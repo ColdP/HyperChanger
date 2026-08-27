@@ -70,11 +70,69 @@ internal object LockscreenMediaBridge {
         private set
     @Volatile var notificationKey: String? = null
         private set
+    @Volatile private var artwork: Bitmap? = null
+    @Volatile private var artworkKey: String? = null
+    @Volatile private var pendingArtwork: Bitmap? = null
+    private val artworkListeners = Collections.newSetFromMap(
+        WeakHashMap<() -> Unit, Boolean>(),
+    )
 
     fun update(controller: MediaController?, notificationKey: String?) {
-        this.controller = controller
+        if (controller == null && notificationKey == null) {
+            this.controller = null
+            this.notificationKey = null
+            artwork = null
+            artworkKey = null
+            pendingArtwork = null
+            notifyArtworkChanged()
+            return
+        }
+        controller?.let { this.controller = it }
+        // NotificationMediaManager transiently clears its key while it rebuilds the first media
+        // card after SystemUI starts. Treat that as an incomplete update so the newly captured
+        // lockscreen-island artwork is not discarded before the key is committed.
+        if (notificationKey == null) return
+        if (notificationKey == this.notificationKey) return
         this.notificationKey = notificationKey
+        artwork = pendingArtwork?.takeUnless(Bitmap::isRecycled)
+        artworkKey = notificationKey
+        pendingArtwork = null
+        notifyArtworkChanged()
     }
+
+    fun registerArtworkListener(listener: () -> Unit) {
+        synchronized(artworkListeners) { artworkListeners += listener }
+    }
+
+    fun unregisterArtworkListener(listener: () -> Unit) {
+        synchronized(artworkListeners) { artworkListeners -= listener }
+    }
+
+    private fun notifyArtworkChanged() {
+        val listeners = synchronized(artworkListeners) { artworkListeners.toList() }
+        listeners.forEach { listener -> runCatching(listener) }
+    }
+
+    /** The lockscreen island has already resolved this bitmap through MiuiMediaHeaderView. */
+    fun updateArtwork(bitmap: Bitmap?, notificationKey: String?) {
+        if (bitmap == null || bitmap.isRecycled || bitmap.width <= 0 || bitmap.height <= 0) return
+        if (notificationKey == null) {
+            pendingArtwork = bitmap
+            return
+        }
+        if (notificationKey != this.notificationKey) return
+        artwork = bitmap
+        artworkKey = notificationKey
+        pendingArtwork = null
+        notifyArtworkChanged()
+    }
+
+    fun artwork(): Bitmap? = artwork?.takeUnless(Bitmap::isRecycled)
+
+    fun artworkOrMetadata(metadata: MediaMetadata?): Bitmap? = artwork()
+        ?: metadata?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
+        ?: metadata?.getBitmap(MediaMetadata.METADATA_KEY_ART)
+        ?: metadata?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
 }
 
 internal enum class LockscreenMediaPresentation {
@@ -188,6 +246,7 @@ internal class LockscreenMiniPlayerController(
         override fun onPlaybackStateChanged(state: PlaybackState?) { scheduleRefresh() }
         override fun onMetadataChanged(metadata: MediaMetadata?) { scheduleRefresh() }
     }
+    private val artworkListener: () -> Unit = { scheduleRefresh() }
 
     init {
         // The card is centered between the shortcuts and may be taller than the shortcut
@@ -197,6 +256,7 @@ internal class LockscreenMiniPlayerController(
         host.rootView.viewTreeObserver.addOnGlobalLayoutListener(globalLayoutListener)
         LockscreenCustomizationMenuBridge.register(this)
         LockscreenMediaPresentationBridge.register(this)
+        LockscreenMediaBridge.registerArtworkListener(artworkListener)
         host.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> schedulePosition() }
         leftShortcut.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> schedulePosition() }
         rightShortcut.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> schedulePosition() }
@@ -210,6 +270,7 @@ internal class LockscreenMiniPlayerController(
     fun destroy() {
         LockscreenCustomizationMenuBridge.unregister(this)
         LockscreenMediaPresentationBridge.unregister(this)
+        LockscreenMediaBridge.unregisterArtworkListener(artworkListener)
         runCatching { host.rootView.viewTreeObserver.removeOnGlobalLayoutListener(globalLayoutListener) }
         runCatching { sessions?.removeOnActiveSessionsChangedListener(sessionCallback) }
         runCatching { activeController?.unregisterCallback(controllerCallback) }
@@ -433,9 +494,7 @@ internal class LockscreenMiniPlayerController(
                 .ifBlank { "正在播放" },
             artist = controller.metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST).orEmpty()
                 .ifBlank { controller.metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM).orEmpty() },
-            artwork = controller.metadata?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
-                ?: controller.metadata?.getBitmap(MediaMetadata.METADATA_KEY_ART)
-                ?: controller.metadata?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON),
+            artwork = LockscreenMediaBridge.artworkOrMetadata(controller.metadata),
             playing = state?.state == PlaybackState.STATE_PLAYING,
             appearance = currentAppearance,
             applyPlatformMaterial = applyPlatformMaterial,
@@ -1164,6 +1223,7 @@ internal class LockscreenMusicLockscreenController(
     private val enabled: () -> Boolean,
     private val isLockscreenShowing: () -> Boolean,
     private val appearance: () -> MiniPlayerAppearance,
+    private val iconColor: () -> Int,
     private val applyPlatformMaterial: (ImageView, MiniPlayerAppearance) -> Unit,
 ) : LockscreenMediaPresentationListener {
     private val context = host.context
@@ -1184,6 +1244,7 @@ internal class LockscreenMusicLockscreenController(
         override fun onPlaybackStateChanged(state: PlaybackState?) { scheduleRefresh() }
         override fun onMetadataChanged(metadata: MediaMetadata?) { scheduleRefresh() }
     }
+    private val artworkListener: () -> Unit = { scheduleRefresh() }
     private val tick = object : Runnable {
         override fun run() {
             tickPosted = false
@@ -1199,6 +1260,7 @@ internal class LockscreenMusicLockscreenController(
         host.clipChildren = false
         host.clipToPadding = false
         LockscreenMediaPresentationBridge.register(this)
+        LockscreenMediaBridge.registerArtworkListener(artworkListener)
         host.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> position() }
         runCatching {
             sessions?.addOnActiveSessionsChangedListener(sessionCallback, null, handler)
@@ -1209,6 +1271,7 @@ internal class LockscreenMusicLockscreenController(
 
     fun destroy() {
         LockscreenMediaPresentationBridge.unregister(this)
+        LockscreenMediaBridge.unregisterArtworkListener(artworkListener)
         runCatching { sessions?.removeOnActiveSessionsChangedListener(sessionCallback) }
         runCatching { activeController?.unregisterCallback(controllerCallback) }
         view?.let { host.removeView(it) }
@@ -1292,12 +1355,11 @@ internal class LockscreenMusicLockscreenController(
                 .ifBlank { "正在播放" },
             artist = controller.metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST).orEmpty()
                 .ifBlank { controller.metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM).orEmpty() },
-            artwork = controller.metadata?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
-                ?: controller.metadata?.getBitmap(MediaMetadata.METADATA_KEY_ART)
-                ?: controller.metadata?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON),
+            artwork = LockscreenMediaBridge.artworkOrMetadata(controller.metadata),
             state = state,
             duration = controller.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L,
             appearance = appearance(),
+            iconColor = iconColor(),
             applyPlatformMaterial = applyPlatformMaterial,
             onToggle = { toggle(controller) },
             onPrevious = { skip(controller, false) },
@@ -1411,6 +1473,7 @@ private class LockscreenMusicLockscreenView(context: Context) : FrameLayout(cont
     private val content = LinearLayout(context)
     private var lastAppearance: MiniPlayerAppearance? = null
     private var onSeek: ((Long) -> Unit)? = null
+    private var contentColor = Color.BLACK
 
     init {
         clipToOutline = true
@@ -1427,26 +1490,28 @@ private class LockscreenMusicLockscreenView(context: Context) : FrameLayout(cont
         materialEdge.isFocusable = false
         addView(materialEdge, LayoutParams(-1, -1))
         content.orientation = LinearLayout.VERTICAL
-        content.gravity = Gravity.CENTER_HORIZONTAL
+        content.gravity = Gravity.START
         content.setPadding(dp(18f), dp(18f), dp(18f), dp(16f))
         addView(content, LayoutParams(-1, -1))
         artwork.scaleType = ImageView.ScaleType.CENTER_CROP
-        artwork.background = rounded(Color.rgb(52, 52, 52), dp(20f).toFloat())
+        artwork.background = rounded(Color.rgb(52, 52, 52), dp(30f).toFloat())
         artwork.clipToOutline = true
-        artwork.outlineProvider = roundOutline(dp(20f).toFloat())
+        artwork.outlineProvider = roundOutline(dp(30f).toFloat())
         artwork.setOnClickListener { tagArtworkClick?.invoke() }
-        content.addView(artwork, LinearLayout.LayoutParams(0, 0).apply {
-            gravity = Gravity.CENTER_HORIZONTAL
+        // Do not let LinearLayout measure a 0x0 child first: SystemUI can bind before its
+        // foreground host has a stable size. The width is supplied by the parent measurement.
+        content.addView(artwork, LinearLayout.LayoutParams(-1, 0).apply {
+            gravity = Gravity.START
         })
         title.textSize = 20f
-        title.setTextColor(Color.rgb(45, 45, 45))
+        title.setTextColor(contentColor)
         title.setTypeface(title.typeface, android.graphics.Typeface.BOLD)
         title.gravity = Gravity.START or Gravity.CENTER_VERTICAL
         title.maxLines = 1
         title.ellipsize = TextUtils.TruncateAt.END
         content.addView(title, LinearLayout.LayoutParams(-1, dp(30f)).apply { topMargin = dp(14f) })
         artist.textSize = 15f
-        artist.setTextColor(Color.argb(190, 45, 45, 45))
+        artist.setTextColor(withAlpha(contentColor, 190))
         artist.gravity = Gravity.START or Gravity.CENTER_VERTICAL
         artist.maxLines = 1
         artist.ellipsize = TextUtils.TruncateAt.END
@@ -1455,7 +1520,7 @@ private class LockscreenMusicLockscreenView(context: Context) : FrameLayout(cont
         val times = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
         listOf(elapsed, remaining).forEach {
             it.textSize = 11f
-            it.setTextColor(Color.argb(190, 45, 45, 45))
+            it.setTextColor(withAlpha(contentColor, 190))
         }
         times.addView(elapsed, LinearLayout.LayoutParams(0, dp(20f), 1f))
         remaining.gravity = Gravity.END
@@ -1487,6 +1552,7 @@ private class LockscreenMusicLockscreenView(context: Context) : FrameLayout(cont
         state: PlaybackState?,
         duration: Long,
         appearance: MiniPlayerAppearance,
+        iconColor: Int,
         applyPlatformMaterial: (ImageView, MiniPlayerAppearance) -> Unit,
         onToggle: () -> Unit,
         onPrevious: () -> Unit,
@@ -1513,6 +1579,13 @@ private class LockscreenMusicLockscreenView(context: Context) : FrameLayout(cont
                 View.VISIBLE
             }
         }
+        if (contentColor != iconColor) {
+            contentColor = iconColor
+            this.title.setTextColor(contentColor)
+            this.artist.setTextColor(withAlpha(contentColor, 190))
+            elapsed.setTextColor(withAlpha(contentColor, 190))
+            remaining.setTextColor(withAlpha(contentColor, 190))
+        }
         this.title.text = title
         this.artist.text = artist
         this.artwork.setImageBitmap(artwork)
@@ -1520,15 +1593,16 @@ private class LockscreenMusicLockscreenView(context: Context) : FrameLayout(cont
         val position = currentPosition(state, total)
         seekBar.setPlayback(total, position, state != null &&
             state.actions and PlaybackState.ACTION_SEEK_TO != 0L)
+        seekBar.setColor(contentColor)
         elapsed.text = formatTime(position)
         remaining.text = "-" + formatTime((total - position).coerceAtLeast(0L))
         toggle.setImageDrawable(MaterialRoundPathDrawable(if (state?.state == PlaybackState.STATE_PLAYING) {
             MATERIAL_ICON_PAUSE
         } else {
             MATERIAL_ICON_PLAY
-        }, Color.rgb(48, 48, 48)))
-        previous.setImageDrawable(MaterialRoundPathDrawable(MATERIAL_ICON_SKIP_PREVIOUS, Color.rgb(48, 48, 48)))
-        next.setImageDrawable(MaterialRoundPathDrawable(MATERIAL_ICON_SKIP_NEXT, Color.rgb(48, 48, 48)))
+        }, contentColor))
+        previous.setImageDrawable(MaterialRoundPathDrawable(MATERIAL_ICON_SKIP_PREVIOUS, contentColor))
+        next.setImageDrawable(MaterialRoundPathDrawable(MATERIAL_ICON_SKIP_NEXT, contentColor))
         this.onSeek = onSeek
         tagArtworkClick = onArtworkClick
         toggle.setOnClickListener { onToggle() }
@@ -1547,19 +1621,27 @@ private class LockscreenMusicLockscreenView(context: Context) : FrameLayout(cont
     }
 
     private fun updateArtworkSize() {
-        val innerWidth = (width - content.paddingLeft - content.paddingRight).coerceAtLeast(0)
-        val fixedContentHeight = dp(196f)
-        val innerHeight = (height - content.paddingTop - content.paddingBottom - fixedContentHeight)
-            .coerceAtLeast(0)
-        val size = min(innerWidth, innerHeight)
+        val innerWidth = (content.width - content.paddingLeft - content.paddingRight)
+            .coerceAtLeast((width - content.paddingLeft - content.paddingRight).coerceAtLeast(0))
+        // The card has a fixed control area below the art. Its exact first height is not stable
+        // while the foreground layer attaches, but the padded width is, so derive the square
+        // cover from width and never leave it as the initial 0px-high LinearLayout child.
+        val size = innerWidth.coerceAtLeast(0)
         val params = artwork.layoutParams as? LinearLayout.LayoutParams ?: return
         if (params.width != size || params.height != size) {
             params.width = size
             params.height = size
-            params.gravity = Gravity.CENTER_HORIZONTAL
+            params.gravity = Gravity.START
             artwork.layoutParams = params
         }
     }
+
+    private fun withAlpha(color: Int, alpha: Int) = Color.argb(
+        alpha.coerceIn(0, 255),
+        Color.red(color),
+        Color.green(color),
+        Color.blue(color),
+    )
 
     private fun configureButton(button: ImageButton, description: String) {
         button.background = null
@@ -1590,14 +1672,20 @@ private class LockscreenMusicLockscreenView(context: Context) : FrameLayout(cont
 /** A narrow, non-widget seek control so the lockscreen uses the reference's slim track. */
 private class LockscreenMusicSeekBar(context: Context) : View(context) {
     private val density = resources.displayMetrics.density
-    private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(82, 36, 36, 36) }
-    private val progressPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(210, 45, 45, 45) }
-    private val thumbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(78, 78, 78) }
+    private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val progressPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val thumbPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private var duration = 0L
     private var position = 0L
     private var enabledForSeek = false
     private var tracking = false
     var onSeekChanged: ((Long) -> Unit)? = null
+
+    fun setColor(color: Int) {
+        trackPaint.color = withAlpha(color, 82)
+        progressPaint.color = withAlpha(color, 210)
+        thumbPaint.color = withAlpha(color, 225)
+    }
 
     fun setPlayback(duration: Long, position: Long, enabled: Boolean) {
         this.duration = duration.coerceAtLeast(0L)
@@ -1664,6 +1752,13 @@ private class LockscreenMusicSeekBar(context: Context) : View(context) {
     }
 
     private fun dp(value: Float) = value * density + .5f
+
+    private fun withAlpha(color: Int, alpha: Int) = Color.argb(
+        alpha.coerceIn(0, 255),
+        Color.red(color),
+        Color.green(color),
+        Color.blue(color),
+    )
 }
 
 /**

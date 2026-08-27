@@ -4,12 +4,14 @@ import android.content.SharedPreferences
 import android.app.KeyguardManager
 import android.content.res.ColorStateList
 import android.content.res.Resources
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.Paint
 import android.graphics.Point
 import android.graphics.drawable.Drawable
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Handler
@@ -20,6 +22,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
+import android.view.ViewParent
 import android.view.inputmethod.EditorInfo
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -2508,6 +2511,13 @@ class HyperSystemUiModule : XposedModule() {
             },
             isLockscreenShowing = isLockscreenShowing,
             appearance = { miniPlayerAppearance(preferences) },
+            iconColor = {
+                when (shortcutIconColorMode(preferences)) {
+                    SHORTCUT_ICON_COLOR_DARK -> SHORTCUT_ICON_DARK_COLOR
+                    SHORTCUT_ICON_COLOR_LIGHT, SHORTCUT_ICON_COLOR_AUTO -> SHORTCUT_ICON_LIGHT_COLOR
+                    else -> SHORTCUT_ICON_LIGHT_COLOR
+                }
+            },
             applyPlatformMaterial = { view, currentAppearance ->
                 runCatching { applyMiniPlayerMaterial(view, currentAppearance, classLoader) }
                     .onFailure { error ->
@@ -3279,6 +3289,8 @@ class HyperSystemUiModule : XposedModule() {
                         if (header != null) {
                             lockscreenMediaHeaders += header
                             installLockscreenMediaArtworkClick(header, preferences)
+                            captureLockscreenIslandArtwork(header)
+                            header.post { captureLockscreenIslandArtwork(header) }
                         }
                         if (shouldHideLockscreenMedia(preferences) &&
                             (lockscreenMediaKeyguardShowing || isLockscreenMediaView(chain.thisObject))
@@ -3306,13 +3318,21 @@ class HyperSystemUiModule : XposedModule() {
                     (chain.thisObject as? View)?.takeIf(headerClass::isInstance)?.let { header ->
                         lockscreenMediaHeaders += header
                         installLockscreenMediaArtworkClick(header, preferences)
+                        captureLockscreenIslandArtwork(header)
                         // Some holder children are attached on the next traversal.
                         header.post {
                             installLockscreenMediaArtworkClick(header, preferences)
+                            captureLockscreenIslandArtwork(header)
                         }
                     }
                     result
                 }
+            // `MiuiMediaViewControllerImpl` owns the drawable that the lockscreen island will
+            // animate into albumImageView. Capture that source immediately after binding rather
+            // than waiting for the ImageView's later flip-animation callback. On a SystemUI
+            // restart this is the only point at which the first track's art is guaranteed to be
+            // available before the custom music surface is shown.
+            installLockscreenIslandArtworkBridge(classLoader, headerClass)
             log(
                 Log.INFO,
                 TAG,
@@ -3322,6 +3342,41 @@ class HyperSystemUiModule : XposedModule() {
             applyLockscreenMediaPresentation(preferences)
         }.onFailure { error ->
             log(Log.ERROR, TAG, "Could not install MiuiMediaHeaderView lockscreen hide hook", error)
+        }
+    }
+
+    private fun installLockscreenIslandArtworkBridge(
+        classLoader: ClassLoader,
+        headerClass: Class<*>,
+    ) {
+        runCatching {
+            val controllerClass = classLoader.loadClass(
+                "com.android.systemui.statusbar.notification.mediacontrol.MiuiMediaViewControllerImpl",
+            )
+            val mediaDataClass = classLoader.loadClass(
+                "com.android.systemui.media.controls.shared.model.MediaData",
+            )
+            val bindMediaData = controllerClass.getMethod("bindMediaData", mediaDataClass)
+            hook(bindMediaData)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("lockscreen-media-artwork:controller-bind")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    val holder = readInstanceField(chain.thisObject, "holder")
+                    val player = holder?.let { readInstanceField(it, "player") as? View }
+                    val header = findLockscreenMediaHeader(player, headerClass)
+                    if (header != null) {
+                        lockscreenMediaHeaders += header
+                        captureLockscreenIslandArtwork(header, chain.thisObject)
+                        // The animation can replace the displayed drawable one traversal later;
+                        // repeat through the same source path without requiring a track switch.
+                        player?.post { captureLockscreenIslandArtwork(header, chain.thisObject) }
+                    }
+                    result
+                }
+            log(Log.INFO, TAG, "Installed lockscreen-island artwork source hook")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install lockscreen-island artwork source hook", error)
         }
     }
 
@@ -3575,6 +3630,53 @@ class HyperSystemUiModule : XposedModule() {
             }
         }
     }
+
+    /**
+     * MiuiMediaHeaderView is the lockscreen island's own media pipeline. Reuse its final album
+     * drawable instead of assuming every player copies artwork into MediaController metadata.
+     */
+    private fun captureLockscreenIslandArtwork(header: View, controller: Any? = null) {
+        val sourceArtwork = controller?.let { readInstanceField(it, "artWorkDrawable") as? Drawable }
+        sourceArtwork?.let(::drawableBitmap)?.let { bitmap ->
+            LockscreenMediaBridge.updateArtwork(bitmap, LockscreenMediaBridge.notificationKey)
+            return
+        }
+        val holder = readInstanceField(header, "mediaViewHolder") ?: return
+        val image = listOfNotNull(
+            readInstanceField(holder, "albumImageView") as? ImageView,
+            readInstanceField(holder, "albumView") as? ImageView,
+        ).firstOrNull { it.drawable != null } ?: return
+        drawableBitmap(image.drawable, image.width, image.height)?.let { bitmap ->
+            LockscreenMediaBridge.updateArtwork(bitmap, LockscreenMediaBridge.notificationKey)
+        }
+    }
+
+    private fun findLockscreenMediaHeader(player: View?, headerClass: Class<*>): View? {
+        var parent: ViewParent? = player?.parent
+        while (parent != null) {
+            if (headerClass.isInstance(parent)) return parent as? View
+            parent = parent.parent
+        }
+        return null
+    }
+
+    private fun drawableBitmap(
+        drawable: Drawable,
+        widthHint: Int = 0,
+        heightHint: Int = 0,
+    ): Bitmap? = runCatching {
+        if (drawable is BitmapDrawable) return@runCatching drawable.bitmap
+        val width = (widthHint.takeIf { it > 0 } ?: drawable.intrinsicWidth)
+            .takeIf { it > 0 } ?: return@runCatching null
+        val height = (heightHint.takeIf { it > 0 } ?: drawable.intrinsicHeight)
+            .takeIf { it > 0 } ?: return@runCatching null
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val bounds = drawable.bounds
+        drawable.setBounds(0, 0, width, height)
+        drawable.draw(Canvas(bitmap))
+        drawable.bounds = bounds
+        bitmap
+    }.getOrNull()
 
     private fun isLockscreenMediaView(target: Any?): Boolean = runCatching {
         val view = target as? View ?: return@runCatching false
