@@ -31,6 +31,7 @@ import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.SeekBar
 import android.widget.TextView
 import io.github.proify.lyricon.lyric.model.Song
 import io.github.proify.lyricon.subscriber.ActivePlayerListener
@@ -77,29 +78,49 @@ internal object LockscreenMediaBridge {
     }
 }
 
-/** Coordinates the dynamic switch between the custom card and SystemUI's media notification. */
+internal enum class LockscreenMediaPresentation {
+    MINI_PLAYER,
+    MUSIC_LOCKSCREEN,
+    SYSTEM_MEDIA,
+}
+
+internal interface LockscreenMediaPresentationListener {
+    fun onMediaPresentationChanged(presentation: LockscreenMediaPresentation)
+}
+
+/** Coordinates the custom lockscreen card, music lockscreen, and SystemUI media notification. */
 internal object LockscreenMediaPresentationBridge {
-    private val listeners = Collections.newSetFromMap(WeakHashMap<LockscreenMiniPlayerController, Boolean>())
+    private val listeners = Collections.newSetFromMap(
+        WeakHashMap<LockscreenMediaPresentationListener, Boolean>(),
+    )
 
-    @Volatile var showMiniPlayer: Boolean = true
+    @Volatile var presentation: LockscreenMediaPresentation = LockscreenMediaPresentation.MINI_PLAYER
         private set
-    @Volatile var onPresentationChanged: ((Boolean) -> Unit)? = null
+    val showMiniPlayer: Boolean get() = presentation == LockscreenMediaPresentation.MINI_PLAYER
+    @Volatile var onPresentationChanged: ((LockscreenMediaPresentation) -> Unit)? = null
 
-    fun register(controller: LockscreenMiniPlayerController) {
-        synchronized(listeners) { listeners += controller }
-        controller.onMediaPresentationChanged(showMiniPlayer)
+    fun register(listener: LockscreenMediaPresentationListener) {
+        synchronized(listeners) { listeners += listener }
+        listener.onMediaPresentationChanged(presentation)
     }
 
-    fun unregister(controller: LockscreenMiniPlayerController) {
-        synchronized(listeners) { listeners -= controller }
+    fun unregister(listener: LockscreenMediaPresentationListener) {
+        synchronized(listeners) { listeners -= listener }
     }
 
-    fun setShowMiniPlayer(value: Boolean) {
-        if (showMiniPlayer == value) return
-        showMiniPlayer = value
+    fun setPresentation(value: LockscreenMediaPresentation) {
+        if (presentation == value) return
+        presentation = value
         val snapshot = synchronized(listeners) { listeners.toList() }
         snapshot.forEach { it.onMediaPresentationChanged(value) }
         onPresentationChanged?.invoke(value)
+    }
+
+    fun setShowMiniPlayer(value: Boolean) {
+        setPresentation(
+            if (value) LockscreenMediaPresentation.MINI_PLAYER
+            else LockscreenMediaPresentation.SYSTEM_MEDIA,
+        )
     }
 }
 
@@ -130,11 +151,12 @@ internal class LockscreenMiniPlayerController(
     private val leftShortcut: View,
     private val rightShortcut: View,
     private val enabled: () -> Boolean,
+    private val musicLockscreenEnabled: () -> Boolean,
     private val lyricsEnabled: () -> Boolean,
     private val mediaNotificationMode: () -> Int,
     private val appearance: () -> MiniPlayerAppearance,
     private val applyPlatformMaterial: (ImageView, MiniPlayerAppearance) -> Unit,
-) {
+) : LockscreenMediaPresentationListener {
     private val context: Context = host.context
     private val mainHandler = Handler(Looper.getMainLooper())
     private val sessions = context.getSystemService(MediaSessionManager::class.java)
@@ -243,9 +265,9 @@ internal class LockscreenMiniPlayerController(
         mainHandler.post { updateCustomizationLift() }
     }
 
-    internal fun onMediaPresentationChanged(showMiniPlayer: Boolean) {
+    override fun onMediaPresentationChanged(presentation: LockscreenMediaPresentation) {
         mainHandler.post {
-            if (showMiniPlayer) {
+            if (presentation == LockscreenMediaPresentation.MINI_PLAYER) {
                 mediaPresentationExitAnimating = false
                 refresh()
                 player?.let(::animateMiniPlayerIn)
@@ -381,8 +403,10 @@ internal class LockscreenMiniPlayerController(
             return
         }
         val mode = mediaNotificationMode()
-        if (mode != LOCKSCREEN_MEDIA_NOTIFICATION_DYNAMIC && !LockscreenMediaPresentationBridge.showMiniPlayer) {
-            LockscreenMediaPresentationBridge.setShowMiniPlayer(true)
+        if (mode != LOCKSCREEN_MEDIA_NOTIFICATION_DYNAMIC &&
+            LockscreenMediaPresentationBridge.presentation == LockscreenMediaPresentation.SYSTEM_MEDIA
+        ) {
+            LockscreenMediaPresentationBridge.setPresentation(LockscreenMediaPresentation.MINI_PLAYER)
         }
         val currentAppearance = appearance()
         val view = player ?: LockscreenMiniPlayerView(context).also {
@@ -398,9 +422,8 @@ internal class LockscreenMiniPlayerController(
                 ),
             )
         }
-        val showMiniPlayer = !(
-            mode == LOCKSCREEN_MEDIA_NOTIFICATION_DYNAMIC && !LockscreenMediaPresentationBridge.showMiniPlayer
-        )
+        val showMiniPlayer = LockscreenMediaPresentationBridge.presentation ==
+            LockscreenMediaPresentation.MINI_PLAYER
         if (showMiniPlayer) {
             view.visibility = View.VISIBLE
         } else if (!mediaPresentationExitAnimating) {
@@ -422,6 +445,13 @@ internal class LockscreenMiniPlayerController(
             onShowSystemMediaNotification = {
                 if (mediaNotificationMode() == LOCKSCREEN_MEDIA_NOTIFICATION_DYNAMIC) {
                     LockscreenMediaPresentationBridge.setShowMiniPlayer(false)
+                }
+            },
+            onShowMusicLockscreen = {
+                if (musicLockscreenEnabled()) {
+                    LockscreenMediaPresentationBridge.setPresentation(
+                        LockscreenMediaPresentation.MUSIC_LOCKSCREEN,
+                    )
                 }
             },
         )
@@ -900,9 +930,17 @@ private class LockscreenMiniPlayerView(context: Context) : FrameLayout(context) 
     private var onSkipToPrevious: (() -> Unit)? = null
     private var onSkipToNext: (() -> Unit)? = null
     private var onShowSystemMediaNotification: (() -> Unit)? = null
+    private var onShowMusicLockscreen: (() -> Unit)? = null
     private var downX = 0f
     private var downY = 0f
     private var trackingSwipe = false
+    private var longPressTriggered = false
+    private val longPressRunnable = Runnable {
+        if (trackingSwipe) {
+            longPressTriggered = true
+            onShowMusicLockscreen?.invoke()
+        }
+    }
 
     init {
         clipToOutline = true
@@ -969,6 +1007,8 @@ private class LockscreenMiniPlayerView(context: Context) : FrameLayout(context) 
                 downX = event.x
                 downY = event.y
                 trackingSwipe = true
+                longPressTriggered = false
+                postDelayed(longPressRunnable, ViewConfiguration.getLongPressTimeout().toLong())
                 // NotificationPanelView recognizes horizontal lockscreen gestures before its
                 // children. Keep this pointer stream with the player once it starts inside the
                 // card, then release the parent chain at the end of the gesture.
@@ -977,6 +1017,9 @@ private class LockscreenMiniPlayerView(context: Context) : FrameLayout(context) 
             MotionEvent.ACTION_MOVE -> if (trackingSwipe) {
                 val horizontalDistance = abs(event.x - downX)
                 val verticalDistance = abs(event.y - downY)
+                if (horizontalDistance > touchSlop || verticalDistance > touchSlop) {
+                    removeCallbacks(longPressRunnable)
+                }
                 if (horizontalDistance > touchSlop && horizontalDistance > verticalDistance) {
                     // Intercept only after a clearly horizontal movement so the toggle remains
                     // clickable and vertical lockscreen gestures keep their normal behavior.
@@ -986,6 +1029,7 @@ private class LockscreenMiniPlayerView(context: Context) : FrameLayout(context) 
             MotionEvent.ACTION_UP,
             MotionEvent.ACTION_CANCEL -> {
                 trackingSwipe = false
+                removeCallbacks(longPressRunnable)
                 parent?.requestDisallowInterceptTouchEvent(false)
             }
         }
@@ -998,8 +1042,11 @@ private class LockscreenMiniPlayerView(context: Context) : FrameLayout(context) 
                 downX = event.x
                 downY = event.y
                 trackingSwipe = true
+                longPressTriggered = false
+                postDelayed(longPressRunnable, ViewConfiguration.getLongPressTimeout().toLong())
             }
             MotionEvent.ACTION_UP -> {
+                removeCallbacks(longPressRunnable)
                 val horizontalDistance = event.x - downX
                 val verticalDistance = event.y - downY
                 val minimumSwipeDistance = max(dp(48).toFloat(), width * .15f)
@@ -1008,7 +1055,7 @@ private class LockscreenMiniPlayerView(context: Context) : FrameLayout(context) 
                     abs(horizontalDistance) > abs(verticalDistance)
                 ) {
                     if (horizontalDistance < 0f) onSkipToNext?.invoke() else onSkipToPrevious?.invoke()
-                } else if (trackingSwipe &&
+                } else if (!longPressTriggered && trackingSwipe &&
                     abs(horizontalDistance) <= touchSlop && abs(verticalDistance) <= touchSlop
                 ) {
                     onShowSystemMediaNotification?.invoke()
@@ -1018,6 +1065,7 @@ private class LockscreenMiniPlayerView(context: Context) : FrameLayout(context) 
             }
             MotionEvent.ACTION_CANCEL -> {
                 trackingSwipe = false
+                removeCallbacks(longPressRunnable)
                 parent?.requestDisallowInterceptTouchEvent(false)
             }
         }
@@ -1035,6 +1083,7 @@ private class LockscreenMiniPlayerView(context: Context) : FrameLayout(context) 
         onSkipToPrevious: () -> Unit,
         onSkipToNext: () -> Unit,
         onShowSystemMediaNotification: () -> Unit,
+        onShowMusicLockscreen: () -> Unit,
     ) {
         if (lastAppearance != appearance) {
             lastAppearance = appearance
@@ -1049,6 +1098,7 @@ private class LockscreenMiniPlayerView(context: Context) : FrameLayout(context) 
         this.onSkipToPrevious = onSkipToPrevious
         this.onSkipToNext = onSkipToNext
         this.onShowSystemMediaNotification = onShowSystemMediaNotification
+        this.onShowMusicLockscreen = onShowMusicLockscreen
     }
 
     private fun applyAppearance(
@@ -1103,6 +1153,453 @@ private class LockscreenMiniPlayerView(context: Context) : FrameLayout(context) 
 
     private fun dp(value: Int): Int = (value * density + .5f).toInt()
     private fun dp(value: Float): Int = (value * density + .5f).toInt()
+}
+
+/** Full lockscreen music surface hosted above the clock and depth foreground by SystemUI. */
+internal class LockscreenMusicLockscreenController(
+    private val host: ViewGroup,
+    private val enabled: () -> Boolean,
+    private val isLockscreenShowing: () -> Boolean,
+    private val appearance: () -> MiniPlayerAppearance,
+    private val applyPlatformMaterial: (ImageView, MiniPlayerAppearance) -> Unit,
+) : LockscreenMediaPresentationListener {
+    private val context = host.context
+    private val handler = Handler(Looper.getMainLooper())
+    private val sessions = context.getSystemService(MediaSessionManager::class.java)
+    private val audioManager = context.getSystemService(AudioManager::class.java)
+    private var activeController: MediaController? = null
+    private var view: LockscreenMusicLockscreenView? = null
+    private var refreshPosted = false
+    private var tickPosted = false
+    private val sessionCallback = object : MediaSessionManager.OnActiveSessionsChangedListener {
+        override fun onActiveSessionsChanged(controllers: MutableList<MediaController>?) {
+            selectController(controllers.orEmpty())
+            refresh()
+        }
+    }
+    private val controllerCallback = object : MediaController.Callback() {
+        override fun onPlaybackStateChanged(state: PlaybackState?) { scheduleRefresh() }
+        override fun onMetadataChanged(metadata: MediaMetadata?) { scheduleRefresh() }
+    }
+    private val tick = object : Runnable {
+        override fun run() {
+            tickPosted = false
+            refresh()
+            if (isVisibleAndPlaying()) {
+                tickPosted = true
+                handler.postDelayed(this, 500L)
+            }
+        }
+    }
+
+    init {
+        host.clipChildren = false
+        host.clipToPadding = false
+        LockscreenMediaPresentationBridge.register(this)
+        host.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> position() }
+        runCatching {
+            sessions?.addOnActiveSessionsChangedListener(sessionCallback, null, handler)
+            selectController(sessions?.getActiveSessions(null).orEmpty())
+            refresh()
+        }.onFailure { scheduleRefresh() }
+    }
+
+    fun destroy() {
+        LockscreenMediaPresentationBridge.unregister(this)
+        runCatching { sessions?.removeOnActiveSessionsChangedListener(sessionCallback) }
+        runCatching { activeController?.unregisterCallback(controllerCallback) }
+        view?.let { host.removeView(it) }
+        handler.removeCallbacksAndMessages(null)
+        view = null
+        activeController = null
+    }
+
+    override fun onMediaPresentationChanged(presentation: LockscreenMediaPresentation) {
+        handler.post {
+            if (presentation == LockscreenMediaPresentation.MUSIC_LOCKSCREEN &&
+                enabled() && isLockscreenShowing()
+            ) {
+                refresh()
+                view?.let(::animateIn)
+            } else {
+                view?.let(::animateOut)
+            }
+        }
+    }
+
+    fun onKeyguardVisibilityChanged() {
+        handler.post {
+            if (!isLockscreenShowing()) {
+                view?.let(::animateOut)
+            } else if (LockscreenMediaPresentationBridge.presentation ==
+                LockscreenMediaPresentation.MUSIC_LOCKSCREEN
+            ) {
+                refresh()
+            }
+        }
+    }
+
+    private fun selectController(controllers: List<MediaController>) {
+        val bridge = LockscreenMediaBridge.controller
+        val selected = bridge?.takeIf(::isUsable)
+            ?: controllers.firstOrNull(::isUsable)
+            ?: controllers.firstOrNull { it.metadata != null }
+        if (selected?.sessionToken != activeController?.sessionToken) {
+            runCatching { activeController?.unregisterCallback(controllerCallback) }
+            activeController = selected
+            runCatching { selected?.registerCallback(controllerCallback, handler) }
+        }
+    }
+
+    private fun isUsable(controller: MediaController): Boolean = when (controller.playbackState?.state) {
+        PlaybackState.STATE_PLAYING, PlaybackState.STATE_PAUSED, PlaybackState.STATE_BUFFERING,
+        PlaybackState.STATE_FAST_FORWARDING, PlaybackState.STATE_REWINDING -> true
+        else -> false
+    }
+
+    private fun refresh() {
+        if (refreshPosted) return
+        refreshPosted = true
+        handler.post {
+            refreshPosted = false
+            runCatching { refreshUnsafe() }
+        }
+    }
+
+    private fun scheduleRefresh() = refresh()
+
+    private fun refreshUnsafe() {
+        LockscreenMediaBridge.controller?.let { bridge ->
+            if (bridge.sessionToken != activeController?.sessionToken) {
+                selectController(listOf(bridge))
+            }
+        }
+        val controller = activeController
+        val state = controller?.playbackState
+        if (!enabled() || !isLockscreenShowing() || controller == null || !isUsable(controller)) {
+            view?.visibility = View.GONE
+            return
+        }
+        val musicView = view ?: LockscreenMusicLockscreenView(context).also {
+            view = it
+            host.addView(it, ViewGroup.LayoutParams(dp(320f), dp(520f)))
+        }
+        musicView.bind(
+            title = controller.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty()
+                .ifBlank { "正在播放" },
+            artist = controller.metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST).orEmpty()
+                .ifBlank { controller.metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM).orEmpty() },
+            artwork = controller.metadata?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
+                ?: controller.metadata?.getBitmap(MediaMetadata.METADATA_KEY_ART),
+            state = state,
+            duration = controller.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L,
+            appearance = appearance(),
+            applyPlatformMaterial = applyPlatformMaterial,
+            onToggle = { toggle(controller) },
+            onPrevious = { skip(controller, false) },
+            onNext = { skip(controller, true) },
+            onSeek = { position ->
+                runCatching { controller.transportControls.seekTo(position) }
+            },
+            onArtworkClick = {
+                LockscreenMediaPresentationBridge.setPresentation(LockscreenMediaPresentation.MINI_PLAYER)
+            },
+        )
+        musicView.visibility = if (
+            LockscreenMediaPresentationBridge.presentation == LockscreenMediaPresentation.MUSIC_LOCKSCREEN &&
+                isLockscreenShowing()
+        ) View.VISIBLE else View.GONE
+        position()
+        if (isVisibleAndPlaying() && !tickPosted) {
+            tickPosted = true
+            handler.postDelayed(tick, 500L)
+        }
+    }
+
+    private fun isVisibleAndPlaying() = view?.visibility == View.VISIBLE &&
+        activeController?.playbackState?.state == PlaybackState.STATE_PLAYING
+
+    private fun animateIn(target: View) {
+        target.animate().cancel()
+        target.visibility = View.VISIBLE
+        target.alpha = 0f
+        target.translationY = dp(18f).toFloat()
+        target.animate().alpha(1f).translationY(0f).setDuration(260L)
+            .setInterpolator(android.view.animation.DecelerateInterpolator()).start()
+    }
+
+    private fun animateOut(target: View) {
+        if (target.visibility != View.VISIBLE) return
+        target.animate().cancel()
+        target.animate().alpha(0f).translationY(dp(18f).toFloat()).setDuration(180L)
+            .setInterpolator(android.view.animation.AccelerateDecelerateInterpolator())
+            .withEndAction {
+                target.visibility = View.GONE
+                target.alpha = 1f
+                target.translationY = 0f
+            }.start()
+    }
+
+    private fun position() {
+        val target = view ?: return
+        if (host.width <= 0 || host.height <= 0) return
+        val width = min(dp(360f), host.width - dp(32f)).coerceAtLeast(dp(240f))
+        val height = min(dp(560f), (host.height * .58f).toInt()).coerceAtLeast(dp(430f))
+        val params = target.layoutParams
+        if (params == null || params.width != width || params.height != height) {
+            target.layoutParams = (params ?: ViewGroup.LayoutParams(width, height)).apply {
+                this.width = width
+                this.height = height
+            }
+        }
+        target.translationX = (host.width - width) / 2f
+        target.translationY = (host.height * .27f).coerceAtMost((host.height - height - dp(72f)).toFloat())
+        target.bringToFront()
+    }
+
+    private fun toggle(controller: MediaController) {
+        runCatching {
+            val playing = controller.playbackState?.state == PlaybackState.STATE_PLAYING
+            if (playing) controller.transportControls.pause() else controller.transportControls.play()
+        }.onFailure {
+            val now = android.os.SystemClock.uptimeMillis()
+            val key = if (controller.playbackState?.state == PlaybackState.STATE_PLAYING) {
+                KeyEvent.KEYCODE_MEDIA_PAUSE
+            } else KeyEvent.KEYCODE_MEDIA_PLAY
+            runCatching {
+                audioManager?.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, key, 0))
+                audioManager?.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, key, 0))
+            }
+        }
+    }
+
+    private fun skip(controller: MediaController, next: Boolean) {
+        runCatching {
+            if (next) controller.transportControls.skipToNext()
+            else controller.transportControls.skipToPrevious()
+        }.onFailure {
+            val now = android.os.SystemClock.uptimeMillis()
+            val key = if (next) KeyEvent.KEYCODE_MEDIA_NEXT else KeyEvent.KEYCODE_MEDIA_PREVIOUS
+            runCatching {
+                audioManager?.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, key, 0))
+                audioManager?.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, key, 0))
+            }
+        }
+    }
+
+    private fun dp(value: Float) = (value * context.resources.displayMetrics.density + .5f).toInt()
+}
+
+private class LockscreenMusicLockscreenView(context: Context) : FrameLayout(context) {
+    private val density = resources.displayMetrics.density
+    private val materialLayer = ImageView(context)
+    private val artwork = ImageView(context)
+    private val title = TextView(context)
+    private val artist = TextView(context)
+    private val elapsed = TextView(context)
+    private val remaining = TextView(context)
+    private val seekBar = SeekBar(context)
+    private val previous = ImageButton(context)
+    private val toggle = ImageButton(context)
+    private val next = ImageButton(context)
+    private val content = LinearLayout(context)
+    private var lastAppearance: MiniPlayerAppearance? = null
+    private var onSeek: ((Long) -> Unit)? = null
+
+    init {
+        clipToOutline = true
+        outlineProvider = roundOutline(dp(30f).toFloat())
+        materialLayer.scaleType = ImageView.ScaleType.FIT_XY
+        addView(materialLayer, LayoutParams(-1, -1))
+        content.orientation = LinearLayout.VERTICAL
+        content.gravity = Gravity.CENTER_HORIZONTAL
+        content.setPadding(dp(22f), dp(22f), dp(22f), dp(18f))
+        addView(content, LayoutParams(-1, -1))
+        artwork.scaleType = ImageView.ScaleType.CENTER_CROP
+        artwork.background = rounded(Color.rgb(52, 52, 52), dp(20f).toFloat())
+        artwork.clipToOutline = true
+        artwork.outlineProvider = roundOutline(dp(20f).toFloat())
+        artwork.setOnClickListener { tagArtworkClick?.invoke() }
+        content.addView(artwork, LinearLayout.LayoutParams(0, 0).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+        })
+        title.textSize = 19f
+        title.setTextColor(Color.WHITE)
+        title.setTypeface(title.typeface, android.graphics.Typeface.BOLD)
+        title.gravity = Gravity.CENTER
+        title.maxLines = 1
+        title.ellipsize = TextUtils.TruncateAt.END
+        content.addView(title, LinearLayout.LayoutParams(-1, dp(30f)).apply { topMargin = dp(14f) })
+        artist.textSize = 14f
+        artist.setTextColor(Color.argb(205, 255, 255, 255))
+        artist.gravity = Gravity.CENTER
+        artist.maxLines = 1
+        artist.ellipsize = TextUtils.TruncateAt.END
+        content.addView(artist, LinearLayout.LayoutParams(-1, dp(24f)))
+        seekBar.setPadding(0, 0, 0, 0)
+        content.addView(seekBar, LinearLayout.LayoutParams(-1, dp(34f)).apply { topMargin = dp(9f) })
+        val times = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
+        listOf(elapsed, remaining).forEach {
+            it.textSize = 11f
+            it.setTextColor(Color.argb(205, 255, 255, 255))
+        }
+        times.addView(elapsed, LinearLayout.LayoutParams(0, dp(22f), 1f))
+        remaining.gravity = Gravity.END
+        times.addView(remaining, LinearLayout.LayoutParams(0, dp(22f), 1f))
+        content.addView(times, LinearLayout.LayoutParams(-1, dp(22f)))
+        val controls = LinearLayout(context).apply { gravity = Gravity.CENTER; weightSum = 3f }
+        configureButton(previous, "上一首")
+        configureButton(toggle, "播放或暂停")
+        configureButton(next, "下一首")
+        controls.addView(previous, LinearLayout.LayoutParams(0, dp(64f), 1f))
+        controls.addView(toggle, LinearLayout.LayoutParams(0, dp(72f), 1f))
+        controls.addView(next, LinearLayout.LayoutParams(0, dp(64f), 1f))
+        content.addView(controls, LinearLayout.LayoutParams(-1, dp(76f)).apply { topMargin = dp(4f) })
+        seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: SeekBar, value: Int, fromUser: Boolean) {
+                if (fromUser) pendingSeek = value.toLong()
+            }
+            override fun onStartTrackingTouch(bar: SeekBar) { seeking = true }
+            override fun onStopTrackingTouch(bar: SeekBar) {
+                seeking = false
+                onSeek?.invoke(pendingSeek)
+            }
+        })
+    }
+
+    private var seeking = false
+    private var pendingSeek = 0L
+    private var tagArtworkClick: (() -> Unit)? = null
+
+    override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
+        super.onSizeChanged(width, height, oldWidth, oldHeight)
+        updateArtworkSize()
+    }
+
+    fun bind(
+        title: String,
+        artist: String,
+        artwork: Bitmap?,
+        state: PlaybackState?,
+        duration: Long,
+        appearance: MiniPlayerAppearance,
+        applyPlatformMaterial: (ImageView, MiniPlayerAppearance) -> Unit,
+        onToggle: () -> Unit,
+        onPrevious: () -> Unit,
+        onNext: () -> Unit,
+        onSeek: (Long) -> Unit,
+        onArtworkClick: () -> Unit,
+    ) {
+        if (lastAppearance != appearance) {
+            lastAppearance = appearance
+            materialLayer.setImageDrawable(
+                when (appearance.backgroundMode) {
+                    MINI_PLAYER_BACKGROUND_PURE -> rounded(appearance.pureColor, dp(30f).toFloat())
+                    MINI_PLAYER_BACKGROUND_ADVANCED, MINI_PLAYER_BACKGROUND_SOFT_GLASS ->
+                        rounded(Color.argb(1, 255, 255, 255), dp(30f).toFloat())
+                    else -> rounded(Color.argb(166, 28, 31, 32), dp(30f).toFloat())
+                },
+            )
+            if (appearance.backgroundMode == MINI_PLAYER_BACKGROUND_ADVANCED ||
+                appearance.backgroundMode == MINI_PLAYER_BACKGROUND_SOFT_GLASS
+            ) applyPlatformMaterial(materialLayer, appearance)
+        }
+        this.title.text = title
+        this.artist.text = artist
+        this.artwork.setImageBitmap(artwork)
+        val total = duration.coerceAtLeast(0L)
+        val position = currentPosition(state, total)
+        seekBar.max = total.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        if (!seeking) seekBar.progress = position.coerceIn(0L, seekBar.max.toLong()).toInt()
+        elapsed.text = formatTime(position)
+        remaining.text = "-" + formatTime((total - position).coerceAtLeast(0L))
+        seekBar.isEnabled = state != null && state.actions and PlaybackState.ACTION_SEEK_TO != 0L
+        toggle.setImageDrawable(PlayerToggleDrawable(state?.state == PlaybackState.STATE_PLAYING))
+        previous.setImageDrawable(MediaSkipDrawable(false))
+        next.setImageDrawable(MediaSkipDrawable(true))
+        this.onSeek = onSeek
+        tagArtworkClick = onArtworkClick
+        toggle.setOnClickListener { onToggle() }
+        previous.setOnClickListener { onPrevious() }
+        next.setOnClickListener { onNext() }
+    }
+
+    private fun currentPosition(state: PlaybackState?, duration: Long): Long {
+        if (state == null) return 0L
+        val delta = if (state.state == PlaybackState.STATE_PLAYING) {
+            ((android.os.SystemClock.elapsedRealtime() - state.lastPositionUpdateTime) * state.playbackSpeed).toLong()
+        } else 0L
+        return (state.position + delta).coerceIn(0L, duration.takeIf { it > 0 } ?: Long.MAX_VALUE)
+    }
+
+    private fun updateArtworkSize() {
+        val innerWidth = (width - content.paddingLeft - content.paddingRight).coerceAtLeast(0)
+        val fixedContentHeight = dp(213f)
+        val innerHeight = (height - content.paddingTop - content.paddingBottom - fixedContentHeight)
+            .coerceAtLeast(0)
+        val size = min(innerWidth, innerHeight)
+        val params = artwork.layoutParams as? LinearLayout.LayoutParams ?: return
+        if (params.width != size || params.height != size) {
+            params.width = size
+            params.height = size
+            params.gravity = Gravity.CENTER_HORIZONTAL
+            artwork.layoutParams = params
+        }
+    }
+
+    private fun configureButton(button: ImageButton, description: String) {
+        button.background = null
+        button.contentDescription = description
+        button.scaleType = ImageView.ScaleType.CENTER
+        button.setPadding(dp(12f), dp(12f), dp(12f), dp(12f))
+    }
+
+    private fun roundOutline(radius: Float) = object : ViewOutlineProvider() {
+        override fun getOutline(view: View, outline: Outline) {
+            outline.setRoundRect(0, 0, view.width, view.height, radius)
+        }
+    }
+
+    private fun rounded(color: Int, radius: Float) = GradientDrawable().apply {
+        cornerRadius = radius
+        setColor(color)
+    }
+
+    private fun formatTime(value: Long): String {
+        val seconds = (value / 1000L).coerceAtLeast(0L)
+        return "%d:%02d".format(java.util.Locale.ROOT, seconds / 60L, seconds % 60L)
+    }
+
+    private fun dp(value: Float) = (value * density + .5f).toInt()
+}
+
+private class MediaSkipDrawable(private val next: Boolean) : Drawable() {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        strokeWidth = 3f
+        strokeCap = Paint.Cap.ROUND
+        style = Paint.Style.STROKE
+    }
+    override fun draw(canvas: Canvas) {
+        val w = bounds.width().toFloat()
+        val h = bounds.height().toFloat()
+        val center = h / 2f
+        val left = w * .25f
+        val right = w * .75f
+        val tip = if (next) right else left
+        val base = if (next) left else right
+        val path = Path().apply {
+            moveTo(base, h * .25f)
+            lineTo(tip, center)
+            lineTo(base, h * .75f)
+        }
+        canvas.drawPath(path, paint)
+        val barX = if (next) right else left
+        canvas.drawLine(barX, h * .25f, barX, h * .75f, paint)
+    }
+    override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+    override fun setColorFilter(filter: android.graphics.ColorFilter?) { paint.colorFilter = filter }
+    @Deprecated("Deprecated in Java") override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 }
 
 private class PlayerToggleDrawable(private val playing: Boolean) : Drawable() {

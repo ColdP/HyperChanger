@@ -2828,6 +2828,14 @@ private fun Lock(
             exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
         ) {
             Column {
+                SwitchPreference(
+                    title = "\u97f3\u4e50\u9501\u5c4f",
+                    summary = "\u957f\u6309\u9501\u5c4f\u5c9b\u663e\u793a\u5168\u5c4f\u97f3\u4e50\u64ad\u653e\u5668",
+                    checked = s.lockscreenMusicLockscreenEnabled,
+                    onCheckedChange = { value ->
+                        update { it.copy(lockscreenMusicLockscreenEnabled = value) }
+                    },
+                )
                 OverlayDropdownPreference(
                     title = "\u9501\u5c4f\u5a92\u4f53\u901a\u77e5",
                     items = listOf("\u4e0d\u9690\u85cf", "\u59cb\u7ec8\u9690\u85cf", "\u52a8\u6001\u663e\u793a"),
