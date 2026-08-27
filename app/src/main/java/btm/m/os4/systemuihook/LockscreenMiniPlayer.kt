@@ -6,7 +6,6 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
@@ -31,8 +30,8 @@ import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.SeekBar
 import android.widget.TextView
+import androidx.core.graphics.PathParser
 import io.github.proify.lyricon.lyric.model.Song
 import io.github.proify.lyricon.subscriber.ActivePlayerListener
 import io.github.proify.lyricon.subscriber.LyriconFactory
@@ -435,7 +434,8 @@ internal class LockscreenMiniPlayerController(
             artist = controller.metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST).orEmpty()
                 .ifBlank { controller.metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM).orEmpty() },
             artwork = controller.metadata?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
-                ?: controller.metadata?.getBitmap(MediaMetadata.METADATA_KEY_ART),
+                ?: controller.metadata?.getBitmap(MediaMetadata.METADATA_KEY_ART)
+                ?: controller.metadata?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON),
             playing = state?.state == PlaybackState.STATE_PLAYING,
             appearance = currentAppearance,
             applyPlatformMaterial = applyPlatformMaterial,
@@ -1093,7 +1093,10 @@ private class LockscreenMiniPlayerView(context: Context) : FrameLayout(context) 
         this.title.text = title
         this.artist.text = artist
         this.artwork.setImageBitmap(artwork)
-        toggle.setImageDrawable(PlayerToggleDrawable(playing))
+        toggle.setImageDrawable(MaterialRoundPathDrawable(
+            if (playing) MATERIAL_ICON_PAUSE else MATERIAL_ICON_PLAY,
+            Color.WHITE,
+        ))
         toggle.setOnClickListener { onToggle() }
         this.onSkipToPrevious = onSkipToPrevious
         this.onSkipToNext = onSkipToNext
@@ -1290,7 +1293,8 @@ internal class LockscreenMusicLockscreenController(
             artist = controller.metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST).orEmpty()
                 .ifBlank { controller.metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM).orEmpty() },
             artwork = controller.metadata?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
-                ?: controller.metadata?.getBitmap(MediaMetadata.METADATA_KEY_ART),
+                ?: controller.metadata?.getBitmap(MediaMetadata.METADATA_KEY_ART)
+                ?: controller.metadata?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON),
             state = state,
             duration = controller.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L,
             appearance = appearance(),
@@ -1343,8 +1347,9 @@ internal class LockscreenMusicLockscreenController(
     private fun position() {
         val target = view ?: return
         if (host.width <= 0 || host.height <= 0) return
-        val width = min(dp(360f), host.width - dp(32f)).coerceAtLeast(dp(240f))
-        val height = min(dp(560f), (host.height * .58f).toInt()).coerceAtLeast(dp(430f))
+        // Match the outer span of the lockscreen shortcut backgrounds rather than the screen edges.
+        val width = min(dp(336f), host.width - dp(48f)).coerceAtLeast(dp(240f))
+        val height = min(dp(548f), (host.height * .60f).toInt()).coerceAtLeast(dp(470f))
         val params = target.layoutParams
         if (params == null || params.width != width || params.height != height) {
             target.layoutParams = (params ?: ViewGroup.LayoutParams(width, height)).apply {
@@ -1393,12 +1398,13 @@ internal class LockscreenMusicLockscreenController(
 private class LockscreenMusicLockscreenView(context: Context) : FrameLayout(context) {
     private val density = resources.displayMetrics.density
     private val materialLayer = ImageView(context)
+    private val materialEdge = View(context)
     private val artwork = ImageView(context)
     private val title = TextView(context)
     private val artist = TextView(context)
     private val elapsed = TextView(context)
     private val remaining = TextView(context)
-    private val seekBar = SeekBar(context)
+    private val seekBar = LockscreenMusicSeekBar(context)
     private val previous = ImageButton(context)
     private val toggle = ImageButton(context)
     private val next = ImageButton(context)
@@ -1410,10 +1416,19 @@ private class LockscreenMusicLockscreenView(context: Context) : FrameLayout(cont
         clipToOutline = true
         outlineProvider = roundOutline(dp(30f).toFloat())
         materialLayer.scaleType = ImageView.ScaleType.FIT_XY
+        // The SystemUI material compositor needs the same rounded target as shortcut backgrounds.
+        materialLayer.clipToOutline = true
+        materialLayer.outlineProvider = roundOutline(dp(30f).toFloat())
         addView(materialLayer, LayoutParams(-1, -1))
+        materialEdge.background = rounded(Color.TRANSPARENT, dp(30f).toFloat()).apply {
+            setStroke(dp(1f), Color.argb(70, 255, 255, 255))
+        }
+        materialEdge.isClickable = false
+        materialEdge.isFocusable = false
+        addView(materialEdge, LayoutParams(-1, -1))
         content.orientation = LinearLayout.VERTICAL
         content.gravity = Gravity.CENTER_HORIZONTAL
-        content.setPadding(dp(22f), dp(22f), dp(22f), dp(18f))
+        content.setPadding(dp(18f), dp(18f), dp(18f), dp(16f))
         addView(content, LayoutParams(-1, -1))
         artwork.scaleType = ImageView.ScaleType.CENTER_CROP
         artwork.background = rounded(Color.rgb(52, 52, 52), dp(20f).toFloat())
@@ -1423,57 +1438,46 @@ private class LockscreenMusicLockscreenView(context: Context) : FrameLayout(cont
         content.addView(artwork, LinearLayout.LayoutParams(0, 0).apply {
             gravity = Gravity.CENTER_HORIZONTAL
         })
-        title.textSize = 19f
-        title.setTextColor(Color.WHITE)
+        title.textSize = 20f
+        title.setTextColor(Color.rgb(45, 45, 45))
         title.setTypeface(title.typeface, android.graphics.Typeface.BOLD)
-        title.gravity = Gravity.CENTER
+        title.gravity = Gravity.START or Gravity.CENTER_VERTICAL
         title.maxLines = 1
         title.ellipsize = TextUtils.TruncateAt.END
         content.addView(title, LinearLayout.LayoutParams(-1, dp(30f)).apply { topMargin = dp(14f) })
-        artist.textSize = 14f
-        artist.setTextColor(Color.argb(205, 255, 255, 255))
-        artist.gravity = Gravity.CENTER
+        artist.textSize = 15f
+        artist.setTextColor(Color.argb(190, 45, 45, 45))
+        artist.gravity = Gravity.START or Gravity.CENTER_VERTICAL
         artist.maxLines = 1
         artist.ellipsize = TextUtils.TruncateAt.END
         content.addView(artist, LinearLayout.LayoutParams(-1, dp(24f)))
-        seekBar.setPadding(0, 0, 0, 0)
-        content.addView(seekBar, LinearLayout.LayoutParams(-1, dp(34f)).apply { topMargin = dp(9f) })
+        content.addView(seekBar, LinearLayout.LayoutParams(-1, dp(24f)).apply { topMargin = dp(8f) })
         val times = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
         listOf(elapsed, remaining).forEach {
             it.textSize = 11f
-            it.setTextColor(Color.argb(205, 255, 255, 255))
+            it.setTextColor(Color.argb(190, 45, 45, 45))
         }
-        times.addView(elapsed, LinearLayout.LayoutParams(0, dp(22f), 1f))
+        times.addView(elapsed, LinearLayout.LayoutParams(0, dp(20f), 1f))
         remaining.gravity = Gravity.END
-        times.addView(remaining, LinearLayout.LayoutParams(0, dp(22f), 1f))
-        content.addView(times, LinearLayout.LayoutParams(-1, dp(22f)))
+        times.addView(remaining, LinearLayout.LayoutParams(0, dp(20f), 1f))
+        content.addView(times, LinearLayout.LayoutParams(-1, dp(20f)))
         val controls = LinearLayout(context).apply { gravity = Gravity.CENTER; weightSum = 3f }
         configureButton(previous, "上一首")
         configureButton(toggle, "播放或暂停")
         configureButton(next, "下一首")
-        controls.addView(previous, LinearLayout.LayoutParams(0, dp(64f), 1f))
-        controls.addView(toggle, LinearLayout.LayoutParams(0, dp(72f), 1f))
-        controls.addView(next, LinearLayout.LayoutParams(0, dp(64f), 1f))
-        content.addView(controls, LinearLayout.LayoutParams(-1, dp(76f)).apply { topMargin = dp(4f) })
-        seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(bar: SeekBar, value: Int, fromUser: Boolean) {
-                if (fromUser) pendingSeek = value.toLong()
-            }
-            override fun onStartTrackingTouch(bar: SeekBar) { seeking = true }
-            override fun onStopTrackingTouch(bar: SeekBar) {
-                seeking = false
-                onSeek?.invoke(pendingSeek)
-            }
-        })
+        controls.addView(previous, LinearLayout.LayoutParams(0, dp(68f), 1f))
+        controls.addView(toggle, LinearLayout.LayoutParams(0, dp(76f), 1f))
+        controls.addView(next, LinearLayout.LayoutParams(0, dp(68f), 1f))
+        content.addView(controls, LinearLayout.LayoutParams(-1, dp(80f)).apply { topMargin = dp(4f) })
+        seekBar.onSeekChanged = { position -> onSeek?.invoke(position) }
     }
 
-    private var seeking = false
-    private var pendingSeek = 0L
     private var tagArtworkClick: (() -> Unit)? = null
 
     override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
         super.onSizeChanged(width, height, oldWidth, oldHeight)
         updateArtworkSize()
+        materialLayer.invalidateOutline()
     }
 
     fun bind(
@@ -1503,25 +1507,35 @@ private class LockscreenMusicLockscreenView(context: Context) : FrameLayout(cont
             if (appearance.backgroundMode == MINI_PLAYER_BACKGROUND_ADVANCED ||
                 appearance.backgroundMode == MINI_PLAYER_BACKGROUND_SOFT_GLASS
             ) applyPlatformMaterial(materialLayer, appearance)
+            materialEdge.visibility = if (appearance.backgroundMode == MINI_PLAYER_BACKGROUND_DEFAULT) {
+                View.GONE
+            } else {
+                View.VISIBLE
+            }
         }
         this.title.text = title
         this.artist.text = artist
         this.artwork.setImageBitmap(artwork)
         val total = duration.coerceAtLeast(0L)
         val position = currentPosition(state, total)
-        seekBar.max = total.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-        if (!seeking) seekBar.progress = position.coerceIn(0L, seekBar.max.toLong()).toInt()
+        seekBar.setPlayback(total, position, state != null &&
+            state.actions and PlaybackState.ACTION_SEEK_TO != 0L)
         elapsed.text = formatTime(position)
         remaining.text = "-" + formatTime((total - position).coerceAtLeast(0L))
-        seekBar.isEnabled = state != null && state.actions and PlaybackState.ACTION_SEEK_TO != 0L
-        toggle.setImageDrawable(PlayerToggleDrawable(state?.state == PlaybackState.STATE_PLAYING))
-        previous.setImageDrawable(MediaSkipDrawable(false))
-        next.setImageDrawable(MediaSkipDrawable(true))
+        toggle.setImageDrawable(MaterialRoundPathDrawable(if (state?.state == PlaybackState.STATE_PLAYING) {
+            MATERIAL_ICON_PAUSE
+        } else {
+            MATERIAL_ICON_PLAY
+        }, Color.rgb(48, 48, 48)))
+        previous.setImageDrawable(MaterialRoundPathDrawable(MATERIAL_ICON_SKIP_PREVIOUS, Color.rgb(48, 48, 48)))
+        next.setImageDrawable(MaterialRoundPathDrawable(MATERIAL_ICON_SKIP_NEXT, Color.rgb(48, 48, 48)))
         this.onSeek = onSeek
         tagArtworkClick = onArtworkClick
         toggle.setOnClickListener { onToggle() }
         previous.setOnClickListener { onPrevious() }
         next.setOnClickListener { onNext() }
+        updateArtworkSize()
+        post { updateArtworkSize() }
     }
 
     private fun currentPosition(state: PlaybackState?, duration: Long): Long {
@@ -1534,7 +1548,7 @@ private class LockscreenMusicLockscreenView(context: Context) : FrameLayout(cont
 
     private fun updateArtworkSize() {
         val innerWidth = (width - content.paddingLeft - content.paddingRight).coerceAtLeast(0)
-        val fixedContentHeight = dp(213f)
+        val fixedContentHeight = dp(196f)
         val innerHeight = (height - content.paddingTop - content.paddingBottom - fixedContentHeight)
             .coerceAtLeast(0)
         val size = min(innerWidth, innerHeight)
@@ -1551,7 +1565,7 @@ private class LockscreenMusicLockscreenView(context: Context) : FrameLayout(cont
         button.background = null
         button.contentDescription = description
         button.scaleType = ImageView.ScaleType.CENTER
-        button.setPadding(dp(12f), dp(12f), dp(12f), dp(12f))
+        button.setPadding(dp(14f), dp(14f), dp(14f), dp(14f))
     }
 
     private fun roundOutline(radius: Float) = object : ViewOutlineProvider() {
@@ -1573,73 +1587,122 @@ private class LockscreenMusicLockscreenView(context: Context) : FrameLayout(cont
     private fun dp(value: Float) = (value * density + .5f).toInt()
 }
 
-private class MediaSkipDrawable(private val next: Boolean) : Drawable() {
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        strokeWidth = 3f
-        strokeCap = Paint.Cap.ROUND
-        style = Paint.Style.STROKE
+/** A narrow, non-widget seek control so the lockscreen uses the reference's slim track. */
+private class LockscreenMusicSeekBar(context: Context) : View(context) {
+    private val density = resources.displayMetrics.density
+    private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(82, 36, 36, 36) }
+    private val progressPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(210, 45, 45, 45) }
+    private val thumbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(78, 78, 78) }
+    private var duration = 0L
+    private var position = 0L
+    private var enabledForSeek = false
+    private var tracking = false
+    var onSeekChanged: ((Long) -> Unit)? = null
+
+    fun setPlayback(duration: Long, position: Long, enabled: Boolean) {
+        this.duration = duration.coerceAtLeast(0L)
+        if (!tracking) this.position = position.coerceIn(0L, this.duration)
+        enabledForSeek = enabled && this.duration > 0L
+        alpha = if (enabledForSeek) 1f else .72f
+        invalidate()
     }
-    override fun draw(canvas: Canvas) {
-        val w = bounds.width().toFloat()
-        val h = bounds.height().toFloat()
-        val center = h / 2f
-        val left = w * .25f
-        val right = w * .75f
-        val tip = if (next) right else left
-        val base = if (next) left else right
-        val path = Path().apply {
-            moveTo(base, h * .25f)
-            lineTo(tip, center)
-            lineTo(base, h * .75f)
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val horizontalInset = dp(3f).toFloat()
+        val start = horizontalInset
+        val end = (width - horizontalInset).coerceAtLeast(horizontalInset)
+        val centerY = height / 2f
+        val radius = dp(2f).toFloat()
+        canvas.drawRoundRect(start, centerY - radius, end, centerY + radius, radius, radius, trackPaint)
+        val fraction = if (duration > 0L) position.toFloat() / duration else 0f
+        val progressEnd = start + (end - start) * fraction.coerceIn(0f, 1f)
+        canvas.drawRoundRect(start, centerY - radius, progressEnd, centerY + radius, radius, radius, progressPaint)
+        if (duration > 0L) canvas.drawCircle(progressEnd, centerY, dp(3.5f).toFloat(), thumbPaint)
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!enabledForSeek) return false
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                parent?.requestDisallowInterceptTouchEvent(true)
+                tracking = true
+                updateFromX(event.x)
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                updateFromX(event.x)
+                return true
+            }
+            MotionEvent.ACTION_UP -> {
+                updateFromX(event.x)
+                tracking = false
+                onSeekChanged?.invoke(position)
+                performClick()
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                tracking = false
+                invalidate()
+                return true
+            }
         }
-        canvas.drawPath(path, paint)
-        val barX = if (next) right else left
-        canvas.drawLine(barX, h * .25f, barX, h * .75f, paint)
+        return super.onTouchEvent(event)
     }
-    override fun setAlpha(alpha: Int) { paint.alpha = alpha }
-    override fun setColorFilter(filter: android.graphics.ColorFilter?) { paint.colorFilter = filter }
-    @Deprecated("Deprecated in Java") override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
+    }
+
+    private fun updateFromX(x: Float) {
+        val start = dp(3f).toFloat()
+        val end = (width - dp(3f)).coerceAtLeast(dp(3f)).toFloat()
+        val fraction = ((x - start) / (end - start).coerceAtLeast(1f)).coerceIn(0f, 1f)
+        position = (duration * fraction).toLong()
+        invalidate()
+    }
+
+    private fun dp(value: Float) = value * density + .5f
 }
 
-private class PlayerToggleDrawable(private val playing: Boolean) : Drawable() {
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+/**
+ * Material Rounded paths held in a drawable so they do not need to resolve this module's
+ * resources through SystemUI's foreign Context.
+ */
+private class MaterialRoundPathDrawable(
+    pathData: String,
+    color: Int,
+) : Drawable() {
+    private val path = PathParser.createPathFromPathData(pathData)
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = color
+        style = Paint.Style.FILL
+    }
 
     override fun draw(canvas: Canvas) {
         val width = bounds.width().toFloat()
         val height = bounds.height().toFloat()
-        if (playing) {
-            val barWidth = width * .19f
-            val gap = width * .18f
-            val left = (width - barWidth * 2 - gap) / 2f
-            val top = height * .19f
-            val bottom = height * .81f
-            val radius = barWidth / 2f
-            canvas.drawRoundRect(left, top, left + barWidth, bottom, radius, radius, paint)
-            canvas.drawRoundRect(left + barWidth + gap, top, left + barWidth * 2 + gap, bottom, radius, radius, paint)
-        } else {
-            val path = Path().apply {
-                val left = width * .31f
-                val top = height * .18f
-                val bottom = height * .82f
-                val tip = width * .79f
-                val centerY = height * .5f
-                val corner = min(width, height) * .075f
-                moveTo(left, top + corner)
-                lineTo(left, bottom - corner)
-                quadTo(left, bottom, left + corner * 1.35f, bottom - corner * .9f)
-                lineTo(tip - corner * 1.65f, centerY + corner * 1.1f)
-                quadTo(tip, centerY, tip - corner * 1.65f, centerY - corner * 1.1f)
-                lineTo(left + corner * 1.35f, top + corner * .9f)
-                quadTo(left, top, left, top + corner)
-                close()
-            }
-            canvas.drawPath(path, paint)
-        }
+        if (width <= 0f || height <= 0f) return
+        canvas.save()
+        canvas.translate(bounds.left.toFloat(), bounds.top.toFloat())
+        val scale = min(width, height) / 960f
+        canvas.scale(scale, scale)
+        canvas.translate((width / scale - 960f) / 2f, (height / scale - 960f) / 2f)
+        canvas.drawPath(path, paint)
+        canvas.restore()
     }
 
     override fun setAlpha(alpha: Int) { paint.alpha = alpha }
     override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { paint.colorFilter = colorFilter }
-    @Deprecated("Deprecated in Java")
-    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+    @Deprecated("Deprecated in Java") override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 }
+
+private const val MATERIAL_ICON_PLAY =
+    "M320 687V273Q320 256 332 244.5Q344 233 360 233Q365 233 370.5 234.5Q376 236 381 239L707 446Q716 452 720.5 461Q725 470 725 480Q725 490 720.5 499Q716 508 707 514L381 721Q376 724 370.5 725.5Q365 727 360 727Q344 727 332 715.5Q320 704 320 687ZM400 346 610 480 400 614ZM400 614 610 480 400 346Z"
+private const val MATERIAL_ICON_PAUSE =
+    "M640 760Q607 760 583.5 736.5Q560 713 560 680V280Q560 247 583.5 223.5Q607 200 640 200Q673 200 696.5 223.5Q720 247 720 280V680Q720 713 696.5 736.5Q673 760 640 760ZM320 760Q287 760 263.5 736.5Q240 713 240 680V280Q240 247 263.5 223.5Q287 200 320 200Q353 200 376.5 223.5Q400 247 400 280V680Q400 713 376.5 736.5Q353 760 320 760Z"
+private const val MATERIAL_ICON_SKIP_NEXT =
+    "M660 680V280Q660 263 671.5 251.5Q683 240 700 240Q717 240 728.5 251.5Q740 263 740 280V680Q740 697 728.5 708.5Q717 720 700 720Q683 720 671.5 708.5Q660 697 660 680ZM220 645V315Q220 297 232 286Q244 275 260 275Q265 275 271 276Q277 277 282 281L530 447Q539 453 543.5 461.5Q548 470 548 480Q548 490 543.5 498.5Q539 507 530 513L282 679Q277 683 271 684Q265 685 260 685Q244 685 232 674Q220 663 220 645ZM300 390 436 480 300 570ZM300 570 436 480 300 390Z"
+private const val MATERIAL_ICON_SKIP_PREVIOUS =
+    "M220 680V280Q220 263 231.5 251.5Q243 240 260 240Q277 240 288.5 251.5Q300 263 300 280V680Q300 697 288.5 708.5Q277 720 260 720Q243 720 231.5 708.5Q220 697 220 680ZM678 679 430 513Q421 507 416.5 498.5Q412 490 412 480Q412 470 416.5 461.5Q421 453 430 447L678 281Q683 277 689 276Q695 275 700 275Q716 275 728 286Q740 297 740 315V645Q740 663 728 674Q716 685 700 685Q695 685 689 684Q683 683 678 679ZM660 390V570L524 480ZM660 570V390L524 480Z"
