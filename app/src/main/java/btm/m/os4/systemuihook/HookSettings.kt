@@ -245,7 +245,7 @@ data class HookSettings(
     val stackedMobileSignalRightMargin: Float = 0f,
     /** 0=do not hide, 1=hide non-data SIM, 2=hide all system signal icons. */
     val mobileSignalHideMode: Int = 0,
-    /** 0=hidden, 1=independent text. */
+    /** 0=system default, 1=independent text, 2=hidden. */
     val mobileNetworkTypeMode: Int = 0,
     /** 0=before signal, 1=after signal. */
     val mobileNetworkTypePosition: Int = 0,
@@ -927,9 +927,7 @@ private fun SharedPreferences.toSettings(): HookSettings {
     stackedMobileSignalRightMargin = getFloat(KEY_STACKED_MOBILE_SIGNAL_RIGHT_MARGIN, 0f)
         .coerceIn(-8f, 8f),
     mobileSignalHideMode = getInt(KEY_MOBILE_SIGNAL_HIDE_MODE, 0).coerceIn(0, 2),
-    // Values from the previous three-option menu (0=system default, 2=hidden)
-    // are both represented by the new hidden option.
-    mobileNetworkTypeMode = getInt(KEY_MOBILE_NETWORK_TYPE_MODE, 0).let { if (it == 1) 1 else 0 },
+    mobileNetworkTypeMode = getInt(KEY_MOBILE_NETWORK_TYPE_MODE, 0).coerceIn(0, 2),
     mobileNetworkTypePosition = getInt(KEY_MOBILE_NETWORK_TYPE_POSITION, 0).coerceIn(0, 1),
     mobileNetworkTypeDisplayLogic = getInt(KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC, 0).coerceIn(0, 1),
     mobileNetworkTypeCustomText = getString(KEY_MOBILE_NETWORK_TYPE_CUSTOM_TEXT, "")
@@ -1321,7 +1319,7 @@ private fun SharedPreferences.write(value: HookSettings) {
             value.stackedMobileSignalRightMargin.coerceIn(-8f, 8f),
         )
         .putInt(KEY_MOBILE_SIGNAL_HIDE_MODE, value.mobileSignalHideMode.coerceIn(0, 2))
-        .putInt(KEY_MOBILE_NETWORK_TYPE_MODE, value.mobileNetworkTypeMode.coerceIn(0, 1))
+        .putInt(KEY_MOBILE_NETWORK_TYPE_MODE, value.mobileNetworkTypeMode.coerceIn(0, 2))
         .putInt(KEY_MOBILE_NETWORK_TYPE_POSITION, value.mobileNetworkTypePosition.coerceIn(0, 1))
         .putInt(KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC, value.mobileNetworkTypeDisplayLogic.coerceIn(0, 1))
         .putString(KEY_MOBILE_NETWORK_TYPE_CUSTOM_TEXT, value.mobileNetworkTypeCustomText.take(128))

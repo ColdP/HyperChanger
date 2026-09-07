@@ -718,11 +718,11 @@ class HyperSystemUiModule : XposedModule() {
                         view?.resources?.getResourceEntryName(view.id)
                     }.getOrNull()
                     val hideNetworkType = preferences.getBoolean(KEY_HIDE_STATUS_BAR_NETWORK_TYPE, false)
-                    // The old value 2 (hidden) and the new value 0 (hidden) have the
-                    // same behavior. Only value 1 enables the independent label.
+                    // 0 keeps SystemUI's original presentation, 1 replaces it with the
+                    // independent label, and 2 hides the network type completely.
                     val mobileNetworkTypeMode = preferences
                         .getInt(KEY_MOBILE_NETWORK_TYPE_MODE, 0)
-                        .let { if (it == 1) 1 else 0 }
+                        .coerceIn(0, 2)
                     val hideWifiStandard = preferences.getBoolean(KEY_HIDE_STATUS_BAR_WIFI_STANDARD, false)
                     val hideClockText = preferences.getBoolean(KEY_HIDE_STATUS_BAR_CLOCK_TEXT, false)
                     val hideNetworkActivity = preferences.getBoolean(KEY_HIDE_STATUS_BAR_NETWORK_ACTIVITY, false)
@@ -734,7 +734,7 @@ class HyperSystemUiModule : XposedModule() {
                         hideSecondaryMobileRoot || hideOriginalDualSignal ||
                         ((resourceName == "mobile_type" || resourceName == "mobile_type_single" ||
                             resourceName == "mobile_special_5G") &&
-                            (hideNetworkType || mobileNetworkTypeMode in 0..1) &&
+                            (hideNetworkType || mobileNetworkTypeMode != 0) &&
                             !(resourceName == "mobile_type_single" &&
                                 isIndependentMobileType && mobileNetworkTypeMode == 1)) ||
                             (resourceName == "wifi_standard" && hideWifiStandard) ||
@@ -1883,6 +1883,11 @@ class HyperSystemUiModule : XposedModule() {
     ) {
         stackedMobilePreferences = preferences
         val enabled = { preferences.getBoolean(KEY_STACKED_MOBILE_SIGNAL_ENABLED, false) }
+        val presentationRequired = {
+            enabled() ||
+                preferences.getInt(KEY_MOBILE_SIGNAL_HIDE_MODE, 0).coerceIn(0, 2) == 1 ||
+                preferences.getInt(KEY_MOBILE_NETWORK_TYPE_MODE, 0).coerceIn(0, 2) == 1
+        }
         var hookCount = 0
 
         runCatching {
@@ -1943,9 +1948,11 @@ class HyperSystemUiModule : XposedModule() {
                 .intercept { chain ->
                     val result = chain.proceed()
                     (chain.getArg(0) as? ViewGroup)?.let { root ->
-                        registerStackedMobilePresentation(root, enabled)
-                        captureMobileNetworkTypeSource(root, chain.getArg(2))
-                        refreshStackedMobilePresentations(enabled)
+                        if (presentationRequired()) {
+                            registerStackedMobilePresentation(root, enabled)
+                            captureMobileNetworkTypeSource(root, chain.getArg(2))
+                            refreshStackedMobilePresentations(enabled)
+                        }
                     }
                     result
                 }
@@ -1995,8 +2002,10 @@ class HyperSystemUiModule : XposedModule() {
                 .intercept { chain ->
                     val result = chain.proceed()
                     (result as? ViewGroup)?.let { root ->
-                        registerStackedMobilePresentation(root, enabled)
-                        refreshStackedMobilePresentations(enabled)
+                        if (presentationRequired()) {
+                            registerStackedMobilePresentation(root, enabled)
+                            refreshStackedMobilePresentations(enabled)
+                        }
                     }
                     result
                 }
@@ -2107,8 +2116,10 @@ class HyperSystemUiModule : XposedModule() {
                 .intercept { chain ->
                     val result = chain.proceed()
                     (chain.thisObject as? ViewGroup)?.let { root ->
-                        registerStackedMobilePresentation(root, enabled)
-                        refreshStackedMobilePresentations(enabled)
+                        if (presentationRequired()) {
+                            registerStackedMobilePresentation(root, enabled)
+                            refreshStackedMobilePresentations(enabled)
+                        }
                     }
                     result
                 }
@@ -2275,7 +2286,7 @@ class HyperSystemUiModule : XposedModule() {
         val group = presentation.mobileGroup ?: return
         val signalContainer = presentation.mobileSignalContainer
         val mode = stackedMobilePreferences?.getInt(KEY_MOBILE_NETWORK_TYPE_MODE, 0)
-            ?.let { if (it == 1) 1 else 0 } ?: 0
+            ?.coerceIn(0, 2) ?: 0
         val position = stackedMobilePreferences?.getInt(KEY_MOBILE_NETWORK_TYPE_POSITION, 0)?.coerceIn(0, 1) ?: 0
         val slotIndex = synchronized(stackedMobileSignalLock) {
             stackedMobileSubscriptions[presentation.subscriptionId]?.slot
@@ -2385,7 +2396,10 @@ class HyperSystemUiModule : XposedModule() {
                     if (shouldShow && displayText.isNotEmpty()) View.VISIBLE else View.GONE,
                 )
             }
-            else -> setStackedMobileViewVisibility(textView, View.GONE)
+            2 -> setStackedMobileViewVisibility(textView, View.GONE)
+            else -> if (textView.tag == INDEPENDENT_MOBILE_TYPE_TAG) {
+                setStackedMobileViewVisibility(textView, View.GONE)
+            }
         }
     }
 
@@ -2451,8 +2465,10 @@ class HyperSystemUiModule : XposedModule() {
             }
         }
         registerMobileNetworkStateCallback(root.context, enabled)
-        ensureIndependentMobileType(presentation)
-        ensureDualMobileSignal(presentation)
+        if (stackedMobilePreferences?.getInt(KEY_MOBILE_NETWORK_TYPE_MODE, 0) == 1) {
+            ensureIndependentMobileType(presentation)
+        }
+        if (enabled()) ensureDualMobileSignal(presentation)
         if (!presentation.attachListenerInstalled) {
             root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
                 override fun onViewAttachedToWindow(view: View) {
@@ -2610,7 +2626,7 @@ class HyperSystemUiModule : XposedModule() {
         applyIndependentMobileType(presentation, useStacked)
         if (!useStacked) {
             restoreSecondaryMobileRoot(presentation)
-            restoreDualMobileSignal(presentation)
+            if (presentation.dualContainer != null) restoreDualMobileSignal(presentation)
             return
         }
 

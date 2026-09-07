@@ -3192,9 +3192,13 @@ OverlayDropdownPreference(
                     onSelectedIndexChange = { value -> update { it.copy(mobileSignalHideMode = value) } },
                 )
 OverlayDropdownPreference(
-                    title = tr("\u72ec\u7acb\u79fb\u52a8\u7f51\u7edc\u7c7b\u578b", "\u72ec\u7acb\u79fb\u52a8\u7f51\u7edc\u7c7b\u578b"),
-                    items = listOf(tr("\u4e0d\u663e\u793a", "\u4e0d\u663e\u793a"), tr("\u72ec\u7acb\u663e\u793a", "\u72ec\u7acb\u663e\u793a")),
-                    selectedIndex = s.mobileNetworkTypeMode.coerceIn(0, 1),
+                    title = tr("\u79fb\u52a8\u7f51\u7edc\u7c7b\u578b\u663e\u793a", "\u79fb\u52a8\u7f51\u7edc\u7c7b\u578b\u663e\u793a"),
+                    items = listOf(
+                        tr("\u8ddf\u968f\u7cfb\u7edf\u9ed8\u8ba4", "\u8ddf\u968f\u7cfb\u7edf\u9ed8\u8ba4"),
+                        tr("\u72ec\u7acb\u663e\u793a", "\u72ec\u7acb\u663e\u793a"),
+                        tr("\u4e0d\u663e\u793a", "\u4e0d\u663e\u793a"),
+                    ),
+                    selectedIndex = s.mobileNetworkTypeMode.coerceIn(0, 2),
                     onSelectedIndexChange = { value -> update { it.copy(mobileNetworkTypeMode = value) } },
                 )
                 AnimatedVisibility(visible = s.mobileNetworkTypeMode == 1) {
