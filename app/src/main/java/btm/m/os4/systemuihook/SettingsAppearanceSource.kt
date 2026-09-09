@@ -97,6 +97,8 @@ object SettingsAppearanceSources {
         .appendPath(slot)
         .build()
 
+    fun lockscreenScheduleUri() = uri(SettingsAppearanceProvider.LOCKSCREEN_SCHEDULE_PATH)
+
     fun query(context: Context, slot: String): SettingsAppearanceSource {
         val key = "${context.packageName}:$slot"
         val now = SystemClock.elapsedRealtime()

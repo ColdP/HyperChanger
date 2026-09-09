@@ -4,7 +4,9 @@ package btm.m.os4.systemuihook
 
 import android.app.Activity
 import android.app.WallpaperManager
+import android.Manifest
 import android.content.Intent
+import android.content.res.Resources
 import android.content.res.ColorStateList
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
@@ -21,6 +23,7 @@ import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.media.MediaMetadataRetriever
 import android.os.Bundle
+import android.os.Build
 import android.util.Log
 import android.widget.Toast
 import android.widget.ImageView
@@ -104,6 +107,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.lazy.items
 import androidx.core.view.WindowCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.graphics.createBitmap
 import kotlinx.coroutines.Dispatchers
@@ -140,10 +144,12 @@ import top.yukonga.miuix.kmp.icon.extended.Close
 import top.yukonga.miuix.kmp.icon.extended.Ok
 import top.yukonga.miuix.kmp.icon.extended.All
 import top.yukonga.miuix.kmp.icon.extended.Import
+import top.yukonga.miuix.kmp.icon.extended.More
 import top.yukonga.miuix.kmp.icon.extended.MoreCircle
 import top.yukonga.miuix.kmp.icon.extended.Refresh
 import top.yukonga.miuix.kmp.icon.extended.Settings
 import top.yukonga.miuix.kmp.preference.*
+import top.yukonga.miuix.kmp.preference.SliderPreference as MiuixSliderPreference
 import top.yukonga.miuix.kmp.shader.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.theme.*
 import java.io.ByteArrayOutputStream
@@ -177,17 +183,24 @@ private enum class Tab { CATEGORY, SETTINGS }
 
 private val LocalPageBackSuppressed = compositionLocalOf<(Boolean) -> Unit> { {} }
 private val LocalLanguageChanged = compositionLocalOf<() -> Unit> { {} }
+val LocalDialogBackdrop = compositionLocalOf<Backdrop?> { null }
 private var activeLanguageStrings by mutableStateOf<Map<String, String>>(emptyMap())
 
 private fun tr(key: String, fallback: String): String =
     activeLanguageStrings[key] ?: activeLanguageStrings[fallback] ?: fallback
+
+private fun systemLanguage(context: android.content.Context): String = runCatching {
+    val locales = context.getSystemService(android.app.LocaleManager::class.java)?.systemLocales
+        ?: Resources.getSystem().configuration.locales
+    if (!locales.isEmpty) locales[0].language else Locale.getDefault().language
+}.getOrDefault(Locale.getDefault().language)
 
 private fun languageStrings(
     context: android.content.Context,
     prefs: android.content.SharedPreferences,
     selection: String = prefs.getString("selected", "system") ?: "system",
 ): Map<String, String> = runCatching {
-    if (selection == "system") return@runCatching builtinLanguageStrings(context, Locale.getDefault().language)
+    if (selection == "system") return@runCatching builtinLanguageStrings(context, systemLanguage(context))
     if (selection in setOf("zh", "en", "ja")) return@runCatching builtinLanguageStrings(context, selection)
     val pack = loadLanguagePacks(prefs).firstOrNull { it.name == selection } ?: return@runCatching emptyMap()
     val objectStrings = JSONObject(pack.json).optJSONObject("strings") ?: return@runCatching emptyMap()
@@ -223,9 +236,9 @@ private enum class PageId {
     SHADE_CONTROL_CENTER_ELEMENTS,
     SHADE_NOTIFICATION_BACKGROUND,
     SHADE_CONTROL_CENTER_BACKGROUND,
-    ISLAND, STATUS, STATUS_SIGNAL_CUSTOMIZATION, CONTROL, LOCK, LOCKSCREEN_WIDGET_EDITOR, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, DEVICE_PROFILE,
+    ISLAND, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN,
-    REAR_SCREEN, REAR_MUSIC_APPS, DISCLAIMER,
+    REAR_SCREEN, REAR_MUSIC_APPS, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION,
 }
 
 private data class ShadePresetActions(
@@ -440,6 +453,9 @@ private fun Root(
             Toast.makeText(context, tr("保存失败", "保存失败"), Toast.LENGTH_SHORT).show()
         }
     }
+    val requestNotificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
     val controller = remember(settings.themeMode) {
         ThemeController(
             when (settings.themeMode) {
@@ -561,6 +577,11 @@ private fun Root(
                 })
             },
             onClearAppearanceLogo = { clearAppearance(APPEARANCE_SLOT_LOGO) },
+            onRequestNotificationPermission = {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            },
         )
         qrShareRequest?.let { request ->
             QrShareDialog(
@@ -628,6 +649,7 @@ private fun Shell(
     onClearStyle2DeviceLogo: () -> Unit,
     onPickAppearanceLogo: () -> Unit,
     onClearAppearanceLogo: () -> Unit,
+    onRequestNotificationPermission: () -> Unit,
 ) {
     val context = LocalContext.current
     var tab by rememberSaveable { mutableStateOf(Tab.CATEGORY) }
@@ -695,6 +717,8 @@ private fun Shell(
     BackHandler(enabled = page != null && !settings.predictiveBackEnabled && !suppressPageBack, onBack = dismissPage)
     val backdrop = rememberLayerBackdrop()
 
+    CompositionLocalProvider(LocalDialogBackdrop provides backdrop) {
+    Scaffold(containerColor = ComposeColor.Transparent) {
     Box(Modifier.fillMaxSize()) {
         // The backdrop must only record page content. Recording the navigation that consumes it
         // creates a RenderNode cycle and crashes HyperOS's RenderThread.
@@ -761,6 +785,7 @@ private fun Shell(
                             onClearStyle2DeviceLogo = onClearStyle2DeviceLogo,
                             onPickAppearanceLogo = onPickAppearanceLogo,
                             onClearAppearanceLogo = onClearAppearanceLogo,
+                            onRequestNotificationPermission = onRequestNotificationPermission,
                         )
                     }
                 }
@@ -792,8 +817,9 @@ private fun Shell(
             )
         }
     }
-}
-
+    }
+    }
+    }
 }
 
 @Composable
@@ -1020,13 +1046,15 @@ private fun RearMusicApps(
                     ),
                 ),
                 backdrop = LocalToolbarBackdrop.current,
-            ) {
-                Icon(
-                    imageVector = MiuixIcons.MoreCircle,
-                    contentDescription = tr("\u66f4\u591a", "\u66f4\u591a"),
-                    tint = MiuixTheme.colorScheme.onBackground,
-                )
-            }
+                trigger = { onClick, enabled ->
+                    GlassToolbarIconButton(
+                        icon = MiuixIcons.Regular.More,
+                        description = tr("\u66f4\u591a", "\u66f4\u591a"),
+                        containerPadding = PaddingValues(end = 8.dp),
+                        onClick = { if (enabled) onClick() },
+                    )
+                },
+            )
         },
     )
 }
@@ -1175,14 +1203,15 @@ OverlayDropdownPreference(
                     onCheckedChange = { value -> update { it.copy(predictiveBackEnabled = value) } }
                 )
                 if (settings.predictiveBackEnabled) {
-                    SliderPreference(
+                    EditableSliderPreference(
                         value = predictiveProgress,
                         onValueChange = { predictiveProgress = it },
                         onValueChangeFinished = { update { it.copy(predictiveBackProgress = predictiveProgress.toInt()) } },
                         title = tr("\u9884\u6d4b\u6027\u8fd4\u56de\u52a8\u753b\u6700\u5927\u8fdb\u5ea6", "\u9884\u6d4b\u6027\u8fd4\u56de\u52a8\u753b\u6700\u5927\u8fdb\u5ea6"),
                         valueText = "${predictiveProgress.toInt()}%",
                         valueRange = 10f..100f,
-                        steps = 89
+                        steps = 89,
+                        defaultValue = 90f,
                     )
                 }
             }
@@ -1282,6 +1311,9 @@ private fun ScopeRestartCheckboxes(
             Checkbox(
                 state = if (target in selectedTargets) ToggleableState.On else ToggleableState.Off,
                 onClick = toggle,
+                colors = CheckboxDefaults.checkboxColors(
+                    uncheckedForegroundColor = ComposeColor(0x808F8F8F),
+                ),
             )
             Text(
                 tr(target.title, target.title),
@@ -1294,6 +1326,8 @@ private fun ScopeRestartCheckboxes(
 
 @Composable
 private fun SystemSettings(
+    settings: HookSettings,
+    updateSettings: ((HookSettings) -> HookSettings) -> Unit,
     profile: DeviceProfileSettings,
     update: ((DeviceProfileSettings) -> DeviceProfileSettings) -> Unit,
     appearance: SettingsAppearanceSettings,
@@ -1315,6 +1349,16 @@ private fun SystemSettings(
                     title = tr("使用骁龙处理器图标", "使用骁龙处理器图标"),
                     checked = profile.snapdragonIcon,
                     onCheckedChange = { enabled -> update { it.copy(snapdragonIcon = enabled) } },
+                )
+                SwitchPreference(
+                    title = tr("解锁更多自动锁屏选项", "解锁更多自动锁屏选项"),
+                    checked = settings.unlockNeverScreenTimeout,
+                    onCheckedChange = { enabled -> updateSettings { it.copy(unlockNeverScreenTimeout = enabled) } },
+                )
+                SwitchPreference(
+                    title = tr("显示 Google 服务入口", "显示 Google 服务入口"),
+                    checked = settings.showGoogleServiceEntry,
+                    onCheckedChange = { enabled -> updateSettings { it.copy(showGoogleServiceEntry = enabled) } },
                 )
             }
         }
@@ -1343,7 +1387,7 @@ OverlayDropdownPreference(
                         summary = if (appearance.logoMime.isBlank()) tr("无LOGO", "无LOGO") else tr("已导入", "已导入"),
                         onClick = onClearLogo,
                     )
-                    SliderPreference(
+                    EditableSliderPreference(
                         value = appearance.logoScale.toFloat(),
                         onValueChange = { value -> updateAppearance { it.copy(logoScale = value.toInt()) } },
                         onValueChangeFinished = {},
@@ -1351,6 +1395,7 @@ OverlayDropdownPreference(
                         valueText = "${appearance.logoScale}%",
                         valueRange = 50f..200f,
                         steps = 149,
+                        defaultValue = 100f,
                     )
                 }
             }
@@ -1539,7 +1584,7 @@ OverlayDropdownPreference(
                         summary = if (appearance.tutorialCardImageMime.isBlank()) tr("无图片", "无图片") else tr("已导入", "已导入"),
                         onClick = onClearStyle1Image,
                     )
-                    SliderPreference(
+                    EditableSliderPreference(
                         value = appearance.tutorialCardImageScale.toFloat(),
                         onValueChange = { value -> update { it.copy(tutorialCardImageScale = value.toInt()) } },
                         onValueChangeFinished = {},
@@ -1547,8 +1592,9 @@ OverlayDropdownPreference(
                         valueText = "${appearance.tutorialCardImageScale}%",
                         valueRange = 40f..200f,
                         steps = 159,
+                        defaultValue = 100f,
                     )
-                    SliderPreference(
+                    EditableSliderPreference(
                         value = appearance.tutorialCardImageLogoSpacing.toFloat(),
                         onValueChange = { value -> update { it.copy(tutorialCardImageLogoSpacing = value.toInt()) } },
                         onValueChangeFinished = {},
@@ -1556,6 +1602,7 @@ OverlayDropdownPreference(
                         valueText = "${appearance.tutorialCardImageLogoSpacing}%",
                         valueRange = -120f..120f,
                         steps = 239,
+                        defaultValue = 0f,
                     )
                 }
             }
@@ -1571,7 +1618,7 @@ OverlayDropdownPreference(
                         summary = if (appearance.tutorialCardBackgroundMime.isBlank()) tr("无图片", "无图片") else tr("已导入", "已导入"),
                         onClick = onClearStyle1Background,
                     )
-                SliderPreference(
+                EditableSliderPreference(
                     value = appearance.tutorialCardBackgroundBlur,
                     onValueChange = { value -> update { it.copy(tutorialCardBackgroundBlur = value) } },
                     onValueChangeFinished = {},
@@ -1579,9 +1626,10 @@ OverlayDropdownPreference(
                     valueText = String.format(Locale.US, "%.2fdp", appearance.tutorialCardBackgroundBlur),
                     valueRange = 0f..25f,
                     steps = 2499,
+                    defaultValue = 0f,
                     enabled = true,
                 )
-                SliderPreference(
+                EditableSliderPreference(
                     value = appearance.tutorialCardBackgroundHorizontalOffset.toFloat(),
                     onValueChange = { value -> update { it.copy(tutorialCardBackgroundHorizontalOffset = value.toInt()) } },
                     onValueChangeFinished = {},
@@ -1589,9 +1637,10 @@ OverlayDropdownPreference(
                     valueText = "${appearance.tutorialCardBackgroundHorizontalOffset}%",
                     valueRange = -120f..120f,
                     steps = 239,
+                    defaultValue = 0f,
                     enabled = true,
                 )
-                SliderPreference(
+                EditableSliderPreference(
                     value = appearance.tutorialCardBackgroundVerticalOffset.toFloat(),
                     onValueChange = { value -> update { it.copy(tutorialCardBackgroundVerticalOffset = value.toInt()) } },
                     onValueChangeFinished = {},
@@ -1599,9 +1648,10 @@ OverlayDropdownPreference(
                     valueText = "${appearance.tutorialCardBackgroundVerticalOffset}%",
                     valueRange = -120f..120f,
                     steps = 239,
+                    defaultValue = 0f,
                     enabled = true,
                 )
-                SliderPreference(
+                EditableSliderPreference(
                     value = appearance.tutorialCardBackgroundScale.toFloat(),
                     onValueChange = { value -> update { it.copy(tutorialCardBackgroundScale = value.toInt()) } },
                     onValueChangeFinished = {},
@@ -1609,6 +1659,7 @@ OverlayDropdownPreference(
                     valueText = "${appearance.tutorialCardBackgroundScale}%",
                     valueRange = 40f..200f,
                     steps = 159,
+                    defaultValue = 100f,
                     enabled = true,
                 )
                 }
@@ -1625,7 +1676,7 @@ OverlayDropdownPreference(
                         summary = if (appearance.tutorialCardLogoMime.isBlank()) tr("无LOGO", "无LOGO") else tr("已导入", "已导入"),
                         onClick = onClearStyle1Logo,
                     )
-                    SliderPreference(
+                    EditableSliderPreference(
                         value = appearance.tutorialCardLogoScale.toFloat(),
                         onValueChange = { value -> update { it.copy(tutorialCardLogoScale = value.toInt()) } },
                         onValueChangeFinished = {},
@@ -1633,8 +1684,9 @@ OverlayDropdownPreference(
                         valueText = "${appearance.tutorialCardLogoScale}%",
                         valueRange = 40f..200f,
                         steps = 159,
+                        defaultValue = 100f,
                     )
-                    SliderPreference(
+                    EditableSliderPreference(
                         value = appearance.tutorialCardLogoVerticalOffset.toFloat(),
                         onValueChange = { value -> update { it.copy(tutorialCardLogoVerticalOffset = value.toInt()) } },
                         onValueChangeFinished = {},
@@ -1642,12 +1694,13 @@ OverlayDropdownPreference(
                         valueText = "${appearance.tutorialCardLogoVerticalOffset}%",
                         valueRange = -120f..120f,
                         steps = 239,
+                        defaultValue = 0f,
                     )
                 }
             }
             item {
                 Group(tr("底部标识", "底部标识")) {
-                    SliderPreference(
+                    EditableSliderPreference(
                         value = appearance.tutorialCardTextSpacing.toFloat(),
                         onValueChange = { value -> update { it.copy(tutorialCardTextSpacing = value.toInt()) } },
                         onValueChangeFinished = {},
@@ -1655,6 +1708,7 @@ OverlayDropdownPreference(
                         valueText = "${appearance.tutorialCardTextSpacing}%",
                         valueRange = -120f..120f,
                         steps = 239,
+                        defaultValue = 0f,
                     )
                     TutorialCardTextField(tr("署名", "署名"), appearance.tutorialCardAuthor) { value -> update { it.copy(tutorialCardAuthor = value) } }
                 }
@@ -1673,7 +1727,7 @@ OverlayDropdownPreference(
                         summary = if (appearance.style2ImageMime.isBlank()) tr("无图片", "无图片") else tr("已导入", "已导入"),
                         onClick = onClearStyle2Image,
                     )
-                    SliderPreference(
+                    EditableSliderPreference(
                         value = appearance.style2ImageScale.toFloat(),
                         onValueChange = { value -> update { it.copy(style2ImageScale = value.toInt()) } },
                         onValueChangeFinished = {},
@@ -1681,6 +1735,7 @@ OverlayDropdownPreference(
                         valueText = "${appearance.style2ImageScale}%",
                         valueRange = 40f..200f,
                         steps = 159,
+                        defaultValue = 100f,
                     )
                 }
             }
@@ -1696,7 +1751,7 @@ OverlayDropdownPreference(
                         summary = if (appearance.style2BackgroundMime.isBlank()) tr("无背景图", "无背景图") else tr("已导入", "已导入"),
                         onClick = onClearStyle2Background,
                     )
-                    SliderPreference(
+                    EditableSliderPreference(
                         value = appearance.style2BackgroundBlur,
                         onValueChange = { value -> update { it.copy(style2BackgroundBlur = value) } },
                         onValueChangeFinished = {},
@@ -1704,8 +1759,9 @@ OverlayDropdownPreference(
                         valueText = String.format(Locale.US, "%.2fdp", appearance.style2BackgroundBlur),
                         valueRange = 0f..25f,
                         steps = 2499,
+                        defaultValue = 0f,
                     )
-                    SliderPreference(
+                    EditableSliderPreference(
                         value = appearance.style2BackgroundHorizontalOffset.toFloat(),
                         onValueChange = { value -> update { it.copy(style2BackgroundHorizontalOffset = value.toInt()) } },
                         onValueChangeFinished = {},
@@ -1713,8 +1769,9 @@ OverlayDropdownPreference(
                         valueText = "${appearance.style2BackgroundHorizontalOffset}%",
                         valueRange = -120f..120f,
                         steps = 239,
+                        defaultValue = 0f,
                     )
-                    SliderPreference(
+                    EditableSliderPreference(
                         value = appearance.style2BackgroundVerticalOffset.toFloat(),
                         onValueChange = { value -> update { it.copy(style2BackgroundVerticalOffset = value.toInt()) } },
                         onValueChangeFinished = {},
@@ -1722,8 +1779,9 @@ OverlayDropdownPreference(
                         valueText = "${appearance.style2BackgroundVerticalOffset}%",
                         valueRange = -120f..120f,
                         steps = 239,
+                        defaultValue = 0f,
                     )
-                    SliderPreference(
+                    EditableSliderPreference(
                         value = appearance.style2BackgroundScale.toFloat(),
                         onValueChange = { value -> update { it.copy(style2BackgroundScale = value.toInt()) } },
                         onValueChangeFinished = {},
@@ -1731,6 +1789,7 @@ OverlayDropdownPreference(
                         valueText = "${appearance.style2BackgroundScale}%",
                         valueRange = 40f..200f,
                         steps = 159,
+                        defaultValue = 100f,
                     )
                 }
             }
@@ -1752,7 +1811,7 @@ OverlayDropdownPreference(
                         selectedIndex = appearance.style2LogoAlignment.coerceIn(0, 2),
                         onSelectedIndexChange = { value -> update { it.copy(style2LogoAlignment = value) } },
                     )
-                    SliderPreference(
+                    EditableSliderPreference(
                         value = appearance.style2LogoVersionSpacing.toFloat(),
                         onValueChange = { value -> update { it.copy(style2LogoVersionSpacing = value.toInt()) } },
                         onValueChangeFinished = {},
@@ -1760,8 +1819,9 @@ OverlayDropdownPreference(
                         valueText = "${appearance.style2LogoVersionSpacing}%",
                         valueRange = -120f..120f,
                         steps = 239,
+                        defaultValue = 0f,
                     )
-                    SliderPreference(
+                    EditableSliderPreference(
                         value = appearance.style2LogoHorizontalOffsetForAlignment().toFloat(),
                         onValueChange = { value -> update { current -> current.withStyle2LogoHorizontalOffset(current.style2LogoAlignment, value.toInt()) } },
                         onValueChangeFinished = {},
@@ -1769,8 +1829,9 @@ OverlayDropdownPreference(
                         valueText = "${appearance.style2LogoHorizontalOffsetForAlignment()}%",
                         valueRange = -120f..120f,
                         steps = 239,
+                        defaultValue = 0f,
                     )
-                    SliderPreference(
+                    EditableSliderPreference(
                         value = appearance.style2LogoVerticalOffsetForAlignment().toFloat(),
                         onValueChange = { value -> update { current -> current.withStyle2LogoVerticalOffset(current.style2LogoAlignment, value.toInt()) } },
                         onValueChangeFinished = {},
@@ -1778,6 +1839,7 @@ OverlayDropdownPreference(
                         valueText = "${appearance.style2LogoVerticalOffsetForAlignment()}%",
                         valueRange = -120f..120f,
                         steps = 239,
+                        defaultValue = 0f,
                     )
                 }
             }
@@ -1795,7 +1857,7 @@ OverlayDropdownPreference(
                             checked = appearance.style2TextIndependent,
                             onCheckedChange = { value -> update { it.copy(style2TextIndependent = value) } },
                         )
-                        SliderPreference(
+                        EditableSliderPreference(
                             value = appearance.style2TextScale.toFloat(),
                             onValueChange = { value -> update { it.copy(style2TextScale = value.toInt()) } },
                             onValueChangeFinished = {},
@@ -1803,6 +1865,7 @@ OverlayDropdownPreference(
                             valueText = "${appearance.style2TextScale}%",
                             valueRange = 40f..200f,
                             steps = 159,
+                            defaultValue = 100f,
                         )
                         if (!appearance.style2TextIndependent) {
 OverlayDropdownPreference(
@@ -1812,7 +1875,7 @@ OverlayDropdownPreference(
                                 onSelectedIndexChange = { value -> update { it.copy(style2TextPosition = value) } },
                             )
                             if (appearance.style2TextPosition == 0) {
-                                SliderPreference(
+                                EditableSliderPreference(
                                     value = appearance.style2TextSpacingAbove.toFloat(),
                                     onValueChange = { value -> update { it.copy(style2TextSpacingAbove = value.toInt()) } },
                                     onValueChangeFinished = {},
@@ -1820,9 +1883,10 @@ OverlayDropdownPreference(
                                     valueText = "${appearance.style2TextSpacingAbove}%",
                                     valueRange = -120f..120f,
                                     steps = 239,
+                                    defaultValue = 0f,
                                 )
                             } else {
-                                SliderPreference(
+                                EditableSliderPreference(
                                     value = appearance.style2TextSpacingBelow.toFloat(),
                                     onValueChange = { value -> update { it.copy(style2TextSpacingBelow = value.toInt()) } },
                                     onValueChangeFinished = {},
@@ -1830,6 +1894,7 @@ OverlayDropdownPreference(
                                     valueText = "${appearance.style2TextSpacingBelow}%",
                                     valueRange = -120f..120f,
                                     steps = 239,
+                                    defaultValue = 0f,
                                 )
                             }
                         } else {
@@ -1839,7 +1904,7 @@ OverlayDropdownPreference(
                                 selectedIndex = appearance.style2TextAlignment.coerceIn(0, 2),
                                 onSelectedIndexChange = { value -> update { it.copy(style2TextAlignment = value) } },
                             )
-                            SliderPreference(
+                            EditableSliderPreference(
                                 value = appearance.style2TextVerticalOffsetForAlignment().toFloat(),
                                 onValueChange = { value -> update { current -> current.withStyle2TextVerticalOffset(current.style2TextAlignment, value.toInt()) } },
                                 onValueChangeFinished = {},
@@ -1847,8 +1912,9 @@ OverlayDropdownPreference(
                                 valueText = "${appearance.style2TextVerticalOffsetForAlignment()}%",
                                 valueRange = -120f..120f,
                                 steps = 239,
+                                defaultValue = 0f,
                             )
-                            SliderPreference(
+                            EditableSliderPreference(
                                 value = appearance.style2TextHorizontalOffsetForAlignment().toFloat(),
                                 onValueChange = { value -> update { current -> current.withStyle2TextHorizontalOffset(current.style2TextAlignment, value.toInt()) } },
                                 onValueChangeFinished = {},
@@ -1856,6 +1922,7 @@ OverlayDropdownPreference(
                                 valueText = "${appearance.style2TextHorizontalOffsetForAlignment()}%",
                                 valueRange = -120f..120f,
                                 steps = 239,
+                                defaultValue = 0f,
                             )
                         }
                     }
@@ -1987,7 +2054,7 @@ private fun SettingsAppearancePage(
                         checked = enabled,
                         onCheckedChange = { value -> change { if (home) it.copy(homeEnabled = value) else it.copy(deviceEnabled = value) } },
                     )
-                    SliderPreference(
+                    EditableSliderPreference(
                         value = blur.toFloat(),
                         onValueChange = { value -> change { if (home) it.copy(homeBlur = value) else it.copy(deviceBlur = value) } },
                         onValueChangeFinished = {},
@@ -1995,9 +2062,10 @@ private fun SettingsAppearancePage(
                         valueText = String.format(Locale.US, "%.2f", blur),
                         valueRange = 0f..20f,
                         steps = 1999,
+                        defaultValue = 0f,
                         enabled = enabled,
                     )
-                    SliderPreference(
+                    EditableSliderPreference(
                         value = opacity.toFloat(),
                         onValueChange = { value -> change { if (home) it.copy(homeOpacity = value.toInt()) else it.copy(deviceOpacity = value.toInt()) } },
                         onValueChangeFinished = {},
@@ -2005,6 +2073,7 @@ private fun SettingsAppearancePage(
                         valueText = "$opacity%",
                         valueRange = 0f..100f,
                         steps = 99,
+                        defaultValue = 100f,
                         enabled = enabled,
                     )
 OverlayDropdownPreference(
@@ -2082,10 +2151,14 @@ private fun ServiceCard(online: Boolean) {
 }
 
 @Composable
-private fun Group(title: String, content: @Composable ColumnScope.() -> Unit) {
+private fun Group(
+    title: String,
+    insideMargin: PaddingValues = PaddingValues(0.dp),
+    content: @Composable ColumnScope.() -> Unit,
+) {
     Column(Modifier.fillMaxWidth()) {
         SmallTitle(title, insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp))
-        Card(Modifier.fillMaxWidth()) { content() }
+        Card(Modifier.fillMaxWidth(), insideMargin = insideMargin) { content() }
     }
 }
 
@@ -2130,6 +2203,7 @@ private fun Detail(
     onClearStyle2DeviceLogo: () -> Unit,
     onPickAppearanceLogo: () -> Unit,
     onClearAppearanceLogo: () -> Unit,
+    onRequestNotificationPermission: () -> Unit,
     openPage: (PageId) -> Unit,
     back: () -> Unit
 ) {
@@ -2164,18 +2238,20 @@ private fun Detail(
             val next = value.copy(controlCenterBackgroundMaterial = it)
             if (value.shadeSettingsUnified) next.copy(notificationCenterBackgroundMaterial = it) else next
         } }
-        PageId.ISLAND -> Island(settings, update, back)
+        PageId.ISLAND -> Island(settings, update, openPage, onRequestNotificationPermission, back)
         PageId.STATUS -> Status(settings, update, openPage, back)
-        PageId.STATUS_SIGNAL_CUSTOMIZATION -> StatusSignalCustomization(settings, update, back)
+        PageId.STATUS_SIGNAL_CUSTOMIZATION -> StatusSignalCustomization(settings, update, openPage, back)
+        PageId.STATUS_SIGNAL_TUNING -> StatusSignalTuning(settings, update, back)
         PageId.CONTROL -> Control(settings, update, back)
         PageId.LOCK -> Lock(settings, update, openPage, back)
         PageId.LOCKSCREEN_WIDGET_EDITOR -> LockscreenWidgetEditor(settings, update, back)
+        PageId.LOCKSCREEN_WIDGET_BACKGROUND -> LockscreenWidgetBackgroundSettings(settings, update, back)
         PageId.RASTER_WALLPAPER -> RasterWallpaper(settings, update, onPickRasterImages, onApplyRasterWallpaper, back)
         PageId.SUPER_XIAOAI -> SuperXiaoAi(settings, update, back)
         PageId.CAMERA -> Camera(cameras, updateCamera, openPage, back)
         PageId.CAMERA_PALETTE -> CameraPalette(cameras, updateCamera, back)
         PageId.SYSTEM_UPDATE -> SystemUpdate(settings, update, back)
-        PageId.SYSTEM_SETTINGS -> SystemSettings(deviceProfile, updateDeviceProfile, appearance, updateAppearance, openPage, onPickAppearanceLogo, onClearAppearanceLogo, back)
+        PageId.SYSTEM_SETTINGS -> SystemSettings(settings, update, deviceProfile, updateDeviceProfile, appearance, updateAppearance, openPage, onPickAppearanceLogo, onClearAppearanceLogo, back)
         PageId.DEVICE_PROFILE -> DeviceProfileEditor(deviceProfile, updateDeviceProfile, back)
         PageId.SETTINGS_APPEARANCE_HOME -> SettingsAppearancePage(APPEARANCE_SLOT_HOME, appearance, updateAppearance, onPickAppearanceHome, onClearAppearanceHome, back)
         PageId.SETTINGS_APPEARANCE_DEVICE -> SettingsAppearancePage(APPEARANCE_SLOT_DEVICE, appearance, updateAppearance, onPickAppearanceDevice, onClearAppearanceDevice, back)
@@ -2188,7 +2264,534 @@ private fun Detail(
         PageId.OPEN -> OpenSource(back)
         PageId.REAR_SCREEN -> RearScreen(musicWhitelist, updateMusicWhitelist, openPage, back)
         PageId.REAR_MUSIC_APPS -> RearMusicApps(musicWhitelist, updateMusicWhitelist, back)
+        PageId.SIMULATE_MEDIA_NOTIFICATION -> SimulateMediaNotificationPage(
+            musicWhitelist,
+            updateMusicWhitelist,
+            onRequestNotificationPermission,
+            back,
+        )
     }
+}
+
+@Composable
+private fun NotificationSimulationDialog(
+    focus: Boolean,
+    onRequestNotificationPermission: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    var title by remember(focus) {
+        mutableStateOf(if (focus) NotificationSimulator.focusTitle(context) else NotificationSimulator.normalTitle(context))
+    }
+    var content by remember(focus) {
+        mutableStateOf(if (focus) NotificationSimulator.focusContent(context) else NotificationSimulator.normalContent(context))
+    }
+    var normalNotificationCount by remember(focus) { mutableIntStateOf(1) }
+    var normalIntervalIndex by remember(focus) { mutableIntStateOf(0) }
+    var delayFirstNormalNotification by remember(focus) { mutableStateOf(false) }
+    var hasNormalNotificationImage by remember(focus) {
+        mutableStateOf(!focus && NotificationSimulator.hasNormalImage(context))
+    }
+    val normalIntervalsMs = remember { longArrayOf(1_000L, 3_000L, 5_000L, 10_000L, 15_000L, 20_000L, 30_000L, 60_000L) }
+    val pickNormalNotificationImage = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+                ?: error(tr("notification_image_invalid", "无法读取通知图片"))
+        }.onSuccess { image ->
+            NotificationSimulator.saveNormalImage(context, image)
+            hasNormalNotificationImage = true
+        }.onFailure {
+            Toast.makeText(context, tr("notification_image_invalid", "无法读取通知图片"), Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun hasNotificationPermission(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
+    fun sendNotification() {
+        if (title.isBlank() || content.isBlank()) {
+            Toast.makeText(context, tr("notification_content_required", "请输入通知标题和内容"), Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!hasNotificationPermission()) {
+            Toast.makeText(context, tr("notification_permission_required", "请先允许通知权限"), Toast.LENGTH_SHORT).show()
+            onRequestNotificationPermission()
+            return
+        }
+        val trimmedTitle = title.trim()
+        val trimmedContent = content.trim()
+        val sent = if (focus) {
+            NotificationSimulator.saveFocusTitle(context, trimmedTitle)
+            NotificationSimulator.saveFocusContent(context, trimmedContent)
+            NotificationSimulator.sendFocus(context, trimmedTitle, trimmedContent)
+        } else {
+            NotificationSimulator.saveNormalTitle(context, trimmedTitle)
+            NotificationSimulator.saveNormalContent(context, trimmedContent)
+            NotificationSimulator.sendNormalBatch(
+                context,
+                trimmedTitle,
+                trimmedContent,
+                normalNotificationCount,
+                normalIntervalsMs[normalIntervalIndex],
+                delayFirstNormalNotification,
+            )
+        }
+        Toast.makeText(
+            context,
+            tr(if (sent) "notification_sent" else "notification_send_failed", if (sent) "通知已发送" else "通知发送失败"),
+            Toast.LENGTH_SHORT,
+        ).show()
+        if (sent) onDismiss()
+    }
+
+    WindowDialog(
+        show = true,
+        onDismissRequest = onDismiss,
+        includeImePadding = false,
+    ) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                tr(
+                    if (focus) "focus_notification_simulation" else "normal_notification_simulation",
+                    if (focus) "超级岛&焦点通知模拟" else "普通通知模拟",
+                ),
+                style = MiuixTheme.textStyles.title3,
+                fontWeight = FontWeight.Bold,
+            )
+            TextField(
+                value = title,
+                onValueChange = { title = it.take(100) },
+                label = tr("notification_title", "通知标题"),
+                useLabelAsPlaceholder = true,
+                singleLine = true,
+                cornerRadius = 999.dp,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            TextField(
+                value = content,
+                onValueChange = { content = it.take(500) },
+                label = tr("notification_content", "通知内容"),
+                useLabelAsPlaceholder = true,
+                singleLine = false,
+                cornerRadius = 24.dp,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (!focus) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        tr("notification_count", "模拟通知数量"),
+                        style = MiuixTheme.textStyles.body1,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        normalNotificationCount.toString(),
+                        style = MiuixTheme.textStyles.body1,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+                Slider(
+                    value = normalNotificationCount.toFloat(),
+                    onValueChange = { normalNotificationCount = it.roundToInt().coerceIn(1, 10) },
+                    valueRange = 1f..10f,
+                    steps = 8,
+                    showKeyPoints = true,
+                    hapticEffect = SliderDefaults.SliderHapticEffect.Step,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        tr("notification_interval", "发送间隔"),
+                        style = MiuixTheme.textStyles.body1,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        "${normalIntervalsMs[normalIntervalIndex] / 1_000}s",
+                        style = MiuixTheme.textStyles.body1,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+                Slider(
+                    value = normalIntervalIndex.toFloat(),
+                    onValueChange = { normalIntervalIndex = it.roundToInt().coerceIn(normalIntervalsMs.indices) },
+                    valueRange = 0f..normalIntervalsMs.lastIndex.toFloat(),
+                    steps = normalIntervalsMs.size - 2,
+                    showKeyPoints = true,
+                    hapticEffect = SliderDefaults.SliderHapticEffect.Step,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        tr("notification_delay_first", "首条通知在设定的发送间隔结束后发送"),
+                        modifier = Modifier.weight(1f),
+                        style = MiuixTheme.textStyles.body1,
+                    )
+                    Switch(
+                        checked = delayFirstNormalNotification,
+                        onCheckedChange = { delayFirstNormalNotification = it },
+                    )
+                }
+                GlassDialogButton(
+                    onClick = {
+                        if (hasNormalNotificationImage) {
+                            NotificationSimulator.clearNormalImage(context)
+                            hasNormalNotificationImage = false
+                        } else {
+                            pickNormalNotificationImage.launch(arrayOf("image/*"))
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        tr(
+                            if (hasNormalNotificationImage) "notification_image_uploaded" else "notification_image_upload",
+                            if (hasNormalNotificationImage) "上传通知图片（已上传）" else "上传通知图片",
+                        ),
+                    )
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GlassDialogButton(onDismiss, Modifier.weight(1f)) { Text(tr("cancel", "取消")) }
+                GlassDialogButton(
+                    onClick = ::sendNotification,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColorsPrimary(),
+                ) { Text(tr("send", "发送")) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SimulateMediaNotificationPage(
+    musicWhitelist: Set<String>,
+    updateMusicWhitelist: (Set<String>) -> Unit,
+    onRequestNotificationPermission: () -> Unit,
+    back: () -> Unit,
+) = AppPage(tr("simulate_media_notification", "媒体通知模拟"), back) { padding, scroll ->
+    val context = LocalContext.current
+    var title by remember { mutableStateOf(MediaNotificationSimulator.title(context)) }
+    var artist by remember { mutableStateOf(MediaNotificationSimulator.artist(context)) }
+    var playing by remember { mutableStateOf(MediaNotificationSimulator.isPlaying(context)) }
+    var positionMs by remember { mutableLongStateOf(MediaNotificationSimulator.position(context)) }
+    var isSeeking by remember { mutableStateOf(false) }
+    var cover by remember { mutableStateOf(MediaNotificationSimulator.cover(context)) }
+    var showMetadataDialog by remember { mutableStateOf(false) }
+    var titleDraft by remember { mutableStateOf(title) }
+    var artistDraft by remember { mutableStateOf(artist) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            playing = MediaNotificationSimulator.isPlaying(context)
+            if (!isSeeking) positionMs = MediaNotificationSimulator.position(context)
+            delay(500)
+        }
+    }
+
+    val pickCover = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+                ?: error(tr("media_notification_cover_invalid", "无法读取封面图片"))
+        }.onSuccess { selected ->
+            MediaNotificationSimulator.saveCover(context, selected)
+            cover = selected
+            Toast.makeText(context, tr("media_notification_cover_saved", "封面已更新"), Toast.LENGTH_SHORT).show()
+        }.onFailure {
+            Toast.makeText(context, tr("media_notification_cover_invalid", "无法读取封面图片"), Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun hasNotificationPermission(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
+    fun sendMediaNotification() {
+        if (!hasNotificationPermission()) {
+            Toast.makeText(context, tr("notification_permission_required", "请先允许通知权限"), Toast.LENGTH_SHORT).show()
+            onRequestNotificationPermission()
+            return
+        }
+        val sent = MediaNotificationSimulator.send(
+            context,
+            title.trim(),
+            artist.trim(),
+            playing,
+            tr("media_notification_channel", "媒体通知模拟"),
+            tr("media_notification_previous", "上一首"),
+            tr("media_notification_play", "播放"),
+            tr("media_notification_pause", "暂停"),
+            tr("media_notification_next", "下一首"),
+        )
+        Toast.makeText(
+            context,
+            tr(
+                if (sent) "media_notification_sent" else "media_notification_send_failed",
+                if (sent) "媒体通知已发送" else "媒体通知发送失败",
+            ),
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
+
+    AppList(padding, scroll, 22) {
+        item {
+            Box(
+                Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(2.24f)
+                        .clip(RoundedCornerShape(28.dp))
+                        .background(ComposeColor.White)
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Image(
+                        bitmap = cover.asImageBitmap(),
+                        contentDescription = tr("media_notification_replace_cover", "替换封面"),
+                        modifier = Modifier
+                            .fillMaxWidth(0.40f)
+                            .aspectRatio(1f)
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable { pickCover.launch(arrayOf("image/*")) },
+                        contentScale = ContentScale.Crop,
+                    )
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    titleDraft = title
+                                    artistDraft = artist
+                                    showMetadataDialog = true
+                                },
+                        ) {
+                            Text(
+                                title,
+                                color = ComposeColor(0xFF171717),
+                                style = MiuixTheme.textStyles.body1,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 19.76.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                artist,
+                                color = ComposeColor(0xFF606060),
+                                style = MiuixTheme.textStyles.body2,
+                                fontSize = 15.3.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Column(Modifier.fillMaxWidth()) {
+                            MediaProgressTrack(
+                                progress = positionMs.toFloat() / MediaNotificationSimulator.DURATION_MS.toFloat(),
+                                onSeekStarted = { isSeeking = true },
+                                onProgressChange = { progress ->
+                                    positionMs = (MediaNotificationSimulator.DURATION_MS * progress).toLong()
+                                },
+                                onProgressChangeFinished = {
+                                    isSeeking = false
+                                    MediaNotificationSimulator.updatePosition(context, positionMs)
+                                },
+                            )
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    "-${mediaTimeText(MediaNotificationSimulator.DURATION_MS - positionMs)}",
+                                    color = ComposeColor(0xFF555555),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Text(
+                                    mediaTimeText(MediaNotificationSimulator.DURATION_MS),
+                                    color = ComposeColor(0xFF555555),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Image(
+                                painterResource(R.drawable.ic_media_notification_previous),
+                                contentDescription = tr("media_notification_previous", "上一首"),
+                                modifier = Modifier.size(44.dp),
+                                colorFilter = ColorFilter.tint(ComposeColor(0xFF222222)),
+                            )
+                            Image(
+                                painterResource(
+                                    if (playing) R.drawable.ic_media_notification_pause else R.drawable.ic_media_notification_play,
+                                ),
+                                contentDescription = tr(
+                                    if (playing) "media_notification_pause" else "media_notification_play",
+                                    if (playing) "暂停" else "播放",
+                                ),
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clickable {
+                                        playing = !playing
+                                        MediaNotificationSimulator.updatePlaying(context, playing)
+                                    },
+                                colorFilter = ColorFilter.tint(ComposeColor(0xFF222222)),
+                            )
+                            Image(
+                                painterResource(R.drawable.ic_media_notification_next),
+                                contentDescription = tr("media_notification_next", "下一首"),
+                                modifier = Modifier.size(44.dp),
+                                colorFilter = ColorFilter.tint(ComposeColor(0xFF222222)),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        item {
+            Group(tr("media_notification_preview", "媒体通知")) {
+                Text(
+                    tr("media_notification_cover_hint", "点击封面替换封面，点击标题和 Artist 编辑信息"),
+                    style = MiuixTheme.textStyles.body2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                )
+                SwitchPreference(
+                    title = tr("add_module_to_rear_media_whitelist", "添加模块应用到背屏媒体控件白名单"),
+                    checked = context.packageName in musicWhitelist,
+                    onCheckedChange = { enabled ->
+                        val next = if (enabled) musicWhitelist + context.packageName else musicWhitelist - context.packageName
+                        updateMusicWhitelist(next)
+                    },
+                )
+                Box(Modifier.fillMaxWidth().padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 20.dp)) {
+                    GlassDialogButton(
+                        onClick = ::sendMediaNotification,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColorsPrimary(),
+                    ) { Text(tr("media_notification_send", "发送媒体通知")) }
+                }
+            }
+        }
+    }
+
+    WindowDialog(show = showMetadataDialog, onDismissRequest = { showMetadataDialog = false }) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                tr("media_notification_edit_metadata", "编辑媒体信息"),
+                style = MiuixTheme.textStyles.title3,
+                fontWeight = FontWeight.Bold,
+            )
+            TextField(
+                value = titleDraft,
+                onValueChange = { titleDraft = it.take(100) },
+                label = tr("media_notification_title_label", "标题"),
+                useLabelAsPlaceholder = true,
+                singleLine = true,
+                cornerRadius = 999.dp,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            TextField(
+                value = artistDraft,
+                onValueChange = { artistDraft = it.take(100) },
+                label = tr("media_notification_artist_label", "Artist"),
+                useLabelAsPlaceholder = true,
+                singleLine = true,
+                cornerRadius = 999.dp,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GlassDialogButton(
+                    onClick = { showMetadataDialog = false },
+                    modifier = Modifier.weight(1f),
+                ) { Text(tr("取消", "取消")) }
+                GlassDialogButton(
+                    onClick = {
+                        if (titleDraft.isNotBlank() && artistDraft.isNotBlank()) {
+                            title = titleDraft.trim()
+                            artist = artistDraft.trim()
+                            MediaNotificationSimulator.saveMetadata(context, title, artist)
+                            showMetadataDialog = false
+                        }
+                    },
+                    enabled = titleDraft.isNotBlank() && artistDraft.isNotBlank(),
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColorsPrimary(),
+                ) { Text(tr("保存", "保存")) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MediaProgressTrack(
+    progress: Float,
+    onSeekStarted: () -> Unit,
+    onProgressChange: (Float) -> Unit,
+    onProgressChangeFinished: () -> Unit,
+) {
+    fun updateProgress(x: Float, width: Float) {
+        if (width > 0f) onProgressChange((x / width).coerceIn(0f, 1f))
+    }
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(24.dp)
+            .pointerInput(onProgressChange, onProgressChangeFinished) {
+                detectDragGestures(
+                    onDragStart = { offset ->
+                        onSeekStarted()
+                        updateProgress(offset.x, size.width.toFloat())
+                    },
+                    onDrag = { change, _ ->
+                        change.consume()
+                        updateProgress(change.position.x, size.width.toFloat())
+                    },
+                    onDragEnd = onProgressChangeFinished,
+                    onDragCancel = onProgressChangeFinished,
+                )
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(ComposeColor(0xFFD7D7D7)),
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth(progress.coerceIn(0f, 1f))
+                    .fillMaxHeight()
+                    .background(ComposeColor(0xFF222222)),
+            )
+        }
+    }
+}
+
+private fun mediaTimeText(milliseconds: Long): String {
+    val totalSeconds = (milliseconds.coerceAtLeast(0L) / 1_000L).toInt()
+    return "${totalSeconds / 60}:${(totalSeconds % 60).toString().padStart(2, '0')}"
 }
 
 @Composable
@@ -2222,9 +2825,13 @@ private fun SuperXiaoAi(
                 OverlayDropdownPreference(title = tr("superXiaoAiKeyboardColorMode", "\u952e\u76d8\u989c\u8272\u6a21\u5f0f"), items = listOf(tr("followSystem", "\u8ddf\u968f\u7cfb\u7edf"), tr("superXiaoAiLightMode", "\u6d45\u8272\u6a21\u5f0f"), tr("superXiaoAiDarkMode", "\u6df1\u8272\u6a21\u5f0f")), selectedIndex = settings.superXiaoAiKeyboardColorMode, onSelectedIndexChange = { value -> update { it.copy(superXiaoAiKeyboardColorMode = value) } })
                 SwitchPreference(title = tr("superXiaoAiKeyboardTuning", "\u952e\u76d8\u5916\u89c2\u53c2\u6570\u8c03\u6574"), checked = settings.superXiaoAiKeyboardStyleEnabled, onCheckedChange = { value -> update { it.copy(superXiaoAiKeyboardStyleEnabled = value) } })
                 if (settings.superXiaoAiKeyboardStyleEnabled) {
-                    ParameterIntSlide(tr("superXiaoAiKeyboardCorner", "\u952e\u76d8\u5706\u89d2"), settings.superXiaoAiKeyboardCornerRadius, 0..48, " dp") { value -> update { it.copy(superXiaoAiKeyboardCornerRadius = value) } }
-                    ParameterIntSlide(tr("superXiaoAiKeyboardOpacity", "\u952e\u76d8\u80cc\u666f\u900f\u660e\u5ea6"), settings.superXiaoAiKeyboardOpacity, 0..100, "%") { value -> update { it.copy(superXiaoAiKeyboardOpacity = value) } }
-                    ParameterIntSlide(tr("superXiaoAiKeyboardBlur", "\u952e\u76d8\u80cc\u666f\u6a21\u7cca\u5ea6"), settings.superXiaoAiKeyboardBlur, 0..100, " dp") { value -> update { it.copy(superXiaoAiKeyboardBlur = value) } }
+                    ParameterDpSlide(tr("superXiaoAiKeyboardCorner", "\u952e\u76d8\u5706\u89d2"), settings.superXiaoAiKeyboardCornerRadius, 0f..48f, defaultValue = 30f) { value -> update { it.copy(superXiaoAiKeyboardCornerRadius = value) } }
+                    ParameterIntSlide(tr("superXiaoAiKeyboardOpacity", "\u952e\u76d8\u80cc\u666f\u4e0d\u900f\u660e\u5ea6"), settings.superXiaoAiKeyboardOpacity, 0..100, "%", defaultValue = 56) { value -> update { it.copy(superXiaoAiKeyboardOpacity = value) } }
+                    ParameterDpSlide(tr("superXiaoAiKeyboardBlur", "\u952e\u76d8\u80cc\u666f\u6a21\u7cca\u5ea6"), settings.superXiaoAiKeyboardBlur, 0f..45f, defaultValue = 15f) { value -> update { it.copy(superXiaoAiKeyboardBlur = value) } }
+                    ParameterIntSlide(tr("superXiaoAiKeyboardHighlight", "\u952e\u76d8\u9876\u90e8\u9ad8\u5149"), settings.superXiaoAiKeyboardHighlight, 0..100, "%", defaultValue = 100) { value -> update { it.copy(superXiaoAiKeyboardHighlight = value) } }
+                    ParameterIntSlide(tr("superXiaoAiKeyboardShadow", "\u952e\u76d8\u9634\u5f71\u5f3a\u5ea6"), settings.superXiaoAiKeyboardShadow, 0..100, "%", defaultValue = 10) { value -> update { it.copy(superXiaoAiKeyboardShadow = value) } }
+                    ParameterDpSlide(tr("superXiaoAiKeyboardStrokeWidth", "\u952e\u76d8\u8fb9\u7f18\u63cf\u8fb9\u5bbd\u5ea6"), settings.superXiaoAiKeyboardStrokeWidth, 0f..4f, defaultValue = 2f) { value -> update { it.copy(superXiaoAiKeyboardStrokeWidth = value) } }
+                    ParameterIntSlide(tr("superXiaoAiKeyboardBottomHighlight", "\u952e\u76d8\u5e95\u90e8\u9ad8\u5149"), settings.superXiaoAiKeyboardBottomHighlight, 0..100, "%", defaultValue = 100) { value -> update { it.copy(superXiaoAiKeyboardBottomHighlight = value) } }
                 }
             }
         }
@@ -2340,80 +2947,17 @@ private enum class SystemUpdateVersionField { SYSTEM, SOTA }
 private fun statusBarFloatText(value: Float): String =
     String.format(Locale.US, "%.2f", value)
 
-private fun statusBarTuningSummary(
-    scale: Float,
-    verticalOffset: Float,
-    leftMargin: Float,
-    rightMargin: Float,
-): String =
-    "${tr("缩放", "缩放")} ${statusBarFloatText(scale)}x · ${tr("上下偏移量", "上下偏移量")} ${statusBarFloatText(verticalOffset)}dp · ${tr("左间距", "左间距")} ${statusBarFloatText(leftMargin)}dp · ${tr("右间距", "右间距")} ${statusBarFloatText(rightMargin)}dp"
-
-@Composable
-private fun StatusSignalTuningDialog(
-    title: String,
-    scale: Float,
-    verticalOffset: Float,
-    leftMargin: Float,
-    rightMargin: Float,
-    onScaleChange: (Float) -> Unit,
-    onVerticalOffsetChange: (Float) -> Unit,
-    onLeftMarginChange: (Float) -> Unit,
-    onRightMarginChange: (Float) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    WindowDialog(show = true, onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
-            StatusSignalTuningSlider(
-                title = tr("缩放", "缩放"),
-                value = scale,
-                range = 0.1f..3f,
-                suffix = "x",
-                onValueChangeFinished = onScaleChange,
-            )
-            StatusSignalTuningSlider(
-                title = tr("上下偏移量", "上下偏移量"),
-                value = verticalOffset,
-                range = -8f..8f,
-                suffix = "dp",
-                onValueChangeFinished = onVerticalOffsetChange,
-            )
-            StatusSignalTuningSlider(
-                title = tr("左间距", "左间距"),
-                value = leftMargin,
-                range = -8f..8f,
-                suffix = "dp",
-                onValueChangeFinished = onLeftMarginChange,
-            )
-            StatusSignalTuningSlider(
-                title = tr("右间距", "右间距"),
-                value = rightMargin,
-                range = -8f..8f,
-                suffix = "dp",
-                onValueChangeFinished = onRightMarginChange,
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                GlassDialogButton(onDismiss, Modifier.weight(1f)) { Text(tr("取消", "取消")) }
-                GlassDialogButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColorsPrimary(),
-                ) { Text(tr("完成", "完成")) }
-            }
-        }
-    }
-}
-
 @Composable
 private fun StatusSignalTuningSlider(
     title: String,
     value: Float,
+    defaultValue: Float,
     range: ClosedFloatingPointRange<Float>,
     suffix: String,
     onValueChangeFinished: (Float) -> Unit,
 ) {
     var current by remember(value) { mutableFloatStateOf(value) }
-    SliderPreference(
+    EditableSliderPreference(
         value = current,
         onValueChange = { current = it },
         onValueChangeFinished = {
@@ -2424,6 +2968,7 @@ private fun StatusSignalTuningSlider(
         valueText = "${statusBarFloatText(current)}$suffix",
         valueRange = range,
         steps = ((range.endInclusive - range.start) * 100f).roundToInt() - 1,
+        defaultValue = defaultValue,
     )
 }
 
@@ -2564,17 +3109,17 @@ private fun MaterialOverrideCard(
             exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
         ) {
             Column {
-                ParameterIntSlide(tr("\u6a21\u7cca\u6bd4\u4f8b", "\u6a21\u7cca\u6bd4\u4f8b"), value.blurPercent.coerceIn(0, if (isBackground) 100 else 200), 0..if (isBackground) 100 else 200, "%") { onChange(value.copy(blurPercent = it)) }
-                if (isBackground) ParameterIntSlide(tr("\u80cc\u666f\u7f29\u653e\u6bd4\u4f8b", "\u80cc\u666f\u7f29\u653e\u6bd4\u4f8b"), value.scalePercent, 0..200, "%") { onChange(value.copy(scalePercent = it)) }
+                ParameterIntSlide(tr("\u6a21\u7cca\u6bd4\u4f8b", "\u6a21\u7cca\u6bd4\u4f8b"), value.blurPercent.coerceIn(0, if (isBackground) 100 else 200), 0..if (isBackground) 100 else 200, "%", defaultValue = 100) { onChange(value.copy(blurPercent = it)) }
+                if (isBackground) ParameterIntSlide(tr("\u80cc\u666f\u7f29\u653e\u6bd4\u4f8b", "\u80cc\u666f\u7f29\u653e\u6bd4\u4f8b"), value.scalePercent, 0..200, "%", defaultValue = 100) { onChange(value.copy(scalePercent = it)) }
                 if (isBackground) {
-                    ParameterIntSlide(tr("\u80cc\u666f\u4e0d\u900f\u660e\u5ea6", "\u80cc\u666f\u4e0d\u900f\u660e\u5ea6"), (value.alpha + 100).coerceIn(0, 100), 0..100, "%") { onChange(value.copy(alpha = it - 100)) }
-                    ParameterIntSlide(tr("\u6df7\u8272\u5f3a\u5ea6", "\u6df7\u8272\u5f3a\u5ea6"), value.tintStrength, 0..50, " x0.01") { onChange(value.copy(tintEnabled = it > 0, tintStrength = it)) }
+                    ParameterIntSlide(tr("\u80cc\u666f\u4e0d\u900f\u660e\u5ea6", "\u80cc\u666f\u4e0d\u900f\u660e\u5ea6"), (value.alpha + 100).coerceIn(0, 100), 0..100, "%", defaultValue = 100) { onChange(value.copy(alpha = it - 100)) }
+                    ParameterIntSlide(tr("\u6df7\u8272\u5f3a\u5ea6", "\u6df7\u8272\u5f3a\u5ea6"), value.tintStrength, 0..50, " x0.01", defaultValue = 0) { onChange(value.copy(tintEnabled = it > 0, tintStrength = it)) }
                 } else {
-                    ParameterIntSlide(tr("Glass \u6a21\u7cca\u534a\u5f84", "Glass \u6a21\u7cca\u534a\u5f84"), value.glassRadius.coerceIn(0, 40), 0..40, " px") { onChange(value.copy(glassRadius = it)) }
-                    ParameterIntSlide(tr("\u73bb\u7483\u5f3a\u5ea6", "\u73bb\u7483\u5f3a\u5ea6"), (value.refraction / 2 + 50).coerceIn(0, 100), 0..100, "%") { onChange(applyCompactGlassStrength(value, it)) }
-                    ParameterIntSlide(tr("\u4e0d\u900f\u660e\u5ea6", "\u4e0d\u900f\u660e\u5ea6"), value.alpha + 50, 0..100, "%") { onChange(value.copy(alpha = it - 50)) }
-                    ParameterIntSlide(tr("\u8fb9\u7f18\u4e0e\u53cd\u5c04", "\u8fb9\u7f18\u4e0e\u53cd\u5c04"), value.reflection + 50, 0..100, "%") { onChange(applyCompactReflection(value, it)) }
-                    ParameterIntSlide(tr("\u8272\u5f69", "\u8272\u5f69"), value.saturation + 50, 0..100, "%") { onChange(applyCompactColor(value, it)) }
+                    ParameterIntSlide(tr("Glass \u6a21\u7cca\u534a\u5f84", "Glass \u6a21\u7cca\u534a\u5f84"), value.glassRadius.coerceIn(0, 40), 0..40, " px", defaultValue = 0) { onChange(value.copy(glassRadius = it)) }
+                    ParameterIntSlide(tr("\u73bb\u7483\u5f3a\u5ea6", "\u73bb\u7483\u5f3a\u5ea6"), (value.refraction / 2 + 50).coerceIn(0, 100), 0..100, "%", defaultValue = 50) { onChange(applyCompactGlassStrength(value, it)) }
+                    ParameterIntSlide(tr("\u4e0d\u900f\u660e\u5ea6", "\u4e0d\u900f\u660e\u5ea6"), value.alpha + 50, 0..100, "%", defaultValue = 50) { onChange(value.copy(alpha = it - 50)) }
+                    ParameterIntSlide(tr("\u8fb9\u7f18\u4e0e\u53cd\u5c04", "\u8fb9\u7f18\u4e0e\u53cd\u5c04"), value.reflection + 50, 0..100, "%", defaultValue = 50) { onChange(applyCompactReflection(value, it)) }
+                    ParameterIntSlide(tr("\u8272\u5f69", "\u8272\u5f69"), value.saturation + 50, 0..100, "%", defaultValue = 50) { onChange(applyCompactColor(value, it)) }
                 }
                 ArrowPreference(title = tr("\u9ad8\u7ea7\u6a21\u5f0f", "\u9ad8\u7ea7\u6a21\u5f0f"), onClick = openAdvanced)
             }
@@ -2603,16 +3148,16 @@ private fun VolumePanelPreferences(
         exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
     ) {
         Column {
-            ParameterIntSlide(tr("\u80cc\u666f\u4e0d\u900f\u660e\u5ea6", "\u80cc\u666f\u4e0d\u900f\u660e\u5ea6"), s.volumePanelBackgroundOpacity, 0..100, "%") { value ->
+            ParameterIntSlide(tr("\u80cc\u666f\u4e0d\u900f\u660e\u5ea6", "\u80cc\u666f\u4e0d\u900f\u660e\u5ea6"), s.volumePanelBackgroundOpacity, 0..100, "%", defaultValue = 100) { value ->
                 update { it.copy(volumePanelBackgroundOpacity = value) }
             }
-            ParameterIntSlide(tr("\u524d\u666f\u4e0d\u900f\u660e\u5ea6", "\u524d\u666f\u4e0d\u900f\u660e\u5ea6"), s.volumePanelBlurRadius, 0..120, " px") { value ->
+            ParameterIntSlide(tr("\u524d\u666f\u4e0d\u900f\u660e\u5ea6", "\u524d\u666f\u4e0d\u900f\u660e\u5ea6"), s.volumePanelBlurRadius, 0..120, " px", defaultValue = 24) { value ->
                 update { it.copy(volumePanelBlurRadius = value) }
             }
-            FloatSlide(tr("\u5706\u89d2", "\u5706\u89d2"), s.volumePanelCornerRadius, 0f..60f) { value ->
+            FloatSlide(tr("\u5706\u89d2", "\u5706\u89d2"), s.volumePanelCornerRadius, 0f..60f, defaultValue = 24f) { value ->
                 update { it.copy(volumePanelCornerRadius = value) }
             }
-            ParameterIntSlide(tr("\u80cc\u666f\u6a21\u7cca\u5ea6", "\u80cc\u666f\u6a21\u7cca\u5ea6"), s.volumePanelGlassStrength, 0..100, "%") { value ->
+            ParameterIntSlide(tr("\u80cc\u666f\u6a21\u7cca\u5ea6", "\u80cc\u666f\u6a21\u7cca\u5ea6"), s.volumePanelGlassStrength, 0..100, "%", defaultValue = 50) { value ->
                 update { it.copy(volumePanelGlassStrength = value) }
             }
         }
@@ -2636,23 +3181,23 @@ private fun MaterialOverrideAdvancedPage(
             )
             AnimatedVisibility(value.enabled) {
                 Column {
-                    ParameterIntSlide(tr("\u6a21\u7cca\u6bd4\u4f8b", "\u6a21\u7cca\u6bd4\u4f8b"), value.blurPercent.coerceIn(0, if (isBackground) 100 else 200), 0..if (isBackground) 100 else 200, "%") { onChange(value.copy(blurPercent = it)) }
+                    ParameterIntSlide(tr("\u6a21\u7cca\u6bd4\u4f8b", "\u6a21\u7cca\u6bd4\u4f8b"), value.blurPercent.coerceIn(0, if (isBackground) 100 else 200), 0..if (isBackground) 100 else 200, "%", defaultValue = 100) { onChange(value.copy(blurPercent = it)) }
                     if (isBackground) {
-                        ParameterIntSlide(tr("\u80cc\u666f\u7f29\u653e\u6bd4\u4f8b", "\u80cc\u666f\u7f29\u653e\u6bd4\u4f8b"), value.scalePercent, 0..200, "%") { onChange(value.copy(scalePercent = it)) }
-                        ParameterIntSlide(tr("\u80cc\u666f\u4e0d\u900f\u660e\u5ea6", "\u80cc\u666f\u4e0d\u900f\u660e\u5ea6"), (value.alpha + 100).coerceIn(0, 100), 0..100, "%") { onChange(value.copy(alpha = it - 100)) }
+                        ParameterIntSlide(tr("\u80cc\u666f\u7f29\u653e\u6bd4\u4f8b", "\u80cc\u666f\u7f29\u653e\u6bd4\u4f8b"), value.scalePercent, 0..200, "%", defaultValue = 100) { onChange(value.copy(scalePercent = it)) }
+                        ParameterIntSlide(tr("\u80cc\u666f\u4e0d\u900f\u660e\u5ea6", "\u80cc\u666f\u4e0d\u900f\u660e\u5ea6"), (value.alpha + 100).coerceIn(0, 100), 0..100, "%", defaultValue = 100) { onChange(value.copy(alpha = it - 100)) }
                     } else {
-                        ParameterIntSlide(tr("Glass \u6a21\u7cca\u534a\u5f84", "Glass \u6a21\u7cca\u534a\u5f84"), value.glassRadius.coerceIn(0, 40), 0..40, " px") { onChange(value.copy(glassRadius = it)) }
-                        ParameterIntSlide(tr("\u4eae\u5ea6\u504f\u79fb", "\u4eae\u5ea6\u504f\u79fb"), value.brightness, -30..30, " x0.01") { onChange(value.copy(brightness = it)) }
-                        ParameterIntSlide(tr("\u538b\u6697\u504f\u79fb", "\u538b\u6697\u504f\u79fb"), value.darker, -50..50, " x0.01") { onChange(value.copy(darker = it)) }
-                        ParameterIntSlide(tr("\u6298\u5c04\u504f\u79fb", "\u6298\u5c04\u504f\u79fb"), value.refraction, -100..100, " x0.01") { onChange(value.copy(refraction = it)) }
-                        ParameterIntSlide(tr("\u70e7\u707c\u504f\u79fb", "\u70e7\u707c\u504f\u79fb"), value.burn, -50..50, " x0.01") { onChange(value.copy(burn = it)) }
-                        ParameterIntSlide(tr("\u9971\u548c\u5ea6\u504f\u79fb", "\u9971\u548c\u5ea6\u504f\u79fb"), value.saturation, -100..100, " x0.01") { onChange(value.copy(saturation = it)) }
-                        ParameterIntSlide(tr("\u4e0d\u900f\u660e\u5ea6\u504f\u79fb", "\u4e0d\u900f\u660e\u5ea6\u504f\u79fb"), value.alpha, -50..50, " x0.01") { onChange(value.copy(alpha = it)) }
-                        ParameterIntSlide(tr("\u8fb9\u7f18\u539a\u5ea6", "\u8fb9\u7f18\u539a\u5ea6"), value.edgeThickness, -100..100, " x0.01") { onChange(value.copy(edgeThickness = it)) }
-                        ParameterIntSlide(tr("\u53cd\u5c04\u5f3a\u5ea6", "\u53cd\u5c04\u5f3a\u5ea6"), value.reflection, -100..100, " x0.01") { onChange(value.copy(reflection = it)) }
-                        ParameterIntSlide(tr("\u65b9\u5411\u5149\u5f3a\u5ea6", "\u65b9\u5411\u5149\u5f3a\u5ea6"), value.directionalLight, -100..100, " x0.01") { onChange(value.copy(directionalLight = it)) }
-                        ParameterIntSlide(tr("\u80cc\u666f\u9971\u548c\u5ea6", "\u80cc\u666f\u9971\u548c\u5ea6"), value.backgroundSaturation, -100..100, " x0.01") { onChange(value.copy(backgroundSaturation = it)) }
-                        ParameterIntSlide(tr("\u80cc\u666f\u4eae\u5ea6", "\u80cc\u666f\u4eae\u5ea6"), value.backgroundBrightness, -100..100, " x0.01") { onChange(value.copy(backgroundBrightness = it)) }
+                        ParameterIntSlide(tr("Glass \u6a21\u7cca\u534a\u5f84", "Glass \u6a21\u7cca\u534a\u5f84"), value.glassRadius.coerceIn(0, 40), 0..40, " px", defaultValue = 0) { onChange(value.copy(glassRadius = it)) }
+                        ParameterIntSlide(tr("\u4eae\u5ea6\u504f\u79fb", "\u4eae\u5ea6\u504f\u79fb"), value.brightness, -30..30, " x0.01", defaultValue = 0) { onChange(value.copy(brightness = it)) }
+                        ParameterIntSlide(tr("\u538b\u6697\u504f\u79fb", "\u538b\u6697\u504f\u79fb"), value.darker, -50..50, " x0.01", defaultValue = 0) { onChange(value.copy(darker = it)) }
+                        ParameterIntSlide(tr("\u6298\u5c04\u504f\u79fb", "\u6298\u5c04\u504f\u79fb"), value.refraction, -100..100, " x0.01", defaultValue = 0) { onChange(value.copy(refraction = it)) }
+                        ParameterIntSlide(tr("\u70e7\u707c\u504f\u79fb", "\u70e7\u707c\u504f\u79fb"), value.burn, -50..50, " x0.01", defaultValue = 0) { onChange(value.copy(burn = it)) }
+                        ParameterIntSlide(tr("\u9971\u548c\u5ea6\u504f\u79fb", "\u9971\u548c\u5ea6\u504f\u79fb"), value.saturation, -100..100, " x0.01", defaultValue = 0) { onChange(value.copy(saturation = it)) }
+                        ParameterIntSlide(tr("\u4e0d\u900f\u660e\u5ea6\u504f\u79fb", "\u4e0d\u900f\u660e\u5ea6\u504f\u79fb"), value.alpha, -50..50, " x0.01", defaultValue = 0) { onChange(value.copy(alpha = it)) }
+                        ParameterIntSlide(tr("\u8fb9\u7f18\u539a\u5ea6", "\u8fb9\u7f18\u539a\u5ea6"), value.edgeThickness, -100..100, " x0.01", defaultValue = 0) { onChange(value.copy(edgeThickness = it)) }
+                        ParameterIntSlide(tr("\u53cd\u5c04\u5f3a\u5ea6", "\u53cd\u5c04\u5f3a\u5ea6"), value.reflection, -100..100, " x0.01", defaultValue = 0) { onChange(value.copy(reflection = it)) }
+                        ParameterIntSlide(tr("\u65b9\u5411\u5149\u5f3a\u5ea6", "\u65b9\u5411\u5149\u5f3a\u5ea6"), value.directionalLight, -100..100, " x0.01", defaultValue = 0) { onChange(value.copy(directionalLight = it)) }
+                        ParameterIntSlide(tr("\u80cc\u666f\u9971\u548c\u5ea6", "\u80cc\u666f\u9971\u548c\u5ea6"), value.backgroundSaturation, -100..100, " x0.01", defaultValue = 0) { onChange(value.copy(backgroundSaturation = it)) }
+                        ParameterIntSlide(tr("\u80cc\u666f\u4eae\u5ea6", "\u80cc\u666f\u4eae\u5ea6"), value.backgroundBrightness, -100..100, " x0.01", defaultValue = 0) { onChange(value.copy(backgroundBrightness = it)) }
                     }
                     SwitchPreference(
                         title = tr("\u81ea\u5b9a\u4e49\u6df7\u8272", "\u81ea\u5b9a\u4e49\u6df7\u8272"),
@@ -2662,7 +3207,7 @@ private fun MaterialOverrideAdvancedPage(
                     AnimatedVisibility(value.tintEnabled) {
                         Column {
                             ShortcutBackgroundColorPreference(tr("\u6df7\u8272\u989c\u8272", "\u6df7\u8272\u989c\u8272"), value.tintColor) { onChange(value.copy(tintColor = it)) }
-                            ParameterIntSlide(tr("\u6df7\u8272\u5f3a\u5ea6", "\u6df7\u8272\u5f3a\u5ea6"), value.tintStrength, 0..50, " x0.01") { onChange(value.copy(tintStrength = it)) }
+                            ParameterIntSlide(tr("\u6df7\u8272\u5f3a\u5ea6", "\u6df7\u8272\u5f3a\u5ea6"), value.tintStrength, 0..50, " x0.01", defaultValue = 0) { onChange(value.copy(tintStrength = it)) }
                         }
                     }
                 }
@@ -3082,7 +3627,16 @@ private fun applyCompactColor(value: MaterialOverride, percent: Int): MaterialOv
 }
 
 @Composable
-private fun Island(s: HookSettings, update: ((HookSettings) -> HookSettings) -> Unit, back: () -> Unit) = AppPage(tr("\u8d85\u7ea7\u5c9b", "\u8d85\u7ea7\u5c9b"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI)) { p, scroll ->
+private fun Island(
+    s: HookSettings,
+    update: ((HookSettings) -> HookSettings) -> Unit,
+    openPage: (PageId) -> Unit,
+    onRequestNotificationPermission: () -> Unit,
+    back: () -> Unit,
+) = AppPage(tr("\u8d85\u7ea7\u5c9b", "\u8d85\u7ea7\u5c9b"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI)) { p, scroll ->
+    var showNormalNotificationDialog by remember { mutableStateOf(false) }
+    var showFocusNotificationDialog by remember { mutableStateOf(false) }
+
     AppList(p, scroll, 28) {
         item {
                 Card(Modifier.fillMaxWidth()) {
@@ -3093,8 +3647,34 @@ private fun Island(s: HookSettings, update: ((HookSettings) -> HookSettings) -> 
                         update { it.copy(removeFocusAndIslandWhitelistLimit = value) }
                     },
                 )
+                SwitchPreference(
+                    title = tr(
+                        "removeDynamicIslandMediaMiniBarWhitelistLimit",
+                        "\u53bb\u9664\u5a92\u4f53\u63a7\u4ef6\u4e0b\u62c9\u6761\u767d\u540d\u5355\u9650\u5236",
+                    ),
+                    checked = s.removeDynamicIslandMediaMiniBarWhitelistLimit,
+                    onCheckedChange = { value ->
+                        update { it.copy(removeDynamicIslandMediaMiniBarWhitelistLimit = value) }
+                    },
+                )
                 SwitchPreference(title = tr("\u81ea\u5b9a\u4e49\u8d85\u7ea7\u5c9b\u957f\u5ea6", "\u81ea\u5b9a\u4e49\u8d85\u7ea7\u5c9b\u957f\u5ea6"), checked = s.islandEnabled, onCheckedChange = { v -> update { it.copy(islandEnabled = v) } })
-                if (s.islandEnabled) IntSlide(tr("\u6700\u5c0f\u5bbd\u5ea6", "\u6700\u5c0f\u5bbd\u5ea6"), s.islandWidth, 108..190) { v -> update { it.copy(islandWidth = v) } }
+                if (s.islandEnabled) IntSlide(tr("\u6700\u5c0f\u5bbd\u5ea6", "\u6700\u5c0f\u5bbd\u5ea6"), s.islandWidth, 108..190, defaultValue = 108) { v -> update { it.copy(islandWidth = v) } }
+            }
+        }
+        item {
+            Group(tr("notification_simulation", "通知模拟")) {
+                ArrowPreference(
+                    title = tr("normal_notification_simulation", "普通通知模拟"),
+                    onClick = { showNormalNotificationDialog = true },
+                )
+                ArrowPreference(
+                    title = tr("focus_notification_simulation", "超级岛&焦点通知模拟"),
+                    onClick = { showFocusNotificationDialog = true },
+                )
+                ArrowPreference(
+                    title = tr("simulate_media_notification", "媒体通知模拟"),
+                    onClick = { openPage(PageId.SIMULATE_MEDIA_NOTIFICATION) },
+                )
             }
         }
         item {
@@ -3110,16 +3690,16 @@ private fun Island(s: HookSettings, update: ((HookSettings) -> HookSettings) -> 
                     exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
                 ) {
                     Column {
-                        ParameterIntSlide(tr("\u80cc\u666f\u4e0d\u900f\u660e\u5ea6", "\u80cc\u666f\u4e0d\u900f\u660e\u5ea6"), s.expandedIslandBackgroundOpacity, 0..100, "%") { value ->
+                        ParameterIntSlide(tr("\u80cc\u666f\u4e0d\u900f\u660e\u5ea6", "\u80cc\u666f\u4e0d\u900f\u660e\u5ea6"), s.expandedIslandBackgroundOpacity, 0..100, "%", defaultValue = 97) { value ->
                             update { it.copy(expandedIslandBackgroundOpacity = value) }
                         }
-                        ParameterIntSlide(tr("Glass \u5c0f\u6a21\u7cca\u534a\u5f84", "Glass \u5c0f\u6a21\u7cca\u534a\u5f84"), s.expandedIslandGlassBlurRadius, 0..40, " px") { value ->
+                        ParameterIntSlide(tr("Glass \u5c0f\u6a21\u7cca\u534a\u5f84", "Glass \u5c0f\u6a21\u7cca\u534a\u5f84"), s.expandedIslandGlassBlurRadius, 0..40, " px", defaultValue = 40) { value ->
                             update { it.copy(expandedIslandGlassBlurRadius = value) }
                         }
-                        ParameterIntSlide(tr("Glass \u5927\u6a21\u7cca\u534a\u5f84", "Glass \u5927\u6a21\u7cca\u534a\u5f84"), s.expandedIslandGlassLargeBlurRadius, 0..40, " px") { value ->
+                        ParameterIntSlide(tr("Glass \u5927\u6a21\u7cca\u534a\u5f84", "Glass \u5927\u6a21\u7cca\u534a\u5f84"), s.expandedIslandGlassLargeBlurRadius, 0..40, " px", defaultValue = 40) { value ->
                             update { it.copy(expandedIslandGlassLargeBlurRadius = value) }
                         }
-                        ParameterIntSlide(tr("\u81ea\u6a21\u7cca\u5f3a\u5ea6", "\u81ea\u6a21\u7cca\u5f3a\u5ea6"), s.expandedIslandSelfBlurRadius, 0..40, " px") { value ->
+                        ParameterIntSlide(tr("\u81ea\u6a21\u7cca\u5f3a\u5ea6", "\u81ea\u6a21\u7cca\u5f3a\u5ea6"), s.expandedIslandSelfBlurRadius, 0..40, " px", defaultValue = 0) { value ->
                             update { it.copy(expandedIslandSelfBlurRadius = value) }
                         }
                         SwitchPreference(
@@ -3132,6 +3712,21 @@ private fun Island(s: HookSettings, update: ((HookSettings) -> HookSettings) -> 
             }
         }
     }
+
+    if (showNormalNotificationDialog) {
+        NotificationSimulationDialog(
+            focus = false,
+            onRequestNotificationPermission = onRequestNotificationPermission,
+            onDismiss = { showNormalNotificationDialog = false },
+        )
+    }
+    if (showFocusNotificationDialog) {
+        NotificationSimulationDialog(
+            focus = true,
+            onRequestNotificationPermission = onRequestNotificationPermission,
+            onDismiss = { showFocusNotificationDialog = false },
+        )
+    }
 }
 
 @Composable
@@ -3143,10 +3738,10 @@ private fun Status(
 ) = AppPage(tr("\u72b6\u6001\u680f", "\u72b6\u6001\u680f"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI)) { p, scroll ->
     AppList(p, scroll, 28) {
         item { Card(Modifier.fillMaxWidth()) {
-        Dim(tr("\u65f6\u949f\u5927\u5c0f", "\u65f6\u949f\u5927\u5c0f"), s.clockEnabled, { v -> update { it.copy(clockEnabled = v) } }, s.clockSize, 10f..24f) { v -> update { it.copy(clockSize = v) } }
+        Dim(tr("\u65f6\u949f\u5927\u5c0f", "\u65f6\u949f\u5927\u5c0f"), s.clockEnabled, { v -> update { it.copy(clockEnabled = v) } }, s.clockSize, 10f..24f, defaultValue = 14.8f) { v -> update { it.copy(clockSize = v) } }
         DeltaDim(tr("\u53f3\u8fb9\u8ddd", "\u53f3\u8fb9\u8ddd"), s.paddingEnd) { v -> update { it.copy(paddingEnd = v, paddingEndEnabled = true, paddingEndLegacyAbsolute = null) } }
-        Dim(tr("\u5de6\u8fb9\u8ddd", "\u5de6\u8fb9\u8ddd"), s.paddingStartEnabled, { v -> update { it.copy(paddingStartEnabled = v) } }, s.paddingStart, 0f..32f) { v -> update { it.copy(paddingStart = v) } }
-        Dim(tr("\u72b6\u6001\u680f\u9ad8\u5ea6", "\u72b6\u6001\u680f\u9ad8\u5ea6"), s.heightEnabled, { v -> update { it.copy(heightEnabled = v) } }, s.statusBarHeight.toFloat(), 24f..72f) { v -> update { it.copy(statusBarHeight = v.toInt()) } }
+        Dim(tr("\u5de6\u8fb9\u8ddd", "\u5de6\u8fb9\u8ddd"), s.paddingStartEnabled, { v -> update { it.copy(paddingStartEnabled = v) } }, s.paddingStart, 0f..32f, defaultValue = 12.5f) { v -> update { it.copy(paddingStart = v) } }
+        Dim(tr("\u72b6\u6001\u680f\u9ad8\u5ea6", "\u72b6\u6001\u680f\u9ad8\u5ea6"), s.heightEnabled, { v -> update { it.copy(heightEnabled = v) } }, s.statusBarHeight.toFloat(), 24f..72f, defaultValue = 40f) { v -> update { it.copy(statusBarHeight = v.toInt()) } }
         DeltaDim(tr("\u4e0a\u8fb9\u8ddd", "\u4e0a\u8fb9\u8ddd"), s.paddingTop) { v -> update { it.copy(paddingTop = v, paddingTopEnabled = true, paddingTopLegacyAbsolute = null) } }
     } }
         item {
@@ -3169,12 +3764,11 @@ private fun Status(
 private fun StatusSignalCustomization(
     s: HookSettings,
     update: ((HookSettings) -> HookSettings) -> Unit,
+    open: (PageId) -> Unit,
     back: () -> Unit,
 ) = AppPage(tr("\u72b6\u6001\u680f\u4fe1\u53f7\u81ea\u5b9a\u4e49", "\u72b6\u6001\u680f\u4fe1\u53f7\u81ea\u5b9a\u4e49"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI)) { p, scroll ->
     var showCustomTextDialog by remember { mutableStateOf(false) }
     var customTextDraft by remember { mutableStateOf(s.mobileNetworkTypeCustomText) }
-    var showStackedSignalTuningDialog by remember { mutableStateOf(false) }
-    var showMobileNetworkTypeTuningDialog by remember { mutableStateOf(false) }
 
     AppList(p, scroll, 28) {
         item {
@@ -3185,10 +3779,17 @@ private fun StatusSignalCustomization(
                     checked = s.stackedMobileSignalEnabled,
                     onCheckedChange = { enabled -> update { it.copy(stackedMobileSignalEnabled = enabled) } },
                 )
+                ArrowPreference(
+                    title = tr("\u4fe1\u53f7\u4e0e\u7f51\u7edc\u7c7b\u578b\u8c03\u6574", "\u4fe1\u53f7\u4e0e\u7f51\u7edc\u7c7b\u578b\u8c03\u6574"),
+                    onClick = { open(PageId.STATUS_SIGNAL_TUNING) },
+                )
 OverlayDropdownPreference(
                     title = tr("\u9690\u85cf\u7cfb\u7edf\u9ed8\u8ba4\u4fe1\u53f7\u56fe\u6807", "\u9690\u85cf\u7cfb\u7edf\u9ed8\u8ba4\u4fe1\u53f7\u56fe\u6807"),
                     items = listOf(tr("\u4e0d\u9690\u85cf", "\u4e0d\u9690\u85cf"), tr("\u9690\u85cf\u975e\u4e0a\u7f51\u5361", "\u9690\u85cf\u975e\u4e0a\u7f51\u5361"), tr("\u5168\u90e8\u9690\u85cf", "\u5168\u90e8\u9690\u85cf")),
-                    selectedIndex = s.mobileSignalHideMode.coerceIn(0, 2),
+                    // Dual-row rendering always suppresses the original signal icons.
+                    // Keep the saved selection untouched so it is restored when disabled.
+                    selectedIndex = if (s.stackedMobileSignalEnabled) 2 else s.mobileSignalHideMode.coerceIn(0, 2),
+                    enabled = !s.stackedMobileSignalEnabled,
                     onSelectedIndexChange = { value -> update { it.copy(mobileSignalHideMode = value) } },
                 )
 OverlayDropdownPreference(
@@ -3237,11 +3838,6 @@ OverlayDropdownPreference(
         item {
             Group(tr("\u56fe\u6807\u663e\u793a", "\u56fe\u6807\u663e\u793a")) {
                 SwitchPreference(
-                    title = tr("\u9690\u85cf\u7cfb\u7edf\u9ed8\u8ba4\u7684\u79fb\u52a8\u7f51\u7edc\u7c7b\u578b", "\u9690\u85cf\u7cfb\u7edf\u9ed8\u8ba4\u7684\u79fb\u52a8\u7f51\u7edc\u7c7b\u578b"),
-                    checked = s.hideStatusBarNetworkType,
-                    onCheckedChange = { value -> update { it.copy(hideStatusBarNetworkType = value) } },
-                )
-                SwitchPreference(
                     title = tr("\u9690\u85cf WiFi \u4ee3\u6570", "\u9690\u85cf WiFi \u4ee3\u6570"),
                     checked = s.hideStatusBarWifiStandard,
                     onCheckedChange = { value -> update { it.copy(hideStatusBarWifiStandard = value) } },
@@ -3254,30 +3850,6 @@ OverlayDropdownPreference(
             }
         }
 
-        item {
-            Group(tr("调整", "调整")) {
-                ArrowPreference(
-                    title = tr("调整双排信号", "调整双排信号"),
-                    summary = statusBarTuningSummary(
-                        s.stackedMobileSignalScale,
-                        s.stackedMobileSignalVerticalOffset,
-                        s.stackedMobileSignalLeftMargin,
-                        s.stackedMobileSignalRightMargin,
-                    ),
-                    onClick = { showStackedSignalTuningDialog = true },
-                )
-                ArrowPreference(
-                    title = tr("调整移动网络类型", "调整移动网络类型"),
-                    summary = statusBarTuningSummary(
-                        s.mobileNetworkTypeScale,
-                        s.mobileNetworkTypeVerticalOffset,
-                        s.mobileNetworkTypeLeftMargin,
-                        s.mobileNetworkTypeRightMargin,
-                    ),
-                    onClick = { showMobileNetworkTypeTuningDialog = true },
-                )
-            }
-        }
     }
 
     WindowDialog(
@@ -3314,33 +3886,91 @@ OverlayDropdownPreference(
             }
         }
     }
-    if (showStackedSignalTuningDialog) {
-        StatusSignalTuningDialog(
-            title = tr("调整双排信号", "调整双排信号"),
-            scale = s.stackedMobileSignalScale,
-            verticalOffset = s.stackedMobileSignalVerticalOffset,
-            leftMargin = s.stackedMobileSignalLeftMargin,
-            rightMargin = s.stackedMobileSignalRightMargin,
-            onScaleChange = { value -> update { it.copy(stackedMobileSignalScale = value) } },
-            onVerticalOffsetChange = { value -> update { it.copy(stackedMobileSignalVerticalOffset = value) } },
-            onLeftMarginChange = { value -> update { it.copy(stackedMobileSignalLeftMargin = value) } },
-            onRightMarginChange = { value -> update { it.copy(stackedMobileSignalRightMargin = value) } },
-            onDismiss = { showStackedSignalTuningDialog = false },
-        )
-    }
-    if (showMobileNetworkTypeTuningDialog) {
-        StatusSignalTuningDialog(
-            title = tr("调整移动网络类型", "调整移动网络类型"),
-            scale = s.mobileNetworkTypeScale,
-            verticalOffset = s.mobileNetworkTypeVerticalOffset,
-            leftMargin = s.mobileNetworkTypeLeftMargin,
-            rightMargin = s.mobileNetworkTypeRightMargin,
-            onScaleChange = { value -> update { it.copy(mobileNetworkTypeScale = value) } },
-            onVerticalOffsetChange = { value -> update { it.copy(mobileNetworkTypeVerticalOffset = value) } },
-            onLeftMarginChange = { value -> update { it.copy(mobileNetworkTypeLeftMargin = value) } },
-            onRightMarginChange = { value -> update { it.copy(mobileNetworkTypeRightMargin = value) } },
-            onDismiss = { showMobileNetworkTypeTuningDialog = false },
-        )
+}
+
+@Composable
+private fun StatusSignalTuning(
+    s: HookSettings,
+    update: ((HookSettings) -> HookSettings) -> Unit,
+    back: () -> Unit,
+) = AppPage(
+    tr("\u4fe1\u53f7\u4e0e\u7f51\u7edc\u7c7b\u578b\u8c03\u6574", "\u4fe1\u53f7\u4e0e\u7f51\u7edc\u7c7b\u578b\u8c03\u6574"),
+    back,
+    restartScopes = setOf(ScopeApplication.SYSTEM_UI),
+) { p, scroll ->
+    AppList(p, scroll, 28) {
+        item {
+            Group(tr("调整双排信号", "调整双排信号")) {
+                StatusSignalTuningSlider(
+                    title = tr("缩放", "缩放"),
+                    value = s.stackedMobileSignalScale,
+                    defaultValue = 1f,
+                    range = 0.1f..3f,
+                    suffix = "x",
+                    onValueChangeFinished = { value -> update { it.copy(stackedMobileSignalScale = value) } },
+                )
+                StatusSignalTuningSlider(
+                    title = tr("上下偏移量", "上下偏移量"),
+                    value = s.stackedMobileSignalVerticalOffset,
+                    defaultValue = 0f,
+                    range = -8f..8f,
+                    suffix = "dp",
+                    onValueChangeFinished = { value -> update { it.copy(stackedMobileSignalVerticalOffset = value) } },
+                )
+                StatusSignalTuningSlider(
+                    title = tr("左间距", "左间距"),
+                    value = s.stackedMobileSignalLeftMargin,
+                    defaultValue = 0f,
+                    range = -8f..8f,
+                    suffix = "dp",
+                    onValueChangeFinished = { value -> update { it.copy(stackedMobileSignalLeftMargin = value) } },
+                )
+                StatusSignalTuningSlider(
+                    title = tr("右间距", "右间距"),
+                    value = s.stackedMobileSignalRightMargin,
+                    defaultValue = 0f,
+                    range = -8f..8f,
+                    suffix = "dp",
+                    onValueChangeFinished = { value -> update { it.copy(stackedMobileSignalRightMargin = value) } },
+                )
+            }
+        }
+        item {
+            Group(tr("调整移动网络类型", "调整移动网络类型")) {
+                StatusSignalTuningSlider(
+                    title = tr("缩放", "缩放"),
+                    value = s.mobileNetworkTypeScale,
+                    defaultValue = 1f,
+                    range = 0.1f..3f,
+                    suffix = "x",
+                    onValueChangeFinished = { value -> update { it.copy(mobileNetworkTypeScale = value) } },
+                )
+                StatusSignalTuningSlider(
+                    title = tr("上下偏移量", "上下偏移量"),
+                    value = s.mobileNetworkTypeVerticalOffset,
+                    defaultValue = 0f,
+                    range = -8f..8f,
+                    suffix = "dp",
+                    onValueChangeFinished = { value -> update { it.copy(mobileNetworkTypeVerticalOffset = value) } },
+                )
+                StatusSignalTuningSlider(
+                    title = tr("左间距", "左间距"),
+                    value = s.mobileNetworkTypeLeftMargin,
+                    defaultValue = 0f,
+                    range = -8f..8f,
+                    suffix = "dp",
+                    onValueChangeFinished = { value -> update { it.copy(mobileNetworkTypeLeftMargin = value) } },
+                )
+                StatusSignalTuningSlider(
+                    title = tr("右间距", "右间距"),
+                    value = s.mobileNetworkTypeRightMargin,
+                    defaultValue = 0f,
+                    range = -8f..8f,
+                    suffix = "dp",
+                    onValueChangeFinished = { value -> update { it.copy(mobileNetworkTypeRightMargin = value) } },
+                )
+            }
+        }
     }
 }
 
@@ -3475,6 +4105,11 @@ OverlayDropdownPreference(
                             onClick = { open(PageId.LOCKSCREEN_WIDGET_EDITOR) },
                         )
                         ArrowPreference(
+                            title = tr("锁屏小组件背景调整", "锁屏小组件背景调整"),
+                            summary = lockscreenWidgetBackgroundModeLabel(s.lockscreenWidgetBackgroundMode),
+                            onClick = { open(PageId.LOCKSCREEN_WIDGET_BACKGROUND) },
+                        )
+                        ArrowPreference(
                             title = tr("\u81ea\u5b9a\u4e49\u8bbe\u5907\u540d\u79f0", "\u81ea\u5b9a\u4e49\u8bbe\u5907\u540d\u79f0"),
                             summary = s.lockscreenWidgetDeviceName.ifBlank { readRoProductMarketName() },
                             onClick = { showWidgetDeviceNameDialog = true },
@@ -3488,7 +4123,7 @@ OverlayDropdownPreference(
                             },
                         )
 OverlayDropdownPreference(
-                            title = tr("\u5c0f\u7ec4\u4ef6\u989c\u8272", "\u5c0f\u7ec4\u4ef6\u989c\u8272"),
+                            title = tr("\u5c0f\u7ec4\u4ef6\u6587\u672c\u989c\u8272", "\u5c0f\u7ec4\u4ef6\u6587\u672c\u989c\u8272"),
                             items = listOf(tr("\u6d45\u8272", "\u6d45\u8272"), tr("\u6df1\u8272", "\u6df1\u8272"), tr("\u81ea\u52a8", "\u81ea\u52a8")),
                             selectedIndex = s.lockscreenWidgetColorMode,
                             onSelectedIndexChange = { value ->
@@ -3508,7 +4143,7 @@ OverlayDropdownPreference(
             }
         }
         item {
-            Group(tr("\u9501\u5c4f\u5e95\u90e8\u6587\u672c", "\u9501\u5c4f\u5e95\u90e8\u6587\u672c")) {
+            Group(tr("\u9501\u5c4f\u5e95\u90e8", "\u9501\u5c4f\u5e95\u90e8")) {
                 ArrowPreference(
                     title = tr("\u9690\u85cf\u9501\u5c4f\u5e95\u90e8\u6587\u672c", "\u9690\u85cf\u9501\u5c4f\u5e95\u90e8\u6587\u672c"),
                     summary = lockscreenBottomTextSummary(s.lockscreenBottomTextMask),
@@ -3563,13 +4198,13 @@ OverlayDropdownPreference(
                         update { it.copy(lockscreenMiniPlayerBackgroundMode = value) }
                     },
                 )
-                FloatSlide(tr("\u64ad\u653e\u5668\u5bbd\u5ea6 (dp)", "\u64ad\u653e\u5668\u5bbd\u5ea6 (dp)"), s.lockscreenMiniPlayerWidth, 160f..360f) { value ->
+                FloatSlide(tr("\u64ad\u653e\u5668\u5bbd\u5ea6 (dp)", "\u64ad\u653e\u5668\u5bbd\u5ea6 (dp)"), s.lockscreenMiniPlayerWidth, 160f..360f, defaultValue = 240f) { value ->
                     update { it.copy(lockscreenMiniPlayerWidth = value) }
                 }
-                FloatSlide(tr("\u64ad\u653e\u5668\u9ad8\u5ea6 (dp)", "\u64ad\u653e\u5668\u9ad8\u5ea6 (dp)"), s.lockscreenMiniPlayerHeight, 10f..60f) { value ->
+                FloatSlide(tr("\u64ad\u653e\u5668\u9ad8\u5ea6 (dp)", "\u64ad\u653e\u5668\u9ad8\u5ea6 (dp)"), s.lockscreenMiniPlayerHeight, 10f..60f, defaultValue = 36f) { value ->
                     update { it.copy(lockscreenMiniPlayerHeight = value) }
                 }
-                FloatSlide(tr("\u5a92\u4f53\u5c01\u9762\u5706\u89d2 (dp)", "\u5a92\u4f53\u5c01\u9762\u5706\u89d2 (dp)"), s.lockscreenMiniPlayerArtworkCornerRadius, 0f..60f) { value ->
+                FloatSlide(tr("\u5a92\u4f53\u5c01\u9762\u5706\u89d2 (dp)", "\u5a92\u4f53\u5c01\u9762\u5706\u89d2 (dp)"), s.lockscreenMiniPlayerArtworkCornerRadius, 0f..60f, defaultValue = 12f) { value ->
                     update { it.copy(lockscreenMiniPlayerArtworkCornerRadius = value) }
                 }
             }
@@ -3596,10 +4231,10 @@ OverlayDropdownPreference(
                     color = s.miniPlayerAdvancedMaterialColor,
                     onColorChange = { value -> update { it.copy(miniPlayerAdvancedMaterialColor = value) } },
                 )
-                ParameterIntSlide(tr("\u64ad\u653e\u5668\u4e0d\u900f\u660e\u5ea6", "\u64ad\u653e\u5668\u4e0d\u900f\u660e\u5ea6"), s.miniPlayerAdvancedMaterialOpacity, 0..100, "%") { value ->
+                ParameterIntSlide(tr("\u64ad\u653e\u5668\u4e0d\u900f\u660e\u5ea6", "\u64ad\u653e\u5668\u4e0d\u900f\u660e\u5ea6"), s.miniPlayerAdvancedMaterialOpacity, 0..100, "%", defaultValue = 14) { value ->
                     update { it.copy(miniPlayerAdvancedMaterialOpacity = value) }
                 }
-                ParameterIntSlide(tr("\u64ad\u653e\u5668\u80cc\u666f\u6a21\u7cca\u5ea6", "\u64ad\u653e\u5668\u80cc\u666f\u6a21\u7cca\u5ea6"), s.miniPlayerAdvancedMaterialBlurRadius, 0..40) { value ->
+                ParameterIntSlide(tr("\u64ad\u653e\u5668\u80cc\u666f\u6a21\u7cca\u5ea6", "\u64ad\u653e\u5668\u80cc\u666f\u6a21\u7cca\u5ea6"), s.miniPlayerAdvancedMaterialBlurRadius, 0..40, defaultValue = 40) { value ->
                     update { it.copy(miniPlayerAdvancedMaterialBlurRadius = value) }
                 }
                 SwitchPreference(
@@ -3620,16 +4255,16 @@ OverlayDropdownPreference(
                     color = s.miniPlayerSoftGlassColor,
                     onColorChange = { value -> update { it.copy(miniPlayerSoftGlassColor = value) } },
                 )
-                ParameterIntSlide(tr("\u64ad\u653e\u5668\u4e0d\u900f\u660e\u5ea6", "\u64ad\u653e\u5668\u4e0d\u900f\u660e\u5ea6"), s.miniPlayerSoftGlassOpacity, 0..100, "%") { value ->
+                ParameterIntSlide(tr("\u64ad\u653e\u5668\u4e0d\u900f\u660e\u5ea6", "\u64ad\u653e\u5668\u4e0d\u900f\u660e\u5ea6"), s.miniPlayerSoftGlassOpacity, 0..100, "%", defaultValue = 10) { value ->
                     update { it.copy(miniPlayerSoftGlassOpacity = value) }
                 }
-                ParameterIntSlide(tr("\u64ad\u653e\u5668\u80cc\u666f\u6a21\u7cca\u5ea6", "\u64ad\u653e\u5668\u80cc\u666f\u6a21\u7cca\u5ea6"), s.miniPlayerSoftGlassBackdropBlurRadius, 0..40) { value ->
+                ParameterIntSlide(tr("\u64ad\u653e\u5668\u80cc\u666f\u6a21\u7cca\u5ea6", "\u64ad\u653e\u5668\u80cc\u666f\u6a21\u7cca\u5ea6"), s.miniPlayerSoftGlassBackdropBlurRadius, 0..40, defaultValue = 40) { value ->
                     update { it.copy(miniPlayerSoftGlassBackdropBlurRadius = value) }
                 }
-                ParameterIntSlide(tr("\u64ad\u653e\u5668 Glass \u6a21\u7cca\u5ea6", "\u64ad\u653e\u5668 Glass \u6a21\u7cca\u5ea6"), s.miniPlayerSoftGlassBlurRadius, 0..40) { value ->
+                ParameterIntSlide(tr("\u64ad\u653e\u5668 Glass \u6a21\u7cca\u5ea6", "\u64ad\u653e\u5668 Glass \u6a21\u7cca\u5ea6"), s.miniPlayerSoftGlassBlurRadius, 0..40, defaultValue = 36) { value ->
                     update { it.copy(miniPlayerSoftGlassBlurRadius = value) }
                 }
-                ParameterFloatSlide(tr("\u64ad\u653e\u5668\u67d4\u5149\u5f3a\u5ea6", "\u64ad\u653e\u5668\u67d4\u5149\u5f3a\u5ea6"), s.miniPlayerSoftGlassLuminance, 0f..0.4f) { value ->
+                ParameterFloatSlide(tr("\u64ad\u653e\u5668\u67d4\u5149\u5f3a\u5ea6", "\u64ad\u653e\u5668\u67d4\u5149\u5f3a\u5ea6"), s.miniPlayerSoftGlassLuminance, 0f..0.4f, defaultValue = .14f) { value ->
                     update { it.copy(miniPlayerSoftGlassLuminance = value) }
                 }
             }
@@ -3658,7 +4293,7 @@ OverlayDropdownPreference(
             exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
         ) {
             Column {
-                FloatSlide(tr("\u5706\u5f62\u534a\u5f84 (dp)", "\u5706\u5f62\u534a\u5f84 (dp)"), s.lockscreenShortcutGlassRadius, 10f..60f) { v ->
+                FloatSlide(tr("\u5706\u5f62\u534a\u5f84 (dp)", "\u5706\u5f62\u534a\u5f84 (dp)"), s.lockscreenShortcutGlassRadius, 10f..60f, defaultValue = 48f) { v ->
                     update { it.copy(lockscreenShortcutGlassRadius = v) }
                 }
                 Dim(
@@ -3669,6 +4304,7 @@ OverlayDropdownPreference(
                     },
                     value = s.lockscreenShortcutBackgroundRadius,
                     range = 0f..60f,
+                    defaultValue = 24f,
                 ) { value ->
                     update { it.copy(lockscreenShortcutBackgroundRadius = value) }
                 }
@@ -3680,6 +4316,7 @@ OverlayDropdownPreference(
             changeEnabled = { value -> update { it.copy(lockscreenShortcutSpacingEnabled = value) } },
             value = s.lockscreenShortcutSpacing,
             range = 0f..48f,
+            defaultValue = 0f,
         ) { value ->
             update { it.copy(lockscreenShortcutSpacing = value) }
         }
@@ -3689,6 +4326,7 @@ OverlayDropdownPreference(
             changeEnabled = { value -> update { it.copy(lockscreenShortcutIconSizeEnabled = value) } },
             value = s.lockscreenShortcutIconSize,
             range = 16f..64f,
+            defaultValue = 32f,
         ) { value ->
             update { it.copy(lockscreenShortcutIconSize = value) }
         }
@@ -3719,11 +4357,13 @@ OverlayDropdownPreference(
                     value = s.shortcutAdvancedMaterialOpacity,
                     range = 0..100,
                     suffix = "%",
+                    defaultValue = 14,
                 ) { value -> update { it.copy(shortcutAdvancedMaterialOpacity = value) } }
                 ParameterIntSlide(
                     title = tr("\u80cc\u666f\u6a21\u7cca\u5ea6", "\u80cc\u666f\u6a21\u7cca\u5ea6"),
                     value = s.shortcutAdvancedMaterialBlurRadius,
                     range = 0..40,
+                    defaultValue = 40,
                 ) { value -> update { it.copy(shortcutAdvancedMaterialBlurRadius = value) } }
                 SwitchPreference(
                     title = tr("\u663e\u793a\u9ad8\u5149", "\u663e\u793a\u9ad8\u5149"),
@@ -3749,21 +4389,25 @@ OverlayDropdownPreference(
                     value = s.shortcutSoftGlassOpacity,
                     range = 0..100,
                     suffix = "%",
+                    defaultValue = 10,
                 ) { value -> update { it.copy(shortcutSoftGlassOpacity = value) } }
                 ParameterIntSlide(
                     title = tr("\u80cc\u666f\u6a21\u7cca\u5ea6", "\u80cc\u666f\u6a21\u7cca\u5ea6"),
                     value = s.shortcutSoftGlassBackdropBlurRadius,
                     range = 0..40,
+                    defaultValue = 40,
                 ) { value -> update { it.copy(shortcutSoftGlassBackdropBlurRadius = value) } }
                 ParameterIntSlide(
                     title = tr("Glass \u6a21\u7cca\u5ea6", "Glass \u6a21\u7cca\u5ea6"),
                     value = s.shortcutSoftGlassBlurRadius,
                     range = 0..40,
+                    defaultValue = 36,
                 ) { value -> update { it.copy(shortcutSoftGlassBlurRadius = value) } }
                 ParameterFloatSlide(
                     title = tr("\u67d4\u5149\u5f3a\u5ea6", "\u67d4\u5149\u5f3a\u5ea6"),
                     value = s.shortcutSoftGlassLuminance,
                     range = 0f..0.4f,
+                    defaultValue = .14f,
                 ) { value -> update { it.copy(shortcutSoftGlassLuminance = value) } }
             }
         }
@@ -3913,6 +4557,13 @@ private fun lockscreenWidgetItemsSummary(mask: Int): String = lockscreenWidgetEd
     .joinToString("、") { it.title }
     .ifBlank { tr("天气、电量", "天气、电量") }
 
+private fun lockscreenWidgetBackgroundModeLabel(mode: Int): String = when (mode) {
+    LOCKSCREEN_WIDGET_BACKGROUND_PURE -> tr("纯色", "纯色")
+    LOCKSCREEN_WIDGET_BACKGROUND_ADVANCED -> tr("高级材质", "高级材质")
+    LOCKSCREEN_WIDGET_BACKGROUND_SOFT_GLASS -> tr("柔光玻璃", "柔光玻璃")
+    else -> tr("跟随快捷按钮背景", "跟随快捷按钮背景")
+}
+
 private fun lockscreenWidgetItemsInOrder(mask: Int, order: String): List<LockscreenWidgetEditorItem> {
     val editorItems = lockscreenWidgetEditorItems()
     val byFlag = editorItems.associateBy(LockscreenWidgetEditorItem::flag)
@@ -3939,6 +4590,144 @@ private fun lockscreenWidgetCanAdd(
 }
 
 @Composable
+private fun LockscreenWidgetBackgroundSettings(
+    settings: HookSettings,
+    update: ((HookSettings) -> HookSettings) -> Unit,
+    back: () -> Unit,
+) = AppPage(
+    tr("锁屏小组件背景调整", "锁屏小组件背景调整"),
+    back,
+    restartScopes = setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.AOD),
+) { padding, scroll ->
+    val mode = settings.lockscreenWidgetBackgroundMode.coerceIn(
+        LOCKSCREEN_WIDGET_BACKGROUND_FOLLOW_SHORTCUT,
+        LOCKSCREEN_WIDGET_BACKGROUND_SOFT_GLASS,
+    )
+    AppList(padding, scroll, 28) {
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                OverlayDropdownPreference(
+                    title = tr("锁屏小组件背景类型", "锁屏小组件背景类型"),
+                    items = listOf(
+                        tr("跟随快捷按钮背景", "跟随快捷按钮背景"),
+                        tr("纯色", "纯色"),
+                        tr("高级材质", "高级材质"),
+                        tr("柔光玻璃", "柔光玻璃"),
+                    ),
+                    selectedIndex = mode,
+                    onSelectedIndexChange = { value ->
+                        update {
+                            it.copy(
+                                lockscreenWidgetBackgroundMode = value.coerceIn(
+                                    LOCKSCREEN_WIDGET_BACKGROUND_FOLLOW_SHORTCUT,
+                                    LOCKSCREEN_WIDGET_BACKGROUND_SOFT_GLASS,
+                                ),
+                            )
+                        }
+                    },
+                )
+            }
+        }
+        item {
+            AnimatedVisibility(
+                visible = mode != LOCKSCREEN_WIDGET_BACKGROUND_FOLLOW_SHORTCUT,
+                enter = fadeIn(tween(220)) + scaleIn(tween(220), initialScale = .96f),
+                exit = fadeOut(tween(180)) + scaleOut(tween(180), targetScale = .96f),
+            ) {
+                Group(tr("参数调整", "参数调整")) {
+                    when (mode) {
+                        LOCKSCREEN_WIDGET_BACKGROUND_PURE -> {
+                            ShortcutBackgroundColorPreference(
+                                color = settings.lockscreenWidgetPureColor,
+                                onColorChange = { value ->
+                                    update { it.copy(lockscreenWidgetPureColor = value) }
+                                },
+                            )
+                        }
+                        LOCKSCREEN_WIDGET_BACKGROUND_ADVANCED -> {
+                            ShortcutBackgroundColorPreference(
+                                title = tr("混色颜色", "混色颜色"),
+                                color = settings.lockscreenWidgetAdvancedMaterialColor,
+                                onColorChange = { value ->
+                                    update { it.copy(lockscreenWidgetAdvancedMaterialColor = value) }
+                                },
+                            )
+                            ParameterIntSlide(
+                                title = tr("不透明度", "不透明度"),
+                                value = settings.lockscreenWidgetAdvancedMaterialOpacity,
+                                range = 0..100,
+                                suffix = "%",
+                                defaultValue = 14,
+                            ) { value ->
+                                update { it.copy(lockscreenWidgetAdvancedMaterialOpacity = value) }
+                            }
+                            ParameterIntSlide(
+                                title = tr("背景模糊度", "背景模糊度"),
+                                value = settings.lockscreenWidgetAdvancedMaterialBlurRadius,
+                                range = 0..40,
+                                defaultValue = 40,
+                            ) { value ->
+                                update { it.copy(lockscreenWidgetAdvancedMaterialBlurRadius = value) }
+                            }
+                            SwitchPreference(
+                                title = tr("显示高光", "显示高光"),
+                                checked = settings.lockscreenWidgetAdvancedMaterialHighlight,
+                                onCheckedChange = { value ->
+                                    update { it.copy(lockscreenWidgetAdvancedMaterialHighlight = value) }
+                                },
+                            )
+                        }
+                        LOCKSCREEN_WIDGET_BACKGROUND_SOFT_GLASS -> {
+                            ShortcutBackgroundColorPreference(
+                                title = tr("混色颜色", "混色颜色"),
+                                color = settings.lockscreenWidgetSoftGlassColor,
+                                onColorChange = { value ->
+                                    update { it.copy(lockscreenWidgetSoftGlassColor = value) }
+                                },
+                            )
+                            ParameterIntSlide(
+                                title = tr("不透明度", "不透明度"),
+                                value = settings.lockscreenWidgetSoftGlassOpacity,
+                                range = 0..100,
+                                suffix = "%",
+                                defaultValue = 10,
+                            ) { value ->
+                                update { it.copy(lockscreenWidgetSoftGlassOpacity = value) }
+                            }
+                            ParameterIntSlide(
+                                title = tr("背景模糊度", "背景模糊度"),
+                                value = settings.lockscreenWidgetSoftGlassBackdropBlurRadius,
+                                range = 0..40,
+                                defaultValue = 40,
+                            ) { value ->
+                                update { it.copy(lockscreenWidgetSoftGlassBackdropBlurRadius = value) }
+                            }
+                            ParameterIntSlide(
+                                title = tr("Glass 模糊度", "Glass 模糊度"),
+                                value = settings.lockscreenWidgetSoftGlassBlurRadius,
+                                range = 0..40,
+                                defaultValue = 36,
+                            ) { value ->
+                                update { it.copy(lockscreenWidgetSoftGlassBlurRadius = value) }
+                            }
+                            ParameterFloatSlide(
+                                title = tr("柔光强度", "柔光强度"),
+                                value = settings.lockscreenWidgetSoftGlassLuminance,
+                                range = 0f..0.4f,
+                                defaultValue = .14f,
+                            ) { value ->
+                                update { it.copy(lockscreenWidgetSoftGlassLuminance = value) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+}
+
+@Composable
 private fun LockscreenWidgetEditor(
     settings: HookSettings,
     update: ((HookSettings) -> HookSettings) -> Unit,
@@ -3946,6 +4735,25 @@ private fun LockscreenWidgetEditor(
 ) = AppPage(tr("锁屏小组件", "锁屏小组件"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.AOD)) { padding, scroll ->
     val context = LocalContext.current
     var showSignatureColorPicker by remember { mutableStateOf(false) }
+    val requestCalendarPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (!granted) {
+            Toast.makeText(
+                context,
+                tr("calendar_permission_required", "请先允许读取日程权限"),
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+    fun requestCalendarPermissionIfNeeded() {
+        val granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.READ_CALENDAR,
+            ) == PackageManager.PERMISSION_GRANTED
+        if (!granted) requestCalendarPermission.launch(Manifest.permission.READ_CALENDAR)
+    }
     val selectedItems = remember(settings.lockscreenWidgetItems, settings.lockscreenWidgetOrder) {
         lockscreenWidgetItemsInOrder(settings.lockscreenWidgetItems, settings.lockscreenWidgetOrder)
     }
@@ -4012,6 +4820,9 @@ private fun LockscreenWidgetEditor(
         if (enabled && !lockscreenWidgetCanAdd(selectedItems, item)) {
             Toast.makeText(context, tr("当前布局已达到组件上限", "当前布局已达到组件上限"), Toast.LENGTH_SHORT).show()
             return
+        }
+        if (enabled && item.flag == LOCKSCREEN_WIDGET_ITEM_SCHEDULE) {
+            requestCalendarPermissionIfNeeded()
         }
         if (next != 0) update {
             val order = lockscreenWidgetItemsInOrder(it.lockscreenWidgetItems, it.lockscreenWidgetOrder)
@@ -4165,7 +4976,7 @@ private fun LockscreenWidgetEditor(
                         },
                     )
                     if (signatureType != LOCKSCREEN_WIDGET_SIGNATURE_NONE) {
-                        SliderPreference(
+                        EditableSliderPreference(
                             value = settings.lockscreenWidgetSignatureScale.toFloat(),
                             onValueChange = { value ->
                                 update { it.copy(lockscreenWidgetSignatureScale = value.roundToInt()) }
@@ -4175,6 +4986,7 @@ private fun LockscreenWidgetEditor(
                             valueText = "${settings.lockscreenWidgetSignatureScale}%",
                             valueRange = 25f..200f,
                             steps = 174,
+                            defaultValue = 100f,
                         )
                         SwitchPreference(
                             title = tr("显示背景", "显示背景"),
@@ -4630,7 +5442,13 @@ private fun LockScreenBottomTextDialog(
             items.forEach { (bit, title) ->
                 val toggle = { selected = if (selected and bit != 0) selected and bit.inv() else selected or bit }
                 Row(Modifier.fillMaxWidth().clickable(onClick = toggle).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(state = if (selected and bit != 0) ToggleableState.On else ToggleableState.Off, onClick = toggle)
+                    Checkbox(
+                        state = if (selected and bit != 0) ToggleableState.On else ToggleableState.Off,
+                        onClick = toggle,
+                        colors = CheckboxDefaults.checkboxColors(
+                            uncheckedForegroundColor = ComposeColor(0x808F8F8F),
+                        ),
+                    )
                     Text(title, style = MiuixTheme.textStyles.body1, modifier = Modifier.padding(start = 10.dp))
                 }
             }
@@ -4677,6 +5495,7 @@ OverlayDropdownPreference(
                         title = tr("\u81ea\u5b9a\u4e49\u7075\u654f\u5ea6", "\u81ea\u5b9a\u4e49\u7075\u654f\u5ea6"),
                         value = s.rasterWallpaperCustomSensitivity,
                         range = 0.1f..2f,
+                        defaultValue = 1f,
                     ) { value -> update { it.copy(rasterWallpaperCustomSensitivity = value) } }
                 }
             }
@@ -4943,7 +5762,7 @@ private fun PaletteColorTab(c: CameraSettings, update: ((CameraSettings) -> Came
                     Button(onClick = { update { it.copy(paletteTone = 0f, paletteColor = 0f, paletteIntensity = 1f, paletteFilter = "自然") } }) { Text(tr("重置", "重置")) }
                 }
                 PaletteStylePad(c.paletteTone, c.paletteColor) { tone, color -> update { it.copy(paletteTone = tone, paletteColor = color) } }
-                PaletteSlider(tr("风格强度", "风格强度"), c.paletteIntensity, 0f..1f, "${(c.paletteIntensity * 100).toInt()}%") { value -> update { it.copy(paletteIntensity = value) } }
+                PaletteSlider(tr("风格强度", "风格强度"), c.paletteIntensity, 0f..1f, "${(c.paletteIntensity * 100).toInt()}%", defaultValue = 1f) { value -> update { it.copy(paletteIntensity = value) } }
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
                     items(paletteStyles) { style ->
                         val selected = c.paletteFilter == style.id
@@ -4965,10 +5784,10 @@ private fun PaletteAdjustmentTab(c: CameraSettings, update: ((CameraSettings) ->
     LazyColumn(Modifier.fillMaxSize().nestedScroll(scroll.nestedScrollConnection), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
         item {
             Group(tr("调整", "调整")) {
-                PaletteSlider(tr("曝光", "曝光"), c.paletteExposure, -1f..1f, signedExposure(c.paletteExposure)) { value -> update { it.copy(paletteExposure = value) } }
-                PaletteSlider(tr("对比度", "对比度"), c.paletteContrast, 0f..2f, "${(c.paletteContrast * 100).toInt()}%") { value -> update { it.copy(paletteContrast = value) } }
-                PaletteSlider(tr("饱和度", "饱和度"), c.paletteSaturation, 0f..1.8f, "${(c.paletteSaturation * 100).toInt()}%") { value -> update { it.copy(paletteSaturation = value) } }
-                PaletteSlider(tr("暖色", "暖色"), c.paletteWarmth, -1f..1f, signedPaletteValue(c.paletteWarmth)) { value -> update { it.copy(paletteWarmth = value) } }
+                PaletteSlider(tr("曝光", "曝光"), c.paletteExposure, -1f..1f, signedExposure(c.paletteExposure), defaultValue = 0f) { value -> update { it.copy(paletteExposure = value) } }
+                PaletteSlider(tr("对比度", "对比度"), c.paletteContrast, 0f..2f, "${(c.paletteContrast * 100).toInt()}%", defaultValue = 1f) { value -> update { it.copy(paletteContrast = value) } }
+                PaletteSlider(tr("饱和度", "饱和度"), c.paletteSaturation, 0f..1.8f, "${(c.paletteSaturation * 100).toInt()}%", defaultValue = 1f) { value -> update { it.copy(paletteSaturation = value) } }
+                PaletteSlider(tr("暖色", "暖色"), c.paletteWarmth, -1f..1f, signedPaletteValue(c.paletteWarmth), defaultValue = 0f) { value -> update { it.copy(paletteWarmth = value) } }
             }
         }
     }
@@ -4981,7 +5800,7 @@ private fun PaletteSkinProtectionTab(c: CameraSettings, update: ((CameraSettings
             Group(tr("肤色保护", "肤色保护")) {
                 SwitchPreference(title = tr("肤色保护", "肤色保护"), summary = tr("保留肤色区域的原始色彩", "保留肤色区域的原始色彩"), checked = c.skinToneProtection, onCheckedChange = { enabled -> update { it.copy(skinToneProtection = enabled) } })
                 if (c.skinToneProtection) {
-                    PaletteSlider(tr("保护强度", "保护强度"), c.skinToneProtectionAmount, 0f..1f, "${(c.skinToneProtectionAmount * 100).toInt()}%") { value -> update { it.copy(skinToneProtectionAmount = value) } }
+                    PaletteSlider(tr("保护强度", "保护强度"), c.skinToneProtectionAmount, 0f..1f, "${(c.skinToneProtectionAmount * 100).toInt()}%", defaultValue = .65f) { value -> update { it.copy(skinToneProtectionAmount = value) } }
                 }
             }
         }
@@ -5092,9 +5911,140 @@ private fun signedPaletteValue(value: Float): String {
 private fun signedExposure(value: Float): String = if (value >= 0f) "+${"%.1f".format(Locale.US, value)}" else "%.1f".format(Locale.US, value)
 
 @Composable
-private fun PaletteSlider(title: String, value: Float, range: ClosedFloatingPointRange<Float>, valueText: String, onValueFinished: (Float) -> Unit) {
+private fun EditableSliderPreference(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    onValueChangeFinished: () -> Unit,
+    title: String?,
+    valueText: String?,
+    valueRange: ClosedFloatingPointRange<Float>,
+    steps: Int,
+    defaultValue: Float = valueRange.start,
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier,
+) {
+    var showValueDialog by remember { mutableStateOf(false) }
+    MiuixSliderPreference(
+        value = value,
+        onValueChange = onValueChange,
+        onValueChangeFinished = onValueChangeFinished,
+        title = title,
+        valueText = valueText,
+        valueRange = valueRange,
+        steps = steps,
+        enabled = enabled,
+        modifier = modifier,
+        onClick = if (enabled) ({ showValueDialog = true }) else null,
+    )
+    if (showValueDialog) {
+        SliderValueDialog(
+            sliderTitle = title.orEmpty(),
+            value = value,
+            defaultValue = defaultValue,
+            valueRange = valueRange,
+            steps = steps,
+            onDismiss = { showValueDialog = false },
+            onSave = { adjustedValue ->
+                onValueChange(adjustedValue)
+                onValueChangeFinished()
+                showValueDialog = false
+            },
+        )
+    }
+}
+
+@Composable
+private fun SliderValueDialog(
+    sliderTitle: String,
+    value: Float,
+    defaultValue: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    steps: Int,
+    onDismiss: () -> Unit,
+    onSave: (Float) -> Unit,
+) {
+    var draft by remember(value) { mutableStateOf(formatSliderInput(value)) }
+    val enteredValue = draft.trim().toFloatOrNull()
+    val canSave = enteredValue != null &&
+        enteredValue.isFinite() &&
+        enteredValue >= valueRange.start &&
+        enteredValue <= valueRange.endInclusive
+
+    WindowDialog(
+        show = true,
+        onDismissRequest = onDismiss,
+        imeBottomSafetyFraction = .175f,
+    ) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(tr("数值调整", "数值调整"), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
+            Text(sliderTitle, style = MiuixTheme.textStyles.body2)
+            TextField(
+                value = draft,
+                onValueChange = { draft = it },
+                label = sliderTitle,
+                useLabelAsPlaceholder = true,
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Decimal,
+                    imeAction = ImeAction.Done,
+                ),
+                keyboardActions = KeyboardActions(
+                    onDone = {
+                        if (canSave) {
+                            onSave(normalizeSliderValue(enteredValue!!, valueRange, steps))
+                            onDismiss()
+                        }
+                    },
+                ),
+                cornerRadius = 999.dp,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            GlassDialogButton(
+                onClick = { draft = formatSliderInput(defaultValue.coerceIn(valueRange.start, valueRange.endInclusive)) },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(tr("恢复默认数值", "恢复默认数值")) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GlassDialogButton(onDismiss, Modifier.weight(1f)) { Text(tr("取消", "取消")) }
+                GlassDialogButton(
+                    onClick = { onSave(normalizeSliderValue(enteredValue!!, valueRange, steps)) },
+                    enabled = canSave,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColorsPrimary(),
+                ) { Text(tr("保存", "保存")) }
+            }
+        }
+    }
+}
+
+private fun normalizeSliderValue(
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    steps: Int,
+): Float {
+    if (steps <= 0) return value.coerceIn(valueRange.start, valueRange.endInclusive)
+    val interval = (valueRange.endInclusive - valueRange.start) / (steps + 1)
+    if (interval <= 0f) return valueRange.start
+    return (valueRange.start + ((value - valueRange.start) / interval).roundToInt() * interval)
+        .coerceIn(valueRange.start, valueRange.endInclusive)
+}
+
+private fun formatSliderInput(value: Float): String {
+    val rounded = (value * 100_000f).roundToInt() / 100_000f
+    return if (rounded == rounded.roundToInt().toFloat()) rounded.roundToInt().toString()
+    else "%.5f".format(Locale.US, rounded).trimEnd('0').trimEnd('.')
+}
+
+@Composable
+private fun PaletteSlider(
+    title: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    valueText: String,
+    defaultValue: Float = range.start,
+    onValueFinished: (Float) -> Unit,
+) {
     var current by remember(value) { mutableFloatStateOf(value) }
-    SliderPreference(
+    EditableSliderPreference(
         value = current,
         onValueChange = { current = it },
         onValueChangeFinished = { onValueFinished(current.coerceIn(range.start, range.endInclusive)) },
@@ -5102,6 +6052,7 @@ private fun PaletteSlider(title: String, value: Float, range: ClosedFloatingPoin
         valueText = valueText,
         valueRange = range,
         steps = ((range.endInclusive - range.start) * 20f).toInt().coerceAtLeast(0) - 1,
+        defaultValue = defaultValue,
     )
 }
 
@@ -5132,32 +6083,32 @@ private fun PaletteStylePad(tone: Float, color: Float, onChange: (Float, Float) 
 }
 
 @Composable
-private fun Dim(title: String, enabled: Boolean, changeEnabled: (Boolean) -> Unit, value: Float, range: ClosedFloatingPointRange<Float>, save: (Float) -> Unit) {
+private fun Dim(title: String, enabled: Boolean, changeEnabled: (Boolean) -> Unit, value: Float, range: ClosedFloatingPointRange<Float>, defaultValue: Float = range.start, save: (Float) -> Unit) {
     SwitchPreference(title = tr("\u81ea\u5b9a\u4e49$title", "\u81ea\u5b9a\u4e49$title"), checked = enabled, onCheckedChange = changeEnabled)
-    if (enabled) FloatSlide(title, value, range, save)
+    if (enabled) FloatSlide(title, value, range, defaultValue, save)
 }
 
 @Composable
 private fun DeltaDim(title: String, value: Float, save: (Float) -> Unit) {
-    FloatSlide(title, value, -35f..35f, save)
+    FloatSlide(title, value, -35f..35f, 0f, save)
 }
 
 @Composable
-private fun Corner(title: String, enabled: Boolean, changeEnabled: (Boolean) -> Unit, value: Float, save: (Float) -> Unit) {
+private fun Corner(title: String, enabled: Boolean, changeEnabled: (Boolean) -> Unit, value: Float, defaultValue: Float = 24f, save: (Float) -> Unit) {
     SwitchPreference(title = tr("\u81ea\u5b9a\u4e49$title\u5706\u89d2", "\u81ea\u5b9a\u4e49$title\u5706\u89d2"), checked = enabled, onCheckedChange = changeEnabled)
-    if (enabled) FloatSlide(title, value, 0f..60f, save)
+    if (enabled) FloatSlide(title, value, 0f..60f, defaultValue, save)
 }
 
 @Composable
-private fun FloatSlide(title: String, value: Float, range: ClosedFloatingPointRange<Float>, save: (Float) -> Unit) {
+private fun FloatSlide(title: String, value: Float, range: ClosedFloatingPointRange<Float>, defaultValue: Float = range.start, save: (Float) -> Unit) {
     var current by remember(value) { mutableFloatStateOf(value) }
-    SliderPreference(value = current, onValueChange = { current = it }, onValueChangeFinished = { save((current * 10f).toInt() / 10f) }, title = title, valueText = "${(current * 10f).toInt() / 10f} dp", valueRange = range, steps = ((range.endInclusive - range.start) * 10f).toInt() - 1)
+    EditableSliderPreference(value = current, onValueChange = { current = it }, onValueChangeFinished = { save((current * 10f).toInt() / 10f) }, title = title, valueText = "${(current * 10f).toInt() / 10f} dp", valueRange = range, steps = ((range.endInclusive - range.start) * 10f).toInt() - 1, defaultValue = defaultValue)
 }
 
 @Composable
-private fun IntSlide(title: String, value: Int, range: IntRange, save: (Int) -> Unit) {
+private fun IntSlide(title: String, value: Int, range: IntRange, defaultValue: Int = range.first, save: (Int) -> Unit) {
     var current by remember(value) { mutableFloatStateOf(value.toFloat()) }
-    SliderPreference(value = current, onValueChange = { current = it }, onValueChangeFinished = { save(current.toInt().coerceIn(range.first, range.last)) }, title = title, valueText = "${current.toInt()} dp", valueRange = range.first.toFloat()..range.last.toFloat(), steps = range.last - range.first - 1)
+    EditableSliderPreference(value = current, onValueChange = { current = it }, onValueChangeFinished = { save(current.toInt().coerceIn(range.first, range.last)) }, title = title, valueText = "${current.toInt()} dp", valueRange = range.first.toFloat()..range.last.toFloat(), steps = range.last - range.first - 1, defaultValue = defaultValue.toFloat())
 }
 
 @Composable
@@ -5166,10 +6117,11 @@ private fun ParameterIntSlide(
     value: Int,
     range: IntRange,
     suffix: String = "",
+    defaultValue: Int = range.first,
     save: (Int) -> Unit,
 ) {
     var current by remember(value) { mutableFloatStateOf(value.toFloat()) }
-    SliderPreference(
+    EditableSliderPreference(
         value = current,
         onValueChange = { current = it },
         onValueChangeFinished = { save(current.toInt().coerceIn(range.first, range.last)) },
@@ -5177,6 +6129,33 @@ private fun ParameterIntSlide(
         valueText = "${current.toInt()}$suffix",
         valueRange = range.first.toFloat()..range.last.toFloat(),
         steps = (range.last - range.first - 1).coerceAtLeast(0),
+        defaultValue = defaultValue.toFloat(),
+    )
+}
+
+@Composable
+private fun ParameterDpSlide(
+    title: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    defaultValue: Float = range.start,
+    save: (Float) -> Unit,
+) {
+    var current by remember(value) { mutableFloatStateOf(value) }
+    EditableSliderPreference(
+        value = current,
+        onValueChange = { current = it },
+        onValueChangeFinished = {
+            save((current * 100f).roundToInt().coerceIn(
+                (range.start * 100f).roundToInt(),
+                (range.endInclusive * 100f).roundToInt(),
+            ) / 100f)
+        },
+        title = title,
+        valueText = String.format(Locale.US, "%.2f dp", current.coerceIn(range.start, range.endInclusive)),
+        valueRange = range,
+        steps = ((range.endInclusive - range.start) * 100f).roundToInt().coerceAtLeast(0) - 1,
+        defaultValue = defaultValue,
     )
 }
 
@@ -5185,10 +6164,11 @@ private fun ParameterFloatSlide(
     title: String,
     value: Float,
     range: ClosedFloatingPointRange<Float>,
+    defaultValue: Float = range.start,
     save: (Float) -> Unit,
 ) {
     var current by remember(value) { mutableFloatStateOf(value) }
-    SliderPreference(
+    EditableSliderPreference(
         value = current,
         onValueChange = { current = it },
         onValueChangeFinished = { save((current * 100f).toInt() / 100f) },
@@ -5196,6 +6176,7 @@ private fun ParameterFloatSlide(
         valueText = "${(current * 100f).toInt() / 100f}",
         valueRange = range,
         steps = ((range.endInclusive - range.start) * 100f).toInt() - 1,
+        defaultValue = defaultValue,
     )
 }
 
@@ -5233,6 +6214,7 @@ private fun About(back: () -> Unit, openPage: (PageId) -> Unit, onDebugMode: () 
                 ArrowPreference(title = tr("license", "LICENSE"), summary = "Apache License 2.0", onClick = { openPage(PageId.LICENSE) })
                 ArrowPreference(title = tr("githubRepository", "GitHub Repository"), summary = "github.com/ColdP/HyperChanger", onClick = { openUrl(context, "https://github.com/ColdP/HyperChanger") })
                 ArrowPreference(title = tr("telegramGroup", "Telegram 群组"), summary = "t.me/HyperChanger", onClick = { openUrl(context, "https://t.me/HyperChanger") })
+                ArrowPreference(title = tr("qqGroup", "QQ 群"), summary = tr("qqGroupNumber", "群号: 429188055"), onClick = { openUrl(context, "https://qm.qq.com/q/rQhbQbiYLe") })
             }
         }
         item { Text("\u00a9 ${Year.now().value} btm_m", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = .56f), modifier = Modifier.padding(start = 12.dp)) }
@@ -5267,7 +6249,11 @@ private fun OsMissingDialog(show: Boolean, seconds: Int, preview: Boolean, onExi
 }
 
 @Composable
-private fun DebugModeDialog(onDismiss: () -> Unit, onNonHyperOs4: () -> Unit, onNonHyperOs: () -> Unit) {
+private fun DebugModeDialog(
+    onDismiss: () -> Unit,
+    onNonHyperOs4: () -> Unit,
+    onNonHyperOs: () -> Unit,
+) {
     WindowDialog(show = true, onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("调试模式", style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
@@ -5343,6 +6329,7 @@ private fun AppPage(
     CompositionLocalProvider(
         LocalToolbarBackdrop provides backdrop,
         LocalToolbarCollapsed provides collapsedFraction,
+        LocalDialogBackdrop provides backdrop,
     ) {
     Scaffold(
         topBar = {
@@ -5509,6 +6496,7 @@ private fun LanguagePage(back: () -> Unit) {
     var packs by remember { mutableStateOf(loadLanguagePacks(prefs)) }
     var editor by remember { mutableStateOf<LanguagePack?>(null) }
     var menuPack by remember { mutableStateOf<LanguagePack?>(null) }
+    var deleteConfirmationPack by remember { mutableStateOf<LanguagePack?>(null) }
     var exportPack by remember { mutableStateOf<LanguagePack?>(null) }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         val pack = exportPack
@@ -5557,6 +6545,17 @@ private fun LanguagePage(back: () -> Unit) {
         exportPack = pack
         exportLauncher.launch("${pack.name.replace(Regex("[^A-Za-z0-9._-]"), "_")}.json")
     }
+    fun deletePack(pack: LanguagePack) {
+        val updatedPacks = packs.filterNot { it.name == pack.name }
+        packs = updatedPacks
+        saveLanguagePacks(prefs, updatedPacks)
+        menuPack = null
+        if (selected == pack.selection) {
+            selected = "system"
+            applyLanguageSelection(context, prefs, "system", updatedPacks)
+        }
+        languageChanged()
+    }
     AppPage(tr("language", "语言"), back) { padding, scroll ->
         AppList(padding, scroll, 28) {
             builtInEntries.forEach { pack ->
@@ -5585,9 +6584,24 @@ private fun LanguagePage(back: () -> Unit) {
                 Text(pack.creator.ifBlank { "btm_m" }, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                 if (!pack.builtIn) {
                     GlassDialogButton({ menuPack = null; editor = pack }, Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("edit", "编辑")) }
+                    GlassDialogButton({ menuPack = null; deleteConfirmationPack = pack }, Modifier.fillMaxWidth()) { Text(tr("删除", "删除"), color = ComposeColor(0xFFD32F2F)) }
                 }
                 GlassDialogButton({ showExport(pack) }, Modifier.fillMaxWidth()) { Text(tr("export", "导出")) }
                 GlassDialogButton({ menuPack = null }, Modifier.fillMaxWidth()) { Text(tr("cancel", "取消")) }
+            }
+        }
+    }
+    deleteConfirmationPack?.let { pack ->
+        WindowDialog(show = true, onDismissRequest = { deleteConfirmationPack = null }) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(tr("deleteLanguage", tr("删除语言？", "删除语言？")), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
+                Text(tr("deleteLanguageSummary", tr("此语言包将被永久删除。", "此语言包将被永久删除。")), style = MiuixTheme.textStyles.body2)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    GlassDialogButton({ deleteConfirmationPack = null }, Modifier.weight(1f)) { Text(tr("cancel", tr("取消", "取消"))) }
+                    GlassDialogButton({ deleteConfirmationPack = null; deletePack(pack) }, Modifier.weight(1f)) {
+                        Text(tr("删除", "删除"), color = ComposeColor(0xFFD32F2F))
+                    }
+                }
             }
         }
     }
@@ -5596,7 +6610,9 @@ private fun LanguagePage(back: () -> Unit) {
 @Composable
 private fun LanguageCard(pack: LanguagePack, selected: Boolean, onSelect: () -> Unit, onLongPress: () -> Unit) {
     Card(
-        Modifier.fillMaxWidth().combinedClickable(onClick = onSelect, onLongClick = onLongPress),
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .combinedClickable(onClick = onSelect, onLongClick = onLongPress),
         insideMargin = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

@@ -8,6 +8,7 @@ import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import android.provider.CalendarContract
 import java.io.File
 
 class SettingsAppearanceProvider : ContentProvider() {
@@ -21,6 +22,7 @@ class SettingsAppearanceProvider : ContentProvider() {
         sortOrder: String?,
     ): Cursor {
         val slot = uri.pathSegments.firstOrNull().orEmpty()
+        if (slot == LOCKSCREEN_SCHEDULE_PATH) return queryNextSchedule(projection)
         val file = appearanceFile(slot)
         val prefs = requireContext().getSharedPreferences(SETTINGS_APPEARANCE_PREFERENCES, 0)
         val columns = projection ?: COLUMNS
@@ -100,6 +102,41 @@ class SettingsAppearanceProvider : ContentProvider() {
     override fun insert(uri: Uri, values: ContentValues?): Uri? = null
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = 0
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int = 0
+
+    private fun queryNextSchedule(projection: Array<out String>?): Cursor {
+        val columns = projection ?: SCHEDULE_COLUMNS
+        val result = MatrixCursor(columns)
+        runCatching {
+            val now = System.currentTimeMillis()
+            val end = now + SCHEDULE_LOOKAHEAD_MS
+            val uri = CalendarContract.Instances.CONTENT_URI.buildUpon()
+                .appendPath(now.toString())
+                .appendPath(end.toString())
+                .build()
+            val calendarProjection = arrayOf(
+                CalendarContract.Instances.TITLE,
+                CalendarContract.Instances.BEGIN,
+                CalendarContract.Instances.ALL_DAY,
+            )
+            requireContext().contentResolver.query(
+                uri,
+                calendarProjection,
+                null,
+                null,
+                "${CalendarContract.Instances.BEGIN} ASC",
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val values = mapOf(
+                        COLUMN_SCHEDULE_TITLE to cursor.getString(0).orEmpty(),
+                        COLUMN_SCHEDULE_BEGIN to cursor.getLong(1),
+                        COLUMN_SCHEDULE_ALL_DAY to cursor.getInt(2),
+                    )
+                    result.addRow(columns.map { values[it] ?: 0 })
+                }
+            }
+        }
+        return result
+    }
 
     private fun appearanceFile(slot: String): File {
         require(slot == APPEARANCE_SLOT_HOME || slot == APPEARANCE_SLOT_DEVICE || slot == APPEARANCE_SLOT_LOGO || slot == APPEARANCE_SLOT_DEVICE_IMAGE || slot == APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO || slot == APPEARANCE_SLOT_STYLE1_UPDATE_BACKGROUND || slot == APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE || slot == APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO || slot == APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND || slot == LOCKSCREEN_WIDGET_SIGNATURE_SLOT)
@@ -228,6 +265,12 @@ class SettingsAppearanceProvider : ContentProvider() {
         const val COLUMN_STYLE2_BACKGROUND_VERTICAL_OFFSET = "style2_background_vertical_offset"
         const val COLUMN_STYLE2_BACKGROUND_HORIZONTAL_OFFSET = "style2_background_horizontal_offset"
         const val COLUMN_STYLE2_BACKGROUND_SCALE = "style2_background_scale"
+        const val LOCKSCREEN_SCHEDULE_PATH = "lockscreen_schedule"
+        const val COLUMN_SCHEDULE_TITLE = "title"
+        const val COLUMN_SCHEDULE_BEGIN = "begin"
+        const val COLUMN_SCHEDULE_ALL_DAY = "all_day"
+        private const val SCHEDULE_LOOKAHEAD_MS = 30L * 24L * 60L * 60L * 1000L
+        private val SCHEDULE_COLUMNS = arrayOf(COLUMN_SCHEDULE_TITLE, COLUMN_SCHEDULE_BEGIN, COLUMN_SCHEDULE_ALL_DAY)
         const val COLUMN_STYLE1_BACKGROUND_BLUR = "style1_background_blur"
         const val COLUMN_STYLE1_BACKGROUND_VERTICAL_OFFSET = "style1_background_vertical_offset"
         const val COLUMN_STYLE1_BACKGROUND_HORIZONTAL_OFFSET = "style1_background_horizontal_offset"

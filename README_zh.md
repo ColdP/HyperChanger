@@ -9,10 +9,12 @@
 <p align="center">
   <a href="README.md">English</a> |
   <a href="https://github.com/ColdP/HyperChanger/releases">发布版本</a> |
-  <a href="https://t.me/HyperChanger">Telegram 群组</a>
+  <a href="https://t.me/HyperChanger">Telegram 群组</a> |
+  <a href="https://qm.qq.com/q/rQhbQbiYLe">QQ群</a>
 </p>
 
 <p align="center"><strong>加入 Telegram 群组：</strong> <a href="https://t.me/HyperChanger">https://t.me/HyperChanger</a></p>
+<p align="center"><strong>加入 QQ 群：</strong> <a href="https://qm.qq.com/q/rQhbQbiYLe">群号：429188055</a></p>
 
 <p align="center">
   <img src="https://img.shields.io/github/v/release/ColdP/HyperChanger?style=flat-square" alt="发布版本">

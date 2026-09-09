@@ -78,3 +78,6 @@ hyperos4-glass-blur-main/
 /*.tmp
 /.codex-window.xml
 /.phone_2609012300.svg
+/.android-home/
+/.build-tmp/
+/.reverse-tmp/

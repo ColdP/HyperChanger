@@ -43,6 +43,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import btm.m.xiaoaihook.SuperXiaoAiInputHook
 import java.util.Collections
+import java.lang.reflect.Method
 import java.util.IdentityHashMap
 import java.util.LinkedHashMap
 import java.util.WeakHashMap
@@ -270,6 +271,10 @@ class HyperSystemUiModule : XposedModule() {
                         installLockscreenChargingTextHook(param.defaultClassLoader, preferences)
                         installLockscreenBottomTextViewHook(param.defaultClassLoader, preferences)
                         lockscreenChargingHookInstalled = true
+                    }
+                    if (param.packageName == SYSTEM_UI && !lockscreenWhiteBarHookInstalled) {
+                        lockscreenWhiteBarHookInstalled =
+                            installLockscreenWhiteBarHook(param.defaultClassLoader, preferences)
                     }
                     if (param.packageName == SYSTEM_UI && !lockscreenShortcutGlassHookInstalled) {
                         installLockscreenShortcutGlassHook(param.defaultClassLoader, preferences)
@@ -717,7 +722,6 @@ class HyperSystemUiModule : XposedModule() {
                     val resourceName = runCatching {
                         view?.resources?.getResourceEntryName(view.id)
                     }.getOrNull()
-                    val hideNetworkType = preferences.getBoolean(KEY_HIDE_STATUS_BAR_NETWORK_TYPE, false)
                     // 0 keeps SystemUI's original presentation, 1 replaces it with the
                     // independent label, and 2 hides the network type completely.
                     val mobileNetworkTypeMode = preferences
@@ -734,7 +738,7 @@ class HyperSystemUiModule : XposedModule() {
                         hideSecondaryMobileRoot || hideOriginalDualSignal ||
                         ((resourceName == "mobile_type" || resourceName == "mobile_type_single" ||
                             resourceName == "mobile_special_5G") &&
-                            (hideNetworkType || mobileNetworkTypeMode != 0) &&
+                            mobileNetworkTypeMode != 0 &&
                             !(resourceName == "mobile_type_single" &&
                                 isIndependentMobileType && mobileNetworkTypeMode == 1)) ||
                             (resourceName == "wifi_standard" && hideWifiStandard) ||
@@ -1155,11 +1159,110 @@ class HyperSystemUiModule : XposedModule() {
         installDynamicIslandBackgroundHooks(classLoader, preferences)
         installDynamicIslandLayoutHooks(classLoader, preferences)
         installDynamicIslandSelfBlurHook(classLoader, preferences)
+        installDynamicIslandMiniBarHook(classLoader, preferences)
         if (!focusIslandWhitelistPluginHooksInstalled) {
             focusIslandWhitelistPluginHooksInstalled =
                 installFocusIslandWhitelistPluginHooks(classLoader, preferences)
         }
         log(Log.INFO, TAG, "Installed dynamic-island hooks")
+    }
+
+    /**
+     * DynamicIslandBaseContentView normally hides the mini bar when the source
+     * package is absent from SystemUI's media-island allowlist.  The module
+     * option deliberately replaces that decision with the tutorial's verified
+     * always-visible implementation while retaining Xiaomi's translation code.
+     */
+    private fun installDynamicIslandMiniBarHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
+        runCatching {
+            val baseClass = classLoader.loadClass(DYNAMIC_ISLAND_BASE_CONTENT_CLASS)
+            val updateMethods = baseClass.declaredMethods.filter { method ->
+                method.name == DYNAMIC_ISLAND_UPDATE_MINI_BAR_METHOD &&
+                    method.returnType == Void.TYPE &&
+                    method.parameterTypes.size == 1 &&
+                    method.parameterTypes[0].name == DYNAMIC_ISLAND_CONTENT_CLASS
+            }
+            check(updateMethods.isNotEmpty()) {
+                "$DYNAMIC_ISLAND_BASE_CONTENT_CLASS#$DYNAMIC_ISLAND_UPDATE_MINI_BAR_METHOD not found"
+            }
+            updateMethods.forEachIndexed { index, method ->
+                method.isAccessible = true
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("dynamic-island-mini-bar:$index")
+                    .intercept { chain ->
+                        if (!preferences.getBoolean(
+                                KEY_REMOVE_DYNAMIC_ISLAND_MEDIA_MINI_BAR_WHITELIST_LIMIT,
+                                false,
+                            )
+                        ) {
+                            return@intercept chain.proceed()
+                        }
+
+                        val target = chain.thisObject
+                        val content = chain.getArg(0)
+                        setDynamicIslandBooleanField(target, "hideByFullScreenPkg", false)
+                        setDynamicIslandBooleanField(target, "miniBarVisible", true)
+                        findDynamicIslandField(target, "miniBar")?.let { field ->
+                            (field.get(target) as? View)?.setVisibility(View.VISIBLE)
+                        }
+
+                        // Keep the stock translation/positioning implementation;
+                        // only the visibility decision is overridden.
+                        runCatching {
+                            val translate = findDynamicIslandMethod(
+                                target,
+                                DYNAMIC_ISLAND_UPDATE_MINI_BAR_TRANSLATION_METHOD,
+                                content,
+                            )
+                            if (translate != null) {
+                                translate.isAccessible = true
+                                translate.invoke(target, content)
+                            }
+                        }.onFailure { error ->
+                            log(Log.WARN, TAG, "Could not update Dynamic Island mini-bar translation", error)
+                        }
+                        null
+                    }
+            }
+            log(Log.INFO, TAG, "Installed Dynamic Island mini-bar allowlist bypass")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install Dynamic Island mini-bar allowlist bypass", error)
+        }
+    }
+
+    private fun findDynamicIslandField(target: Any, name: String): java.lang.reflect.Field? {
+        var current: Class<*>? = target.javaClass
+        while (current != null && current != Any::class.java) {
+            try {
+                return current.getDeclaredField(name).apply { isAccessible = true }
+            } catch (_: NoSuchFieldException) {
+                current = current.superclass
+            } catch (_: Throwable) {
+                return null
+            }
+        }
+        return null
+    }
+
+    private fun findDynamicIslandMethod(target: Any, name: String, argument: Any?): Method? {
+        var current: Class<*>? = target.javaClass
+        while (current != null && current != Any::class.java) {
+            current.declaredMethods.firstOrNull {
+                it.name == name &&
+                    it.parameterTypes.size == 1 &&
+                    (argument == null || it.parameterTypes[0].isInstance(argument))
+            }?.let { return it }
+            current = current.superclass
+        }
+        return null
+    }
+
+    private fun setDynamicIslandBooleanField(target: Any, name: String, value: Boolean) {
+        runCatching { findDynamicIslandField(target, name)?.setBoolean(target, value) }
     }
 
     private fun installFocusIslandWhitelistPluginHooks(
@@ -1939,7 +2042,7 @@ class HyperSystemUiModule : XposedModule() {
         runCatching {
             val binderClass = loadFirstClass(classLoader, MOBILE_ICON_BINDER_CLASSES)
             val bindMethod = binderClass.methods.firstOrNull { method ->
-                method.name == "bind" && method.parameterCount == 4 &&
+                method.name == "bind" && method.parameterCount > 0 &&
                     ViewGroup::class.java.isAssignableFrom(method.parameterTypes[0])
             } ?: error("MiuiMobileIconBinder.bind was not found")
             hook(bindMethod)
@@ -1994,7 +2097,7 @@ class HyperSystemUiModule : XposedModule() {
         runCatching {
             val mobileViewClass = loadFirstClass(classLoader, MODERN_MOBILE_VIEW_CLASSES)
             val constructMethod = mobileViewClass.methods.firstOrNull { method ->
-                method.name == "constructAndBind" && method.parameterCount == 5
+                method.name == "constructAndBind"
             } ?: error("ModernStatusBarMobileView.constructAndBind was not found")
             hook(constructMethod)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
@@ -2199,11 +2302,21 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
+    /**
+     * The dual-row glyph and the independent network-type label both live in the mobile group.
+     * Keep discovery independent from the network-type mode: mode 2 intentionally creates no
+     * label, but still needs the signal container for the dual-row glyph.
+     */
+    private fun captureMobileSignalLayout(presentation: StackedMobilePresentation) {
+        presentation.mobileGroup =
+            findViewByEntryName(presentation.root, "mobile_group") as? ViewGroup
+        presentation.mobileSignalContainer =
+            findViewByEntryName(presentation.root, "mobile_signal_container") as? ViewGroup
+    }
+
     private fun ensureIndependentMobileType(presentation: StackedMobilePresentation) {
-        val group = findViewByEntryName(presentation.root, "mobile_group") as? ViewGroup ?: return
-        val signalContainer = findViewByEntryName(presentation.root, "mobile_signal_container") as? ViewGroup
-        presentation.mobileGroup = group
-        presentation.mobileSignalContainer = signalContainer
+        captureMobileSignalLayout(presentation)
+        val group = presentation.mobileGroup ?: return
 
         val original = findViewByEntryName(presentation.root, "mobile_type_single") as? TextView
         presentation.networkTypeView = original
@@ -2465,6 +2578,7 @@ class HyperSystemUiModule : XposedModule() {
             }
         }
         registerMobileNetworkStateCallback(root.context, enabled)
+        captureMobileSignalLayout(presentation)
         if (stackedMobilePreferences?.getInt(KEY_MOBILE_NETWORK_TYPE_MODE, 0) == 1) {
             ensureIndependentMobileType(presentation)
         }
@@ -2573,10 +2687,14 @@ class HyperSystemUiModule : XposedModule() {
         } ?: return false
         if (!isStackedMobileDualSim()) return false
 
-        // Use the same order as the merged glyph. This remains correct when the data SIM is
-        // not slot 0 and also covers builds where getSimSlotIndex() is temporarily unavailable.
-        val retainedSubscriptionId = stackedMobileRenderOrder().firstOrNull() ?: return false
-        return presentation.subscriptionId != retainedSubscriptionId
+        // The merged glyph is mounted in the physical slot-0 view.  The order of the rows may
+        // put the data SIM first, but it must not decide which StatusIconContainer child remains
+        // measurable: on devices with the data SIM in slot 1 that hid slot 0 while the renderer
+        // simultaneously hid slot 1, leaving no mobile glyph at all.
+        val slotIndex = synchronized(stackedMobileSignalLock) {
+            stackedMobileSubscriptions[presentation.subscriptionId]?.slot
+        } ?: SubscriptionManager.getSlotIndex(presentation.subscriptionId)
+        return slotIndex > 0
     }
 
     private fun refreshStackedMobilePresentations(enabled: () -> Boolean) {
@@ -2653,9 +2771,17 @@ class HyperSystemUiModule : XposedModule() {
             restoreDualMobileSignal(presentation)
             return
         }
-        val dualContainer = presentation.dualContainer ?: return
-        val dualSignal = presentation.dualSignal ?: return
-        setDualMobileSignalVisibility(presentation, true)
+        // Binder timing differs between HyperOS builds.  Re-check the hierarchy here because
+        // this render can happen after a previously incomplete inflation pass.
+        ensureDualMobileSignal(presentation)
+        val dualContainer = presentation.dualContainer ?: run {
+            restoreDualMobileSignal(presentation)
+            return
+        }
+        val dualSignal = presentation.dualSignal ?: run {
+            restoreDualMobileSignal(presentation)
+            return
+        }
         if (presentation.savedDualMargins == null) {
             presentation.savedDualTranslationY = dualContainer.translationY
             presentation.savedDualMargins = captureHorizontalMargins(dualContainer)
@@ -2691,6 +2817,7 @@ class HyperSystemUiModule : XposedModule() {
                 presentation.signal.colorFilter?.let(::setColorFilter)
             },
         )
+        setDualMobileSignalVisibility(presentation, true)
     }
 
     private fun isStackedMobileDualSim(): Boolean = synchronized(stackedMobileSignalLock) {
@@ -2715,8 +2842,13 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun ensureDualMobileSignal(presentation: StackedMobilePresentation) {
-        val signalContainer = presentation.mobileSignalContainer ?: return
+        captureMobileSignalLayout(presentation)
+        val signalContainer = presentation.mobileSignalContainer ?: run {
+            log(Log.DEBUG, TAG, "Dual mobile signal container unavailable for subId=${presentation.subscriptionId}")
+            return
+        }
         val existing = signalContainer.findViewById<FrameLayout>(stackedMobileDualContainerId)
+        val wasCreated = existing == null
         val dualContainer = existing ?: FrameLayout(signalContainer.context).apply {
             id = stackedMobileDualContainerId
             layoutParams = ViewGroup.LayoutParams(
@@ -2739,6 +2871,21 @@ class HyperSystemUiModule : XposedModule() {
         presentation.dualSignal = dualContainer.getChildAt(0) as? ImageView ?: return
         configureDualMobileSignalConstraints(dualContainer)
         updateDualMobileSignalLayout(presentation)
+        if (wasCreated) {
+            // addView() happens after the parent has usually completed this frame's measure.
+            // Keep the original signal visible until the next frame can measure the replacement.
+            dualContainer.post {
+                scheduleStackedMobilePresentationRefresh(presentation) {
+                    stackedMobilePreferences?.getBoolean(KEY_STACKED_MOBILE_SIGNAL_ENABLED, false) == true
+                }
+            }
+            log(
+                Log.DEBUG,
+                TAG,
+                "Added dual mobile signal container for subId=${presentation.subscriptionId}, " +
+                    "parent=${signalContainer.javaClass.name}",
+            )
+        }
     }
 
     private fun resolveDualMobileSignalWidth(signal: ImageView): Int {
@@ -2797,10 +2944,17 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun setDualMobileSignalVisibility(presentation: StackedMobilePresentation, visible: Boolean) {
-        presentation.dualContainer?.visibility = if (visible) View.VISIBLE else View.GONE
-        // The original ImageView remains untouched except for this temporary visibility switch;
-        // SystemUI keeps its drawable and state flows intact for the normal mode.
-        presentation.signal.visibility = if (visible) View.GONE else View.VISIBLE
+        val dualContainer = presentation.dualContainer
+        val replacementReady = dualContainer != null &&
+            presentation.dualSignal?.drawable != null &&
+            dualContainer.parent === presentation.mobileSignalContainer &&
+            dualContainer.isAttachedToWindow &&
+            dualContainer.width > 0 && dualContainer.height > 0
+        dualContainer?.visibility = if (visible) View.VISIBLE else View.GONE
+        // Do not trade a known-good system glyph for an unmeasured replacement.  This is also
+        // important while SystemUI is rebuilding its status-bar hierarchy after configuration
+        // changes.
+        presentation.signal.visibility = if (visible && replacementReady) View.GONE else View.VISIBLE
         requestStackedMobileParentLayout(presentation.root)
     }
 
@@ -4488,15 +4642,32 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     /**
-     * Combination two has three independent surfaces, but they deliberately consume the exact
-     * same preference keys and backdrop APIs as the flashlight/camera shortcut backgrounds.
+     * Combination two has three independent surfaces. By default they follow the shortcut
+     * background, while the widget background page can provide an independent material set.
      */
     private fun applyLockscreenWidgetShortcutSurfaceMaterial(
         view: View,
         preferences: SharedPreferences,
         classLoader: ClassLoader,
     ) {
-        val mode = shortcutBackgroundMode(preferences)
+        val widgetBackgroundMode = preferences.getInt(
+            KEY_LOCKSCREEN_WIDGET_BACKGROUND_MODE,
+            LOCKSCREEN_WIDGET_BACKGROUND_FOLLOW_SHORTCUT,
+        ).coerceIn(
+            LOCKSCREEN_WIDGET_BACKGROUND_FOLLOW_SHORTCUT,
+            LOCKSCREEN_WIDGET_BACKGROUND_SOFT_GLASS,
+        )
+        val followsShortcutBackground =
+            widgetBackgroundMode == LOCKSCREEN_WIDGET_BACKGROUND_FOLLOW_SHORTCUT
+        val mode = if (followsShortcutBackground) {
+            shortcutBackgroundMode(preferences)
+        } else {
+            when (widgetBackgroundMode) {
+                LOCKSCREEN_WIDGET_BACKGROUND_PURE -> SHORTCUT_BACKGROUND_PURE_COLOR
+                LOCKSCREEN_WIDGET_BACKGROUND_ADVANCED -> SHORTCUT_BACKGROUND_ADVANCED_MATERIAL
+                else -> SHORTCUT_BACKGROUND_SOFT_GLASS
+            }
+        }
         val viewClass = View::class.java
         runCatching { viewClass.getMethod("clearMiBackgroundBlendColor").invoke(view) }
         runCatching {
@@ -4513,7 +4684,13 @@ class HyperSystemUiModule : XposedModule() {
             SHORTCUT_BACKGROUND_PURE_COLOR -> {
                 (view as? ImageView)?.setImageDrawable(null)
                 view.background = GradientDrawable().apply {
-                    setColor(preferences.getInt(KEY_SHORTCUT_PURE_COLOR, SHORTCUT_PURE_COLOR))
+                    setColor(
+                        if (followsShortcutBackground) {
+                            preferences.getInt(KEY_SHORTCUT_PURE_COLOR, SHORTCUT_PURE_COLOR)
+                        } else {
+                            preferences.getInt(KEY_LOCKSCREEN_WIDGET_PURE_COLOR, 0x73000000)
+                        },
+                    )
                     cornerRadius = view.height / 2f
                 }
             }
@@ -4531,44 +4708,86 @@ class HyperSystemUiModule : XposedModule() {
                     applyLegacyBackdropMaterial(
                         view = view,
                         opacity = preferences.getInt(
-                            KEY_SHORTCUT_ADVANCED_MATERIAL_OPACITY,
+                            if (followsShortcutBackground) {
+                                KEY_SHORTCUT_ADVANCED_MATERIAL_OPACITY
+                            } else {
+                                KEY_LOCKSCREEN_WIDGET_ADVANCED_MATERIAL_OPACITY
+                            },
                             DEFAULT_ADVANCED_MATERIAL_OPACITY,
                         ).coerceIn(0, 100),
                         blurRadius = preferences.getInt(
-                            KEY_SHORTCUT_ADVANCED_MATERIAL_BLUR_RADIUS,
+                            if (followsShortcutBackground) {
+                                KEY_SHORTCUT_ADVANCED_MATERIAL_BLUR_RADIUS
+                            } else {
+                                KEY_LOCKSCREEN_WIDGET_ADVANCED_MATERIAL_BLUR_RADIUS
+                            },
                             DEFAULT_ADVANCED_MATERIAL_BLUR_RADIUS,
                         ).coerceIn(0, 40),
                         color = preferences.getInt(
-                            KEY_SHORTCUT_ADVANCED_MATERIAL_COLOR,
+                            if (followsShortcutBackground) {
+                                KEY_SHORTCUT_ADVANCED_MATERIAL_COLOR
+                            } else {
+                                KEY_LOCKSCREEN_WIDGET_ADVANCED_MATERIAL_COLOR
+                            },
                             DEFAULT_ADVANCED_MATERIAL_COLOR,
                         ),
-                        showHighlight = preferences.getBoolean(KEY_SHORTCUT_ADVANCED_MATERIAL_HIGHLIGHT, false),
+                        showHighlight = preferences.getBoolean(
+                            if (followsShortcutBackground) {
+                                KEY_SHORTCUT_ADVANCED_MATERIAL_HIGHLIGHT
+                            } else {
+                                KEY_LOCKSCREEN_WIDGET_ADVANCED_MATERIAL_HIGHLIGHT
+                            },
+                            false,
+                        ),
                     )
                 } else {
                     applyLegacyBackdropMaterial(
                         view = view,
                         opacity = preferences.getInt(
-                            KEY_SHORTCUT_SOFT_GLASS_OPACITY,
+                            if (followsShortcutBackground) {
+                                KEY_SHORTCUT_SOFT_GLASS_OPACITY
+                            } else {
+                                KEY_LOCKSCREEN_WIDGET_SOFT_GLASS_OPACITY
+                            },
                             DEFAULT_SOFT_GLASS_OPACITY,
                         ).coerceIn(0, 100),
                         blurRadius = preferences.getInt(
-                            KEY_SHORTCUT_SOFT_GLASS_BACKDROP_BLUR_RADIUS,
+                            if (followsShortcutBackground) {
+                                KEY_SHORTCUT_SOFT_GLASS_BACKDROP_BLUR_RADIUS
+                            } else {
+                                KEY_LOCKSCREEN_WIDGET_SOFT_GLASS_BACKDROP_BLUR_RADIUS
+                            },
                             DEFAULT_SOFT_GLASS_BACKDROP_BLUR_RADIUS,
                         ).coerceIn(0, 40),
-                        color = preferences.getInt(KEY_SHORTCUT_SOFT_GLASS_COLOR, DEFAULT_SOFT_GLASS_COLOR),
+                        color = preferences.getInt(
+                            if (followsShortcutBackground) {
+                                KEY_SHORTCUT_SOFT_GLASS_COLOR
+                            } else {
+                                KEY_LOCKSCREEN_WIDGET_SOFT_GLASS_COLOR
+                            },
+                            DEFAULT_SOFT_GLASS_COLOR,
+                        ),
                         showHighlight = false,
                     )
                     applySystemGlassMaterial(
                         view = view,
                         classLoader = classLoader,
                         blurRadius = preferences.getInt(
-                            KEY_SHORTCUT_SOFT_GLASS_BLUR_RADIUS,
+                            if (followsShortcutBackground) {
+                                KEY_SHORTCUT_SOFT_GLASS_BLUR_RADIUS
+                            } else {
+                                KEY_LOCKSCREEN_WIDGET_SOFT_GLASS_BLUR_RADIUS
+                            },
                             DEFAULT_SOFT_GLASS_BLUR_RADIUS,
                         ).coerceIn(0, 40),
                         luminance = preferences.getFloat(
-                            KEY_SHORTCUT_SOFT_GLASS_LUMINANCE,
+                            if (followsShortcutBackground) {
+                                KEY_SHORTCUT_SOFT_GLASS_LUMINANCE
+                            } else {
+                                KEY_LOCKSCREEN_WIDGET_SOFT_GLASS_LUMINANCE
+                            },
                             DEFAULT_SOFT_GLASS_LUMINANCE,
-                        ),
+                        ).coerceIn(0f, MAX_SHORTCUT_GLASS_LUMINANCE),
                     )
                 }
             }
@@ -5861,6 +6080,83 @@ class HyperSystemUiModule : XposedModule() {
         }.onFailure { error ->
             log(Log.ERROR, TAG, "Could not install lockscreen charging-text hook", error)
         }
+    }
+
+    /**
+     * The target ROM hides the gesture handle at the end of updateNavButtonIcons().  Its DEX
+     * branch selects INVISIBLE when both home and recents are disabled; the documented patch
+     * changes that conditional jump so the VISIBLE branch is always selected.  Intercept that
+     * exact ButtonDispatcher call instead of changing visibility after the vendor method has
+     * finished, as another UI update can otherwise immediately hide the handle again.
+     */
+    private fun installLockscreenWhiteBarHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ): Boolean {
+        return runCatching {
+            val navigationBarViewClass = classLoader.loadClass(NAVIGATION_BAR_VIEW_CLASS)
+            val updateNavButtonIcons = navigationBarViewClass.getDeclaredMethod("updateNavButtonIcons")
+            val getHomeHandle = navigationBarViewClass.getDeclaredMethod("getHomeHandle")
+            val dispatcherClass = getHomeHandle.returnType
+            val setHandleVisibility = dispatcherClass.getDeclaredMethod(
+                "setVisibility",
+                Int::class.javaPrimitiveType,
+            ).apply { isAccessible = true }
+            getHomeHandle.isAccessible = true
+            val idField = dispatcherClass.getDeclaredField("mId").apply { isAccessible = true }
+            val viewsField = dispatcherClass.getDeclaredField("mViews").apply { isAccessible = true }
+            val homeHandleId = classLoader.loadClass("com.android.systemui.R\$id")
+                .getDeclaredField("home_handle")
+                .apply { isAccessible = true }
+                .getInt(null)
+
+            hook(setHandleVisibility)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("lockscreen-white-bar:visibility")
+                .intercept { chain ->
+                    val dispatcher = chain.thisObject
+                    val isHomeHandle = runCatching {
+                        idField.getInt(dispatcher) == homeHandleId
+                    }.getOrDefault(false)
+                    if (
+                        preferences.getBoolean(KEY_LOCKSCREEN_WHITE_BAR_ENABLED, false) &&
+                        isHomeHandle &&
+                        chain.getArg(0) == View.INVISIBLE
+                    ) {
+                        chain.proceedWith(chain.thisObject, arrayOf(View.VISIBLE))
+                    } else {
+                        chain.proceed()
+                    }
+                }
+
+            hook(updateNavButtonIcons)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("lockscreen-white-bar:update")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    if (preferences.getBoolean(KEY_LOCKSCREEN_WHITE_BAR_ENABLED, false)) {
+                        runCatching {
+                            val dispatcher = getHomeHandle.invoke(chain.thisObject)
+                            if (dispatcher != null && idField.getInt(dispatcher) == homeHandleId) {
+                                // Keep the dispatcher state visible as well as its current View;
+                                // addView() reapplies mVisibility when the navigation layout is rebuilt.
+                                setHandleVisibility.invoke(dispatcher, View.VISIBLE)
+                                (viewsField.get(dispatcher) as? Iterable<*>)?.forEach { view ->
+                                    (view as? View)?.visibility = View.VISIBLE
+                                }
+                            }
+                        }.onFailure { error ->
+                            log(Log.DEBUG, TAG, "Could not restore lockscreen white-bar visibility", error)
+                        }
+                    }
+                    result
+                }
+
+            log(Log.INFO, TAG, "Installed lockscreen white-bar hook")
+            true
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install lockscreen white-bar hook", error)
+        }.getOrDefault(false)
     }
 
     private fun installDimensionHooks(preferences: SharedPreferences) {
@@ -7252,6 +7548,13 @@ class HyperSystemUiModule : XposedModule() {
         private const val CLOCK_EFFECT_OVERLAY = 2
         private const val CLOCK_EFFECT_GLASS = 5
         private const val DYNAMIC_ISLAND_BACKGROUND_CLASS = "miui.systemui.dynamicisland.DynamicIslandBackgroundView"
+        private const val DYNAMIC_ISLAND_BASE_CONTENT_CLASS =
+            "miui.systemui.dynamicisland.window.content.DynamicIslandBaseContentView"
+        private const val DYNAMIC_ISLAND_CONTENT_CLASS =
+            "miui.systemui.dynamicisland.window.content.DynamicIslandContentView"
+        private const val DYNAMIC_ISLAND_UPDATE_MINI_BAR_METHOD = "updateMiniBar"
+        private const val DYNAMIC_ISLAND_UPDATE_MINI_BAR_TRANSLATION_METHOD =
+            "updateMiniBarTranslation\$miui_dynamicisland_release"
         private const val PLUGIN_NOTIFICATION_SETTINGS_MANAGER_CLASS =
             "miui.systemui.notification.NotificationSettingsManager"
         private const val SYSTEM_UI_NOTIFICATION_SETTINGS_MANAGER_CLASS =
@@ -7342,6 +7645,8 @@ class HyperSystemUiModule : XposedModule() {
         private const val KEY_ISLAND_WIDTH = "island_width"
         private const val KEY_REMOVE_FOCUS_AND_ISLAND_WHITELIST_LIMIT =
             "remove_focus_and_island_whitelist_limit"
+        private const val KEY_REMOVE_DYNAMIC_ISLAND_MEDIA_MINI_BAR_WHITELIST_LIMIT =
+            "remove_dynamic_island_media_mini_bar_whitelist_limit"
         private const val KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED = "expanded_island_background_enabled"
         private const val KEY_EXPANDED_ISLAND_BACKGROUND_OPACITY = "expanded_island_background_opacity"
         private const val KEY_EXPANDED_ISLAND_GLASS_BLUR_RADIUS = "expanded_island_glass_blur_radius"
@@ -7414,6 +7719,7 @@ class HyperSystemUiModule : XposedModule() {
         private const val KEY_NOTIFICATIONS_IGNORE_FOD = "notifications_ignore_fod"
         private const val KEY_HIDE_LOCKSCREEN_CHARGING_TEXT = "hide_lockscreen_charging_text"
         private const val KEY_LOCKSCREEN_BOTTOM_TEXT_MASK = "lockscreen_bottom_text_mask"
+        private const val KEY_LOCKSCREEN_WHITE_BAR_ENABLED = "lockscreen_white_bar_enabled"
         private const val LOCKSCREEN_TEXT_CHARGING = 1
         private const val LOCKSCREEN_TEXT_DND = 2
         private const val LOCKSCREEN_TEXT_NOTIFICATIONS = 4
@@ -7448,7 +7754,6 @@ class HyperSystemUiModule : XposedModule() {
         private const val KEY_KEEP_SOFT_GLASS_AFTER_GLOBAL_THEME =
             "keep_soft_glass_after_global_theme"
         private const val KEY_REMOVE_CLOCK_MATERIAL_LIMIT = "remove_clock_material_limit"
-        private const val KEY_HIDE_STATUS_BAR_NETWORK_TYPE = "hide_status_bar_network_type"
         private const val KEY_HIDE_STATUS_BAR_WIFI_STANDARD = "hide_status_bar_wifi_standard"
         private const val KEY_HIDE_STATUS_BAR_CLOCK_TEXT = "hide_status_bar_clock_text"
         private const val KEY_HIDE_STATUS_BAR_NETWORK_ACTIVITY = "hide_status_bar_network_activity"
@@ -7460,6 +7765,8 @@ class HyperSystemUiModule : XposedModule() {
         private const val INDEPENDENT_MOBILE_TYPE_TAG = "hyper_system_ui_hook.independent_mobile_type"
         private const val BATTERY_METER_VIEW_CLASS =
             "com.android.systemui.statusbar.views.MiuiBatteryMeterView"
+        private const val NAVIGATION_BAR_VIEW_CLASS =
+            "com.android.systemui.navigationbar.views.NavigationBarView"
         private const val BATTERY_ICON_CLASS =
             "com.android.systemui.statusbar.views.MiuiBatteryMeterIconView"
         private const val BATTERY_INDICATOR_CLASS =
@@ -7513,6 +7820,7 @@ class HyperSystemUiModule : XposedModule() {
         private var fingerprintIconHookInstalled = false
         private var systemUiDepthHookInstalled = false
         private var lockscreenChargingHookInstalled = false
+        private var lockscreenWhiteBarHookInstalled = false
         private var lockscreenShortcutGlassHookInstalled = false
         private var lockscreenWidgetSceneVisibilityHookInstalled = false
         private var lockscreenPinCircleBackgroundHookInstalled = false

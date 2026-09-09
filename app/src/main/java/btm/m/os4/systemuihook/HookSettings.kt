@@ -13,6 +13,8 @@ internal const val KEY_SYSTEM_UPDATE_OTA_LIMIT_REMOVED = "system_update_ota_limi
 internal const val KEY_SYSTEM_UPDATE_VERSION_SPOOF_ENABLED = "system_update_version_spoof_enabled"
 internal const val KEY_SYSTEM_UPDATE_VERSION = "system_update_version"
 internal const val KEY_SYSTEM_UPDATE_SOTA_VERSION = "system_update_sota_version"
+internal const val KEY_UNLOCK_NEVER_SCREEN_TIMEOUT = "unlock_never_screen_timeout"
+internal const val KEY_SHOW_GOOGLE_SERVICE_ENTRY = "show_google_service_entry"
 internal const val KEY_STACKED_MOBILE_SIGNAL_ENABLED = "stacked_mobile_signal_enabled"
 internal const val KEY_STACKED_MOBILE_SIGNAL_SCALE = "stacked_mobile_signal_scale"
 internal const val KEY_STACKED_MOBILE_SIGNAL_VERTICAL_OFFSET = "stacked_mobile_signal_vertical_offset"
@@ -114,6 +116,7 @@ data class HookSettings(
     val controlCenterButton: GlassTuning = GlassTuning(),
     val controlCenterSlider: GlassTuning = GlassTuning(),
     val removeFocusAndIslandWhitelistLimit: Boolean = false,
+    val removeDynamicIslandMediaMiniBarWhitelistLimit: Boolean = false,
     val islandEnabled: Boolean = false,
     val islandWidth: Int = 108,
     val expandedIslandBackgroundEnabled: Boolean = false,
@@ -129,9 +132,13 @@ data class HookSettings(
     val superXiaoAiVoiceSafetyUnblocked: Boolean = false,
     val superXiaoAiKeyboardStyleEnabled: Boolean = false,
     val superXiaoAiKeyboardColorMode: Int = 0,
-    val superXiaoAiKeyboardCornerRadius: Int = 16,
-    val superXiaoAiKeyboardOpacity: Int = 85,
-    val superXiaoAiKeyboardBlur: Int = 50,
+    val superXiaoAiKeyboardCornerRadius: Float = 30f,
+    val superXiaoAiKeyboardOpacity: Int = 56,
+    val superXiaoAiKeyboardBlur: Float = 15f,
+    val superXiaoAiKeyboardHighlight: Int = 100,
+    val superXiaoAiKeyboardShadow: Int = 10,
+    val superXiaoAiKeyboardStrokeWidth: Float = 2f,
+    val superXiaoAiKeyboardBottomHighlight: Int = 100,
     val clockEnabled: Boolean = false,
     val clockSize: Float = 14.8f,
     val paddingEndEnabled: Boolean = false,
@@ -171,6 +178,7 @@ data class HookSettings(
     val lockscreenTemplateLimitCustom: Int = 50,
     /** Bit mask: charging=1, do-not-disturb=2, notification count=4. */
     val lockscreenBottomTextMask: Int = 0,
+    val lockscreenWhiteBarEnabled: Boolean = false,
     val lockscreenPinCircleBackgroundEnabled: Boolean = false,
     val lockscreenPinCircleRowSpacing: Float = 0f,
     val lockscreenShortcutBackgroundMode: Int = 0,
@@ -212,6 +220,17 @@ data class HookSettings(
     val lockscreenWidgetPreviewVersion: Long = 0L,
     val lockscreenWidgetCombination: Int = LOCKSCREEN_WIDGET_COMBINATION_ONE,
     val lockscreenWidgetBatteryMaterialMode: Int = LOCKSCREEN_WIDGET_BATTERY_MATERIAL_PURE,
+    val lockscreenWidgetBackgroundMode: Int = LOCKSCREEN_WIDGET_BACKGROUND_FOLLOW_SHORTCUT,
+    val lockscreenWidgetPureColor: Int = 0x73000000,
+    val lockscreenWidgetAdvancedMaterialColor: Int = 0xFFFFFFFF.toInt(),
+    val lockscreenWidgetAdvancedMaterialOpacity: Int = 14,
+    val lockscreenWidgetAdvancedMaterialBlurRadius: Int = 80,
+    val lockscreenWidgetAdvancedMaterialHighlight: Boolean = false,
+    val lockscreenWidgetSoftGlassColor: Int = 0xFFFFFFFF.toInt(),
+    val lockscreenWidgetSoftGlassOpacity: Int = 10,
+    val lockscreenWidgetSoftGlassBackdropBlurRadius: Int = 80,
+    val lockscreenWidgetSoftGlassBlurRadius: Int = 36,
+    val lockscreenWidgetSoftGlassLuminance: Float = 0.14f,
     val lockscreenWidgetColorMode: Int = LOCKSCREEN_WIDGET_COLOR_AUTO,
     val lockscreenWidgetNotificationAvoid: Boolean = true,
     /** 0=none, 1=PNG, 2=SVG or Android Vector XML. */
@@ -234,7 +253,6 @@ data class HookSettings(
     val miniPlayerSoftGlassLuminance: Float = 0.14f,
     val keepSoftGlassAfterGlobalTheme: Boolean = false,
     val removeClockMaterialLimit: Boolean = false,
-    val hideStatusBarNetworkType: Boolean = false,
     val hideStatusBarWifiStandard: Boolean = false,
     val hideStatusBarClockText: Boolean = false,
     val hideStatusBarNetworkActivity: Boolean = false,
@@ -262,6 +280,8 @@ data class HookSettings(
     val systemUpdateVersionSpoofEnabled: Boolean = false,
     val systemUpdateVersion: String = "",
     val systemUpdateSotaVersion: String = "",
+    val unlockNeverScreenTimeout: Boolean = false,
+    val showGoogleServiceEntry: Boolean = false,
     val themeMode: String = "system",
     val navigationStyle: String = "hyper_os",
     val navigationLabelMode: String = "icon_and_text",
@@ -365,6 +385,8 @@ private const val KEY_CONTROL_CENTER_BUTTON = "control_center_button_glass"
 private const val KEY_CONTROL_CENTER_SLIDER = "control_center_slider_glass"
 private const val KEY_REMOVE_FOCUS_AND_ISLAND_WHITELIST_LIMIT =
     "remove_focus_and_island_whitelist_limit"
+private const val KEY_REMOVE_DYNAMIC_ISLAND_MEDIA_MINI_BAR_WHITELIST_LIMIT =
+    "remove_dynamic_island_media_mini_bar_whitelist_limit"
 private const val KEY_ISLAND_ENABLED = "island_enabled"
 private const val KEY_ISLAND_WIDTH = "island_width"
 private const val KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED = "expanded_island_background_enabled"
@@ -384,6 +406,10 @@ internal const val KEY_SUPER_XIAOAI_KEYBOARD_COLOR_MODE = "super_xiaoai_keyboard
 internal const val KEY_SUPER_XIAOAI_KEYBOARD_CORNER_RADIUS = "super_xiaoai_keyboard_corner_radius"
 internal const val KEY_SUPER_XIAOAI_KEYBOARD_OPACITY = "super_xiaoai_keyboard_opacity"
 internal const val KEY_SUPER_XIAOAI_KEYBOARD_BLUR = "super_xiaoai_keyboard_blur"
+internal const val KEY_SUPER_XIAOAI_KEYBOARD_HIGHLIGHT = "super_xiaoai_keyboard_highlight"
+internal const val KEY_SUPER_XIAOAI_KEYBOARD_SHADOW = "super_xiaoai_keyboard_shadow"
+internal const val KEY_SUPER_XIAOAI_KEYBOARD_STROKE_WIDTH = "super_xiaoai_keyboard_stroke_width"
+internal const val KEY_SUPER_XIAOAI_KEYBOARD_BOTTOM_HIGHLIGHT = "super_xiaoai_keyboard_bottom_highlight"
 private const val KEY_CLOCK_ENABLED = "clock_enabled"
 private const val KEY_CLOCK_SIZE = "clock_size"
 private const val KEY_PADDING_END_ENABLED = "padding_end_enabled"
@@ -424,6 +450,7 @@ private const val KEY_FINGERPRINT_HIDE_MODE = "fingerprint_hide_mode"
 private const val KEY_NOTIFICATIONS_IGNORE_FOD = "notifications_ignore_fod"
 private const val KEY_HIDE_LOCKSCREEN_CHARGING_TEXT = "hide_lockscreen_charging_text"
 private const val KEY_LOCKSCREEN_BOTTOM_TEXT_MASK = "lockscreen_bottom_text_mask"
+private const val KEY_LOCKSCREEN_WHITE_BAR_ENABLED = "lockscreen_white_bar_enabled"
 const val KEY_LOCKSCREEN_PIN_CIRCLE_BACKGROUND_ENABLED =
     "lockscreen_pin_circle_background_enabled"
 const val KEY_LOCKSCREEN_PIN_CIRCLE_ROW_SPACING = "lockscreen_pin_circle_row_spacing"
@@ -469,6 +496,24 @@ internal const val KEY_LOCKSCREEN_WIDGET_ORDER = "lockscreen_widget_order"
 internal const val KEY_LOCKSCREEN_WIDGET_PREVIEW_VERSION = "lockscreen_widget_preview_version"
 internal const val KEY_LOCKSCREEN_WIDGET_COMBINATION = "lockscreen_widget_combination"
 internal const val KEY_LOCKSCREEN_WIDGET_BATTERY_MATERIAL_MODE = "lockscreen_widget_battery_material_mode"
+internal const val KEY_LOCKSCREEN_WIDGET_BACKGROUND_MODE = "lockscreen_widget_background_mode"
+internal const val KEY_LOCKSCREEN_WIDGET_PURE_COLOR = "lockscreen_widget_pure_color"
+internal const val KEY_LOCKSCREEN_WIDGET_ADVANCED_MATERIAL_COLOR =
+    "lockscreen_widget_advanced_material_color"
+internal const val KEY_LOCKSCREEN_WIDGET_ADVANCED_MATERIAL_OPACITY =
+    "lockscreen_widget_advanced_material_opacity"
+internal const val KEY_LOCKSCREEN_WIDGET_ADVANCED_MATERIAL_BLUR_RADIUS =
+    "lockscreen_widget_advanced_material_blur_radius"
+internal const val KEY_LOCKSCREEN_WIDGET_ADVANCED_MATERIAL_HIGHLIGHT =
+    "lockscreen_widget_advanced_material_highlight"
+internal const val KEY_LOCKSCREEN_WIDGET_SOFT_GLASS_COLOR = "lockscreen_widget_soft_glass_color"
+internal const val KEY_LOCKSCREEN_WIDGET_SOFT_GLASS_OPACITY = "lockscreen_widget_soft_glass_opacity"
+internal const val KEY_LOCKSCREEN_WIDGET_SOFT_GLASS_BACKDROP_BLUR_RADIUS =
+    "lockscreen_widget_soft_glass_backdrop_blur_radius"
+internal const val KEY_LOCKSCREEN_WIDGET_SOFT_GLASS_BLUR_RADIUS =
+    "lockscreen_widget_soft_glass_blur_radius"
+internal const val KEY_LOCKSCREEN_WIDGET_SOFT_GLASS_LUMINANCE =
+    "lockscreen_widget_soft_glass_luminance"
 internal const val KEY_LOCKSCREEN_WIDGET_COLOR_MODE = "lockscreen_widget_color_mode"
 internal const val KEY_LOCKSCREEN_WIDGET_NOTIFICATION_AVOID = "lockscreen_widget_notification_avoid"
 internal const val KEY_LOCKSCREEN_WIDGET_SIGNATURE_TYPE = "lockscreen_widget_signature_type"
@@ -480,6 +525,10 @@ internal const val LOCKSCREEN_WIDGET_SIGNATURE_SLOT = "lockscreen_widget_signatu
 internal const val LOCKSCREEN_WIDGET_BATTERY_MATERIAL_PURE = 0
 internal const val LOCKSCREEN_WIDGET_BATTERY_MATERIAL_ADVANCED = 1
 internal const val LOCKSCREEN_WIDGET_BATTERY_MATERIAL_SOFT = 2
+internal const val LOCKSCREEN_WIDGET_BACKGROUND_FOLLOW_SHORTCUT = 0
+internal const val LOCKSCREEN_WIDGET_BACKGROUND_PURE = 1
+internal const val LOCKSCREEN_WIDGET_BACKGROUND_ADVANCED = 2
+internal const val LOCKSCREEN_WIDGET_BACKGROUND_SOFT_GLASS = 3
 internal const val LOCKSCREEN_WIDGET_COMBINATION_ONE = 0
 internal const val LOCKSCREEN_WIDGET_COMBINATION_TWO = 1
 /** The two original combination-one cards remain distinct widgets in the editor. */
@@ -529,7 +578,6 @@ private const val KEY_MINI_PLAYER_SOFT_GLASS_BLUR_RADIUS = "mini_player_soft_gla
 private const val KEY_MINI_PLAYER_SOFT_GLASS_LUMINANCE = "mini_player_soft_glass_luminance"
 private const val KEY_KEEP_SOFT_GLASS_AFTER_GLOBAL_THEME = "keep_soft_glass_after_global_theme"
 private const val KEY_REMOVE_CLOCK_MATERIAL_LIMIT = "remove_clock_material_limit"
-private const val KEY_HIDE_STATUS_BAR_NETWORK_TYPE = "hide_status_bar_network_type"
 private const val KEY_HIDE_STATUS_BAR_WIFI_STANDARD = "hide_status_bar_wifi_standard"
 private const val KEY_HIDE_STATUS_BAR_CLOCK_TEXT = "hide_status_bar_clock_text"
 private const val KEY_HIDE_STATUS_BAR_NETWORK_ACTIVITY = "hide_status_bar_network_activity"
@@ -657,6 +705,11 @@ internal fun SharedPreferences.readLockscreenWidgetOrder(itemMask: Int = readLoc
         }
 }
 
+private fun SharedPreferences.getFloatCompat(key: String, default: Float): Float =
+    runCatching { getFloat(key, default) }.getOrElse {
+        runCatching { getInt(key, default.toInt()).toFloat() }.getOrDefault(default)
+    }
+
 private fun SharedPreferences.toSettings(): HookSettings {
     val statusDimensionsAreDeltas = getBoolean(KEY_STATUS_DIMENSION_DELTAS_V1, false)
     val oldPaddingEnd = getFloat(KEY_PADDING_END, 6f).coerceIn(0f, 32f)
@@ -693,6 +746,10 @@ private fun SharedPreferences.toSettings(): HookSettings {
     controlCenterSlider = getGlassTuning(KEY_CONTROL_CENTER_SLIDER),
     removeFocusAndIslandWhitelistLimit =
         getBoolean(KEY_REMOVE_FOCUS_AND_ISLAND_WHITELIST_LIMIT, false),
+    removeDynamicIslandMediaMiniBarWhitelistLimit = getBoolean(
+        KEY_REMOVE_DYNAMIC_ISLAND_MEDIA_MINI_BAR_WHITELIST_LIMIT,
+        false,
+    ),
     islandEnabled = getBoolean(KEY_ISLAND_ENABLED, false),
     islandWidth = getInt(KEY_ISLAND_WIDTH, 108).coerceIn(108, 190),
     expandedIslandBackgroundEnabled = getBoolean(KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED, false),
@@ -711,9 +768,13 @@ private fun SharedPreferences.toSettings(): HookSettings {
     superXiaoAiVoiceSafetyUnblocked = getBoolean(KEY_SUPER_XIAOAI_VOICE_SAFETY_UNBLOCKED, false),
     superXiaoAiKeyboardStyleEnabled = getBoolean(KEY_SUPER_XIAOAI_KEYBOARD_STYLE_ENABLED, false),
     superXiaoAiKeyboardColorMode = getInt(KEY_SUPER_XIAOAI_KEYBOARD_COLOR_MODE, 0).coerceIn(0, 2),
-    superXiaoAiKeyboardCornerRadius = getInt(KEY_SUPER_XIAOAI_KEYBOARD_CORNER_RADIUS, 16).coerceIn(0, 48),
-    superXiaoAiKeyboardOpacity = getInt(KEY_SUPER_XIAOAI_KEYBOARD_OPACITY, 85).coerceIn(0, 100),
-    superXiaoAiKeyboardBlur = getInt(KEY_SUPER_XIAOAI_KEYBOARD_BLUR, 50).coerceIn(0, 100),
+    superXiaoAiKeyboardCornerRadius = getFloatCompat(KEY_SUPER_XIAOAI_KEYBOARD_CORNER_RADIUS, 30f).coerceIn(0f, 48f),
+    superXiaoAiKeyboardOpacity = getInt(KEY_SUPER_XIAOAI_KEYBOARD_OPACITY, 56).coerceIn(0, 100),
+    superXiaoAiKeyboardBlur = getFloatCompat(KEY_SUPER_XIAOAI_KEYBOARD_BLUR, 15f).coerceIn(0f, 45f),
+    superXiaoAiKeyboardHighlight = getInt(KEY_SUPER_XIAOAI_KEYBOARD_HIGHLIGHT, 100).coerceIn(0, 100),
+    superXiaoAiKeyboardShadow = getInt(KEY_SUPER_XIAOAI_KEYBOARD_SHADOW, 10).coerceIn(0, 100),
+    superXiaoAiKeyboardStrokeWidth = getFloatCompat(KEY_SUPER_XIAOAI_KEYBOARD_STROKE_WIDTH, 2f).coerceIn(0f, 4f),
+    superXiaoAiKeyboardBottomHighlight = getInt(KEY_SUPER_XIAOAI_KEYBOARD_BOTTOM_HIGHLIGHT, 100).coerceIn(0, 100),
     clockEnabled = getBoolean(KEY_CLOCK_ENABLED, false),
     clockSize = getFloat(KEY_CLOCK_SIZE, 14.8f).coerceIn(10f, 24f),
     paddingEndEnabled = getBoolean(KEY_PADDING_END_ENABLED, false),
@@ -793,6 +854,7 @@ private fun SharedPreferences.toSettings(): HookSettings {
             !getBoolean(KEY_LOCKSCREEN_MINI_PLAYER_ENABLED, false)
         ) 1 else 0
     },
+    lockscreenWhiteBarEnabled = getBoolean(KEY_LOCKSCREEN_WHITE_BAR_ENABLED, false),
     lockscreenPinCircleBackgroundEnabled = getBoolean(
         KEY_LOCKSCREEN_PIN_CIRCLE_BACKGROUND_ENABLED,
         false,
@@ -869,6 +931,50 @@ private fun SharedPreferences.toSettings(): HookSettings {
         LOCKSCREEN_WIDGET_BATTERY_MATERIAL_PURE,
         LOCKSCREEN_WIDGET_BATTERY_MATERIAL_SOFT,
     ),
+    lockscreenWidgetBackgroundMode = getInt(
+        KEY_LOCKSCREEN_WIDGET_BACKGROUND_MODE,
+        LOCKSCREEN_WIDGET_BACKGROUND_FOLLOW_SHORTCUT,
+    ).coerceIn(
+        LOCKSCREEN_WIDGET_BACKGROUND_FOLLOW_SHORTCUT,
+        LOCKSCREEN_WIDGET_BACKGROUND_SOFT_GLASS,
+    ),
+    lockscreenWidgetPureColor = getInt(KEY_LOCKSCREEN_WIDGET_PURE_COLOR, 0x73000000),
+    lockscreenWidgetAdvancedMaterialColor = getInt(
+        KEY_LOCKSCREEN_WIDGET_ADVANCED_MATERIAL_COLOR,
+        0xFFFFFFFF.toInt(),
+    ),
+    lockscreenWidgetAdvancedMaterialOpacity = getInt(
+        KEY_LOCKSCREEN_WIDGET_ADVANCED_MATERIAL_OPACITY,
+        14,
+    ).coerceIn(0, 100),
+    lockscreenWidgetAdvancedMaterialBlurRadius = getInt(
+        KEY_LOCKSCREEN_WIDGET_ADVANCED_MATERIAL_BLUR_RADIUS,
+        10,
+    ).coerceIn(0, 40),
+    lockscreenWidgetAdvancedMaterialHighlight = getBoolean(
+        KEY_LOCKSCREEN_WIDGET_ADVANCED_MATERIAL_HIGHLIGHT,
+        false,
+    ),
+    lockscreenWidgetSoftGlassColor = getInt(
+        KEY_LOCKSCREEN_WIDGET_SOFT_GLASS_COLOR,
+        0xFFFFFFFF.toInt(),
+    ),
+    lockscreenWidgetSoftGlassOpacity = getInt(
+        KEY_LOCKSCREEN_WIDGET_SOFT_GLASS_OPACITY,
+        10,
+    ).coerceIn(0, 100),
+    lockscreenWidgetSoftGlassBackdropBlurRadius = getInt(
+        KEY_LOCKSCREEN_WIDGET_SOFT_GLASS_BACKDROP_BLUR_RADIUS,
+        10,
+    ).coerceIn(0, 40),
+    lockscreenWidgetSoftGlassBlurRadius = getInt(
+        KEY_LOCKSCREEN_WIDGET_SOFT_GLASS_BLUR_RADIUS,
+        10,
+    ).coerceIn(0, 40),
+    lockscreenWidgetSoftGlassLuminance = getFloat(
+        KEY_LOCKSCREEN_WIDGET_SOFT_GLASS_LUMINANCE,
+        0.14f,
+    ).coerceIn(0f, 0.4f),
     lockscreenWidgetColorMode = getInt(
         KEY_LOCKSCREEN_WIDGET_COLOR_MODE,
         LOCKSCREEN_WIDGET_COLOR_AUTO,
@@ -913,7 +1019,6 @@ private fun SharedPreferences.toSettings(): HookSettings {
         .coerceIn(0f, 0.4f),
     keepSoftGlassAfterGlobalTheme = getBoolean(KEY_KEEP_SOFT_GLASS_AFTER_GLOBAL_THEME, false),
     removeClockMaterialLimit = getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false),
-    hideStatusBarNetworkType = getBoolean(KEY_HIDE_STATUS_BAR_NETWORK_TYPE, false),
     hideStatusBarWifiStandard = getBoolean(KEY_HIDE_STATUS_BAR_WIFI_STANDARD, false),
     hideStatusBarClockText = getBoolean(KEY_HIDE_STATUS_BAR_CLOCK_TEXT, false),
     hideStatusBarNetworkActivity = getBoolean(KEY_HIDE_STATUS_BAR_NETWORK_ACTIVITY, false),
@@ -946,6 +1051,8 @@ private fun SharedPreferences.toSettings(): HookSettings {
     systemUpdateVersionSpoofEnabled = getBoolean(KEY_SYSTEM_UPDATE_VERSION_SPOOF_ENABLED, false),
     systemUpdateVersion = getString(KEY_SYSTEM_UPDATE_VERSION, "").orEmpty().take(128),
     systemUpdateSotaVersion = getString(KEY_SYSTEM_UPDATE_SOTA_VERSION, "").orEmpty().take(128),
+    unlockNeverScreenTimeout = getBoolean(KEY_UNLOCK_NEVER_SCREEN_TIMEOUT, false),
+    showGoogleServiceEntry = getBoolean(KEY_SHOW_GOOGLE_SERVICE_ENTRY, false),
     themeMode = getString(KEY_THEME_MODE, "system").orEmpty().ifBlank { "system" },
     navigationStyle = getString(KEY_NAVIGATION_STYLE, "hyper_os").orEmpty().ifBlank { "hyper_os" },
     navigationLabelMode = getString(KEY_NAVIGATION_LABEL_MODE, "icon_and_text").orEmpty().ifBlank { "icon_and_text" },
@@ -1113,6 +1220,10 @@ private fun SharedPreferences.write(value: HookSettings) {
             KEY_REMOVE_FOCUS_AND_ISLAND_WHITELIST_LIMIT,
             value.removeFocusAndIslandWhitelistLimit,
         )
+        .putBoolean(
+            KEY_REMOVE_DYNAMIC_ISLAND_MEDIA_MINI_BAR_WHITELIST_LIMIT,
+            value.removeDynamicIslandMediaMiniBarWhitelistLimit,
+        )
         .putBoolean(KEY_ISLAND_ENABLED, value.islandEnabled)
         .putInt(KEY_ISLAND_WIDTH, value.islandWidth)
         .putBoolean(KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED, value.expandedIslandBackgroundEnabled)
@@ -1131,9 +1242,13 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putBoolean(KEY_SUPER_XIAOAI_VOICE_SAFETY_UNBLOCKED, value.superXiaoAiVoiceSafetyUnblocked)
         .putBoolean(KEY_SUPER_XIAOAI_KEYBOARD_STYLE_ENABLED, value.superXiaoAiKeyboardStyleEnabled)
         .putInt(KEY_SUPER_XIAOAI_KEYBOARD_COLOR_MODE, value.superXiaoAiKeyboardColorMode)
-        .putInt(KEY_SUPER_XIAOAI_KEYBOARD_CORNER_RADIUS, value.superXiaoAiKeyboardCornerRadius)
+        .putFloat(KEY_SUPER_XIAOAI_KEYBOARD_CORNER_RADIUS, value.superXiaoAiKeyboardCornerRadius)
         .putInt(KEY_SUPER_XIAOAI_KEYBOARD_OPACITY, value.superXiaoAiKeyboardOpacity)
-        .putInt(KEY_SUPER_XIAOAI_KEYBOARD_BLUR, value.superXiaoAiKeyboardBlur)
+        .putFloat(KEY_SUPER_XIAOAI_KEYBOARD_BLUR, value.superXiaoAiKeyboardBlur)
+        .putInt(KEY_SUPER_XIAOAI_KEYBOARD_HIGHLIGHT, value.superXiaoAiKeyboardHighlight)
+        .putInt(KEY_SUPER_XIAOAI_KEYBOARD_SHADOW, value.superXiaoAiKeyboardShadow)
+        .putFloat(KEY_SUPER_XIAOAI_KEYBOARD_STROKE_WIDTH, value.superXiaoAiKeyboardStrokeWidth)
+        .putInt(KEY_SUPER_XIAOAI_KEYBOARD_BOTTOM_HIGHLIGHT, value.superXiaoAiKeyboardBottomHighlight)
         .putBoolean(KEY_CLOCK_ENABLED, value.clockEnabled)
         .putFloat(KEY_CLOCK_SIZE, value.clockSize)
         .putBoolean(KEY_STATUS_DIMENSION_DELTAS_V1, true)
@@ -1190,6 +1305,7 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putInt(KEY_LOCKSCREEN_TEMPLATE_LIMIT_CUSTOM, value.lockscreenTemplateLimitCustom.coerceIn(20, 200))
         .putInt(KEY_LOCKSCREEN_BOTTOM_TEXT_MASK, value.lockscreenBottomTextMask.coerceIn(0, 7))
         .putBoolean(KEY_HIDE_LOCKSCREEN_CHARGING_TEXT, value.lockscreenBottomTextMask and 1 != 0)
+        .putBoolean(KEY_LOCKSCREEN_WHITE_BAR_ENABLED, value.lockscreenWhiteBarEnabled)
         .putBoolean(
             KEY_LOCKSCREEN_PIN_CIRCLE_BACKGROUND_ENABLED,
             value.lockscreenPinCircleBackgroundEnabled,
@@ -1264,6 +1380,47 @@ private fun SharedPreferences.write(value: HookSettings) {
             ),
         )
         .putInt(
+            KEY_LOCKSCREEN_WIDGET_BACKGROUND_MODE,
+            value.lockscreenWidgetBackgroundMode.coerceIn(
+                LOCKSCREEN_WIDGET_BACKGROUND_FOLLOW_SHORTCUT,
+                LOCKSCREEN_WIDGET_BACKGROUND_SOFT_GLASS,
+            ),
+        )
+        .putInt(KEY_LOCKSCREEN_WIDGET_PURE_COLOR, value.lockscreenWidgetPureColor)
+        .putInt(
+            KEY_LOCKSCREEN_WIDGET_ADVANCED_MATERIAL_COLOR,
+            value.lockscreenWidgetAdvancedMaterialColor,
+        )
+        .putInt(
+            KEY_LOCKSCREEN_WIDGET_ADVANCED_MATERIAL_OPACITY,
+            value.lockscreenWidgetAdvancedMaterialOpacity.coerceIn(0, 100),
+        )
+        .putInt(
+            KEY_LOCKSCREEN_WIDGET_ADVANCED_MATERIAL_BLUR_RADIUS,
+            value.lockscreenWidgetAdvancedMaterialBlurRadius.coerceIn(0, 40),
+        )
+        .putBoolean(
+            KEY_LOCKSCREEN_WIDGET_ADVANCED_MATERIAL_HIGHLIGHT,
+            value.lockscreenWidgetAdvancedMaterialHighlight,
+        )
+        .putInt(KEY_LOCKSCREEN_WIDGET_SOFT_GLASS_COLOR, value.lockscreenWidgetSoftGlassColor)
+        .putInt(
+            KEY_LOCKSCREEN_WIDGET_SOFT_GLASS_OPACITY,
+            value.lockscreenWidgetSoftGlassOpacity.coerceIn(0, 100),
+        )
+        .putInt(
+            KEY_LOCKSCREEN_WIDGET_SOFT_GLASS_BACKDROP_BLUR_RADIUS,
+            value.lockscreenWidgetSoftGlassBackdropBlurRadius.coerceIn(0, 40),
+        )
+        .putInt(
+            KEY_LOCKSCREEN_WIDGET_SOFT_GLASS_BLUR_RADIUS,
+            value.lockscreenWidgetSoftGlassBlurRadius.coerceIn(0, 40),
+        )
+        .putFloat(
+            KEY_LOCKSCREEN_WIDGET_SOFT_GLASS_LUMINANCE,
+            value.lockscreenWidgetSoftGlassLuminance.coerceIn(0f, 0.4f),
+        )
+        .putInt(
             KEY_LOCKSCREEN_WIDGET_COLOR_MODE,
             value.lockscreenWidgetColorMode.coerceIn(
                 LOCKSCREEN_WIDGET_COLOR_LIGHT,
@@ -1300,7 +1457,6 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putFloat(KEY_MINI_PLAYER_SOFT_GLASS_LUMINANCE, value.miniPlayerSoftGlassLuminance)
         .putBoolean(KEY_KEEP_SOFT_GLASS_AFTER_GLOBAL_THEME, value.keepSoftGlassAfterGlobalTheme)
         .putBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, value.removeClockMaterialLimit)
-        .putBoolean(KEY_HIDE_STATUS_BAR_NETWORK_TYPE, value.hideStatusBarNetworkType)
         .putBoolean(KEY_HIDE_STATUS_BAR_WIFI_STANDARD, value.hideStatusBarWifiStandard)
         .putBoolean(KEY_HIDE_STATUS_BAR_CLOCK_TEXT, value.hideStatusBarClockText)
         .putBoolean(KEY_HIDE_STATUS_BAR_NETWORK_ACTIVITY, value.hideStatusBarNetworkActivity)
@@ -1345,6 +1501,8 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putBoolean(KEY_SYSTEM_UPDATE_VERSION_SPOOF_ENABLED, value.systemUpdateVersionSpoofEnabled)
         .putString(KEY_SYSTEM_UPDATE_VERSION, value.systemUpdateVersion.take(128))
         .putString(KEY_SYSTEM_UPDATE_SOTA_VERSION, value.systemUpdateSotaVersion.take(128))
+        .putBoolean(KEY_UNLOCK_NEVER_SCREEN_TIMEOUT, value.unlockNeverScreenTimeout)
+        .putBoolean(KEY_SHOW_GOOGLE_SERVICE_ENTRY, value.showGoogleServiceEntry)
         .putString(KEY_THEME_MODE, value.themeMode)
         .putString(KEY_NAVIGATION_STYLE, value.navigationStyle)
         .putString(KEY_NAVIGATION_LABEL_MODE, value.navigationLabelMode)

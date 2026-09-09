@@ -4,6 +4,7 @@ package btm.m.os4.systemuihook
 
 import android.content.SharedPreferences
 import android.app.Activity
+import android.app.admin.DevicePolicyManager
 import android.content.Context
 import android.content.res.Resources
 import android.content.res.TypedArray
@@ -28,8 +29,15 @@ class SettingsDeviceModule : XposedModule() {
         if (param.packageName != SETTINGS_PACKAGE) return
         settingsApplicationContext = currentApplicationContext()
         val preferences = getRemotePreferences(DEVICE_PROFILE_PREFERENCES)
+        val hookPreferences = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
         val appearance = getRemotePreferences(SETTINGS_APPEARANCE_PREFERENCES)
         runCatching {
+            if (hookPreferences.getBoolean(KEY_UNLOCK_NEVER_SCREEN_TIMEOUT, false)) {
+                installNeverScreenTimeoutHooks(param.defaultClassLoader)
+            }
+            if (hookPreferences.getBoolean(KEY_SHOW_GOOGLE_SERVICE_ENTRY, false)) {
+                installGoogleServiceEntryHook(param.defaultClassLoader)
+            }
             installCardBindingHook(param.defaultClassLoader, preferences)
             installDirectDetailHooks(param.defaultClassLoader, preferences)
             installCpuIconHook(param.defaultClassLoader, preferences)
@@ -63,6 +71,304 @@ class SettingsDeviceModule : XposedModule() {
         }
     }
 
+    private fun installNeverScreenTimeoutHooks(classLoader: ClassLoader) {
+        runCatching {
+            val type = classLoader.loadClass("com.android.settings.KeyguardTimeoutDropDownPreference")
+            type.declaredMethods.firstOrNull { it.name == "disableUnusableTimeouts" && it.parameterCount == 0 }
+                ?.let { method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("settings-screen-timeout:unlock-never-filter")
+                        .intercept { chain ->
+                            val preference = chain.thisObject
+                            val context = fieldContext(preference) ?: settingsApplicationContext
+                            val wasNever = context?.let {
+                                android.provider.Settings.System.getLong(
+                                    it.contentResolver,
+                                    "screen_off_timeout",
+                                    DEFAULT_SCREEN_TIMEOUT,
+                                ) == NEVER_SCREEN_TIMEOUT
+                            } == true
+                            val result = chain.proceed()
+                            if (context != null && canExposeNeverScreenTimeout(context) && !isDisabledByAdmin(preference)) {
+                                if (wasNever) {
+                                    android.provider.Settings.System.putInt(
+                                        context.contentResolver,
+                                        "screen_off_timeout",
+                                        NEVER_SCREEN_TIMEOUT.toInt(),
+                                    )
+                                }
+                                appendTimeoutOptions(preference, context)
+                            }
+                            result
+                        }
+                }
+            type.declaredMethods.firstOrNull { it.name == "updateTimeoutPreferenceSummary" && it.parameterCount == 0 }
+                ?.let { method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("settings-screen-timeout:preserve-never")
+                        .intercept { chain ->
+                            val context = fieldContext(chain.thisObject) ?: settingsApplicationContext
+                            val current = context?.let {
+                                android.provider.Settings.System.getLong(
+                                    it.contentResolver,
+                                    "screen_off_timeout",
+                                    DEFAULT_SCREEN_TIMEOUT,
+                                )
+                            }
+                            if (current == NEVER_SCREEN_TIMEOUT) null else chain.proceed()
+                        }
+                }
+        }.onFailure { error -> log(Log.WARN, TAG, "Could not hook legacy screen timeout", error) }
+
+        runCatching {
+            val type = classLoader.loadClass("com.android.settings.display.ScreenTimeoutDialogActivity")
+            type.declaredMethods.firstOrNull { it.name == "disableUnusableTimeouts" && it.parameterCount == 0 }
+                ?.let { method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("settings-screen-timeout:unlock-never-dialog")
+                        .intercept { chain ->
+                            val result = chain.proceed()
+                            val activity = chain.thisObject
+                            val context = activity as? Context ?: settingsApplicationContext
+                            if (context != null && canExposeNeverScreenTimeout(context)) {
+                                appendDialogTimeoutOptions(activity, context)
+                            }
+                            result
+                        }
+                }
+        }.onFailure { error -> log(Log.DEBUG, TAG, "Screen timeout dialog unavailable", error) }
+
+        runCatching {
+            val type = classLoader.loadClass("com.android.settings.display.ScreenTimeoutSettings")
+            type.declaredMethods.firstOrNull { it.name == "getCandidates" && it.parameterCount == 0 }
+                ?.let { method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("settings-screen-timeout:unlock-more-candidates")
+                        .intercept { chain ->
+                            val result = chain.proceed()
+                            val context = fieldContext(chain.thisObject) ?: settingsApplicationContext
+                            if (context != null && canExposeNeverScreenTimeout(context)) {
+                                appendScreenTimeoutCandidates(result, classLoader, context)
+                            } else {
+                                result
+                            }
+                        }
+                }
+        }.onFailure { error -> log(Log.DEBUG, TAG, "Screen timeout candidate list unavailable", error) }
+
+        listOf(
+            "com.android.settings.display.ScreenTimeoutSettings",
+            "com.android.settings.display.ScreenTimeoutPreferenceController",
+        ).forEach { className ->
+            runCatching {
+                classLoader.loadClass(className).declaredMethods
+                    .filter { it.name == "getMaxScreenTimeout" }
+                    .forEachIndexed { index, method ->
+                        hook(method)
+                            .setExceptionMode(ExceptionMode.PROTECTIVE)
+                            .setId("settings-screen-timeout:unlock-never-${className.substringAfterLast('.')}-${index}")
+                            .intercept { chain ->
+                                val result = chain.proceed()
+                                val context = (if (method.parameterCount > 0) chain.getArg(0) as? Context else null)
+                                    ?: fieldContext(chain.thisObject)
+                                    ?: settingsApplicationContext
+                                if (context != null && canExposeNeverScreenTimeout(context)) {
+                                    val maximum = (result as? Number)?.toLong() ?: 0L
+                                    if (maximum in 1 until NEVER_SCREEN_TIMEOUT) NEVER_SCREEN_TIMEOUT else result
+                                } else result
+                            }
+                    }
+            }.onFailure { error -> log(Log.DEBUG, TAG, "Screen timeout class unavailable: $className", error) }
+        }
+        log(Log.INFO, TAG, "Installed extended screen timeout option hooks")
+    }
+
+    private fun installGoogleServiceEntryHook(classLoader: ClassLoader) {
+        runCatching {
+            val type = classLoader.loadClass(MIUI_SETTINGS)
+            val updateHeaderList = allMethods(type).firstOrNull { method ->
+                method.name == "updateHeaderList" &&
+                    method.parameterCount == 1 &&
+                    java.util.List::class.java.isAssignableFrom(method.parameterTypes[0])
+            } ?: return
+            val addGoogleHeaders = allMethods(type).firstOrNull { method ->
+                method.name == "AddGoogleSettingsHeaders" &&
+                    method.parameterCount == 1 &&
+                    java.util.List::class.java.isAssignableFrom(method.parameterTypes[0])
+            } ?: return
+            addGoogleHeaders.isAccessible = true
+            hook(updateHeaderList)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("settings-google:show-service-entry")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    val headers = chain.getArg(0) as? java.util.List<*> ?: return@intercept result
+                    runCatching { addGoogleHeaders.invoke(chain.thisObject, headers) }
+                        .onFailure { error ->
+                            log(Log.DEBUG, TAG, "Could not restore Google service entry", error)
+                        }
+                    result
+                }
+            log(Log.INFO, TAG, "Installed Google service entry hook")
+        }.onFailure { error ->
+            log(Log.DEBUG, TAG, "Google service entry hook unavailable", error)
+        }
+    }
+
+    private data class TimeoutArrays(
+        val entries: Array<CharSequence>,
+        val values: Array<CharSequence>,
+    )
+
+    private data class TimeoutOption(
+        val value: Long,
+        val label: CharSequence,
+    )
+
+    private fun timeoutOptions(context: Context): List<TimeoutOption> = buildList {
+        val minutePlurals = context.resources.getIdentifier(
+            "string_int_minute",
+            "plurals",
+            context.packageName,
+        )
+        if (minutePlurals != 0) {
+            ADDITIONAL_SCREEN_TIMEOUT_MINUTES.forEach { minutes ->
+                runCatching {
+                    add(
+                        TimeoutOption(
+                            minutes * MILLIS_PER_MINUTE,
+                            context.resources.getQuantityString(minutePlurals, minutes, minutes),
+                        ),
+                    )
+                }
+            }
+        }
+        neverScreenTimeoutLabel(context)?.let { add(TimeoutOption(NEVER_SCREEN_TIMEOUT, it)) }
+    }
+
+    private fun buildTimeoutArrays(entries: Array<*>, values: Array<*>, context: Context): TimeoutArrays? {
+        val pairCount = minOf(entries.size, values.size)
+        if (pairCount == 0) return null
+        val currentValues = values.take(pairCount).map { it?.toString().orEmpty() }.toHashSet()
+        val additions = timeoutOptions(context).filterNot { it.value.toString() in currentValues }
+        if (additions.isEmpty()) return null
+        val nextEntries = ArrayList<CharSequence>(pairCount + additions.size)
+        val nextValues = ArrayList<CharSequence>(pairCount + additions.size)
+        for (index in 0 until pairCount) {
+            val entry = entries[index] as? CharSequence ?: continue
+            val value = values[index] as? CharSequence ?: continue
+            if (value.toString() == NEVER_SCREEN_TIMEOUT.toString()) {
+                additions.forEach {
+                    nextEntries += it.label
+                    nextValues += it.value.toString()
+                }
+            }
+            nextEntries += entry
+            nextValues += value
+        }
+        if (nextValues.none { it.toString() == NEVER_SCREEN_TIMEOUT.toString() }) {
+            additions.forEach {
+                nextEntries += it.label
+                nextValues += it.value.toString()
+            }
+        }
+        return TimeoutArrays(nextEntries.toTypedArray(), nextValues.toTypedArray())
+    }
+
+    private fun appendTimeoutOptions(preference: Any, context: Context) {
+        runCatching {
+            val values = preference.javaClass.getMethod("getEntryValues").invoke(preference) as? Array<*> ?: return
+            val entries = preference.javaClass.getMethod("getEntries").invoke(preference) as? Array<*> ?: return
+            val arrays = buildTimeoutArrays(entries, values, context) ?: return
+            preference.javaClass.getMethod("setEntries", Array<CharSequence>::class.java)
+                .invoke(preference, arrays.entries)
+            preference.javaClass.getMethod("setEntryValues", Array<CharSequence>::class.java)
+                .invoke(preference, arrays.values)
+            val current = android.provider.Settings.System.getLong(
+                context.contentResolver,
+                "screen_off_timeout",
+                DEFAULT_SCREEN_TIMEOUT,
+            )
+            if (current == NEVER_SCREEN_TIMEOUT) {
+                runCatching {
+                    preference.javaClass.getMethod("setValue", String::class.java)
+                        .invoke(preference, NEVER_SCREEN_TIMEOUT.toString())
+                }
+            }
+        }.onFailure { error -> log(Log.DEBUG, TAG, "Could not append screen timeout options", error) }
+    }
+
+    private fun appendDialogTimeoutOptions(activity: Any, context: Context) {
+        runCatching {
+            val entriesField = activity.javaClass.getDeclaredField("mEntries").apply { isAccessible = true }
+            val valuesField = activity.javaClass.getDeclaredField("mEntryValues").apply { isAccessible = true }
+            val entries = entriesField.get(activity) as? Array<*> ?: return
+            val values = valuesField.get(activity) as? Array<*> ?: return
+            val arrays = buildTimeoutArrays(entries, values, context) ?: return
+            entriesField.set(activity, arrays.entries)
+            valuesField.set(activity, arrays.values)
+        }.onFailure { error -> log(Log.DEBUG, TAG, "Could not append dialog screen timeout options", error) }
+    }
+
+    private fun appendScreenTimeoutCandidates(result: Any?, classLoader: ClassLoader, context: Context): Any? {
+        val candidates = result as? List<*> ?: return result
+        val existing = candidates.mapNotNull { candidate ->
+            runCatching { candidate?.javaClass?.getMethod("getKey")?.invoke(candidate)?.toString() }.getOrNull()
+        }.toHashSet()
+        val additions = timeoutOptions(context).filterNot { it.value.toString() in existing }
+        if (additions.isEmpty()) return result
+        val candidateClass = classLoader.loadClass(
+            "com.android.settings.display.ScreenTimeoutSettings\$TimeoutCandidateInfo",
+        )
+        val constructor = candidateClass.getDeclaredConstructor(
+            CharSequence::class.java,
+            String::class.java,
+            Boolean::class.javaPrimitiveType,
+        ).apply { isAccessible = true }
+        val next = ArrayList<Any?>(candidates.size + additions.size)
+        var inserted = false
+        candidates.forEach { candidate ->
+            val key = runCatching { candidate?.javaClass?.getMethod("getKey")?.invoke(candidate)?.toString() }.getOrNull()
+            if (!inserted && key == NEVER_SCREEN_TIMEOUT.toString()) {
+                additions.forEach { option ->
+                    next += constructor.newInstance(option.label, option.value.toString(), true)
+                }
+                inserted = true
+            }
+            next += candidate
+        }
+        if (!inserted) {
+            additions.forEach { option ->
+                next += constructor.newInstance(option.label, option.value.toString(), true)
+            }
+        }
+        return next
+    }
+
+    private fun fieldContext(target: Any): Context? {
+        var type: Class<*>? = target.javaClass
+        while (type != null && type != Any::class.java) {
+            type.declaredFields.firstOrNull { Context::class.java.isAssignableFrom(it.type) }?.let { field ->
+                return runCatching { field.isAccessible = true; field.get(target) as? Context }.getOrNull()
+            }
+            type = type.superclass
+        }
+        return null
+    }
+
+    private fun canExposeNeverScreenTimeout(context: Context): Boolean {
+        val devicePolicyManager = context.getSystemService(DevicePolicyManager::class.java)
+        return devicePolicyManager == null || devicePolicyManager.getMaximumTimeToLock(null) == 0L
+    }
+
+    private fun isDisabledByAdmin(preference: Any): Boolean = runCatching {
+        preference.javaClass.getMethod("isDisabledByAdmin").invoke(preference) as Boolean
+    }.getOrDefault(false)
+
     private fun installPersistentTextColorHooks() {
         runCatching {
             listOf(
@@ -87,6 +393,12 @@ class SettingsDeviceModule : XposedModule() {
             log(Log.WARN, TAG, "Could not hook Settings text colors", error)
         }
     }
+
+    private fun neverScreenTimeoutLabel(context: Context): CharSequence? = runCatching {
+        context.resources.getIdentifier("string_never", "string", context.packageName)
+            .takeIf { it != 0 }
+            ?.let(context::getString)
+    }.getOrNull()
 
     private fun installCardFinalBackgroundHooks() {
         runCatching {
@@ -719,5 +1031,9 @@ class SettingsDeviceModule : XposedModule() {
         // R.drawable.device_description_cpu / device_description_snapdragon_cpu in 设置_17.apk.
         const val DEFAULT_CPU_ICON = 0x7f08079b
         const val SNAPDRAGON_CPU_ICON = 0x7f0807a2
+        const val NEVER_SCREEN_TIMEOUT = 2147483647L
+        const val DEFAULT_SCREEN_TIMEOUT = 30000L
+        const val MILLIS_PER_MINUTE = 60_000L
+        val ADDITIONAL_SCREEN_TIMEOUT_MINUTES = intArrayOf(15, 20, 30, 60)
     }
 }

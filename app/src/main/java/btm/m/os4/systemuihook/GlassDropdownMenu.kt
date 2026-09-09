@@ -150,17 +150,23 @@ fun GlassIconDropdownMenu(
     backdrop: Backdrop?,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    content: @Composable () -> Unit,
+    trigger: (@Composable (onClick: () -> Unit, enabled: Boolean) -> Unit)? = null,
+    content: @Composable () -> Unit = {},
 ) {
     val expanded = remember { mutableStateOf(false) }
     val available = enabled && entry.items.isNotEmpty()
     Box(modifier) {
-        IconButton(
-            onClick = { if (available) expanded.value = !expanded.value },
-            enabled = available,
-            holdDownState = false,
-            content = content,
-        )
+        val toggleExpanded = { if (available) expanded.value = !expanded.value }
+        if (trigger != null) {
+            trigger(toggleExpanded, available)
+        } else {
+            IconButton(
+                onClick = toggleExpanded,
+                enabled = available,
+                holdDownState = false,
+                content = content,
+            )
+        }
         GlassDropdownPopup(
             entries = listOf(entry),
             show = expanded.value,
@@ -169,6 +175,7 @@ fun GlassIconDropdownMenu(
             backdrop = backdrop,
             alignment = PopupPositionProvider.Align.End,
             horizontalOffset = 0.dp,
+            useAnchorVerticalPosition = true,
         )
     }
 }
@@ -189,6 +196,7 @@ private fun GlassDropdownPopup(
     maxHeight: Dp? = null,
     alignment: PopupPositionProvider.Align = PopupPositionProvider.Align.End,
     horizontalOffset: Dp = GlassMenuHorizontalOffset,
+    useAnchorVerticalPosition: Boolean = false,
 ) {
     val fraction = remember { Animatable(0f) }
     val alpha = remember { Animatable(0f) }
@@ -291,15 +299,19 @@ private fun GlassDropdownPopup(
                     layoutInfo.popupMargin,
                     alignment,
                 )
-                val safeInset = (parentBounds.height * .10f).roundToInt()
-                val minY = layoutInfo.windowBounds.top + layoutInfo.popupMargin.top
-                val maxY = (layoutInfo.windowBounds.bottom - placeable.height - layoutInfo.popupMargin.bottom)
-                    .coerceAtLeast(minY)
-                val overlayY = (parentBounds.top + safeInset - shadowPadding).coerceIn(minY, maxY)
+                val popupY = if (useAnchorVerticalPosition) {
+                    result.y
+                } else {
+                    val safeInset = (parentBounds.height * .10f).roundToInt()
+                    val minY = layoutInfo.windowBounds.top + layoutInfo.popupMargin.top
+                    val maxY = (layoutInfo.windowBounds.bottom - placeable.height - layoutInfo.popupMargin.bottom)
+                        .coerceAtLeast(minY)
+                    (parentBounds.top + safeInset - shadowPadding).coerceIn(minY, maxY)
+                }
                 layout(constraints.maxWidth, constraints.maxHeight) {
                     placeable.place(
                         result.x + horizontalOffsetPx - hostPosition.x.toInt(),
-                        overlayY - hostPosition.y.toInt(),
+                        popupY - hostPosition.y.toInt(),
                     )
                 }
             }

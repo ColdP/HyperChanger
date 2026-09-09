@@ -2,7 +2,6 @@
 // Copyright 2026 btm_m
 package btm.m.os4.systemuihook
 
-import android.app.AlarmManager
 import android.app.KeyguardManager
 import android.app.WallpaperManager
 import android.content.Context
@@ -20,7 +19,7 @@ import android.graphics.drawable.Drawable
 import android.os.BatteryManager
 import android.os.Handler
 import android.os.Looper
-import android.provider.CalendarContract
+import android.provider.Settings
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.view.Gravity
@@ -35,7 +34,6 @@ import android.widget.TextView
 import java.lang.ref.WeakReference
 import java.util.Calendar
 import java.util.Collections
-import java.util.Date
 import java.util.Locale
 import java.text.SimpleDateFormat
 import java.util.WeakHashMap
@@ -71,6 +69,7 @@ private const val MOBILE_ICON_WIDTH_DP = 19
 private const val MOBILE_ICON_HEIGHT_DP = 21
 private const val WIDGET_DARK_FOREGROUND = 0xFF1A1A1A.toInt()
 private const val STEPS_GOAL = 10000
+private const val SYSTEM_NEXT_ALARM_FORMATTED = "next_alarm_formatted"
 
 /**
  * The editor and full-screen charging animation reuse the keyguard window. Track their explicit
@@ -250,7 +249,7 @@ private data class SystemWeatherSnapshot(
     val windIcon: Drawable?,
 )
 
-/** The view receiving our translation and its vendor container that exposes visual clock bounds. */
+/** A time-layer root and its vendor container that exposes visual clock bounds. */
 private data class LockscreenClockTarget(
     val clock: View,
     val container: View,
@@ -345,6 +344,10 @@ private class LockscreenWidgetView(
     private val standCount = TextView(context)
     private val alarmIcon = ImageView(context)
     private val alarmTime = TextView(context)
+    private var alarmValueLayoutParams: LinearLayout.LayoutParams? = null
+    private var alarmValueDefaultTopMarginPx = 0
+    private var alarmValueDefaultHeightPx = 0
+    private var alarmValueMultilineHeightPx = 0
     private val scheduleTitle = TextView(context)
     private val scheduleTime = TextView(context)
     private val signatureImage = ImageView(context)
@@ -595,10 +598,10 @@ private class LockscreenWidgetView(
             stepsWideTitle.alpha = .78f
             labels.addView(stepsWideTitle, LinearLayout.LayoutParams(-1, dp(18)))
             val valueRow = LinearLayout(context).apply { gravity = Gravity.BOTTOM }
-            style(stepsWideValue, 20.7f)
+            style(stepsWideValue, 17.6f)
             stepsWideValue.setTypeface(stepsWideValue.typeface, android.graphics.Typeface.BOLD)
             valueRow.addView(stepsWideValue, LinearLayout.LayoutParams(-2, dp(29)))
-            style(stepsWideUnit, 11.7f)
+            style(stepsWideUnit, 8.8f)
             stepsWideUnit.text = "步"
             stepsWideUnit.setTypeface(stepsWideUnit.typeface, android.graphics.Typeface.BOLD)
             valueRow.addView(stepsWideUnit, LinearLayout.LayoutParams(-2, dp(22)).apply { leftMargin = dp(2) })
@@ -662,6 +665,7 @@ private class LockscreenWidgetView(
             iconWidth: Int = 28,
             iconHeight: Int = 28,
             valueSize: Float = WIDGET_COMBINATION_METRIC_TEXT_SIZE_SP,
+            valueHeight: Int = 22,
         ) {
             val surface = createSurface(widthDp = metricWidth, heightDp = surfaceHeight, circular = true)
             val content = LinearLayout(context).apply {
@@ -672,7 +676,15 @@ private class LockscreenWidgetView(
             content.addView(icon, LinearLayout.LayoutParams(dp(iconWidth), dp(iconHeight)))
             style(value, valueSize)
             value.gravity = Gravity.CENTER
-            content.addView(value, LinearLayout.LayoutParams(-1, dp(22)).apply { topMargin = dp(1) })
+            val valueLayoutParams = LinearLayout.LayoutParams(-1, dp(valueHeight)).apply {
+                topMargin = dp(1)
+            }
+            content.addView(value, valueLayoutParams)
+            if (value === alarmTime) {
+                alarmValueLayoutParams = valueLayoutParams
+                alarmValueDefaultTopMarginPx = valueLayoutParams.topMargin
+                alarmValueDefaultHeightPx = valueLayoutParams.height
+            }
             surface.addView(content, LayoutParams(-1, -1))
             surfaces[flag] = surface to metricWidth
         }
@@ -713,7 +725,27 @@ private class LockscreenWidgetView(
                 loadModuleDrawable(context, "ic_widget_alarm")
                     ?: loadSystemDrawable(context, "ic_alarm"),
             )
-            addMetricSurface(LOCKSCREEN_WIDGET_ITEM_ALARM, alarmIcon, alarmTime, 30, 30, 11f)
+            // Reserve a second line for values with a non-weekday date prefix. Four-circle
+            // layouts are only 56dp high, so use a smaller icon there to keep two lines inside.
+            val alarmIconHeight = if (surfaceHeight >= 64) 30 else 25
+            // Keep the single-line slot identical to the other metric widgets. The taller slot
+            // is applied only when the bound alarm text actually contains a date line.
+            val alarmValueHeight = 22
+            alarmValueMultilineHeightPx = dp(if (surfaceHeight >= 64) 32 else 30)
+            addMetricSurface(
+                LOCKSCREEN_WIDGET_ITEM_ALARM,
+                alarmIcon,
+                alarmTime,
+                30,
+                alarmIconHeight,
+                11f,
+                alarmValueHeight,
+            )
+            // style() sets the single-line defaults for other metric values; override them
+            // after the shared builder so a date prefix can occupy its own line.
+            alarmTime.maxLines = 2
+            alarmTime.ellipsize = android.text.TextUtils.TruncateAt.END
+            alarmTime.setLineSpacing(0f, .9f)
         }
         itemOrder.forEach { flag ->
             surfaces.remove(flag)?.let { (surface, width) -> addSurface(surface, width) }
@@ -833,7 +865,8 @@ private class LockscreenWidgetView(
             standCount.text = data.standCount?.takeIf { it >= 0 }?.toString() ?: "--"
         }
         if (itemMask and LOCKSCREEN_WIDGET_ITEM_ALARM != 0) {
-            alarmTime.text = data.nextAlarm ?: "--:--"
+            alarmTime.text = formatAlarmText(data.nextAlarm ?: "--:--")
+            updateAlarmTextSpacing()
         }
         if (itemMask and LOCKSCREEN_WIDGET_ITEM_SCHEDULE != 0) {
             scheduleTitle.text = data.nextSchedule?.title ?: "无日程"
@@ -927,6 +960,40 @@ private class LockscreenWidgetView(
     } else {
         "--:--"
     }
+
+    private fun formatAlarmText(value: String): String {
+        val text = value.trim()
+        val match = Regex(
+            "^(.*?)(\\d{1,2}\\s*[:：]\\s*\\d{2}(?:\\s*(?:[AaPp][Mm]|上午|下午))?)$",
+        ).matchEntire(text) ?: return text
+        val prefix = match.groupValues[1].trim()
+        val time = match.groupValues[2].trim()
+        // The system's formatted alarm often includes a weekday (for example, "周二 7:00").
+        // Weekday-only prefixes add no useful information in this compact lock-screen slot.
+        val weekdayOnly = Regex("^(?:周|星期)[一二三四五六日天]$").matches(prefix)
+        return if (prefix.isEmpty() || weekdayOnly) time else "$prefix\n$time"
+    }
+
+    /** Resize the alarm text slot only when a date line is present. */
+    private fun updateAlarmTextSpacing() {
+        val params = alarmValueLayoutParams ?: return
+        val isMultiline = alarmTime.text?.contains('\n') == true
+        val targetMargin = if (isMultiline) {
+            (alarmValueDefaultTopMarginPx * .35f).roundToInt()
+        } else {
+            alarmValueDefaultTopMarginPx
+        }
+        val targetHeight = if (isMultiline && alarmValueMultilineHeightPx > 0) {
+            alarmValueMultilineHeightPx
+        } else {
+            alarmValueDefaultHeightPx
+        }
+        if (params.topMargin == targetMargin && params.height == targetHeight) return
+        params.topMargin = targetMargin
+        params.height = targetHeight
+        alarmTime.layoutParams = params
+        alarmTime.requestLayout()
+    }
 }
 
 /** Keeps the widget attached to SystemUI's lock-screen shortcut host and follows layout rebuilds. */
@@ -956,9 +1023,9 @@ internal class LockscreenWidgetController(
     private var hideAnimationRunning = false
     private var lastLockscreenVisible: Boolean? = null
     private var notificationStack: WeakReference<View>? = null
-    private var adjustedClock: WeakReference<View>? = null
-    private var adjustedClockContainer: WeakReference<View>? = null
-    private var appliedClockAvoidanceOffset = 0f
+    // Depth clocks can split the visible hour and minute into independent roots. Track our
+    // contribution per root so their own AOD and gesture translations remain untouched.
+    private val appliedClockAvoidanceOffsets = WeakHashMap<View, Float>()
     private val refreshRunnable = object : Runnable {
         override fun run() {
             refresh()
@@ -1234,7 +1301,13 @@ internal class LockscreenWidgetController(
             systemWeather?.sunrise ?: 0,
             systemWeather?.sunriseTomorrow ?: 0,
             systemWeather?.sunset ?: 0,
-            if (displayedItemMask and LOCKSCREEN_WIDGET_ITEM_STEPS != 0) readSystemSteps() else null,
+            // Both step layouts use the same HealthBean value. The wide layout has its own
+            // flag, so include it here or it would always render the no-data placeholder.
+            if (displayedItemMask and (LOCKSCREEN_WIDGET_ITEM_STEPS or LOCKSCREEN_WIDGET_ITEM_STEPS_WIDE) != 0) {
+                readSystemSteps()
+            } else {
+                null
+            },
             systemWeather?.humidity ?: "--",
             systemWeather?.aqi ?: "--",
             systemWeather?.feelsLike ?: "--°",
@@ -1247,32 +1320,28 @@ internal class LockscreenWidgetController(
         )
     }
 
+    /** Mirrors the value consumed by HyperOS lockscreen clock templates as `next_alarm_time`. */
     private fun readNextAlarm(): String? = runCatching {
-        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
-        val triggerTime = alarmManager?.nextAlarmClock?.triggerTime ?: return@runCatching null
-        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(triggerTime))
+        Settings.System.getString(context.contentResolver, SYSTEM_NEXT_ALARM_FORMATTED)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
     }.getOrNull()
 
     private fun readNextSchedule(): ScheduleEntry? = runCatching {
-        val now = System.currentTimeMillis()
-        val end = now + 30L * 24L * 60L * 60L * 1000L
-        val uri = CalendarContract.Instances.CONTENT_URI.buildUpon()
-            .appendPath(now.toString())
-            .appendPath(end.toString())
-            .build()
+        val uri = SettingsAppearanceSources.lockscreenScheduleUri()
         val projection = arrayOf(
-            CalendarContract.Instances.TITLE,
-            CalendarContract.Instances.BEGIN,
-            CalendarContract.Instances.ALL_DAY,
+            SettingsAppearanceProvider.COLUMN_SCHEDULE_TITLE,
+            SettingsAppearanceProvider.COLUMN_SCHEDULE_BEGIN,
+            SettingsAppearanceProvider.COLUMN_SCHEDULE_ALL_DAY,
         )
-        context.contentResolver.query(uri, projection, null, null, "${CalendarContract.Instances.BEGIN} ASC")
+        context.contentResolver.query(uri, projection, null, null, null)
             ?.use { cursor ->
                 if (!cursor.moveToFirst()) return@runCatching null
                 val title = cursor.getString(0).orEmpty().trim().ifBlank { "日程" }
                 val begin = cursor.getLong(1)
                 val allDay = cursor.getInt(2) != 0
                 val format = SimpleDateFormat(if (allDay) "MM/dd 全天" else "MM/dd HH:mm", Locale.getDefault())
-                ScheduleEntry(title, format.format(Date(begin)))
+                ScheduleEntry(title, format.format(java.util.Date(begin)))
             }
     }.getOrNull()
 
@@ -1477,40 +1546,34 @@ internal class LockscreenWidgetController(
     }
 
     /**
-     * The actual MIUI clock view owns its own gesture and AOD translation. Keep that system
-     * translation intact, then add only the offset required to keep its lower edge above us.
+     * MIUI's depth clock may split the visible hour and minute into a primary clock and a
+     * foreground-clock copy. Keep every active time layer clear of the widget, while preserving
+     * each layer's own gesture and AOD translation.
      */
     private fun adjustClockForWidget(widget: LockscreenWidgetView) {
-        val cachedClock = adjustedClock?.get()?.takeIf { it.isAttachedToWindow }
-        val cachedContainer = adjustedClockContainer?.get()?.takeIf { it.isAttachedToWindow }
-        val target = if (cachedClock != null && cachedContainer != null) {
-            LockscreenClockTarget(cachedClock, cachedContainer)
-        } else {
-            findPrimaryLockscreenClock(host.rootView)
-        } ?: run {
+        val targets = findLockscreenClockTargets(host.rootView)
+            .filter { target ->
+                target.clock.isAttachedToWindow && isVisibleForNotificationAvoidance(target.clock)
+            }
+        if (targets.isEmpty()) {
             restoreClockPosition()
             return
         }
-        val clock = target.clock
-        val previousClock = adjustedClock?.get()
-        if (previousClock !== clock) {
-            restoreClockPosition()
-            adjustedClock = WeakReference(clock)
-        }
-        adjustedClockContainer = WeakReference(target.container)
-        if (!clock.isAttachedToWindow || !isVisibleForNotificationAvoidance(clock)) return
-
-        val containerLocation = IntArray(2).also(target.container::getLocationOnScreen)
-        val clockLocation = IntArray(2).also(clock::getLocationOnScreen)
+        restoreStaleClockPositions(targets.mapTo(LinkedHashSet()) { it.clock })
         val widgetLocation = IntArray(2).also(widget::getLocationOnScreen)
         val candidateBottoms = buildList {
-            target.container.getClockBottomForNotificationAvoidance()?.let { bottom ->
-                add(containerLocation[1] + bottom)
-            }
-            // All-in-one clocks animate their contents inside a full-height root. Its measured
-            // height is unusable, while mClockViewRect tracks the actual time glyph rectangle.
-            clock.getRenderedClockContentBottom()?.let { bottom ->
-                add(clockLocation[1] + bottom - appliedClockAvoidanceOffset)
+            targets.forEach { target ->
+                val containerLocation = IntArray(2).also(target.container::getLocationOnScreen)
+                target.container.getClockBottomForNotificationAvoidance()?.let { bottom ->
+                    add(containerLocation[1] + bottom)
+                }
+                // All-in-one clocks animate their contents inside a full-height root. Its
+                // measured height is unusable, while mClockViewRect tracks the time glyph.
+                val clockLocation = IntArray(2).also(target.clock::getLocationOnScreen)
+                val previousOffset = appliedClockAvoidanceOffsets[target.clock] ?: 0f
+                target.clock.getRenderedClockContentBottom()?.let { bottom ->
+                    add(clockLocation[1] + bottom - previousOffset)
+                }
             }
         }
         val clockBottomOnScreen = candidateBottoms.maxOrNull() ?: run {
@@ -1521,20 +1584,33 @@ internal class LockscreenWidgetController(
             0f,
             widgetLocation[1] - dp(NOTIFICATION_SAFE_GAP_DP) - clockBottomOnScreen,
         )
-        val systemOffset = clock.translationY - appliedClockAvoidanceOffset
-        clock.translationY = systemOffset + requiredOffset
-        appliedClockAvoidanceOffset = requiredOffset
+        targets.forEach { target ->
+            val clock = target.clock
+            val previousOffset = appliedClockAvoidanceOffsets[clock] ?: 0f
+            val systemOffset = clock.translationY - previousOffset
+            clock.translationY = systemOffset + requiredOffset
+            appliedClockAvoidanceOffsets[clock] = requiredOffset
+        }
     }
 
     private fun restoreClockPosition() {
-        adjustedClock?.get()?.let { clock ->
+        appliedClockAvoidanceOffsets.entries.toList().forEach { (clock, offset) ->
             if (clock.isAttachedToWindow) {
-                clock.translationY -= appliedClockAvoidanceOffset
+                clock.translationY -= offset
             }
         }
-        adjustedClock = null
-        adjustedClockContainer = null
-        appliedClockAvoidanceOffset = 0f
+        appliedClockAvoidanceOffsets.clear()
+    }
+
+    private fun restoreStaleClockPositions(activeClocks: Set<View>) {
+        appliedClockAvoidanceOffsets.entries.toList()
+            .filter { (clock, _) -> clock !in activeClocks }
+            .forEach { (clock, offset) ->
+                if (clock.isAttachedToWindow) {
+                    clock.translationY -= offset
+                }
+                appliedClockAvoidanceOffsets.remove(clock)
+            }
     }
 
     /** Returns the top of the first real, visible notification relative to the widget host. */
@@ -1628,6 +1704,37 @@ internal class LockscreenWidgetController(
         return container?.let { containerView ->
             readMiuiClockView(containerView)?.let { LockscreenClockTarget(it, containerView) }
         }
+    }
+
+    /**
+     * In depth mode, MIUI renders the portion in front of the subject in the normal clock
+     * container and the portion behind it in a separate foreground-clock container. Both roots
+     * can carry a text_area, so translating both also keeps the date and lunar date aligned with
+     * the visible time when the entire clock is behind the subject.
+     */
+    private fun findLockscreenClockTargets(root: View?): List<LockscreenClockTarget> {
+        if (root == null) return emptyList()
+        val targets = LinkedHashMap<View, LockscreenClockTarget>()
+        findPrimaryLockscreenClock(root)?.let { target -> targets[target.clock] = target }
+        findViewByIdName(
+            root,
+            setOf("miui_keyguard_foreground_clock_container", "keyguard_foreground_clock_container"),
+        )?.let { container ->
+            findVendorClockRoot(container)?.let { clock ->
+                targets[clock] = LockscreenClockTarget(clock, container)
+            }
+        }
+        return targets.values.toList()
+    }
+
+    private fun findVendorClockRoot(root: View): View? {
+        if (root.javaClass.name.startsWith("com.miui.clock.")) return root
+        if (root is ViewGroup) {
+            for (index in 0 until root.childCount) {
+                findVendorClockRoot(root.getChildAt(index))?.let { return it }
+            }
+        }
+        return null
     }
 
     private fun findViewByClassName(root: View, className: String): View? {
