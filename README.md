@@ -186,8 +186,21 @@ Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before openin
 
 HyperChanger is released under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for historical attribution to the original MIT-licensed release.
 
-<p align="center">
-  <a href="https://star-history.com/#ColdP/HyperChanger&Date">
-    <img src="https://api.star-history.com/svg?repos=ColdP/HyperChanger&type=Date" alt="Star History Chart">
-  </a>
-</p>
+## Star History
+
+<a href="https://www.star-history.com/?repos=ColdP%2FHyperChanger&type=date">
+  <picture>
+    <source
+      media="(prefers-color-scheme: dark)"
+      srcset="https://api.star-history.com/chart?repos=ColdP/HyperChanger&type=date&theme=dark"
+    />
+    <source
+      media="(prefers-color-scheme: light)"
+      srcset="https://api.star-history.com/chart?repos=ColdP/HyperChanger&type=date"
+    />
+    <img
+      alt="Star History Chart"
+      src="https://api.star-history.com/chart?repos=ColdP/HyperChanger&type=date"
+    />
+  </picture>
+</a>
