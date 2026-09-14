@@ -201,6 +201,7 @@ data class HookSettings(
     val shortcutSoftGlassBlurRadius: Int = 36,
     val shortcutSoftGlassLuminance: Float = 0.14f,
     val lockscreenMiniPlayerEnabled: Boolean = false,
+    val lockscreenMusicLockscreenEnabled: Boolean = false,
     val lockscreenMiniPlayerLyricsEnabled: Boolean = false,
     val lockscreenMiniPlayerMediaNotificationMode: Int = LOCKSCREEN_MEDIA_NOTIFICATION_DO_NOT_HIDE,
     val lockscreenMiniPlayerBackgroundMode: Int = 0,
@@ -497,6 +498,7 @@ private const val KEY_SHORTCUT_SOFT_GLASS_BACKDROP_BLUR_RADIUS = "shortcut_soft_
 private const val KEY_SHORTCUT_SOFT_GLASS_BLUR_RADIUS = "shortcut_soft_glass_blur_radius"
 private const val KEY_SHORTCUT_SOFT_GLASS_LUMINANCE = "shortcut_soft_glass_luminance"
 private const val KEY_LOCKSCREEN_MINI_PLAYER_ENABLED = "lockscreen_mini_player_enabled"
+private const val KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED = "lockscreen_music_lockscreen_enabled"
 private const val KEY_LOCKSCREEN_MINI_PLAYER_LYRICS_ENABLED = "lockscreen_mini_player_lyrics_enabled"
 private const val KEY_LOCKSCREEN_MINI_PLAYER_HIDE_MEDIA_NOTIFICATION =
     "lockscreen_mini_player_hide_media_notification"
@@ -949,6 +951,7 @@ private fun SharedPreferences.toSettings(): HookSettings {
     shortcutSoftGlassBlurRadius = getInt(KEY_SHORTCUT_SOFT_GLASS_BLUR_RADIUS, 10).coerceIn(0, 40),
     shortcutSoftGlassLuminance = getFloat(KEY_SHORTCUT_SOFT_GLASS_LUMINANCE, 0.14f).coerceIn(0f, 0.4f),
     lockscreenMiniPlayerEnabled = getBoolean(KEY_LOCKSCREEN_MINI_PLAYER_ENABLED, false),
+    lockscreenMusicLockscreenEnabled = getBoolean(KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED, false),
     lockscreenMiniPlayerLyricsEnabled = getBoolean(KEY_LOCKSCREEN_MINI_PLAYER_LYRICS_ENABLED, false),
     lockscreenMiniPlayerMediaNotificationMode = if (
         contains(KEY_LOCKSCREEN_MINI_PLAYER_MEDIA_NOTIFICATION_MODE)
@@ -1465,6 +1468,7 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putInt(KEY_SHORTCUT_SOFT_GLASS_BLUR_RADIUS, value.shortcutSoftGlassBlurRadius)
         .putFloat(KEY_SHORTCUT_SOFT_GLASS_LUMINANCE, value.shortcutSoftGlassLuminance)
         .putBoolean(KEY_LOCKSCREEN_MINI_PLAYER_ENABLED, value.lockscreenMiniPlayerEnabled)
+        .putBoolean(KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED, value.lockscreenMusicLockscreenEnabled)
         .putBoolean(KEY_LOCKSCREEN_MINI_PLAYER_LYRICS_ENABLED, value.lockscreenMiniPlayerLyricsEnabled)
         .putInt(
             KEY_LOCKSCREEN_MINI_PLAYER_MEDIA_NOTIFICATION_MODE,

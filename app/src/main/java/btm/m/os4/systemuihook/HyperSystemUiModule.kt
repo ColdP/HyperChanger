@@ -10,6 +10,7 @@ import android.content.res.Resources
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorFilter
@@ -22,6 +23,7 @@ import android.graphics.Point
 import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Handler
@@ -39,6 +41,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.animation.DecelerateInterpolator
+import android.view.ViewParent
+import android.view.inputmethod.EditorInfo
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
@@ -355,6 +359,10 @@ class HyperSystemUiModule : XposedModule() {
                     if (param.packageName == SYSTEM_UI && !lockscreenWidgetSceneVisibilityHookInstalled) {
                         installLockscreenWidgetSceneVisibilityHooks(param.defaultClassLoader)
                         lockscreenWidgetSceneVisibilityHookInstalled = true
+                    }
+                    if (param.packageName == SYSTEM_UI && !lockscreenMusicLockscreenHookInstalled) {
+                        installLockscreenMusicLockscreenHook(param.defaultClassLoader, preferences)
+                        lockscreenMusicLockscreenHookInstalled = true
                     }
                     if (param.packageName == SYSTEM_UI && !lockscreenPinCircleBackgroundHookInstalled) {
                         installLockscreenPinCircleBackgroundHook(param.defaultClassLoader, preferences)
@@ -5722,6 +5730,9 @@ class HyperSystemUiModule : XposedModule() {
                 leftShortcut = left,
                 rightShortcut = right,
                 enabled = { preferences.getBoolean(KEY_LOCKSCREEN_MINI_PLAYER_ENABLED, false) },
+                musicLockscreenEnabled = {
+                    preferences.getBoolean(KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED, false)
+                },
                 lyricsEnabled = {
                     preferences.getBoolean(KEY_LOCKSCREEN_MINI_PLAYER_LYRICS_ENABLED, false)
                 },
@@ -5833,6 +5844,105 @@ class HyperSystemUiModule : XposedModule() {
         install()
         root.post(::install)
         root.postDelayed(::install, LOCKSCREEN_SHORTCUT_RETRY_DELAY_MS)
+    }
+
+
+    private fun installLockscreenMusicLockscreenHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
+        runCatching {
+            val panelClass = classLoader.loadClass(KEYGUARD_PANEL_VIEW_CONTROLLER_CLASS)
+            val foregroundLayer = panelClass.getDeclaredField("keyguardForegroundLayer")
+                .apply { isAccessible = true }
+            val statusBarState = panelClass.getDeclaredField("statusBarState")
+                .apply { isAccessible = true }
+            val bindMethods = panelClass.declaredMethods.filter {
+                it.name == "onKeyguardViewBind" && it.parameterCount == 1
+            }
+            check(bindMethods.isNotEmpty()) { "KeyguardPanelViewController.onKeyguardViewBind was not found" }
+            bindMethods.forEachIndexed { index, method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("lockscreen-music-lockscreen-bind-$index")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        val panelController = chain.thisObject
+                        val host = runCatching { foregroundLayer.get(panelController) as? ViewGroup }
+                            .getOrNull() ?: return@intercept result
+                        installLockscreenMusicLockscreen(
+                            host = host,
+                            isLockscreenShowing = {
+                                runCatching {
+                                    statusBarState.getInt(panelController) == STATUS_BAR_STATE_KEYGUARD
+                                }.getOrDefault(false)
+                            },
+                            preferences = preferences,
+                            classLoader = classLoader,
+                        )
+                        result
+                    }
+            }
+            val updateVisibility = panelClass.getMethod("updateKeyguardElementsVisibility")
+            hook(updateVisibility)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("lockscreen-music-lockscreen-visibility")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    val host = runCatching {
+                        foregroundLayer.get(chain.thisObject) as? ViewGroup
+                    }.getOrNull()
+                    synchronized(lockscreenMusicLockscreenControllers) {
+                        lockscreenMusicLockscreenControllers[host]
+                    }?.onKeyguardVisibilityChanged()
+                    result
+                }
+            log(Log.INFO, TAG, "Installed ${bindMethods.size} music-lockscreen foreground hook(s)")
+        }.onFailure { error ->
+            log(Log.ERROR, TAG, "Could not install music-lockscreen foreground hook", error)
+        }
+    }
+
+    private fun installLockscreenMusicLockscreen(
+        host: ViewGroup,
+        isLockscreenShowing: () -> Boolean,
+        preferences: SharedPreferences,
+        classLoader: ClassLoader,
+    ) {
+        val old = synchronized(lockscreenMusicLockscreenControllers) {
+            lockscreenMusicLockscreenControllers[host]
+        }
+        if (!preferences.getBoolean(KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED, false)) {
+            old?.destroy()
+            lockscreenMusicLockscreenControllers.remove(host)
+            return
+        }
+        if (old != null) return
+        val controller = LockscreenMusicLockscreenController(
+            host = host,
+            enabled = {
+                preferences.getBoolean(KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED, false) &&
+                    preferences.getBoolean(KEY_LOCKSCREEN_MINI_PLAYER_ENABLED, false)
+            },
+            isLockscreenShowing = isLockscreenShowing,
+            appearance = { miniPlayerAppearance(preferences) },
+            iconColor = {
+                when (shortcutIconColorMode(preferences)) {
+                    SHORTCUT_ICON_COLOR_DARK -> SHORTCUT_ICON_DARK_COLOR
+                    SHORTCUT_ICON_COLOR_LIGHT, SHORTCUT_ICON_COLOR_AUTO -> SHORTCUT_ICON_LIGHT_COLOR
+                    else -> SHORTCUT_ICON_LIGHT_COLOR
+                }
+            },
+            applyPlatformMaterial = { view, currentAppearance ->
+                runCatching { applyMiniPlayerMaterial(view, currentAppearance, classLoader) }
+                    .onFailure { error ->
+                        log(Log.ERROR, TAG, "Could not initialize music-lockscreen material", error)
+                    }
+            },
+        )
+        synchronized(lockscreenMusicLockscreenControllers) {
+            lockscreenMusicLockscreenControllers[host] = controller
+        }
     }
 
     private fun resolveLockscreenShortcutViews(shortcutController: Any?): Pair<View, View>? = runCatching {
@@ -7039,6 +7149,8 @@ class HyperSystemUiModule : XposedModule() {
                         if (header != null) {
                             lockscreenMediaHeaders += header
                             installLockscreenMediaArtworkClick(header, preferences)
+                            captureLockscreenIslandArtwork(header)
+                            header.post { captureLockscreenIslandArtwork(header) }
                         }
                         if (shouldHideLockscreenMedia(preferences) &&
                             (lockscreenMediaKeyguardShowing || isLockscreenMediaView(chain.thisObject))
@@ -7066,13 +7178,21 @@ class HyperSystemUiModule : XposedModule() {
                     (chain.thisObject as? View)?.takeIf(headerClass::isInstance)?.let { header ->
                         lockscreenMediaHeaders += header
                         installLockscreenMediaArtworkClick(header, preferences)
+                        captureLockscreenIslandArtwork(header)
                         // Some holder children are attached on the next traversal.
                         header.post {
                             installLockscreenMediaArtworkClick(header, preferences)
+                            captureLockscreenIslandArtwork(header)
                         }
                     }
                     result
                 }
+            // `MiuiMediaViewControllerImpl` owns the drawable that the lockscreen island will
+            // animate into albumImageView. Capture that source immediately after binding rather
+            // than waiting for the ImageView's later flip-animation callback. On a SystemUI
+            // restart this is the only point at which the first track's art is guaranteed to be
+            // available before the custom music surface is shown.
+            installLockscreenIslandArtworkBridge(classLoader, headerClass)
             log(
                 Log.INFO,
                 TAG,
@@ -7082,6 +7202,41 @@ class HyperSystemUiModule : XposedModule() {
             applyLockscreenMediaPresentation(preferences)
         }.onFailure { error ->
             log(Log.ERROR, TAG, "Could not install MiuiMediaHeaderView lockscreen hide hook", error)
+        }
+    }
+
+    private fun installLockscreenIslandArtworkBridge(
+        classLoader: ClassLoader,
+        headerClass: Class<*>,
+    ) {
+        runCatching {
+            val controllerClass = classLoader.loadClass(
+                "com.android.systemui.statusbar.notification.mediacontrol.MiuiMediaViewControllerImpl",
+            )
+            val mediaDataClass = classLoader.loadClass(
+                "com.android.systemui.media.controls.shared.model.MediaData",
+            )
+            val bindMediaData = controllerClass.getMethod("bindMediaData", mediaDataClass)
+            hook(bindMediaData)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("lockscreen-media-artwork:controller-bind")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    val holder = readInstanceField(chain.thisObject, "holder")
+                    val player = holder?.let { readInstanceField(it, "player") as? View }
+                    val header = findLockscreenMediaHeader(player, headerClass)
+                    if (header != null) {
+                        lockscreenMediaHeaders += header
+                        captureLockscreenIslandArtwork(header, chain.thisObject)
+                        // The animation can replace the displayed drawable one traversal later;
+                        // repeat through the same source path without requiring a track switch.
+                        player?.post { captureLockscreenIslandArtwork(header, chain.thisObject) }
+                    }
+                    result
+                }
+            log(Log.INFO, TAG, "Installed lockscreen-island artwork source hook")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install lockscreen-island artwork source hook", error)
         }
     }
 
@@ -7259,7 +7414,8 @@ class HyperSystemUiModule : XposedModule() {
             lockscreenMediaNotificationMode(preferences)
         ) {
             LOCKSCREEN_MEDIA_NOTIFICATION_ALWAYS_HIDE -> true
-            LOCKSCREEN_MEDIA_NOTIFICATION_DYNAMIC -> LockscreenMediaPresentationBridge.showMiniPlayer
+            LOCKSCREEN_MEDIA_NOTIFICATION_DYNAMIC ->
+                LockscreenMediaPresentationBridge.presentation != LockscreenMediaPresentation.SYSTEM_MEDIA
             else -> false
         }
 
@@ -7323,7 +7479,9 @@ class HyperSystemUiModule : XposedModule() {
                 when (event.actionMasked) {
                     MotionEvent.ACTION_UP -> {
                         log(Log.DEBUG, TAG, "System media artwork tapped; showing mini player")
-                        LockscreenMediaPresentationBridge.setShowMiniPlayer(true)
+                        LockscreenMediaPresentationBridge.setPresentation(
+                            LockscreenMediaPresentation.MINI_PLAYER,
+                        )
                     }
                 }
                 // Consume the complete gesture so the vendor click listener cannot replace the
@@ -7332,6 +7490,53 @@ class HyperSystemUiModule : XposedModule() {
             }
         }
     }
+
+    /**
+     * MiuiMediaHeaderView is the lockscreen island's own media pipeline. Reuse its final album
+     * drawable instead of assuming every player copies artwork into MediaController metadata.
+     */
+    private fun captureLockscreenIslandArtwork(header: View, controller: Any? = null) {
+        val sourceArtwork = controller?.let { readInstanceField(it, "artWorkDrawable") as? Drawable }
+        sourceArtwork?.let(::drawableBitmap)?.let { bitmap ->
+            LockscreenMediaBridge.updateArtwork(bitmap, LockscreenMediaBridge.notificationKey)
+            return
+        }
+        val holder = readInstanceField(header, "mediaViewHolder") ?: return
+        val image = listOfNotNull(
+            readInstanceField(holder, "albumImageView") as? ImageView,
+            readInstanceField(holder, "albumView") as? ImageView,
+        ).firstOrNull { it.drawable != null } ?: return
+        drawableBitmap(image.drawable, image.width, image.height)?.let { bitmap ->
+            LockscreenMediaBridge.updateArtwork(bitmap, LockscreenMediaBridge.notificationKey)
+        }
+    }
+
+    private fun findLockscreenMediaHeader(player: View?, headerClass: Class<*>): View? {
+        var parent: ViewParent? = player?.parent
+        while (parent != null) {
+            if (headerClass.isInstance(parent)) return parent as? View
+            parent = parent.parent
+        }
+        return null
+    }
+
+    private fun drawableBitmap(
+        drawable: Drawable,
+        widthHint: Int = 0,
+        heightHint: Int = 0,
+    ): Bitmap? = runCatching {
+        if (drawable is BitmapDrawable) return@runCatching drawable.bitmap
+        val width = (widthHint.takeIf { it > 0 } ?: drawable.intrinsicWidth)
+            .takeIf { it > 0 } ?: return@runCatching null
+        val height = (heightHint.takeIf { it > 0 } ?: drawable.intrinsicHeight)
+            .takeIf { it > 0 } ?: return@runCatching null
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val bounds = drawable.bounds
+        drawable.setBounds(0, 0, width, height)
+        drawable.draw(Canvas(bitmap))
+        drawable.bounds = bounds
+        bitmap
+    }.getOrNull()
 
     private fun isLockscreenMediaView(target: Any?): Boolean = runCatching {
         val view = target as? View ?: return@runCatching false
@@ -9554,8 +9759,10 @@ class HyperSystemUiModule : XposedModule() {
         private const val LOCKSCREEN_TEXT_CHARGING = 1
         private const val LOCKSCREEN_TEXT_DND = 2
         private const val LOCKSCREEN_TEXT_NOTIFICATIONS = 4
+        private const val STATUS_BAR_STATE_KEYGUARD = 1
         private const val KEY_LOCKSCREEN_SHORTCUT_GLASS_ENABLED = "lockscreen_shortcut_glass_enabled"
         private const val KEY_LOCKSCREEN_MINI_PLAYER_ENABLED = "lockscreen_mini_player_enabled"
+        private const val KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED = "lockscreen_music_lockscreen_enabled"
         private const val KEY_LOCKSCREEN_MINI_PLAYER_LYRICS_ENABLED =
             "lockscreen_mini_player_lyrics_enabled"
         private const val KEY_LOCKSCREEN_MINI_PLAYER_HIDE_MEDIA_NOTIFICATION =
@@ -9656,6 +9863,7 @@ private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_d
         private var lockscreenWhiteBarHookInstalled = false
         private var lockscreenShortcutGlassHookInstalled = false
         private var lockscreenWidgetSceneVisibilityHookInstalled = false
+        private var lockscreenMusicLockscreenHookInstalled = false
         private var lockscreenPinCircleBackgroundHookInstalled = false
         private var shadeMaterialHooksInstalled = false
         private var softGlassThemeSystemUiHookInstalled = false
@@ -9700,6 +9908,9 @@ private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_d
         )
         private const val LOCKSCREEN_DATE_FOLLOW_DURATION_MS = 900L
         private const val LOCKSCREEN_DATE_TO_GLYPH_GAP_DP = 12f
+        private val lockscreenMusicLockscreenControllers = Collections.synchronizedMap(
+            WeakHashMap<View, LockscreenMusicLockscreenController>(),
+        )
         private val fodEnrollmentFlowOverrides = WeakHashMap<Any, Any>()
         private val notificationGlassAppliedViews =
             Collections.newSetFromMap(WeakHashMap<View, Boolean>())
