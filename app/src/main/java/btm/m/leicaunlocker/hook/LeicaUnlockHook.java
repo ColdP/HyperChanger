@@ -5,6 +5,7 @@ package btm.m.leicaunlocker.hook;
 import android.content.SharedPreferences;
 import android.hardware.camera2.CaptureRequest;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -17,6 +18,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Constructor;
 import java.util.Collections;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -30,6 +32,7 @@ import io.github.libxposed.api.XposedModule;
 
 public final class LeicaUnlockHook extends XposedModule {
     private static final String TAG = "LeicaUnlocker";
+    private static final Object AI_PROFILE_LOCK = new Object();
     private static final String CAMERA_CONFIG_FACTORY = "Je.e";
     private static final String LEGENDARY_VENDOR_TAG = "com.xiaomi.sessionparams.legendMode";
     private static final int LEGENDARY_MODE_M9 = 1;
@@ -42,6 +45,14 @@ public final class LeicaUnlockHook extends XposedModule {
 
     private volatile SharedPreferences preferences;
     private volatile boolean targetProcess;
+    /** True while this module instance is running inside Gallery/MediaEditor. */
+    private volatile boolean galleryProcess;
+    /** Gallery class loaders are not safe to hook while ActivityThread is binding. */
+    private volatile boolean galleryWatermarkHooksScheduled;
+    /** True only while an AI capability/provider call is evaluated as madrid. */
+    private volatile boolean galleryAiProfileActive;
+    private final Map<String, String> galleryOriginalBuildValues = new HashMap<>();
+    private volatile boolean galleryOriginalBuildCaptured;
     private volatile Object nativeCameraConfig;
     private volatile String nativeDefaultFocal;
     private volatile Object nezhaCameraConfig;
@@ -55,6 +66,36 @@ public final class LeicaUnlockHook extends XposedModule {
     private final Set<Class<?>> galleryModernWatermarkClasses = ConcurrentHashMap.newKeySet();
     private final Set<Class<?>> galleryModernCapabilityClasses = ConcurrentHashMap.newKeySet();
     private final Set<Class<?>> galleryWatermarkFragmentClasses = ConcurrentHashMap.newKeySet();
+    private final Set<Class<?>> galleryPaletteUnlockClasses = ConcurrentHashMap.newKeySet();
+    /** MediaEditor AI capability gates that use the madrid device profile. */
+    private final Set<Class<?>> galleryAiUnlockClasses = ConcurrentHashMap.newKeySet();
+    private final Set<Class<?>> galleryAiProviderClasses = ConcurrentHashMap.newKeySet();
+    private final Set<Class<?>> galleryLimitationPredicateClasses = ConcurrentHashMap.newKeySet();
+    private final Set<Class<?>> galleryWatermarkFilterClasses = ConcurrentHashMap.newKeySet();
+    private final Set<Class<?>> galleryWatermarkSupportedListClasses = ConcurrentHashMap.newKeySet();
+    /** Lookup fallback for IDs removed by the 2.10.40 catalog filters. */
+    private final Set<Class<?>> galleryWatermarkLookupClasses = ConcurrentHashMap.newKeySet();
+    private final Set<Class<?>> galleryCloudWatermarkMakerClasses = ConcurrentHashMap.newKeySet();
+    /** MediaEditor watermark EXIF/parameter validators (o80.j in 2.10.40). */
+    private final Set<Class<?>> galleryWatermarkExifClasses = ConcurrentHashMap.newKeySet();
+    private final Set<Class<?>> galleryWatermarkDataLoaderClasses = ConcurrentHashMap.newKeySet();
+    private final Set<Class<?>> galleryWatermarkAvailabilityClasses = ConcurrentHashMap.newKeySet();
+    /** Cloud watermark config filter (version/device/time restrictions). */
+    private final Set<Class<?>> galleryWatermarkConfigFilterClasses = ConcurrentHashMap.newKeySet();
+    /** Final per-item parameter/device restriction result (w60.x0). */
+    private final Set<Class<?>> galleryWatermarkSelectionRestrictionClasses = ConcurrentHashMap.newKeySet();
+    /** New 2.10.40 capability/brand gate (p382nt.C11802a). */
+    private final Set<Class<?>> galleryWatermarkBrandCapabilityClasses = ConcurrentHashMap.newKeySet();
+    /** Classes found by structural watermark signatures (survives obfuscation/package moves). */
+    private final Set<Class<?>> galleryGenericWatermarkClasses = ConcurrentHashMap.newKeySet();
+    /** Device capability helpers used by the watermark catalog. */
+    private final Set<Class<?>> galleryWatermarkDeviceClasses = ConcurrentHashMap.newKeySet();
+    /** Additional device predicates used by the 2.10.40 watermark feature dex. */
+    private final Set<Class<?>> galleryWatermarkDevicePredicateClasses = ConcurrentHashMap.newKeySet();
+    /** Per-item kl0 predicates (version/device/region filters) in newer dexes. */
+    private final Set<Class<?>> galleryWatermarkItemPredicateClasses = ConcurrentHashMap.newKeySet();
+    /** k0.g() may run before the feature-dex predicate hooks are installed. */
+    private final Set<Class<?>> galleryWatermarkInitClasses = ConcurrentHashMap.newKeySet();
     private Method cameraConfigGetter;
     private Field cameraConfigCacheField;
     private Class<?> deviceSelectorClass;
@@ -67,6 +108,7 @@ public final class LeicaUnlockHook extends XposedModule {
     private volatile boolean modernDeviceSelectorOverride;
     private boolean cameraFactoryTouched;
     private volatile boolean galleryWatermarkClassLoadHookInstalled;
+    private volatile boolean galleryWatermarkJsonHookInstalled;
     private volatile CaptureRequest.Key<Integer> legendaryVendorKey;
     private volatile boolean nativeFocalDefaultHookInstalled;
     private volatile boolean nativeFocalComponentHookInstalled;
@@ -89,6 +131,7 @@ public final class LeicaUnlockHook extends XposedModule {
 
         try {
             preferences = getRemotePreferences(ModuleConfig.PREFERENCE_GROUP);
+            galleryProcess = isGalleryProcess(param.getProcessName());
             log(Log.INFO, TAG, "Loaded in " + param.getProcessName() + " with API " + getApiVersion());
         } catch (RuntimeException error) {
             log(Log.WARN, TAG, "Remote preferences are unavailable; using enabled defaults", error);
@@ -105,6 +148,14 @@ public final class LeicaUnlockHook extends XposedModule {
             return;
         }
         if (ModuleConfig.isGalleryPackage(param.getPackageName())) {
+            galleryProcess = true;
+            if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                    || pref(ModuleConfig.KEY_GALLERY_PALETTE_UNLOCKED, false)) {
+                if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                    applyGalleryWatermarkBuildProfile();
+                }
+                installSystemPropertyHooks();
+            }
             installGalleryWatermarkHooksForChain(param.getDefaultClassLoader());
             return;
         }
@@ -153,6 +204,14 @@ public final class LeicaUnlockHook extends XposedModule {
 
         ClassLoader classLoader = param.getClassLoader();
         if (ModuleConfig.isGalleryPackage(param.getPackageName())) {
+            galleryProcess = true;
+            if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                    || pref(ModuleConfig.KEY_GALLERY_PALETTE_UNLOCKED, false)) {
+                if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                    applyGalleryWatermarkBuildProfile();
+                }
+                installSystemPropertyHooks();
+            }
             installGalleryWatermarkHooksForChain(classLoader);
             return;
         }
@@ -181,6 +240,16 @@ public final class LeicaUnlockHook extends XposedModule {
         // process (notably MediaEditor :photo_editor/:editor_service). Requiring
         // firstPackage here silently skipped the watermark module.
         return targetProcess && ModuleConfig.isSupportedPackage(packageName);
+    }
+
+    private boolean isGalleryProcess(String processName) {
+        return processName != null && (
+                processName.equals(ModuleConfig.GALLERY_PACKAGE)
+                        || processName.startsWith(ModuleConfig.GALLERY_PACKAGE + ":")
+                        || processName.equals(ModuleConfig.GALLERY_PLUGIN_PACKAGE)
+                        || processName.startsWith(ModuleConfig.GALLERY_PLUGIN_PACKAGE + ":")
+                        || processName.equals(ModuleConfig.MEDIA_EDITOR_PACKAGE)
+                        || processName.startsWith(ModuleConfig.MEDIA_EDITOR_PACKAGE + ":"));
     }
 
     private boolean isEnabled() {
@@ -241,8 +310,85 @@ public final class LeicaUnlockHook extends XposedModule {
                             key,
                             pref(ModuleConfig.KEY_LEICA_UI, true)
                     );
+                    if (galleryProcess) {
+                        String galleryReplacement = galleryAiProfileActive
+                                ? ModuleConfig.aiPropertyOverride(key)
+                                : (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                                ? ModuleConfig.galleryWatermarkPropertyOverride(key) : null);
+                        if (galleryReplacement != null) {
+                            replacement = galleryReplacement;
+                        }
+                    }
                     return replacement != null ? replacement : chain.proceed();
                 });
+    }
+
+    /** AI-only identity used while MediaEditor evaluates capability gates. */
+    private void applyGalleryAiBuildProfile() {
+        captureGalleryOriginalBuildValues();
+        galleryAiProfileActive = true;
+        Map<String, String> values = Map.of(
+                "DEVICE", "madrid",
+                "PRODUCT", "madrid",
+                "MODEL", "Xiaomi 18 Pro Max",
+                "BRAND", "Xiaomi",
+                "MANUFACTURER", "Xiaomi"
+        );
+        for (Map.Entry<String, String> entry : values.entrySet()) {
+            setStaticStringField(Build.class, entry.getKey(), entry.getValue());
+        }
+        log(Log.INFO, TAG, "Gallery AI build profile applied: Xiaomi 18 Pro Max / madrid");
+    }
+
+    /**
+     * The working 2.10.40.3.1 mod replaces Build.DEVICE with lhasa in the
+     * watermark code. Keep this profile independent from the hongkong palette
+     * switch: watermark availability is not tied to the new editor palette.
+     */
+    private void applyGalleryWatermarkBuildProfile() {
+        captureGalleryOriginalBuildValues();
+        galleryAiProfileActive = false;
+        setStaticStringField(Build.class, "DEVICE", "lhasa");
+        setStaticStringField(Build.class, "PRODUCT", "lhasa");
+        restoreGalleryOriginalBuildValue("MODEL");
+        restoreGalleryOriginalBuildValue("BRAND");
+        restoreGalleryOriginalBuildValue("MANUFACTURER");
+        log(Log.INFO, TAG, "Gallery watermark build profile applied: lhasa");
+    }
+
+    private void captureGalleryOriginalBuildValues() {
+        if (galleryOriginalBuildCaptured) {
+            return;
+        }
+        synchronized (galleryOriginalBuildValues) {
+            if (galleryOriginalBuildCaptured) {
+                return;
+            }
+            for (String name : new String[]{"DEVICE", "PRODUCT", "MODEL", "BRAND", "MANUFACTURER"}) {
+                String value = readStaticStringField(Build.class, name);
+                if (value != null) {
+                    galleryOriginalBuildValues.put(name, value);
+                }
+            }
+            galleryOriginalBuildCaptured = true;
+        }
+    }
+
+    private void restoreGalleryOriginalBuildValue(String name) {
+        String value;
+        synchronized (galleryOriginalBuildValues) {
+            value = galleryOriginalBuildValues.get(name);
+        }
+        if (value != null) {
+            setStaticStringField(Build.class, name, value);
+        }
+    }
+
+    private void restoreGalleryOriginalBuildProfile() {
+        galleryAiProfileActive = false;
+        for (String name : new String[]{"DEVICE", "PRODUCT", "MODEL", "BRAND", "MANUFACTURER"}) {
+            restoreGalleryOriginalBuildValue(name);
+        }
     }
 
     private void installCameraFeatureHooks(ClassLoader classLoader) {
@@ -1358,20 +1504,1116 @@ public final class LeicaUnlockHook extends XposedModule {
     }
 
     private void installGalleryWatermarkHooks(ClassLoader classLoader) {
+        if (pref(ModuleConfig.KEY_GALLERY_PALETTE_UNLOCKED, false)) {
+            installGalleryAiUnlockHooks(classLoader);
+        }
+        // Newer MediaEditor builds reject images without camera EXIF before
+        // the watermark renderer is reached.  Install this independently of
+        // the catalog/device hooks so every image can be watermarked.
+        if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+            installGalleryAiUnlockHooks(classLoader);
+            installGalleryWatermarkExifBypass(classLoader);
+            installGalleryWatermarkDeviceBypass(classLoader);
+            // The catalog is assembled lazily in a feature dex. These hooks
+            // only set the manager's own skip-filter flag and preserve all
+            // original return values, so they are safe during UI layout.
+            installGalleryWatermarkFilterBypass(classLoader);
+            installGalleryWatermarkInitBypass(classLoader);
+            installCloudWatermarkMakerBypass(classLoader);
+            installGalleryWatermarkDataLoaderHook(classLoader);
+            installGalleryWatermarkAvailabilityHook(classLoader);
+            installGalleryWatermarkBrandCapabilityHook(classLoader);
+            installGalleryWatermarkItemPredicateHooks(classLoader);
+            installGalleryWatermarkConfigFilterHook(classLoader);
+            installGalleryWatermarkSelectionRestrictionHook(classLoader);
+            installGalleryWatermarkJsonLimitationHook();
+        }
         if (!pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
             return;
         }
+    }
 
-        boolean modernHooked = installModernGalleryWatermarkHooks(classLoader);
-        boolean capabilityHooked = installModernWatermarkCapabilityOnly(classLoader);
-        boolean managerHooked = installGalleryWatermarkManagerHook(classLoader);
-        boolean capabilitiesHooked = installGalleryWatermarkCapabilityHooks(classLoader);
-        boolean usageHooked = installGalleryWatermarkUsageHook(classLoader);
-        boolean restrictionHooked = installGalleryWatermarkRestrictionHook(classLoader);
-        boolean fragmentHooked = installGalleryWatermarkFragmentHook(classLoader);
-        if (!modernHooked || !capabilityHooked || !managerHooked || !capabilitiesHooked || !usageHooked
-                || !restrictionHooked || !fragmentHooked) {
-            installDeferredGalleryWatermarkManagerHook();
+    /**
+     * Bypass the photo-parameter checks introduced in MediaEditor 2.10.40.
+     * o80.j.x/y validate EXIF fields and o80.j.a is the aggregate validator
+     * that produces the "未识别到拍摄参数" error for ordinary images.
+     */
+    private boolean installGalleryWatermarkExifBypass(ClassLoader classLoader) {
+        try {
+            Class<?> validator = Class.forName("o80.j", false, classLoader);
+            if (!galleryWatermarkExifClasses.add(validator)) {
+                return true;
+            }
+            int installed = 0;
+            for (Method candidate : validator.getDeclaredMethods()) {
+                String name = candidate.getName();
+                Class<?> returnType = candidate.getReturnType();
+                if (!isBooleanReturn(returnType)) {
+                    continue;
+                }
+                int count = candidate.getParameterCount();
+                // 2.10.40.4.8 is emitted by JADX as m17672x/m17673y and
+                // m17674a, while the runtime DEX names may still be x/y/a.
+                // Match both forms and keep the final aggregate validator
+                // open so images without Leica EXIF remain usable.
+                if (("x".equals(name) || "y".equals(name)
+                        || "m17672x".equals(name) || "m17673y".equals(name)) && count == 1
+                        && Modifier.isStatic(candidate.getModifiers())) {
+                    candidate.setAccessible(true);
+                    hook(candidate)
+                            .setPriority(PRIORITY_HIGHEST)
+                            .setId("gallery_watermark_exif_" + name)
+                            .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                                    ? Boolean.TRUE : chain.proceed());
+                    installed++;
+                } else if (("a".equals(name) || "m17674a".equals(name)) && count == 2
+                        && !Modifier.isStatic(candidate.getModifiers())) {
+                    candidate.setAccessible(true);
+                    hook(candidate)
+                            .setPriority(PRIORITY_HIGHEST)
+                            .setId("gallery_watermark_param_validator")
+                            .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                                    ? Boolean.TRUE : chain.proceed());
+                    installed++;
+                }
+            }
+            log(Log.INFO, TAG, "Gallery watermark EXIF bypass installed: " + installed);
+            return installed > 0;
+        } catch (ClassNotFoundException ignored) {
+            return false;
+        } catch (RuntimeException | LinkageError error) {
+            galleryWatermarkExifClasses.removeIf(type -> type.getClassLoader() == classLoader);
+            log(Log.WARN, TAG, "Unable to install Gallery watermark EXIF bypass", error);
+            return false;
+        }
+    }
+
+    /** bv0.a.i()/m3791i() is the explicit lhasa device capability gate. */
+    private boolean installGalleryWatermarkDeviceBypass(ClassLoader classLoader) {
+        try {
+            Class<?> device = Class.forName("bv0.a", false, classLoader);
+            if (!galleryWatermarkDeviceClasses.add(device)) {
+                return true;
+            }
+            Method isLhasa = null;
+            for (String name : new String[]{"i", "m3791i"}) {
+                try {
+                    Method candidate = device.getDeclaredMethod(name);
+                    if (Modifier.isStatic(candidate.getModifiers())
+                            && candidate.getParameterCount() == 0
+                            && isBooleanReturn(candidate.getReturnType())) {
+                        isLhasa = candidate;
+                        break;
+                    }
+                } catch (NoSuchMethodException ignored) {
+                    // Try the JADX-generated name below.
+                }
+            }
+            if (isLhasa == null) {
+                return false;
+            }
+            isLhasa.setAccessible(true);
+            hook(isLhasa)
+                    .setPriority(PRIORITY_HIGHEST)
+                    .setId("gallery_watermark_device_lhasa")
+                    .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                            ? Boolean.TRUE : chain.proceed());
+            log(Log.INFO, TAG, "Gallery watermark device capability bypass installed");
+            return true;
+        } catch (ClassNotFoundException ignored) {
+            return false;
+        } catch (RuntimeException | LinkageError error) {
+            galleryWatermarkDeviceClasses.removeIf(type -> type.getClassLoader() == classLoader);
+            log(Log.WARN, TAG, "Unable to install Gallery watermark device bypass", error);
+            return false;
+        }
+    }
+
+    /**
+     * C11802a is the 2.10.40 feature-dex capability table.  Its methods are
+     * static boolean predicates, and several of them are consulted before any
+     * catalog item is created.  Keep the original class and resources intact,
+     * but expose every category when the explicit all-watermarks option is on.
+     */
+    private boolean installGalleryWatermarkBrandCapabilityHook(ClassLoader classLoader) {
+        try {
+            Class<?> capability = resolveFirstClass(classLoader, "p382nt.C11802a", "nt.a");
+            if (!galleryWatermarkBrandCapabilityClasses.add(capability)) {
+                return true;
+            }
+            int installed = 0;
+            for (Method method : capability.getDeclaredMethods()) {
+                if (!Modifier.isStatic(method.getModifiers())
+                        || method.getParameterCount() > 1
+                        || !isBooleanReturn(method.getReturnType())) {
+                    continue;
+                }
+                // The one-argument variants receive the EXIF parameter object;
+                // zero-argument variants are brand/device capability checks.
+                if (method.getParameterCount() == 1
+                        && !method.getParameterTypes()[0].getName().contains("C12495b")
+                        && !method.getParameterTypes()[0].getName().contains("pc.b")) {
+                    continue;
+                }
+                method.setAccessible(true);
+                hook(method)
+                        .setPriority(PRIORITY_HIGHEST)
+                        .setId("gallery_watermark_brand_capability_" + method.getName())
+                        .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                                ? Boolean.TRUE : chain.proceed());
+                installed++;
+            }
+            log(Log.INFO, TAG, "Gallery watermark brand capability hooks installed: " + installed);
+            return installed > 0;
+        } catch (ClassNotFoundException ignored) {
+            return false;
+        } catch (RuntimeException | LinkageError error) {
+            galleryWatermarkBrandCapabilityClasses.removeIf(
+                    type -> type.getClassLoader() == classLoader);
+            log(Log.WARN, TAG, "Unable to install Gallery watermark brand capability hooks", error);
+            return false;
+        }
+    }
+
+    /** Install per-item version/device/region predicates, including renamed
+     * Kotlin lambda classes in future feature dexes. */
+    private boolean installGalleryWatermarkItemPredicateHooks(ClassLoader classLoader) {
+        String[] names = {
+                "kl0.C9119a0", "kl0.C9146o", "kl0.C9154s", "kl0.C9156t",
+                "kl0.C9157u", "kl0.C9158v", "kl0.C9159w", "kl0.C9160x",
+                "kl0.C9161y", "kl0.C9162z", "kl0.t", "kl0.u", "kl0.v",
+                "kl0.w", "kl0.x", "kl0.y", "kl0.z", "kl0.a0"
+        };
+        int installed = 0;
+        for (String name : names) {
+            try {
+                if (installGalleryWatermarkItemPredicateHook(
+                        Class.forName(name, false, classLoader))) {
+                    installed++;
+                }
+            } catch (ClassNotFoundException ignored) {
+                // Feature classes are loaded lazily and are handled by the
+                // class-load observer below.
+            }
+        }
+        if (installed > 0) {
+            log(Log.INFO, TAG, "Gallery watermark item predicate hooks installed: " + installed);
+        }
+        return installed > 0;
+    }
+
+    private boolean installGalleryWatermarkItemPredicateHook(Class<?> type) {
+        if (type == null || !type.getName().startsWith("kl0.")
+                || !galleryWatermarkItemPredicateClasses.add(type)) {
+            return false;
+        }
+        int count = 0;
+        try {
+            for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+                for (Method method : current.getDeclaredMethods()) {
+                    if (!isBooleanReturn(method.getReturnType()) || method.getParameterCount() != 1) {
+                        continue;
+                    }
+                    String parameterName = method.getParameterTypes()[0].getName();
+                    if (!(parameterName.startsWith("com.xiaomi.cam.watermark.")
+                            || parameterName.endsWith("C4104a"))) {
+                        continue;
+                    }
+                    method.setAccessible(true);
+                    hook(method)
+                            .setPriority(PRIORITY_HIGHEST)
+                            .setId("gallery_watermark_item_predicate_"
+                                    + type.getName().replace('.', '_') + "_" + method.getName())
+                            .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                                    ? Boolean.FALSE : chain.proceed());
+                    count++;
+                }
+            }
+            if (count == 0) {
+                galleryWatermarkItemPredicateClasses.remove(type);
+            }
+            return count > 0;
+        } catch (RuntimeException | LinkageError error) {
+            galleryWatermarkItemPredicateClasses.remove(type);
+            log(Log.WARN, TAG, "Unable to install watermark item predicate hook: " + type, error);
+            return false;
+        }
+    }
+
+    /**
+     * The 2.10.40 AI entry points gate support on Build.DEVICE.  Evaluate the
+     * provider call as the Xiaomi 18 Pro Max (madrid), then restore lhasa so
+     * watermark code in the same process keeps its established identity.
+     */
+    private boolean installGalleryAiUnlockHooks(ClassLoader classLoader) {
+        int installed = 0;
+        installed += installGalleryAiGateHooks(classLoader) ? 1 : 0;
+        for (String className : new String[]{
+                "com.miui.mediaeditor.provider.AiActionProvider",
+                "com.miui.mediaeditor.provider.MediaEditorProviderForGallery"
+        }) {
+            try {
+                Class<?> provider = Class.forName(className, false, classLoader);
+                if (!galleryAiProviderClasses.add(provider)) {
+                    installed++;
+                    continue;
+                }
+                Method call = provider.getDeclaredMethod(
+                        "call", String.class, String.class, Bundle.class);
+                call.setAccessible(true);
+                hook(call)
+                        .setPriority(PRIORITY_HIGHEST)
+                        .setId("gallery_ai_provider_" + className.replace('.', '_'))
+                        .intercept(chain -> {
+                            if (!pref(ModuleConfig.KEY_GALLERY_PALETTE_UNLOCKED, false)) {
+                                return chain.proceed();
+                            }
+                            if (!isAiProviderCall(className, chain.getArg(0))) {
+                                return chain.proceed();
+                            }
+                            synchronized (AI_PROFILE_LOCK) {
+                                applyGalleryAiBuildProfile();
+                                try {
+                                    return chain.proceed();
+                                } finally {
+                                    if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                                        applyGalleryWatermarkBuildProfile();
+                                    } else {
+                                        restoreGalleryOriginalBuildProfile();
+                                    }
+                                }
+                            }
+                        });
+                installed++;
+                if (className.endsWith("AiActionProvider")) {
+                    for (String methodName : new String[]{"m7213a", "a"}) {
+                        try {
+                            Method actionSupport = provider.getDeclaredMethod(methodName, String.class);
+                            actionSupport.setAccessible(true);
+                            hook(actionSupport)
+                                    .setPriority(PRIORITY_HIGHEST)
+                                    .setId("gallery_ai_action_support_" + methodName)
+                                    .intercept(chain -> {
+                                        Object action = chain.getArg(0);
+                                        if (!pref(ModuleConfig.KEY_GALLERY_PALETTE_UNLOCKED, false)
+                                                || !isAiAction(action)) {
+                                            return chain.proceed();
+                                        }
+                                        synchronized (AI_PROFILE_LOCK) {
+                                            applyGalleryAiBuildProfile();
+                                            try {
+                                                return Boolean.TRUE;
+                                            } finally {
+                                                if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                                                    applyGalleryWatermarkBuildProfile();
+                                                } else {
+                                                    restoreGalleryOriginalBuildProfile();
+                                                }
+                                            }
+                                        }
+                                    });
+                            installed++;
+                            break;
+                        } catch (NoSuchMethodException ignored) {
+                            // Try the next obfuscation name.
+                        }
+                    }
+                }
+            } catch (ClassNotFoundException ignored) {
+                // Providers may be loaded from the feature dex later.
+            } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
+                galleryAiProviderClasses.removeIf(type -> type.getClassLoader() == classLoader);
+                log(Log.WARN, TAG, "Unable to install Gallery AI provider hook: " + className, error);
+            }
+        }
+        if (installed > 0) {
+            log(Log.INFO, TAG, "Gallery AI provider hooks installed: " + installed);
+        }
+        return installed > 0;
+    }
+
+    private boolean isAiProviderCall(String providerClass, Object method) {
+        if (!(method instanceof String name)) {
+            return false;
+        }
+        if (providerClass.endsWith("AiActionProvider")) {
+            return "action_support".equals(name);
+        }
+        return name.equals("method_is_device_support_magic_matting")
+                || name.equals("method_is_outpaint_available")
+                || name.equals("method_is_remover_available")
+                || name.equals("method_is_remove_glare_available")
+                || name.equals("method_is_art_still_available")
+                || name.equals("method_is_magic_sky_available")
+                || name.equals("method_is_id_photo_available")
+                || name.equals("method_is_mishow_magic_matting_available")
+                || name.equals("method_is_auto_adjust_available")
+                || name.equals("method_is_magic_matting_available")
+                || name.equals("method_is_device_support_capabilities");
+    }
+
+    private boolean isAiAction(Object value) {
+        if (!(value instanceof String action)) {
+            return false;
+        }
+        return action.contains("/photo/auto-beauty]")
+                || action.contains("/photo/face-beauty]")
+                || action.contains("/photo/face-beauty-acne]")
+                || action.contains("/photo/face-beauty-skin]")
+                || action.contains("/photo/face-shape]")
+                || action.contains("/photo/face-shape-extra]")
+                || action.contains("/photo/body-beauty]")
+                || action.contains("/photo/body-beauty-slim]")
+                || action.contains("/photo/body-beauty-extra]")
+                || action.contains("/photo/virtualization-portrait]")
+                || action.contains("/photo/magic-sky]")
+                || action.contains("/photo/reflection-eliminate]")
+                || action.contains("/photo/super-portrait]")
+                || action.contains("/photo/image-quality-restoration]")
+                || action.contains("/photo/ai-cloud-function]")
+                || action.contains("/photo/ai-cloud-function-super-editor]")
+                || action.contains("/photo/hsl]")
+                || action.contains("/photo/enhance]")
+                || action.contains("/photo/de-noise]")
+                || action.contains("/photo/posterize]")
+                || action.contains("/photo/enhance-extra]")
+                || action.contains("/photo/beautification]");
+    }
+
+    /** Static feature gates used by the 2.10.40 AI menu and provider APIs. */
+    private boolean installGalleryAiGateHooks(ClassLoader classLoader) {
+        int installed = 0;
+        for (String className : new String[]{
+                "p179ft.C6418f", "p179ft.C6411b0", "p179ft.C6420g", "p179ft.C6423h0",
+                "ft.f", "ft.b0", "ft.g", "ft.h0"
+        }) {
+            try {
+                Class<?> type = Class.forName(className, false, classLoader);
+                if (!galleryAiUnlockClasses.add(type)) {
+                    installed++;
+                    continue;
+                }
+                for (Method method : type.getDeclaredMethods()) {
+                    if (!Modifier.isStatic(method.getModifiers())
+                            || method.getParameterCount() != 0
+                            || method.getReturnType() != boolean.class) {
+                        continue;
+                    }
+                    method.setAccessible(true);
+                    hook(method)
+                            .setPriority(PRIORITY_HIGHEST)
+                            .setId("gallery_ai_gate_" + className.replace('.', '_') + "_" + method.getName())
+                            .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_PALETTE_UNLOCKED, false)
+                                    ? Boolean.TRUE : chain.proceed());
+                    installed++;
+                }
+            } catch (ClassNotFoundException ignored) {
+                // Feature dex classes are loaded lazily.
+            } catch (RuntimeException | LinkageError error) {
+                galleryAiUnlockClasses.removeIf(type -> type.getClassLoader() == classLoader);
+                log(Log.WARN, TAG, "Unable to install Gallery AI gate hook: " + className, error);
+            }
+        }
+        if (installed > 0) {
+            log(Log.INFO, TAG, "Gallery AI gate hooks installed: " + installed);
+        }
+        return installed > 0;
+    }
+
+    /**
+     * The cloud catalog is normalized before it reaches kl0.k0.  In 2.10.40
+     * this pass is w60.r0.a(C2114c, List), emitted as
+     * C16644r0.m22218a by JADX.  It removes entries using version, device,
+     * region, time and support-list checks, so bypassing the later menu
+     * predicates alone still leaves the catalog incomplete.
+     */
+    private boolean installGalleryWatermarkConfigFilterHook(ClassLoader classLoader) {
+        int installed = 0;
+        for (String className : new String[]{"w60.r0", "w60.C16644r0"}) {
+            try {
+                Class<?> type = Class.forName(className, false, classLoader);
+                if (!galleryWatermarkConfigFilterClasses.add(type)) {
+                    continue;
+                }
+                for (Method method : type.getDeclaredMethods()) {
+                    if (!Modifier.isStatic(method.getModifiers())
+                            || method.getParameterCount() != 2
+                            || !List.class.isAssignableFrom(method.getParameterTypes()[1])
+                            || method.getParameterTypes()[0] != method.getReturnType()) {
+                        continue;
+                    }
+                    String methodName = method.getName();
+                    if (!("a".equals(methodName) || "m22218a".equals(methodName)
+                            || methodName.startsWith("m"))) {
+                        continue;
+                    }
+                    method.setAccessible(true);
+                    hook(method)
+                            .setPriority(PRIORITY_HIGHEST)
+                            .setId("gallery_watermark_config_filter_"
+                                    + type.getName().replace('.', '_') + "_" + methodName)
+                            .intercept(chain -> {
+                                Object config = chain.getArg(0);
+                                if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                                        && config != null) {
+                                    return config;
+                                }
+                                return chain.proceed();
+                            });
+                    installed++;
+                }
+                if (installed == 0) {
+                    galleryWatermarkConfigFilterClasses.remove(type);
+                }
+            } catch (ClassNotFoundException ignored) {
+                // The watermark feature dex is loaded lazily.
+            } catch (RuntimeException | LinkageError error) {
+                log(Log.WARN, TAG,
+                        "Unable to install Gallery watermark config filter hook: " + className,
+                        error);
+            }
+        }
+        if (installed > 0) {
+            log(Log.INFO, TAG, "Gallery watermark config filter hook installed: " + installed);
+        }
+        return installed > 0;
+    }
+
+    /**
+     * Bypass the final item validation used when a watermark is selected.
+     * C16656x0.m22225a (runtime name w60.x0.a) returns
+     * AbstractC5396a.b(photo_editor_gallery_frame_no_exif_v2) when any
+     * required EXIF field, model, or device capability is absent.  Returning
+     * the library's success singleton keeps the normal render path intact and
+     * removes the "unrecognized shooting parameters" rejection for every
+     * watermark type.
+     */
+    private boolean installGalleryWatermarkSelectionRestrictionHook(ClassLoader classLoader) {
+        for (String className : new String[]{"w60.C16656x0", "w60.x0"}) {
+            try {
+                Class<?> checker = Class.forName(className, false, classLoader);
+                if (!galleryWatermarkSelectionRestrictionClasses.add(checker)) {
+                    continue;
+                }
+                Method target = null;
+                for (Method method : checker.getDeclaredMethods()) {
+                    if (!Modifier.isStatic(method.getModifiers())
+                            || method.getParameterCount() != 4
+                            || !method.getReturnType().getName().startsWith("e70.")) {
+                        continue;
+                    }
+                    String name = method.getName();
+                    if ("a".equals(name) || "m22225a".equals(name) || name.startsWith("m")) {
+                        target = method;
+                        break;
+                    }
+                }
+                if (target == null) {
+                    galleryWatermarkSelectionRestrictionClasses.remove(checker);
+                    continue;
+                }
+                Object success = findSuccessResult(target.getReturnType(), classLoader);
+                if (success == null) {
+                    galleryWatermarkSelectionRestrictionClasses.remove(checker);
+                    log(Log.WARN, TAG, "Watermark selection success result is unavailable");
+                    continue;
+                }
+                target.setAccessible(true);
+                hook(target)
+                        .setPriority(PRIORITY_HIGHEST)
+                        .setId("gallery_watermark_selection_restriction_"
+                                + checker.getName().replace('.', '_'))
+                        .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                                ? success : chain.proceed());
+                log(Log.INFO, TAG, "Gallery watermark selection restriction bypass installed: "
+                        + checker.getName());
+                return true;
+            } catch (ClassNotFoundException ignored) {
+                // Feature dex may be loaded after the editor starts.
+            } catch (RuntimeException | LinkageError error) {
+                log(Log.WARN, TAG,
+                        "Unable to install Gallery watermark selection restriction hook: "
+                                + className, error);
+            }
+        }
+        return false;
+    }
+
+    private static Object findSuccessResult(Class<?> resultType, ClassLoader classLoader) {
+        for (Class<?> nested : resultType.getDeclaredClasses()) {
+            for (Field field : nested.getDeclaredFields()) {
+                if (!Modifier.isStatic(field.getModifiers())
+                        || !resultType.isAssignableFrom(field.getType())) {
+                    continue;
+                }
+                try {
+                    field.setAccessible(true);
+                    Object value = field.get(null);
+                    if (value != null) {
+                        return value;
+                    }
+                } catch (IllegalAccessException | RuntimeException ignored) {
+                    // Try another nested result holder.
+                }
+            }
+        }
+        for (String name : new String[]{"e70.AbstractC5396a$a", "e70.a$a"}) {
+            try {
+                Class<?> holder = Class.forName(name, false, classLoader);
+                for (Field field : holder.getDeclaredFields()) {
+                    if (!Modifier.isStatic(field.getModifiers())
+                            || !resultType.isAssignableFrom(field.getType())) {
+                        continue;
+                    }
+                    field.setAccessible(true);
+                    Object value = field.get(null);
+                    if (value != null) {
+                        return value;
+                    }
+                }
+            } catch (ClassNotFoundException | IllegalAccessException | RuntimeException ignored) {
+                // Continue with the structural result lookup.
+            }
+        }
+        return null;
+    }
+
+    /** HyperCeiler's generic cloud-data bypass: the editor stores time/device
+     * restrictions under a JSON object named "limitation". Returning null for
+     * that optional node leaves the watermark definition and bitmap paths
+     * untouched while preventing the menu builder from dropping the item. */
+    private void installGalleryWatermarkJsonLimitationHook() {
+        if (galleryWatermarkJsonHookInstalled) {
+            return;
+        }
+        synchronized (this) {
+            if (galleryWatermarkJsonHookInstalled) {
+                return;
+            }
+            try {
+                Class<?> jsonObject = Class.forName("org.json.JSONObject", false, null);
+                Method optJSONObject = jsonObject.getDeclaredMethod("optJSONObject", String.class);
+                optJSONObject.setAccessible(true);
+                hook(optJSONObject)
+                        .setPriority(PRIORITY_HIGHEST)
+                        .setId("gallery_watermark_json_limitation_bypass")
+                        .intercept(chain -> {
+                            if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                                    && chain.getArg(0) instanceof String key
+                                    && key.toLowerCase(java.util.Locale.ROOT).contains("limitation")) {
+                                return null;
+                            }
+                            return chain.proceed();
+                        });
+                galleryWatermarkJsonHookInstalled = true;
+                log(Log.INFO, TAG, "Gallery watermark JSON limitation hook installed");
+            } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
+                log(Log.WARN, TAG, "Unable to install Gallery watermark JSON limitation hook", error);
+            }
+        }
+    }
+
+    /**
+     * 2.10.40 moved the old bt.k gate into several tiny synthetic helpers.
+     * They are evaluated while the watermark feature catalog is assembled,
+     * before kl0.k0 receives the list.  Hooking only bv0.a.i therefore leaves
+     * the catalog empty on devices which are not in Xiaomi's allow-list.
+     */
+    private boolean installGalleryWatermarkDevicePredicateHooks(ClassLoader classLoader) {
+        int installed = 0;
+        for (String className : new String[]{"bt.k", "ft.d0", "ft.j0", "k30.f", "ah0.c"}) {
+            try {
+                Class<?> type = Class.forName(className, false, classLoader);
+                if (!galleryWatermarkDevicePredicateClasses.add(type)) {
+                    installed++;
+                    continue;
+                }
+                for (Method method : type.getDeclaredMethods()) {
+                    method.setAccessible(true);
+                    if ("bt.k".equals(className) && "a".equals(method.getName())
+                            && method.getParameterCount() == 0 && method.getReturnType() == boolean.class) {
+                        hook(method).setPriority(PRIORITY_HIGHEST)
+                                .setId("gallery_watermark_bt_k")
+                                .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                                        ? Boolean.TRUE : chain.proceed());
+                        installed++;
+                    } else if (("ft.d0".equals(className) || "ft.j0".equals(className))
+                            && "a".equals(method.getName()) && method.getParameterCount() == 0
+                            && method.getReturnType() == boolean.class) {
+                        hook(method).setPriority(PRIORITY_HIGHEST)
+                                .setId("gallery_watermark_device_" + className.replace('.', '_'))
+                                .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                                        ? Boolean.TRUE : chain.proceed());
+                        installed++;
+                    } else if (("k30.f".equals(className) || "ah0.c".equals(className))
+                            && "c".equals(method.getName()) && method.getParameterCount() == 0
+                            && method.getReturnType() == Object.class) {
+                        hook(method).setPriority(PRIORITY_HIGHEST)
+                                .setId("gallery_watermark_device_lambda_" + className.replace('.', '_'))
+                                .intercept(chain -> {
+                                    if (!pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                                        return chain.proceed();
+                                    }
+                                    // These Kotlin lambdas use case 0 for
+                                    // construction and the default branch for
+                                    // the device allow-list Boolean.
+                                    try {
+                                        Field selector = type.getDeclaredField(
+                                                "k30.f".equals(className) ? "f33812a" : "f765a");
+                                        selector.setAccessible(true);
+                                        if (selector.getInt(chain.getThisObject()) != 0) {
+                                            return Boolean.TRUE;
+                                        }
+                                    } catch (ReflectiveOperationException | RuntimeException ignored) {
+                                        return Boolean.TRUE;
+                                    }
+                                    return chain.proceed();
+                                });
+                        installed++;
+                    }
+                }
+            } catch (ClassNotFoundException ignored) {
+                // Feature classes are loaded lazily; retry from the class-load hook.
+            } catch (RuntimeException | LinkageError error) {
+                log(Log.WARN, TAG, "Unable to install watermark device predicate hook: " + className, error);
+            }
+        }
+        if (installed > 0) {
+            log(Log.INFO, TAG, "Gallery watermark device predicate hooks installed: " + installed);
+        }
+        return installed > 0;
+    }
+
+    /**
+     * Bypass the model/device predicates used by Adjust2's menu builder
+     * (sw.z1).  The upstream implementation creates every AdjustData item,
+     * then removes ids 21/22/31/32/33 and friends on unsupported devices.
+     * Returning false from those predicates keeps the original items intact;
+     * the actual rendering implementation is already bundled in the APK.
+     */
+    private boolean installGalleryPaletteUnlockHooks(ClassLoader classLoader) {
+        String[] predicateNames = {
+                "sw.t1", "sw.u1", "sw.v1", "sw.w1", "sw.x1",
+                "sw.n1", "sw.o1", "sw.p1", "sw.q1", "hr.a", "hr.b"
+        };
+        int installed = 0;
+        for (String className : predicateNames) {
+            try {
+                Class<?> predicateClass = Class.forName(className, false, classLoader);
+                if (!galleryPaletteUnlockClasses.add(predicateClass)) {
+                    installed++;
+                    continue;
+                }
+                Method test = predicateClass.getDeclaredMethod("test", Object.class);
+                test.setAccessible(true);
+                final String selectorFieldName = "hr.a".equals(className) ? "f29175a" : "f29176a";
+                hook(test)
+                        .setPriority(PRIORITY_HIGHEST)
+                        .setId("gallery_palette_predicate_" + className.replace('.', '_'))
+                        .intercept(chain -> {
+                            if (!pref(ModuleConfig.KEY_GALLERY_PALETTE_UNLOCKED, false)) {
+                                return chain.proceed();
+                            }
+                            // hr.a/hr.b are shared switch predicates; only
+                            // their synthetic variant with constructor value 1
+                            // removes an AdjustData item (35 or 15).
+                            if ("hr.a".equals(className) || "hr.b".equals(className)) {
+                                try {
+                                    Field selector = predicateClass.getDeclaredField(selectorFieldName);
+                                    selector.setAccessible(true);
+                                    if (selector.getInt(chain.getThisObject()) == 1) {
+                                        return Boolean.FALSE;
+                                    }
+                                } catch (ReflectiveOperationException | RuntimeException ignored) {
+                                    // Fall through to the original predicate.
+                                }
+                                return chain.proceed();
+                            }
+                            return Boolean.FALSE;
+                        });
+                installed++;
+            } catch (ClassNotFoundException ignored) {
+                // Feature classes are loaded lazily; the class-loader hook
+                // below will retry when each class is defined.
+            } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
+                galleryPaletteUnlockClasses.removeIf(type -> type.getClassLoader() == classLoader);
+                log(Log.WARN, TAG, "Unable to install Adjust2 palette predicate hook: " + className, error);
+            }
+        }
+        if (installed > 0) {
+            log(Log.INFO, TAG, "Adjust2 palette unlock hooks installed: " + installed);
+        }
+        return installed == predicateNames.length;
+    }
+
+    /**
+     * MediaEditor 2.10.x moved the final watermark filtering into kl0's
+     * Kotlin predicate classes. Each predicate returns true when an item is
+     * invalid (device, region, theme, system properties or name length).
+     * Returning false here keeps the complete catalog visible.
+     */
+    private boolean installGalleryLimitationPredicateHooks(ClassLoader classLoader) {
+        int installed = 0;
+        for (String className : new String[]{
+                "kl0.t", "kl0.v", "kl0.u", "kl0.s", "kl0.w", "kl0.x", "kl0.y", "kl0.z", "kl0.a0"
+        }) {
+            try {
+                Class<?> predicate = Class.forName(className, false, classLoader);
+                if (!galleryLimitationPredicateClasses.add(predicate)) {
+                    installed++;
+                    continue;
+                }
+                Method test = findBooleanPredicateMethod(predicate);
+                if (test == null) {
+                    throw new NoSuchMethodException("boolean predicate method in " + className);
+                }
+                test.setAccessible(true);
+                hook(test)
+                        .setPriority(PRIORITY_HIGHEST)
+                        .setId("gallery_watermark_limit_" + className.replace('.', '_'))
+                        .intercept(chain -> {
+                            if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                                return Boolean.FALSE;
+                            }
+                            return chain.proceed();
+                        });
+                installed++;
+            } catch (ClassNotFoundException ignored) {
+                // Watermark feature dex is loaded lazily; the class-load hook retries it.
+            } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
+                galleryLimitationPredicateClasses.removeIf(type -> type.getClassLoader() == classLoader);
+                log(Log.WARN, TAG, "Unable to install watermark limitation hook: " + className, error);
+            }
+        }
+        if (installed > 0) {
+            log(Log.INFO, TAG, "Gallery watermark limitation predicate hooks installed: " + installed);
+        }
+        return installed == 9;
+    }
+
+    /**
+     * k0.c() returns the server-side supported_watermark_list.  The stock
+     * manager feeds that list into kl0.t and removes every catalog entry not
+     * present in it.  For the explicit all-watermarks switch the local catalog
+     * is already bundled in the APK, so this list must not act as a hard gate.
+     */
+    private boolean installGalleryWatermarkSupportedListBypass(ClassLoader classLoader) {
+        try {
+            Class<?> manager = resolveFirstClass(classLoader, "kl0.k0", "kl0.AbstractC9139k0");
+            if (!galleryWatermarkSupportedListClasses.add(manager)) {
+                return true;
+            }
+            Method supported = findMethod(manager, new String[]{"c", "m14230c"}, 0, null);
+            if (supported == null) {
+                throw new NoSuchMethodException("supported watermark list");
+            }
+            supported.setAccessible(true);
+            // Do not replace this with an empty list: kl0.t treats an empty
+            // supported list as "nothing is supported" and removes the whole
+            // catalog when its predicate hook is not yet installed. Keep the
+            // original list and bypass kl0.t itself instead.
+            hook(supported)
+                    .setPriority(PRIORITY_HIGHEST)
+                    .setId("gallery_watermark_supported_list_passthrough")
+                    .intercept(chain -> chain.proceed());
+            log(Log.INFO, TAG, "Gallery watermark supported-list bypass installed (kl0.k0.c)");
+            return true;
+        } catch (ClassNotFoundException ignored) {
+            return false;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
+            galleryWatermarkSupportedListClasses.removeIf(type -> type.getClassLoader() == classLoader);
+            log(Log.WARN, TAG, "Unable to install Gallery watermark supported-list bypass", error);
+            return false;
+        }
+    }
+
+    /**
+     * The renderer asks kl0.k0.e(id) and aborts with "cannot get watermark
+     * item" when a server/device filter removed that id.  Returning a real
+     * bundled item keeps the renderer's configuration object valid (unlike a
+     * fabricated null/empty object) and is only used as a last-resort lookup
+     * fallback when the all-watermarks switch is enabled.
+     */
+    private boolean installGalleryWatermarkLookupFallback(ClassLoader classLoader) {
+        try {
+            Class<?> manager = resolveFirstClass(classLoader, "kl0.k0", "kl0.AbstractC9139k0");
+            if (!galleryWatermarkLookupClasses.add(manager)) {
+                return true;
+            }
+            Method lookup = findMethod(manager, new String[]{"e", "m14232e"}, 1, String.class);
+            if (lookup == null) {
+                throw new NoSuchMethodException("watermark lookup");
+            }
+            lookup.setAccessible(true);
+            hook(lookup)
+                    .setPriority(PRIORITY_HIGHEST)
+                    .setId("gallery_watermark_lookup_fallback")
+                    .intercept(chain -> {
+                        Object value = chain.proceed();
+                        if (value != null || !pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                            return value;
+                        }
+                        try {
+                            Method groupsMethod = findMethod(manager, new String[]{"d", "m14231d"}, 1, boolean.class);
+                            Object groups = groupsMethod == null ? null
+                                    : groupsMethod.invoke(chain.getThisObject(), true);
+                            if (groups instanceof Iterable<?>) {
+                                for (Object group : (Iterable<?>) groups) {
+                                    Field items = findIterableField(group.getClass());
+                                    if (items == null) {
+                                        continue;
+                                    }
+                                    items.setAccessible(true);
+                                    Object list = items.get(group);
+                                    if (list instanceof Iterable<?>) {
+                                        for (Object item : (Iterable<?>) list) {
+                                            if (item != null) {
+                                                return item;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (ReflectiveOperationException | RuntimeException ignored) {
+                            // Preserve the original null result if the catalog
+                            // is not initialized yet; later calls retry.
+                        }
+                        return null;
+                    });
+            log(Log.INFO, TAG, "Gallery watermark lookup fallback installed (kl0.k0.e)");
+            return true;
+        } catch (ClassNotFoundException ignored) {
+            return false;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
+            galleryWatermarkLookupClasses.removeIf(type -> type.getClassLoader() == classLoader);
+            log(Log.WARN, TAG, "Unable to install Gallery watermark lookup fallback", error);
+            return false;
+        }
+    }
+
+    /** CloudWatermarkMaker.l(boolean) is the real initialization entry. Set
+     * k0's skip-filter flag before it invokes h()/g(), covering feature
+     * classloaders where the abstract-manager hook is installed too late. */
+    private boolean installCloudWatermarkMakerBypass(ClassLoader classLoader) {
+        try {
+            Class<?> maker = Class.forName(
+                    "com.miui.mediaeditor.photo.watermask.CloudWatermarkMaker", false, classLoader);
+            if (!galleryCloudWatermarkMakerClasses.add(maker)) {
+                return true;
+            }
+            Method init = findMethod(maker, new String[]{"l", "m7180l"}, 1, boolean.class);
+            if (init == null) {
+                throw new NoSuchMethodException("watermark manager init");
+            }
+            init.setAccessible(true);
+            hook(init)
+                    .setPriority(PRIORITY_HIGHEST)
+                    .setId("gallery_cloud_watermark_init_bypass")
+                    .intercept(chain -> {
+                        if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                            try {
+                                Class<?> manager = resolveFirstClass(classLoader, "kl0.m0", "kl0.C9143m0");
+                                Object instance = findStaticSingleton(manager);
+                                Field skip = findWatermarkBypassField(manager);
+                                if (instance != null && skip != null) {
+                                    skip.setAccessible(true);
+                                    skip.setBoolean(instance, true);
+                                }
+                            } catch (ReflectiveOperationException | RuntimeException ignored) {
+                                // k0.g()/b() hooks remain as fallback.
+                            }
+                        }
+                        return chain.proceed();
+                    });
+            installCloudWatermarkItemVersionBypass(maker, classLoader);
+            log(Log.INFO, TAG, "CloudWatermarkMaker initialization bypass installed");
+            return true;
+        } catch (ClassNotFoundException ignored) {
+            return false;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
+            galleryCloudWatermarkMakerClasses.removeIf(type -> type.getClassLoader() == classLoader);
+            log(Log.WARN, TAG, "Unable to install CloudWatermarkMaker initialization bypass", error);
+            return false;
+        }
+    }
+
+    /**
+     * CloudWatermarkMaker.k rejects templates whose metadata declares a
+     * manager version newer than Xiaomi's hard-coded 2.13 runtime.  The
+     * renderer bundled in the editor can still consume those templates, so
+     * recover the real catalog item after the stock method returns null.
+     */
+    private void installCloudWatermarkItemVersionBypass(Class<?> maker, ClassLoader classLoader) {
+        try {
+            Class<?> item = resolveFirstClass(classLoader, "com.xiaomi.cam.watermark.C4104a");
+            Method target = null;
+            for (Class<?> current = maker; current != null && target == null; current = current.getSuperclass()) {
+                for (Method method : current.getDeclaredMethods()) {
+                    Class<?>[] params = method.getParameterTypes();
+                    if (method.getReturnType() == item && params.length == 2
+                            && params[0] == byte[].class && params[1] == boolean.class) {
+                        target = method;
+                        break;
+                    }
+                }
+            }
+            if (target == null) {
+                return;
+            }
+            target.setAccessible(true);
+            hook(target)
+                    .setPriority(PRIORITY_LOWEST)
+                    .setId("gallery_cloud_watermark_item_version_bypass")
+                    .intercept(chain -> {
+                        Object result = chain.proceed();
+                        if (result != null || !pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                            return result;
+                        }
+                        try {
+                            Class<?> manager = resolveFirstClass(classLoader, "kl0.m0", "kl0.C9143m0");
+                            Object managerObject = findStaticSingleton(manager);
+                            if (managerObject == null) {
+                                return null;
+                            }
+                            Method decode = findMethodByReturnAndParams(manager, String.class, byte[].class);
+                            if (decode == null) {
+                                return null;
+                            }
+                            decode.setAccessible(true);
+                            String id = (String) decode.invoke(managerObject, chain.getArg(0));
+                            if (id == null || id.isEmpty()) {
+                                return null;
+                            }
+                            Method lookup = findMethod(manager, new String[]{"e", "m14232e"}, 1, String.class);
+                            if (lookup == null) {
+                                return null;
+                            }
+                            lookup.setAccessible(true);
+                            return lookup.invoke(managerObject, id);
+                        } catch (ReflectiveOperationException | RuntimeException ignored) {
+                            return null;
+                        }
+                    });
+        } catch (ClassNotFoundException | RuntimeException | LinkageError ignored) {
+            // Optional on older editor builds.
+        }
+    }
+
+    private static Method findMethodByReturnAndParams(Class<?> type, Class<?> returnType,
+                                                       Class<?>... params) {
+        for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+            for (Method method : current.getDeclaredMethods()) {
+                if (method.getReturnType() != returnType) {
+                    continue;
+                }
+                Class<?>[] actual = method.getParameterTypes();
+                if (actual.length != params.length) {
+                    continue;
+                }
+                boolean matches = true;
+                for (int i = 0; i < params.length; i++) {
+                    if (actual[i] != params[i]) {
+                        matches = false;
+                        break;
+                    }
+                }
+                if (matches) {
+                    return method;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The 2.10.40 manager (kl0.k0) removes invalid watermark items in one
+     * centralized pass. Bypass that pass when the all-watermarks switch is on;
+     * this remains effective even if a feature dex loads before its predicate
+     * classes and avoids relying on obfuscated predicate signatures.
+     */
+    private boolean installGalleryWatermarkFilterBypass(ClassLoader classLoader) {
+        try {
+            Class<?> manager = resolveFirstClass(classLoader, "kl0.k0", "kl0.AbstractC9139k0");
+            if (!galleryWatermarkFilterClasses.add(manager)) {
+                return true;
+            }
+            Method filter = findMethod(manager, new String[]{"b", "m14229b"}, 1, boolean.class);
+            if (filter == null) {
+                throw new NoSuchMethodException("watermark filter");
+            }
+            filter.setAccessible(true);
+            hook(filter)
+                    .setPriority(PRIORITY_HIGHEST)
+                    .setId("gallery_watermark_filter_bypass")
+                    .intercept(chain -> {
+                        if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                            Field bypass = findWatermarkBypassField(manager);
+                            if (bypass != null) {
+                                try {
+                                    bypass.setAccessible(true);
+                                    bypass.setBoolean(chain.getThisObject(), true);
+                                } catch (IllegalAccessException | RuntimeException ignored) {
+                                    // Predicate hooks below still cover the pass.
+                                }
+                            }
+                        }
+                        return chain.proceed();
+                    });
+            log(Log.INFO, TAG, "Gallery watermark catalog filter bypass installed (kl0.k0.b)");
+            return true;
+        } catch (ClassNotFoundException ignored) {
+            return false;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
+            galleryWatermarkFilterClasses.removeIf(type -> type.getClassLoader() == classLoader);
+            log(Log.WARN, TAG, "Unable to install Gallery watermark catalog filter bypass", error);
+            return false;
+        }
+    }
+
+    /**
+     * Prevent the manager's one-shot initData() pass from deleting catalog
+     * entries before the runtime predicate hooks become available.  In
+     * MediaEditor 2.10.40, k0.g() calls b(true) immediately after loading the
+     * catalog; setting f34772k makes b() return without filtering.  This is
+     * deliberately done only while the all-watermarks switch is enabled.
+     */
+    private boolean installGalleryWatermarkInitBypass(ClassLoader classLoader) {
+        try {
+            Class<?> manager = resolveFirstClass(classLoader, "kl0.k0", "kl0.AbstractC9139k0");
+            if (!galleryWatermarkInitClasses.add(manager)) {
+                return true;
+            }
+            Method init = findMethod(manager, new String[]{"g", "m14234g"}, 0, null);
+            if (init == null) {
+                throw new NoSuchMethodException("watermark data init");
+            }
+            init.setAccessible(true);
+            Field bypass = findWatermarkBypassField(manager);
+            if (bypass == null) {
+                throw new NoSuchFieldException("watermark filter bypass flag");
+            }
+            bypass.setAccessible(true);
+            hook(init)
+                    .setPriority(PRIORITY_HIGHEST)
+                    .setId("gallery_watermark_init_bypass")
+                    .intercept(chain -> {
+                        if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                            try {
+                                bypass.setBoolean(chain.getThisObject(), true);
+                            } catch (IllegalAccessException | RuntimeException ignored) {
+                                // The b(boolean) hook below remains active.
+                            }
+                        }
+                        return chain.proceed();
+                    });
+            log(Log.INFO, TAG, "Gallery watermark init filter bypass installed (kl0.k0.g)");
+            return true;
+        } catch (ClassNotFoundException ignored) {
+            return false;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
+            galleryWatermarkInitClasses.removeIf(type -> type.getClassLoader() == classLoader);
+            log(Log.WARN, TAG, "Unable to install Gallery watermark init filter bypass", error);
+            return false;
         }
     }
 
@@ -1383,7 +2625,47 @@ public final class LeicaUnlockHook extends XposedModule {
             installGalleryWatermarkHooks(current);
             current = current.getParent();
         }
-        installDeferredGalleryWatermarkManagerHook();
+        // Feature dexes are loaded on demand. Install the class-load observer
+        // only after the application has bound its first activity; callbacks
+        // are restricted to watermark packages and never mutate UI lists.
+        scheduleGalleryWatermarkHooksForChain(classLoader);
+    }
+
+    /**
+     * PackageLoaded/PackageReady can run from LoadedApk's class-loader setup,
+     * before ActivityThread has finished binding the application. Installing
+     * a global ClassLoader hook (or changing Build/SystemProperties) there can
+     * interfere with framework services such as ConnectivityManager. Defer
+     * the gallery-only hooks until the main loop has completed binding.
+     */
+    private void scheduleGalleryWatermarkHooksForChain(ClassLoader classLoader) {
+        if (galleryWatermarkHooksScheduled) {
+            return;
+        }
+        synchronized (this) {
+            if (galleryWatermarkHooksScheduled) {
+                return;
+            }
+            galleryWatermarkHooksScheduled = true;
+        }
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            try {
+                if (!btm.m.os4.systemuihook.OsCompatibility.areHooksAllowed()) {
+                    return;
+                }
+                installDeferredGalleryWatermarkManagerHook();
+                installGalleryWatermarkHooksForChain(classLoader);
+                // Feature classes may already have been resolved before the
+                // class-load observer was installed. Retry resolution while
+                // the editor is starting, without touching its adapters.
+                for (long delay : new long[]{250L, 750L, 1500L, 3000L, 5000L}) {
+                    new Handler(Looper.getMainLooper()).postDelayed(
+                            () -> installGalleryWatermarkHooksForChain(classLoader), delay);
+                }
+            } catch (RuntimeException | LinkageError error) {
+                log(Log.WARN, TAG, "Deferred Gallery watermark hooks failed", error);
+            }
+        }, 1500L);
     }
 
     /**
@@ -1642,11 +2924,19 @@ public final class LeicaUnlockHook extends XposedModule {
                 try {
                     Field available = null;
                     for (Class<?> type = item.getClass(); type != null; type = type.getSuperclass()) {
-                        try {
-                            available = type.getDeclaredField("f15804d");
+                        for (String fieldName : new String[]{"f17713d", "f15804d", "available", "isAvailable"}) {
+                            try {
+                                Field candidate = type.getDeclaredField(fieldName);
+                                if (candidate.getType() == boolean.class || candidate.getType() == Boolean.class) {
+                                    available = candidate;
+                                    break;
+                                }
+                            } catch (NoSuchFieldException ignored) {
+                                // Continue through intermediate item implementations.
+                            }
+                        }
+                        if (available != null) {
                             break;
-                        } catch (NoSuchFieldException ignored) {
-                            // Continue through intermediate item implementations.
                         }
                     }
                     if (available == null) {
@@ -1914,7 +3204,441 @@ public final class LeicaUnlockHook extends XposedModule {
             installGalleryWatermarkRestrictionHook(loader);
         } else if ("com.miui.mediaeditor.photo.watermark.PhotoWatermarkFragment".equals(className)) {
             installGalleryWatermarkFragmentHook(loader);
+        } else if ("com.miui.mediaeditor.photo.watermask.CloudWatermarkMaker".equals(className)
+                || className.endsWith(".CloudWatermarkMaker")) {
+            installCloudWatermarkMakerBypass(loader);
+        } else if ("o80.j".equals(className)) {
+            installGalleryWatermarkExifBypass(loader);
+        } else if ("bv0.a".equals(className)) {
+            installGalleryWatermarkDeviceBypass(loader);
+        } else if ("p382nt.C11802a".equals(className) || "nt.a".equals(className)) {
+            installGalleryWatermarkBrandCapabilityHook(loader);
+        } else if ("w60.r0".equals(className) || "w60.C16644r0".equals(className)) {
+            installGalleryWatermarkConfigFilterHook(loader);
+        } else if ("w60.x0".equals(className) || "w60.C16656x0".equals(className)) {
+            installGalleryWatermarkSelectionRestrictionHook(loader);
         }
+        if ("a70.C0082b".equals(className) || "a70.b".equals(className)) {
+            installGalleryWatermarkDataLoaderHook(loader);
+        }
+        if ("w60.m".equals(className) || "w60.C16633m".equals(className)
+                || "w60.C16633m0".equals(className)) {
+            installGalleryWatermarkAvailabilityHook(loader);
+        }
+        if (className.startsWith("o80.")) {
+            installGenericWatermarkExifHook(loaded);
+        }
+        if ("bt.k".equals(className) || "ft.d0".equals(className)
+                || "ft.j0".equals(className) || "k30.f".equals(className)
+                || "ah0.c".equals(className)) {
+            installGalleryWatermarkDevicePredicateHooks(loader);
+        }
+        if (className.startsWith("kl0.")) {
+            installGalleryLimitationPredicateHooks(loader);
+            installGalleryWatermarkItemPredicateHook(loaded);
+            installGalleryWatermarkFilterBypass(loader);
+            installGalleryWatermarkSupportedListBypass(loader);
+            installGalleryWatermarkInitBypass(loader);
+            installCloudWatermarkMakerBypass(loader);
+            installGenericWatermarkManagerHook(loaded);
+        }
+        if (className.startsWith("p179ft.") || className.startsWith("ft.")) {
+            installGalleryAiGateHooks(loader);
+        }
+        if (className.equals("com.miui.mediaeditor.provider.AiActionProvider")
+                || className.equals("com.miui.mediaeditor.provider.MediaEditorProviderForGallery")) {
+            installGalleryAiUnlockHooks(loader);
+        }
+    }
+
+    /**
+     * Structural fallback for renamed manager classes. The MediaEditor
+     * manager has an ArrayList catalog, several boolean state fields, and a
+     * one-boolean void filtering method. The skip flag is deliberately
+     * selected by its stable trailing "k" field shape, avoiding assumptions
+     * about JADX's generated class/method names.
+     */
+    private void installGenericWatermarkManagerHook(Class<?> type) {
+        if (type == null || !type.getName().startsWith("kl0.")) {
+            return;
+        }
+        try {
+            Class<?> managerType = null;
+            for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+                if (findIterableField(current) != null && countBooleanFields(current) >= 3) {
+                    managerType = current;
+                    break;
+                }
+            }
+            if (managerType == null || !galleryGenericWatermarkClasses.add(managerType)) {
+                return;
+            }
+            type = managerType;
+            Field skip = null;
+            int boolFields = 0;
+            for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+                for (Field field : current.getDeclaredFields()) {
+                    if (field.getType() == boolean.class || field.getType() == Boolean.class) {
+                        boolFields++;
+                        if ("k".equals(field.getName()) || field.getName().endsWith("k")) {
+                            skip = field;
+                        }
+                    }
+                }
+            }
+            Field catalog = findIterableField(type);
+            if (skip == null || catalog == null || boolFields < 3) {
+                return;
+            }
+            skip.setAccessible(true);
+            Method filter = null;
+            Method init = null;
+            for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+                for (Method method : current.getDeclaredMethods()) {
+                    if (method.getReturnType() == void.class && method.getParameterCount() == 1
+                            && method.getParameterTypes()[0] == boolean.class && filter == null) {
+                        filter = method;
+                    } else if (method.getReturnType() == void.class && method.getParameterCount() == 0
+                            && init == null && !Modifier.isStatic(method.getModifiers())) {
+                        init = method;
+                    }
+                }
+            }
+            if (filter == null) {
+                return;
+            }
+            final Field bypass = skip;
+            Method filterMethod = filter;
+            filterMethod.setAccessible(true);
+            hook(filterMethod).setPriority(PRIORITY_HIGHEST)
+                    .setId("gallery_watermark_generic_filter_" + type.getName().replace('.', '_'))
+                    .intercept(chain -> {
+                        if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                            try {
+                                bypass.setBoolean(chain.getThisObject(), true);
+                            } catch (IllegalAccessException | RuntimeException ignored) {
+                                // Keep the original path if a vendor runtime
+                                // prevents reflective field access.
+                            }
+                        }
+                        return chain.proceed();
+                    });
+            if (init != null && init != filterMethod) {
+                init.setAccessible(true);
+                hook(init).setPriority(PRIORITY_HIGHEST)
+                        .setId("gallery_watermark_generic_init_" + type.getName().replace('.', '_'))
+                        .intercept(chain -> {
+                            if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                                try {
+                                    bypass.setBoolean(chain.getThisObject(), true);
+                                } catch (IllegalAccessException | RuntimeException ignored) {
+                                    // Filter hook remains active.
+                                }
+                            }
+                            return chain.proceed();
+                        });
+            }
+            log(Log.INFO, TAG, "Generic Gallery watermark manager hook installed: " + type.getName());
+        } catch (RuntimeException | LinkageError error) {
+            galleryGenericWatermarkClasses.remove(type);
+            log(Log.WARN, TAG, "Unable to install generic Gallery watermark manager hook", error);
+        }
+    }
+
+    private static int countBooleanFields(Class<?> type) {
+        int count = 0;
+        for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+            for (Field field : current.getDeclaredFields()) {
+                if (field.getType() == boolean.class || field.getType() == Boolean.class) {
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
+    /** Structural fallback for the EXIF validator when its package/class is renamed. */
+    private void installGenericWatermarkExifHook(Class<?> type) {
+        if (type == null || !galleryWatermarkExifClasses.add(type)
+                || !pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+            return;
+        }
+        try {
+            int installed = 0;
+            for (Method method : type.getDeclaredMethods()) {
+                if (!isBooleanReturn(method.getReturnType())) {
+                    continue;
+                }
+                int count = method.getParameterCount();
+                boolean candidate = (Modifier.isStatic(method.getModifiers()) && count == 1
+                        && looksLikeExifParameter(method.getParameterTypes()[0]))
+                        || (!Modifier.isStatic(method.getModifiers()) && count == 2
+                        && looksLikeExifParameter(method.getParameterTypes()[0]));
+                if (!candidate) {
+                    continue;
+                }
+                method.setAccessible(true);
+                hook(method)
+                        .setPriority(PRIORITY_HIGHEST)
+                        .setId("gallery_watermark_generic_exif_" + type.getName().replace('.', '_')
+                                + "_" + method.getName())
+                        .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                                ? Boolean.TRUE : chain.proceed());
+                installed++;
+            }
+            if (installed > 0) {
+                log(Log.INFO, TAG, "Generic Gallery watermark EXIF hooks installed: "
+                        + type.getName() + " (" + installed + ")");
+            }
+        } catch (RuntimeException | LinkageError error) {
+            galleryWatermarkExifClasses.remove(type);
+            log(Log.WARN, TAG, "Unable to install generic Gallery watermark EXIF hook", error);
+        }
+    }
+
+    /**
+     * Final cloud-watermark data loader. It must run first so the render data
+     * object is populated, then its boolean result can be relaxed for photos
+     * without matching model/EXIF metadata.
+     */
+    private boolean installGalleryWatermarkDataLoaderHook(ClassLoader classLoader) {
+        try {
+            Class<?> loader = resolveFirstClass(classLoader, "a70.b", "a70.C0082b");
+            Class<?> info = resolveFirstClass(classLoader, "i70.d", "i70.AbstractC7785d");
+            Class<?> exif = resolveFirstClass(classLoader, "pc.b", "p434pc.C12495b");
+            Method target = null;
+            for (Method method : loader.getDeclaredMethods()) {
+                Class<?>[] params = method.getParameterTypes();
+                if (Modifier.isStatic(method.getModifiers())
+                        && isBooleanReturn(method.getReturnType())
+                        && ((params.length == 4 && params[1] == exif && params[3] == info)
+                        || (params.length == 2 && params[0] == info))) {
+                    target = method;
+                    break;
+                }
+            }
+            if (target == null) {
+                throw new NoSuchMethodException("watermark data loader");
+            }
+            if (!galleryWatermarkDataLoaderClasses.add(loader)) {
+                return true;
+            }
+            target.setAccessible(true);
+            hook(target).setPriority(PRIORITY_HIGHEST)
+                    .setId("gallery_watermark_data_loader_success")
+                    .intercept(chain -> {
+                        Object result = chain.proceed();
+                        return pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                                ? Boolean.TRUE : result;
+                    });
+            log(Log.INFO, TAG, "Gallery watermark data-loader result hook installed");
+            return true;
+        } catch (ClassNotFoundException ignored) {
+            return false;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
+            galleryWatermarkDataLoaderClasses.removeIf(type -> type.getClassLoader() == classLoader);
+            log(Log.WARN, TAG, "Unable to install Gallery watermark data-loader hook", error);
+            return false;
+        }
+    }
+
+    /** Mark generated cloud-watermark entries as available after the stock
+     * visibility pass has evaluated device and parameter predicates. */
+    private boolean installGalleryWatermarkAvailabilityHook(ClassLoader classLoader) {
+        try {
+            Class<?> helper = resolveFirstClass(classLoader, "w60.m", "w60.C16633m", "w60.C16633m0");
+            Class<?> exif = resolveFirstClass(classLoader, "pc.b", "p434pc.C12495b");
+            Class<?> location = resolveFirstClass(classLoader, "o80.m", "o80.C11989m");
+            Class<?> locationData = resolveFirstClass(classLoader, "o80.h", "o80.C11984h");
+            Method target = null;
+            for (Method method : helper.getDeclaredMethods()) {
+                Class<?>[] params = method.getParameterTypes();
+                if (Modifier.isStatic(method.getModifiers()) && method.getReturnType() == void.class
+                        && params.length == 4 && Map.class.isAssignableFrom(params[0])
+                        && params[1] == exif && params[2] == location && params[3] == locationData) {
+                    target = method;
+                    break;
+                }
+            }
+            if (target == null) {
+                throw new NoSuchMethodException("watermark availability pass");
+            }
+            if (!galleryWatermarkAvailabilityClasses.add(helper)) {
+                return true;
+            }
+            target.setAccessible(true);
+            hook(target).setPriority(PRIORITY_HIGHEST)
+                    .setId("gallery_watermark_availability_success")
+                    .intercept(chain -> {
+                        Object result = chain.proceed();
+                        if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                            forceWatermarkItemsAvailable(chain.getArg(0));
+                        }
+                        return result;
+                    });
+            log(Log.INFO, TAG, "Gallery watermark availability hook installed");
+            return true;
+        } catch (ClassNotFoundException ignored) {
+            return false;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
+            galleryWatermarkAvailabilityClasses.removeIf(type -> type.getClassLoader() == classLoader);
+            log(Log.WARN, TAG, "Unable to install Gallery watermark availability hook", error);
+            return false;
+        }
+    }
+
+    private static boolean looksLikeExifParameter(Class<?> type) {
+        if (type == null || type.isPrimitive()) {
+            return false;
+        }
+        for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+            for (Method method : current.getDeclaredMethods()) {
+                if (method.getReturnType() == String.class && method.getParameterCount() == 1
+                        && method.getParameterTypes()[0] == String.class) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean isBooleanReturn(Class<?> type) {
+        return type == boolean.class || type == Boolean.class;
+    }
+
+    private static Class<?> resolveFirstClass(ClassLoader loader, String... names)
+            throws ClassNotFoundException {
+        ClassNotFoundException last = null;
+        for (String name : names) {
+            try {
+                return Class.forName(name, false, loader);
+            } catch (ClassNotFoundException error) {
+                last = error;
+            }
+        }
+        throw last == null ? new ClassNotFoundException("watermark class") : last;
+    }
+
+    /** Find the Kotlin lambda bridge used by both old and new feature dexes. */
+    private static Method findBooleanPredicateMethod(Class<?> type) {
+        Method fallback = null;
+        for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+            for (Method method : current.getDeclaredMethods()) {
+                if (method.getParameterCount() != 1 || !isBooleanReturn(method.getReturnType())) {
+                    continue;
+                }
+                if ("mo339g".equals(method.getName()) || "g".equals(method.getName())) {
+                    return method;
+                }
+                if (fallback == null) {
+                    fallback = method;
+                }
+            }
+        }
+        return fallback;
+    }
+
+    private static Method findBooleanMethodByNames(Class<?> type, String... names) {
+        for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+            for (Method method : current.getDeclaredMethods()) {
+                if (!isBooleanReturn(method.getReturnType()) || method.getParameterCount() != 1) {
+                    continue;
+                }
+                for (String name : names) {
+                    if (name.equals(method.getName())) {
+                        return method;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static Method findMethod(
+            Class<?> type,
+            String[] names,
+            int parameterCount,
+            Class<?> exactParameter
+    ) {
+        for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+            for (Method method : current.getDeclaredMethods()) {
+                if (method.getParameterCount() != parameterCount) {
+                    continue;
+                }
+                if (exactParameter != null
+                        && (parameterCount != 1 || method.getParameterTypes()[0] != exactParameter)) {
+                    continue;
+                }
+                for (String name : names) {
+                    if (name.equals(method.getName())) {
+                        return method;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static Field findBooleanField(Class<?> type, String... preferredNames) {
+        for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+            for (String name : preferredNames) {
+                try {
+                    Field field = current.getDeclaredField(name);
+                    if (field.getType() == boolean.class || field.getType() == Boolean.class) {
+                        return field;
+                    }
+                } catch (NoSuchFieldException ignored) {
+                    // Continue through the manager hierarchy.
+                }
+            }
+        }
+        return null;
+    }
+
+    private static Field findWatermarkBypassField(Class<?> type) {
+        Field preferred = findBooleanField(type, "f37743k", "f34772k", "k");
+        if (preferred != null) {
+            return preferred;
+        }
+        for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+            for (Field field : current.getDeclaredFields()) {
+                if ((field.getType() == boolean.class || field.getType() == Boolean.class)
+                        && ("k".equals(field.getName()) || field.getName().endsWith("k"))) {
+                    return field;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static Object findStaticSingleton(Class<?> type) {
+        for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+            for (Field field : current.getDeclaredFields()) {
+                if (!Modifier.isStatic(field.getModifiers()) || !type.isAssignableFrom(field.getType())) {
+                    continue;
+                }
+                try {
+                    field.setAccessible(true);
+                    return field.get(null);
+                } catch (IllegalAccessException | RuntimeException ignored) {
+                    // Try another static manager field.
+                }
+            }
+        }
+        return null;
+    }
+
+    private static Field findIterableField(Class<?> type) {
+        for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+            for (Field field : current.getDeclaredFields()) {
+                Class<?> fieldType = field.getType();
+                if (Iterable.class.isAssignableFrom(fieldType)
+                        || Collection.class.isAssignableFrom(fieldType)) {
+                    return field;
+                }
+            }
+        }
+        return null;
     }
 
     private Integer getLegendaryMode(Object value) {
@@ -1945,15 +3669,46 @@ public final class LeicaUnlockHook extends XposedModule {
     }
 
     private void setStaticStringField(Class<?> type, String name, String value) {
+        Field field = null;
         try {
-            Field field = type.getDeclaredField(name);
+            field = type.getDeclaredField(name);
             if (!Modifier.isStatic(field.getModifiers())) {
                 throw new IllegalStateException(name + " is not static");
             }
             field.setAccessible(true);
             field.set(null, value);
         } catch (ReflectiveOperationException | RuntimeException error) {
-            log(Log.WARN, TAG, "Unable to set Build." + name, error);
+            // Build.DEVICE/PRODUCT/BRAND are static final fields on recent
+            // Android releases and Field#set may be rejected even after
+            // setAccessible(true).  Use Unsafe as a fallback so code that
+            // reads Build constants (instead of SystemProperties) observes
+            // the same spoofed identity.
+            try {
+                Class<?> unsafeClass = Class.forName("sun.misc.Unsafe");
+                Field singleton = unsafeClass.getDeclaredField("theUnsafe");
+                singleton.setAccessible(true);
+                Object unsafe = singleton.get(null);
+                Method staticFieldBase = unsafeClass.getMethod("staticFieldBase", Field.class);
+                Method staticFieldOffset = unsafeClass.getMethod("staticFieldOffset", Field.class);
+                Method putObject = unsafeClass.getMethod("putObject", Object.class, long.class, Object.class);
+                Object base = staticFieldBase.invoke(unsafe, field);
+                long offset = ((Number) staticFieldOffset.invoke(unsafe, field)).longValue();
+                putObject.invoke(unsafe, base, offset, value);
+                log(Log.INFO, TAG, "Set static final Build." + name + " via Unsafe");
+            } catch (ReflectiveOperationException | RuntimeException | LinkageError fallback) {
+                log(Log.WARN, TAG, "Unable to set Build." + name, error);
+            }
+        }
+    }
+
+    private String readStaticStringField(Class<?> type, String name) {
+        try {
+            Field field = type.getDeclaredField(name);
+            field.setAccessible(true);
+            Object value = field.get(null);
+            return value instanceof String ? (String) value : null;
+        } catch (ReflectiveOperationException | RuntimeException error) {
+            return null;
         }
     }
 

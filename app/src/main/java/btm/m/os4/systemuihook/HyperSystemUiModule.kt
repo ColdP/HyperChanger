@@ -13,11 +13,14 @@ import android.net.NetworkCapabilities
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorFilter
+import android.graphics.Matrix
 import android.graphics.Outline
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.Point
 import android.graphics.Rect
+import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
@@ -35,9 +38,11 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
+import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.core.graphics.PathParser
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
@@ -61,7 +66,9 @@ private data class VolumeTuningSnapshot(
 
 private data class StackedMobileSubscription(
     val slot: Int,
-    val dataSim: Boolean,
+    val dataSim: Boolean?,
+    val dataConnected: Boolean?,
+    val isDefault: Boolean?,
     val signalLevel: Int,
 )
 
@@ -76,6 +83,11 @@ private class StackedMobilePresentation(
     var mobileSignalContainer: ViewGroup? = null
     var mobileGroup: ViewGroup? = null
     var networkTypeView: TextView? = null
+    var systemMobileType: ImageView? = null
+    var savedSystemMobileTypeEndToStart: Int? = null
+    var savedSystemMobileTypeTopToTop: Int? = null
+    var savedSystemMobileTypeEndMargin: Int? = null
+    var savedSystemMobileTypeTopMargin: Int? = null
     var networkTypeSource: Any? = null
     var dualContainer: FrameLayout? = null
     var dualSignal: ImageView? = null
@@ -84,6 +96,8 @@ private class StackedMobilePresentation(
     var savedRootVisibility: Int? = null
     var rootHiddenByStacked = false
     var savedIndependentView: TextView? = null
+    var savedIndependentTypeface: Typeface? = null
+    var hasSavedIndependentTypeface = false
     var savedIndependentTranslationY: Float? = null
     var savedIndependentMargins: IntArray? = null
     var savedIndependentParent: ViewGroup? = null
@@ -184,6 +198,47 @@ private class StackedMobileDrawable(
     override fun isStateful(): Boolean = tint?.isStateful == true
 }
 
+private class ControlCenterSvgDrawable(
+    pathData: String,
+    private val sourceSize: Float = 380f,
+) : Drawable() {
+    private val sourcePath: Path = PathParser.createPathFromPathData(pathData)
+    private val drawPath = Path()
+    private val matrix = Matrix()
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.WHITE
+    }
+    private var drawableAlpha = 0xFF
+    private var tint: ColorStateList? = null
+
+    override fun draw(canvas: Canvas) {
+        val width = bounds.width().toFloat()
+        val height = bounds.height().toFloat()
+        if (width <= 0f || height <= 0f) return
+        matrix.reset()
+        matrix.setScale(width / sourceSize, height / sourceSize)
+        matrix.postTranslate(bounds.left.toFloat(), bounds.top.toFloat())
+        drawPath.reset()
+        sourcePath.transform(matrix, drawPath)
+        paint.color = tint?.getColorForState(state, Color.WHITE) ?: Color.WHITE
+        paint.alpha = drawableAlpha
+        canvas.drawPath(drawPath, paint)
+    }
+
+    override fun setAlpha(alpha: Int) { drawableAlpha = alpha.coerceIn(0, 255); invalidateSelf() }
+    override fun setColorFilter(colorFilter: ColorFilter?) { paint.colorFilter = colorFilter; invalidateSelf() }
+    override fun setTintList(tint: ColorStateList?) { this.tint = tint; invalidateSelf() }
+    override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+    override fun onStateChange(state: IntArray): Boolean = tint?.isStateful == true
+    override fun isStateful(): Boolean = tint?.isStateful == true
+}
+
+private const val CONTROL_CENTER_PLUS_PATH =
+    "M352.567 216.376H216.377V352.566C216.377 367.84 204.921 379.295 189.648 379.295C174.374 379.295 162.919 367.84 162.919 352.566V216.376H26.7289C11.4552 216.376 2.38419e-06 204.921 2.38419e-06 189.648C2.38419e-06 174.374 11.4552 162.919 26.7289 162.919H162.919V26.7287C162.919 11.4551 174.374 -0.000180721 189.648 -0.000180721C204.921 -0.000180721 216.377 11.4551 216.377 26.7287V162.919H352.567C367.84 162.919 379.296 174.374 379.296 189.648C379.296 204.921 367.84 216.376 352.567 216.376Z"
+private const val CONTROL_CENTER_POWER_PATH =
+    "M248.197 0.000213623C263.47 0.000213623 274.926 12.7283 274.926 26.7291V244.379C274.926 259.652 263.47 271.107 248.197 271.107C232.923 271.107 221.468 259.652 221.468 244.379V26.7291C221.468 12.7283 232.923 0.000213623 248.197 0.000213623ZM388.205 77.6412C398.388 66.186 416.207 67.4588 426.389 77.6412C467.119 122.189 492.575 179.466 492.575 244.379C492.575 381.841 379.296 492.575 240.56 488.757C108.188 484.938 9.05991e-06 370.386 3.81842 236.742C5.09122e-06 175.647 30.5473 119.644 70.0042 77.6412C80.1866 67.4588 98.0059 66.186 108.188 77.6412C118.371 87.8237 118.371 104.37 109.461 114.553C77.641 148.918 58.549 194.739 58.549 244.379C58.549 350.021 145.1 435.299 250.742 434.026C355.112 432.753 440.39 343.657 437.845 239.287C436.572 190.921 418.752 147.645 386.932 115.825C378.023 104.37 376.75 87.8237 388.205 77.6412Z"
+
 class HyperSystemUiModule : XposedModule() {
     internal fun installHook(member: java.lang.reflect.Executable) = hook(member)
 
@@ -199,10 +254,14 @@ class HyperSystemUiModule : XposedModule() {
             when (param.packageName) {
                 SYSTEM_UI, SYSTEM_UI_PLUGIN -> {
                     if (param.packageName == SYSTEM_UI) {
+                        synchronized(controlCenterButtonsLock) {
+                            systemUiClassLoader = param.defaultClassLoader
+                        }
                         scheduleSoftGlassThemeActivation(preferences)
                     }
                     if (!resourceHooksInstalled) {
                         installDimensionHooks(preferences)
+                        installNotificationColorHooks(preferences)
                         resourceHooksInstalled = true
                     }
                     if (!cornerHooksInstalled) {
@@ -212,8 +271,21 @@ class HyperSystemUiModule : XposedModule() {
                     if (param.packageName == SYSTEM_UI_PLUGIN) {
                         installKnownCornerRadiusHooks(param.defaultClassLoader, preferences)
                     }
-                    if (param.packageName == SYSTEM_UI && !dynamicIslandClassDiscoveryInstalled) {
-                        installDynamicIslandClassDiscovery(preferences)
+                    // Depending on the SystemUI build, the plugin classes can be loaded by
+                    // SystemUI's class loader without a separate plugin package callback.
+                    if (!controlCenterEditButtonHookInstalled ||
+                        !controlCenterContentDistributorHookInstalled ||
+                        !controlCenterTopButtonsHookInstalled ||
+                        !controlCenterMainPanelHookInstalled
+                    ) {
+                        installControlCenterEditButtonHook(param.defaultClassLoader, preferences)
+                        scheduleControlCenterHookRetries(param.defaultClassLoader, preferences)
+                    }
+                    if (!globalActionsHookInstalled) {
+                        installGlobalActionsHook(param.defaultClassLoader)
+                    }
+                    if (!dynamicIslandClassDiscoveryInstalled) {
+                        installDynamicIslandClassDiscovery(preferences, param.defaultClassLoader)
                         dynamicIslandClassDiscoveryInstalled = true
                     }
                     if (param.packageName == SYSTEM_UI_PLUGIN && !dynamicIslandHooksInstalled) {
@@ -290,6 +362,7 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     if (param.packageName == SYSTEM_UI && !shadeMaterialHooksInstalled) {
                         installShadeMaterialHooks(preferences, param.defaultClassLoader)
+                        installHeadsUpNotificationSoftGlassHooks(preferences, param.defaultClassLoader)
                         shadeMaterialHooksInstalled = true
                     }
                     if (param.packageName == SYSTEM_UI && !softGlassThemeSystemUiHookInstalled) {
@@ -355,6 +428,1201 @@ class HyperSystemUiModule : XposedModule() {
             classLoader = classLoader,
             phraseProcess = packageName == SUPER_XIAOAI_PHRASE,
         )
+    }
+
+    /**
+     * The control-center plugin is preloaded lazily after the package callback.  Retry against
+     * the same loader after preload has had a chance to define its classes.
+     */
+    private fun scheduleControlCenterHookRetries(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
+        if (controlCenterHookRetryScheduled) return
+        controlCenterHookRetryScheduled = true
+        val handler = Handler(Looper.getMainLooper())
+        listOf(500L, 1500L, 3000L, 6000L, 10000L, 16000L).forEach { delay ->
+            handler.postDelayed({
+                val complete = controlCenterEditButtonHookInstalled &&
+                    controlCenterTopButtonsHookInstalled &&
+                    controlCenterMainPanelHookInstalled
+                if (!complete) {
+                    log(Log.DEBUG, TAG, "Retrying control-center hooks after ${delay}ms")
+                    installControlCenterEditButtonHook(classLoader, preferences)
+                }
+            }, delay)
+        }
+    }
+
+    private fun installControlCenterEditButtonHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+        alreadyLoadedClass: Class<*>? = null,
+    ): Boolean {
+        return runCatching {
+            var installed = false
+            val controllerClass = (alreadyLoadedClass
+                ?.takeIf { it.name == CONTROL_CENTER_EDIT_BUTTON_CONTROLLER_CLASS }
+                ?: runCatching { classLoader.loadClass(CONTROL_CENTER_EDIT_BUTTON_CONTROLLER_CLASS) }.getOrNull())
+            log(
+                Log.DEBUG,
+                TAG,
+                "Control-center hook discovery: controller=${controllerClass != null}, " +
+                    "loader=${classLoader.javaClass.name}, loaded=${alreadyLoadedClass?.name ?: "none"}",
+            )
+            if (controllerClass != null && !controlCenterEditButtonHookInstalled) {
+                val availabilityMethods = controllerClass.methods.filter { method ->
+                    method.name == "available" &&
+                        method.parameterCount == 1 &&
+                        method.parameterTypes[0] == Boolean::class.javaPrimitiveType &&
+                        method.returnType == Boolean::class.javaPrimitiveType
+                }
+                val listMethods = controllerClass.methods.filter { method ->
+                    method.name == "getListItems" &&
+                        method.parameterCount == 0 &&
+                        java.util.List::class.java.isAssignableFrom(method.returnType)
+                }
+                availabilityMethods.forEachIndexed { index, method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("control-center:hide-edit-button-$index")
+                        .intercept { chain ->
+                            if (preferences.getBoolean(KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON, false) &&
+                                !preferences.getBoolean(ADD_CONTROL_CENTER_TOP_BUTTONS_KEY, false)
+                            ) false
+                            else chain.proceed()
+                        }
+                }
+                listMethods.forEachIndexed { index, method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("control-center:hide-edit-button-items-$index")
+                        .intercept { chain ->
+                            if (preferences.getBoolean(KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON, false) &&
+                                !preferences.getBoolean(ADD_CONTROL_CENTER_TOP_BUTTONS_KEY, false)
+                            ) ArrayList<Any?>()
+                            else chain.proceed()
+                        }
+                }
+                if (availabilityMethods.isNotEmpty() || listMethods.isNotEmpty()) {
+                    controlCenterEditButtonHookInstalled = true
+                    installed = true
+                }
+                log(
+                    Log.INFO,
+                    TAG,
+                    "Control-center edit methods discovered: available=${availabilityMethods.size}, " +
+                        "list=${listMethods.size}, controller=${controllerClass.name}",
+                )
+            }
+            if (controllerClass != null && !controlCenterTopButtonsHookInstalled) {
+                val bindMethods = controllerClass.methods.filter { method ->
+                    method.name == "onBindViewHolder" && method.parameterCount == 0
+                }
+                bindMethods.forEachIndexed { index, method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("control-center:top-buttons-bind-$index")
+                            .intercept { chain ->
+                                val result = chain.proceed()
+                                val controller = chain.thisObject
+                                synchronized(controlCenterButtonsLock) {
+                                    controlCenterEditController = controller
+                                    controlCenterControllerClassLoader = controller.javaClass.classLoader
+                                }
+                                hideBoundControlCenterEditButton(controller, preferences)
+                                installControlCenterTopButtons(controller, preferences)
+                                Handler(Looper.getMainLooper()).postDelayed(
+                                    { installControlCenterTopButtons(controller, preferences) },
+                                    120L,
+                                )
+                                Handler(Looper.getMainLooper()).postDelayed(
+                                    { installControlCenterTopButtons(controller, preferences) },
+                                    600L,
+                                )
+                                result
+                            }
+                    controlCenterTopButtonsHookInstalled = true
+                    installed = true
+                }
+                log(
+                    Log.INFO,
+                    TAG,
+                    "Control-center bind methods discovered: count=${bindMethods.size}, " +
+                        "controller=${controllerClass.name}",
+                )
+            }
+            installControlCenterMainPanelHook(classLoader, preferences)
+            installControlCenterExpandLifecycleHook(classLoader)
+            installControlCenterHeaderLifecycleHook(classLoader, preferences)
+            val distributorClass = (alreadyLoadedClass
+                ?.takeIf { it.name == CONTROL_CENTER_CONTENT_DISTRIBUTOR_CLASS }
+                ?: runCatching { classLoader.loadClass(CONTROL_CENTER_CONTENT_DISTRIBUTOR_CLASS) }.getOrNull())
+            if (!controlCenterContentDistributorHookInstalled) distributorClass?.methods?.firstOrNull { method ->
+                method.name == "getChildControllers" &&
+                    method.parameterCount == 0 &&
+                    java.util.List::class.java.isAssignableFrom(method.returnType)
+            }?.let { method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("control-center:hide-edit-button-controllers")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        if (!preferences.getBoolean(KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON, false) ||
+                            preferences.getBoolean(ADD_CONTROL_CENTER_TOP_BUTTONS_KEY, false)
+                        ) result
+                        else (result as? List<*>)?.let { controllers ->
+                            ArrayList(controllers.filterNot {
+                                it?.javaClass?.name == CONTROL_CENTER_EDIT_BUTTON_CONTROLLER_CLASS
+                            })
+                        } ?: result
+                    }
+                controlCenterContentDistributorHookInstalled = true
+                installed = true
+            }
+            if (distributorClass != null) {
+                log(
+                    Log.DEBUG,
+                    TAG,
+                    "Control-center distributor discovered: class=${distributorClass.name}, " +
+                        "hooked=$controlCenterContentDistributorHookInstalled",
+                )
+            }
+            installControlCenterTouchHook(classLoader)
+            if (!controlCenterPreferenceListenerInstalled) {
+                val listener = SharedPreferences.OnSharedPreferenceChangeListener { changed, key ->
+                    if (key == ADD_CONTROL_CENTER_TOP_BUTTONS_KEY ||
+                        key == KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON ||
+                        key == KEY_CONTROL_CENTER_TOP_BUTTONS_ICON_SCALE ||
+                        key == KEY_CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_MODE ||
+                        key == KEY_CONTROL_CENTER_TOP_BUTTONS_PURE_COLOR ||
+                        key == KEY_CONTROL_CENTER_TOP_BUTTONS_PURE_BACKGROUND_RADIUS ||
+                        key == KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_COLOR ||
+                        key == KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_BACKGROUND_RADIUS ||
+                        key == KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_OPACITY ||
+                        key == KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_BLUR_RADIUS ||
+                        key == KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_HIGHLIGHT ||
+                        key == KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_COLOR ||
+                        key == KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_BACKGROUND_RADIUS ||
+                        key == KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_OPACITY ||
+                        key == KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_BACKDROP_BLUR_RADIUS ||
+                        key == KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_BLUR_RADIUS ||
+                        key == KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_LUMINANCE
+                    ) {
+                        val controller = synchronized(controlCenterButtonsLock) {
+                            controlCenterEditController
+                        }
+                        if (controller != null) {
+                            Handler(Looper.getMainLooper()).post {
+                                hideBoundControlCenterEditButton(controller, changed)
+                                installControlCenterTopButtons(controller, changed)
+                            }
+                        }
+                    }
+                }
+                preferences.registerOnSharedPreferenceChangeListener(listener)
+                controlCenterPreferenceListenerInstalled = true
+            }
+            check(installed) { "Control-center edit button methods were not found" }
+            log(Log.INFO, TAG, "Installed control-center edit button visibility hook")
+            true
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install control-center edit button visibility hook", error)
+        }.getOrDefault(false)
+    }
+
+    private fun installControlCenterMainPanelHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+        alreadyLoadedClass: Class<*>? = null,
+    ) {
+        if (controlCenterMainPanelHookInstalled) return
+        if (alreadyLoadedClass == null && controlCenterClassDiscoveryInProgress.get() == true) return
+        runCatching {
+            val panelClass = (alreadyLoadedClass
+                ?.takeIf { it.name == CONTROL_CENTER_MAIN_PANEL_CONTROLLER_CLASS }
+                ?: classLoader.loadClass(CONTROL_CENTER_MAIN_PANEL_CONTROLLER_CLASS))
+            val methods = panelClass.methods.filter { method ->
+                method.name == "onCreate" && method.parameterCount == 0
+            }
+            methods.forEachIndexed { index, method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("control-center:top-buttons-main-panel-$index")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        val panel = chain.thisObject
+                        val root = runCatching {
+                            panel.javaClass.methods.firstOrNull {
+                                it.name == "getView" && it.parameterCount == 0
+                            }?.invoke(panel) as? ViewGroup
+                        }.getOrNull()
+                        if (root != null) {
+                            installControlCenterTopButtonsIntoRoot(root, preferences)
+                            Handler(Looper.getMainLooper()).postDelayed({
+                                installControlCenterTopButtonsIntoRoot(root, preferences)
+                            }, 250L)
+                        } else {
+                            log(Log.DEBUG, TAG, "Control-center main panel root unavailable after onCreate")
+                        }
+                        result
+                    }
+            }
+            if (methods.isNotEmpty()) {
+                controlCenterMainPanelHookInstalled = true
+                log(Log.INFO, TAG, "Installed control-center MainPanelController hook")
+            }
+        }.onFailure { error ->
+            log(Log.DEBUG, TAG, "Control-center MainPanelController hook unavailable", error)
+        }
+    }
+
+    private fun installControlCenterHeaderLifecycleHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+        alreadyLoadedClass: Class<*>? = null,
+    ) {
+        if (controlCenterHeaderLifecycleHookInstalled) return
+        if (alreadyLoadedClass == null && controlCenterClassDiscoveryInProgress.get() == true) return
+        runCatching {
+            val headerClass = alreadyLoadedClass
+                ?.takeIf { it.name == CONTROL_CENTER_HEADER_CONTROLLER_CLASS }
+                ?: classLoader.loadClass(CONTROL_CENTER_HEADER_CONTROLLER_CLASS)
+            var count = 0
+            headerClass.methods.filter { method ->
+                method.name in setOf("onCreate", "onMainPanelVisibleChanged", "onModeChanged")
+            }.forEachIndexed { index, method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("control-center:top-buttons-header-$index")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        val controller = synchronized(controlCenterButtonsLock) { controlCenterEditController }
+                        val visible = (0 until method.parameterCount)
+                            .mapNotNull { index -> chain.getArg(index) as? Boolean }
+                            .firstOrNull()
+                        if (visible == false) {
+                            hideControlCenterTopButtons()
+                        } else {
+                            controller?.let { installControlCenterTopButtons(it, preferences) }
+                            // Switching from the notification shade to the control center
+                            // horizontally can make the header visible without emitting an
+                            // expand-progress callback.  In that path the injected buttons
+                            // remain in their default hidden-by-collapse state until the user
+                            // pulls down once more.  A visible header means the panel is already
+                            // shown, so synchronize the buttons to the fully expanded state.
+                            if (visible == true) updateControlCenterTopButtonsProgress(1f)
+                        }
+                        result
+                    }
+                count++
+            }
+            if (count > 0) controlCenterHeaderLifecycleHookInstalled = true
+        }.onFailure { error -> log(Log.DEBUG, TAG, "Control-center header lifecycle hook unavailable", error) }
+    }
+
+    private fun hideBoundControlCenterEditButton(controller: Any?, preferences: SharedPreferences) {
+        if (!preferences.getBoolean(KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON, false)) return
+        val target = runCatching {
+            controller?.javaClass?.declaredMethods?.firstOrNull {
+                it.name == "getEditButton" && it.parameterCount == 0
+            }?.apply { isAccessible = true }?.invoke(controller) as? View
+        }.getOrNull() ?: return
+        if (target.visibility != View.GONE) {
+            target.visibility = View.GONE
+            log(Log.INFO, TAG, "Hid bound control-center edit button for top-button replacement")
+        }
+    }
+
+    private fun installControlCenterTouchHook(classLoader: ClassLoader, alreadyLoadedClass: Class<*>? = null) {
+        if (controlCenterTouchHookInstalled) return
+        if (controlCenterClassDiscoveryInProgress.get() == true && alreadyLoadedClass == null) return
+        runCatching {
+            val touchClass = alreadyLoadedClass
+                ?.takeIf { it.name == CONTROL_CENTER_TOUCH_CONTROLLER_CLASS }
+                ?: classLoader.loadClass(CONTROL_CENTER_TOUCH_CONTROLLER_CLASS)
+            touchClass.methods.filter { method ->
+                method.name == "onInterceptTouchEvent" && method.parameterCount == 1 &&
+                    method.parameterTypes[0] == MotionEvent::class.java &&
+                    method.returnType == Boolean::class.javaPrimitiveType
+            }.forEachIndexed { index, method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("control-center:top-buttons-touch-$index")
+                    .intercept { chain ->
+                        val event = chain.getArg(0) as? MotionEvent
+                        if (event == null) return@intercept chain.proceed()
+                        val active = synchronized(controlCenterButtonsLock) {
+                            controlCenterActiveTouchButton
+                        }
+                        when (event.actionMasked) {
+                            MotionEvent.ACTION_DOWN -> {
+                                val hit = findControlCenterTopButtonHit(event)
+                                if (hit != null) {
+                                    synchronized(controlCenterButtonsLock) {
+                                        controlCenterActiveTouchButton = hit
+                                    }
+                                    // Do not let MainPanelTouchController intercept the head
+                                    // gesture.  Returning false keeps this gesture on the
+                                    // injected child, whose listener owns the eventual action.
+                                    false
+                                } else {
+                                    chain.proceed()
+                                }
+                            }
+                            MotionEvent.ACTION_MOVE,
+                            -> if (active != null) false else chain.proceed()
+                            MotionEvent.ACTION_UP,
+                            MotionEvent.ACTION_CANCEL -> if (active != null) {
+                                synchronized(controlCenterButtonsLock) {
+                                    controlCenterActiveTouchButton = null
+                                }
+                                false
+                            } else chain.proceed()
+                            else -> chain.proceed()
+                        }
+                    }
+                controlCenterTouchHookInstalled = true
+            }
+        }.onFailure { error -> log(Log.DEBUG, TAG, "Control-center touch hook unavailable", error) }
+    }
+
+    private fun installControlCenterEventHandlerHook(classLoader: ClassLoader) {
+        if (controlCenterEventHandlerHookInstalled) return
+        runCatching {
+            val handlerClass = classLoader.loadClass(CONTROL_CENTER_EVENT_HANDLER_CLASS)
+            val methods = handlerClass.methods.filter { method ->
+                method.name == "handleExpandEvent" && method.parameterCount >= 1 &&
+                    method.parameterTypes.firstOrNull() == MotionEvent::class.java &&
+                    method.returnType == Boolean::class.javaPrimitiveType
+            }
+            methods.forEachIndexed { index, method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("control-center:top-buttons-event-handler-$index")
+                    .intercept { chain ->
+                        val event = chain.getArg(0) as? MotionEvent
+                        if (event == null) return@intercept chain.proceed()
+                        val active = synchronized(controlCenterButtonsLock) {
+                            controlCenterActiveTouchButton
+                        }
+                        when (event.actionMasked) {
+                            MotionEvent.ACTION_DOWN -> {
+                                val hit = findControlCenterTopButtonHit(event)
+                                if (hit != null) {
+                                    synchronized(controlCenterButtonsLock) {
+                                        controlCenterActiveTouchButton = hit
+                                    }
+                                    log(Log.DEBUG, TAG, "Control-center button DOWN via event handler: ${hit.tag}")
+                                    true
+                                } else {
+                                    chain.proceed()
+                                }
+                            }
+                            MotionEvent.ACTION_MOVE -> if (active != null) true else chain.proceed()
+                            MotionEvent.ACTION_UP -> if (active != null) {
+                                synchronized(controlCenterButtonsLock) {
+                                    controlCenterActiveTouchButton = null
+                                }
+                                performControlCenterTopButtonAction(active)
+                                true
+                            } else chain.proceed()
+                            MotionEvent.ACTION_CANCEL -> if (active != null) {
+                                synchronized(controlCenterButtonsLock) {
+                                    controlCenterActiveTouchButton = null
+                                }
+                                true
+                            } else chain.proceed()
+                            else -> if (active != null) true else chain.proceed()
+                        }
+                    }
+            }
+            if (methods.isNotEmpty()) {
+                controlCenterEventHandlerHookInstalled = true
+                log(Log.INFO, TAG, "Installed ControlCenterEventHandler touch hook")
+            }
+        }.onFailure { error -> log(Log.DEBUG, TAG, "ControlCenterEventHandler hook unavailable", error) }
+    }
+
+    private fun installControlCenterRootDispatchHook(root: ViewGroup) {
+        // The vendor root invokes its own click listener when a tap in the empty collapse
+        // area starts the close animation.  Observe that click instead of consuming the root
+        // dispatch stream: consuming dispatch prevented the injected child views from ever
+        // receiving their complete DOWN/UP sequence.
+        installControlCenterRootClickHook()
+    }
+
+    private fun installControlCenterRootClickHook() {
+        if (controlCenterRootClickHookInstalled) return
+        runCatching {
+            hook(View::class.java.getMethod("performClick"))
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("control-center:top-buttons-root-click")
+                .intercept { chain ->
+                    val root = synchronized(controlCenterButtonsLock) { controlCenterRoot }
+                    if (chain.thisObject === root) {
+                        // This runs in the same ACTION_UP that invokes the vendor collapse
+                        // listener, so the injected buttons begin leaving with the panel.
+                        startControlCenterTopButtonsCollapse()
+                    }
+                    chain.proceed()
+                }
+            controlCenterRootClickHookInstalled = true
+            log(Log.INFO, TAG, "Installed control-center root click hook")
+        }.onFailure { error ->
+            log(Log.DEBUG, TAG, "Control-center root click hook unavailable", error)
+        }
+    }
+
+    private fun installControlCenterExpandLifecycleHook(
+        classLoader: ClassLoader,
+        alreadyLoadedClass: Class<*>? = null,
+    ) {
+        if (controlCenterExpandLifecycleHookInstalled) return
+        if (controlCenterClassDiscoveryInProgress.get() == true && alreadyLoadedClass == null) return
+        runCatching {
+            val expandClass = alreadyLoadedClass
+                ?.takeIf { it.name == CONTROL_CENTER_EXPAND_CONTROLLER_CLASS }
+                ?: classLoader.loadClass(CONTROL_CENTER_EXPAND_CONTROLLER_CLASS)
+            var count = 0
+            expandClass.methods.filter { method ->
+                (method.name == "onExpandChange" && method.parameterCount == 3 &&
+                    method.parameterTypes[0] == Float::class.javaPrimitiveType &&
+                    method.parameterTypes[1] == Float::class.javaPrimitiveType &&
+                    method.parameterTypes[2] == Boolean::class.javaPrimitiveType) ||
+                    (method.name == "hidePanel" && method.parameterCount == 2 &&
+                        method.parameterTypes.all { it == Boolean::class.javaPrimitiveType }) ||
+                    (method.name == "onStop" && method.parameterCount == 0) ||
+                    (method.name == "onExpandFinish" && method.parameterCount == 1)
+            }.forEachIndexed { index, method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("control-center:top-buttons-expand-$index")
+                    .intercept { chain ->
+                        if (method.name == "hidePanel") {
+                            // hidePanel starts the vendor's non-drag close path.  onStop only
+                            // arrives after that animation, which was why the buttons lingered.
+                            if (chain.getArg(0) == true) startControlCenterTopButtonsCollapse()
+                            else hideControlCenterTopButtons()
+                        }
+                        val result = chain.proceed()
+                        synchronized(controlCenterButtonsLock) {
+                            controlCenterExpandController = chain.thisObject
+                        }
+                        when (method.name) {
+                            "onExpandChange" -> updateControlCenterTopButtonsProgress(
+                                controlCenterExpansionProgress(chain.thisObject),
+                            )
+                            "onStop" -> hideControlCenterTopButtons()
+                            "onExpandFinish" -> {
+                                val expanded = runCatching {
+                                    method.declaringClass.methods.firstOrNull {
+                                        it.name == "getAppearance" && it.parameterCount == 0
+                                    }?.invoke(chain.thisObject) as? Boolean
+                                }.getOrNull() == true
+                                if (expanded) updateControlCenterTopButtonsProgress(1f)
+                                else hideControlCenterTopButtons()
+                            }
+                        }
+                        result
+                    }
+                count++
+            }
+            if (count > 0) {
+                controlCenterExpandLifecycleHookInstalled = true
+                log(Log.INFO, TAG, "Installed control-center expand lifecycle hook")
+            }
+        }.onFailure { error ->
+            log(Log.DEBUG, TAG, "Control-center expand lifecycle hook unavailable", error)
+        }
+    }
+
+    private fun hideControlCenterTopButtons() {
+        synchronized(controlCenterButtonsLock) {
+            controlCenterActiveTouchButton = null
+            controlCenterButtonsExpansionProgress = 0f
+            controlCenterButtonsHiddenByCollapse = true
+            controlCenterButtonsCollapsing = false
+            listOf(controlCenterPlusButton, controlCenterPowerButton).forEach { button ->
+                button?.animate()?.cancel()
+                button?.alpha = 0f
+                button?.translationY = 0f
+                button?.visibility = View.GONE
+            }
+        }
+    }
+
+    private fun updateControlCenterTopButtonsProgress(progress: Float) {
+        val clamped = progress.coerceIn(0f, 1f)
+        val visible = clamped > 0.05f
+        synchronized(controlCenterButtonsLock) {
+            // A non-drag collapse has no intermediate expand-height callbacks.  Ignore a
+            // stale visible value while its own exit animation is already in progress.
+            if (controlCenterButtonsCollapsing && visible) return
+            controlCenterButtonsExpansionProgress = clamped
+            controlCenterButtonsHiddenByCollapse = !visible
+            if (visible) controlCenterButtonsCollapsing = false
+            val plus = controlCenterPlusButton
+            val power = controlCenterPowerButton
+            val offset = ((plus ?: power)?.resources?.displayMetrics?.density ?: 1f) * 20f
+            listOf(plus, power).forEach { button ->
+                if (button == null) return@forEach
+                button.animate().cancel()
+                button.visibility = if (visible) View.VISIBLE else View.GONE
+                button.alpha = clamped
+                button.translationY = -(1f - clamped) * offset
+            }
+        }
+        if (!visible) {
+            synchronized(controlCenterButtonsLock) {
+                controlCenterPlusButton?.translationY = 0f
+                controlCenterPowerButton?.translationY = 0f
+            }
+        }
+    }
+
+    private fun startControlCenterTopButtonsCollapse() {
+        synchronized(controlCenterButtonsLock) {
+            if (controlCenterButtonsCollapsing) return
+            controlCenterButtonsHiddenByCollapse = true
+            controlCenterButtonsCollapsing = true
+            controlCenterActiveTouchButton = null
+            var animated = false
+            listOf(controlCenterPlusButton, controlCenterPowerButton).forEach { button ->
+                if (button == null) return@forEach
+                button.animate().cancel()
+                if (button.visibility != View.VISIBLE || button.alpha <= 0f) {
+                    button.visibility = View.GONE
+                    button.alpha = 0f
+                    return@forEach
+                }
+                animated = true
+                button.animate()
+                    .alpha(0f)
+                    .translationY(-button.resources.displayMetrics.density * 20f)
+                    .setDuration(180L)
+                    .setInterpolator(DecelerateInterpolator())
+                    .withEndAction {
+                        button.visibility = View.GONE
+                        button.translationY = 0f
+                        synchronized(controlCenterButtonsLock) {
+                            val allHidden = listOf(
+                                controlCenterPlusButton,
+                                controlCenterPowerButton,
+                            ).filterNotNull().all { it.visibility != View.VISIBLE }
+                            if (allHidden) controlCenterButtonsCollapsing = false
+                        }
+                    }
+                    .start()
+            }
+            if (!animated) controlCenterButtonsCollapsing = false
+        }
+    }
+
+    private fun controlCenterExpansionProgress(controller: Any?): Float = runCatching {
+        if (controller == null) return@runCatching 0f
+        val height = controller.javaClass.methods.firstOrNull {
+            it.name == "getExpandHeight" && it.parameterCount == 0
+        }?.invoke(controller) as? Number
+        val threshold = controller.javaClass.methods.firstOrNull {
+            it.name == "getExpandThresh" && it.parameterCount == 0
+        }?.invoke(controller) as? Number
+        val max = threshold?.toFloat() ?: 0f
+        if (height == null || max <= 0f) 0f else (height.toFloat() / max).coerceIn(0f, 1f)
+    }.getOrDefault(0f)
+
+    private fun findControlCenterTopButtonHit(event: MotionEvent): View? {
+        val buttons = synchronized(controlCenterButtonsLock) {
+            listOf(controlCenterPlusButton, controlCenterPowerButton)
+        }
+        return buttons.filterNotNull().firstOrNull { button ->
+            if (button.visibility != View.VISIBLE || button.width <= 0 || button.height <= 0) return@firstOrNull false
+            val location = IntArray(2)
+            button.getLocationOnScreen(location)
+            val x = event.rawX
+            val y = event.rawY
+            x >= location[0] && x <= location[0] + button.width &&
+                y >= location[1] && y <= location[1] + button.height
+        }
+    }
+
+    private fun isControlCenterDispatchOwner(candidate: Any?, buttonRoot: ViewGroup): Boolean {
+        if (candidate === buttonRoot) return true
+        var parent = buttonRoot.parent
+        while (parent is View) {
+            if (parent === candidate) return true
+            parent = parent.parent
+        }
+        return false
+    }
+
+    private fun isControlCenterTopButtonHit(event: MotionEvent): Boolean =
+        findControlCenterTopButtonHit(event) != null
+
+    private fun performControlCenterTopButtonAction(button: View) {
+        val (plus, power, shouldRun) = synchronized(controlCenterButtonsLock) {
+            val now = SystemClock.uptimeMillis()
+            val duplicate = button === controlCenterLastActionButton &&
+                now - controlCenterLastActionUptime < CONTROL_CENTER_BUTTON_ACTION_DEBOUNCE_MS
+            if (!duplicate) {
+                controlCenterLastActionButton = button
+                controlCenterLastActionUptime = now
+            }
+            Triple(controlCenterPlusButton, controlCenterPowerButton, !duplicate)
+        }
+        if (!shouldRun) return
+        when {
+            button === plus -> showControlCenterEdit()
+            button === power -> showCachedGlobalActions()
+            else -> button.performClick()
+        }
+    }
+
+    private fun showControlCenterEdit(): Boolean {
+        val controller = synchronized(controlCenterButtonsLock) { controlCenterEditController }
+        val result = runCatching {
+            log(Log.DEBUG, TAG, "Control-center edit click: controller=${controller?.javaClass?.name ?: "null"}")
+            val provider = controller?.let { readInstanceField(it, "qsListController") }
+            // The plugin's dependency wrapper is obfuscated in production builds (F0.a on
+            // this version), so its class name does not identify it as a Provider or Lazy.
+            // Always prefer its zero-argument get() result when present.
+            val qsListController = provider?.let { wrapper ->
+                runCatching {
+                    wrapper.javaClass.methods.firstOrNull {
+                        it.name == "get" && it.parameterCount == 0
+                    }?.apply { isAccessible = true }?.invoke(wrapper)
+                }.getOrNull() ?: wrapper
+            }
+            val startQuery = qsListController?.javaClass?.methods?.firstOrNull { method ->
+                method.name == "startQuery" && method.parameterCount == 1 && method.parameterTypes[0].isEnum
+            }
+            val editMode = startQuery?.parameterTypes?.get(0)?.let { enumType ->
+                runCatching {
+                    java.lang.Enum.valueOf(
+                        enumType.asSubclass(Enum::class.java),
+                        "EDIT",
+                    )
+                }.getOrNull()
+            }
+            log(
+                Log.DEBUG,
+                TAG,
+                "Control-center edit target: qsList=${qsListController?.javaClass?.name ?: "null"}, " +
+                    "startQuery=${startQuery?.toGenericString() ?: "null"}, editMode=${editMode != null}",
+            )
+            if (qsListController != null && editMode != null && startQuery != null) {
+                startQuery.invoke(qsListController, editMode)
+                log(Log.INFO, TAG, "Opened control-center edit mode via QSListController.startQuery")
+                true
+            } else {
+                log(
+                    Log.WARN,
+                    TAG,
+                    "Control-center edit reflection unavailable: controller=${controller?.javaClass?.name}, " +
+                        "qsList=${qsListController?.javaClass?.name}, mode=${editMode != null}, startQuery=${startQuery != null}",
+                )
+                false
+            }
+        }.getOrElse { error ->
+            log(Log.WARN, TAG, "Control-center edit reflection failed", error)
+            false
+        }
+        if (result) return true
+        val target = synchronized(controlCenterButtonsLock) { controlCenterEditTarget }
+        return target?.performClick() == true
+    }
+
+    private fun installControlCenterTopButtons(controller: Any?, preferences: SharedPreferences) {
+        val controllerObject = controller ?: return
+        synchronized(controlCenterButtonsLock) {
+            controlCenterControllerClassLoader = controllerObject.javaClass.classLoader
+        }
+        val editButton = runCatching {
+            controllerObject.javaClass.declaredMethods.firstOrNull {
+                it.name == "getEditButton" && it.parameterCount == 0
+            }?.apply { isAccessible = true }?.invoke(controllerObject) as? View
+        }.getOrNull()
+        synchronized(controlCenterButtonsLock) {
+            controlCenterEditTarget = editButton
+        }
+        log(
+            Log.DEBUG,
+            TAG,
+            "Control-center top buttons bind: controller=${controllerObject.javaClass.name}, " +
+                "editButton=${editButton?.javaClass?.name ?: "null"}",
+        )
+        val mainPanelRef: Any = readInstanceField(controllerObject, "mainPanelController") ?: run {
+            log(Log.DEBUG, TAG, "Control-center top buttons: mainPanelController unavailable")
+            val fallbackRoot = findControlCenterWindowRoot(editButton)
+            if (fallbackRoot != null) {
+                installControlCenterTopButtonsIntoRoot(fallbackRoot, preferences)
+            }
+            return
+        }
+        val mainPanel = runCatching {
+            mainPanelRef.javaClass.methods.firstOrNull { it.name == "get" && it.parameterCount == 0 }?.invoke(mainPanelRef)
+        }.getOrNull() ?: run {
+            log(Log.DEBUG, TAG, "Control-center top buttons: MainPanel instance unavailable")
+            return
+        }
+        log(Log.DEBUG, TAG, "Control-center top buttons: MainPanel=${mainPanel.javaClass.name}")
+        val root = runCatching {
+            mainPanel.javaClass.methods.firstOrNull { it.name == "getView" && it.parameterCount == 0 }?.invoke(mainPanel)
+        }.getOrNull() as? ViewGroup ?: run {
+            log(Log.DEBUG, TAG, "Control-center top buttons: panel root unavailable")
+            findControlCenterWindowRoot(editButton)?.let { installControlCenterTopButtonsIntoRoot(it, preferences) }
+            return
+        }
+        installControlCenterTopButtonsIntoRoot(root, preferences)
+    }
+
+    private fun findControlCenterWindowRoot(view: View?): ViewGroup? {
+        var current = view?.parent as? View
+        var fallback: ViewGroup? = null
+        while (current != null) {
+            if (current is ViewGroup) {
+                fallback = current
+                if (current.javaClass.name.contains("ControlCenterWindowViewImpl")) return current
+            }
+            current = current.parent as? View
+        }
+        return fallback
+    }
+
+    private fun installControlCenterTopButtonsIntoRoot(root: ViewGroup, preferences: SharedPreferences) {
+        synchronized(controlCenterButtonsLock) { controlCenterRoot = root }
+        installControlCenterRootDispatchHook(root)
+        val enabled = preferences.getBoolean(ADD_CONTROL_CENTER_TOP_BUTTONS_KEY, false)
+        log(
+            Log.DEBUG,
+            TAG,
+            "Control-center top buttons root=${root.javaClass.name}, enabled=$enabled, " +
+                "childCount=${root.childCount}",
+        )
+        val existingPlus = root.findViewWithTag<View>(CONTROL_CENTER_PLUS_TAG)
+        val existingPower = root.findViewWithTag<View>(CONTROL_CENTER_POWER_TAG)
+        if (!enabled) {
+            existingPlus?.let { (it.parent as? ViewGroup)?.removeView(it) }
+            existingPower?.let { (it.parent as? ViewGroup)?.removeView(it) }
+            synchronized(controlCenterButtonsLock) {
+                if (controlCenterPlusButton === existingPlus) controlCenterPlusButton = null
+                if (controlCenterPowerButton === existingPower) controlCenterPowerButton = null
+            }
+            return
+        }
+        val density = root.resources.displayMetrics.density
+        fun createButton(tag: String, path: String): FrameLayout {
+            val button = FrameLayout(root.context).apply {
+                this.tag = tag
+                clipChildren = false
+                clipToPadding = false
+                isClickable = true
+                isFocusable = true
+                contentDescription = tag
+                setOnClickListener { view -> performControlCenterTopButtonAction(view) }
+                setOnTouchListener { view, event ->
+                    when (event.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> {
+                            view.parent?.requestDisallowInterceptTouchEvent(true)
+                            true
+                        }
+                        MotionEvent.ACTION_MOVE -> {
+                            view.parent?.requestDisallowInterceptTouchEvent(true)
+                            true
+                        }
+                        MotionEvent.ACTION_UP -> {
+                            view.parent?.requestDisallowInterceptTouchEvent(false)
+                            // Keep accessibility and click semantics on the actual child.
+                            // Its parent touch controller has been told not to intercept this
+                            // gesture, so this cannot bubble into the panel-close click.
+                            view.performClick()
+                            true
+                        }
+                        MotionEvent.ACTION_CANCEL -> {
+                            view.parent?.requestDisallowInterceptTouchEvent(false)
+                            true
+                        }
+                        else -> true
+                    }
+                }
+            }
+            val background = ImageView(root.context).apply {
+                this.tag = "$tag.background"
+                isClickable = false
+                isFocusable = false
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                scaleType = ImageView.ScaleType.FIT_XY
+            }
+            val icon = ImageView(root.context).apply {
+                this.tag = "$tag.icon"
+                setImageDrawable(
+                    ControlCenterSvgDrawable(
+                        path,
+                        if (path == CONTROL_CENTER_POWER_PATH) 493f else 380f,
+                    ),
+                )
+                setColorFilter(Color.WHITE)
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                val iconPadding = (14f * density).roundToInt()
+                setPadding(iconPadding, iconPadding, iconPadding, iconPadding)
+                isClickable = false
+                isFocusable = false
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }
+            button.addView(background, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ))
+            button.addView(icon, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ))
+            return button
+        }
+        fun addButton(existing: View?, tag: String, path: String, gravity: Int) {
+            if (existing != null) {
+                existing.bringToFront()
+                return
+            }
+            val button = createButton(tag, path)
+            val size = (44f * density).roundToInt()
+            val horizontalMargin = (32f * density).roundToInt()
+            val topMargin = (18f * density).roundToInt()
+            button.alpha = 0f
+            button.visibility = View.GONE
+            if (root is FrameLayout) {
+                root.addView(button, FrameLayout.LayoutParams(size, size, gravity).apply {
+                    setMargins(horizontalMargin, topMargin, horizontalMargin, topMargin)
+                })
+            } else {
+                root.addView(button, ViewGroup.LayoutParams(size, size))
+            }
+        }
+        addButton(existingPlus, CONTROL_CENTER_PLUS_TAG, CONTROL_CENTER_PLUS_PATH, Gravity.TOP or Gravity.START)
+        addButton(existingPower, CONTROL_CENTER_POWER_TAG, CONTROL_CENTER_POWER_PATH, Gravity.TOP or Gravity.END)
+        synchronized(controlCenterButtonsLock) {
+            controlCenterPlusButton = root.findViewWithTag(CONTROL_CENTER_PLUS_TAG)
+            controlCenterPowerButton = root.findViewWithTag(CONTROL_CENTER_POWER_TAG)
+        }
+        synchronized(controlCenterButtonsLock) {
+            listOf(controlCenterPlusButton, controlCenterPowerButton).forEach { button ->
+                button?.let { target ->
+                    applyControlCenterTopButtonIconScale(target, preferences)
+                    val materialLayer = (target as? ViewGroup)
+                        ?.findViewWithTag<View>("${target.tag}.background") as? ImageView
+                        ?: target as? ImageView
+                    materialLayer?.let {
+                        applyControlCenterTopButtonBackground(
+                            it,
+                            preferences,
+                            controlCenterTopButtonsMaterialClassLoader(root),
+                        )
+                    }
+                }
+            }
+        }
+        val expandController = synchronized(controlCenterButtonsLock) { controlCenterExpandController }
+        val hiddenByCollapse = synchronized(controlCenterButtonsLock) {
+            controlCenterButtonsHiddenByCollapse
+        }
+        if (hiddenByCollapse) {
+            synchronized(controlCenterButtonsLock) {
+                listOf(controlCenterPlusButton, controlCenterPowerButton).forEach { button ->
+                    button?.animate()?.cancel()
+                    button?.alpha = 0f
+                    button?.translationY = 0f
+                    button?.visibility = View.GONE
+                }
+            }
+        } else if (expandController != null) {
+            updateControlCenterTopButtonsProgress(controlCenterExpansionProgress(expandController))
+        }
+        log(Log.INFO, TAG, "Control-center top buttons injected into ${root.javaClass.name}")
+    }
+
+    private fun applyControlCenterTopButtonBackground(
+        button: ImageView,
+        preferences: SharedPreferences,
+        classLoader: ClassLoader,
+    ) {
+        val mode = preferences.getInt(
+            KEY_CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_MODE,
+            CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_NONE,
+        ).coerceIn(
+            CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_NONE,
+            CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_SOFT_GLASS,
+        )
+        val radiusDp = when (mode) {
+            CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_PURE -> preferences.getFloat(
+                KEY_CONTROL_CENTER_TOP_BUTTONS_PURE_BACKGROUND_RADIUS,
+                CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_RADIUS_DEFAULT_DP,
+            )
+            CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_ADVANCED -> preferences.getFloat(
+                KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_BACKGROUND_RADIUS,
+                CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_RADIUS_DEFAULT_DP,
+            )
+            CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_SOFT_GLASS -> preferences.getFloat(
+                KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_BACKGROUND_RADIUS,
+                CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_RADIUS_DEFAULT_DP,
+            )
+            else -> 0f
+        }.coerceIn(0f, CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_RADIUS_MAX_DP)
+        val showBackground = mode != CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_NONE && radiusDp > 0f
+        val diameter = (radiusDp * button.resources.displayMetrics.density * 2f)
+            .roundToInt()
+            .coerceAtLeast(1)
+        val layoutParams = (button.layoutParams as? FrameLayout.LayoutParams)
+            ?: FrameLayout.LayoutParams(diameter, diameter, Gravity.CENTER)
+        layoutParams.width = diameter
+        layoutParams.height = diameter
+        layoutParams.gravity = Gravity.CENTER
+        button.layoutParams = layoutParams
+        runCatching {
+            View::class.java.getMethod("clearMiBackgroundBlendColor").invoke(button)
+            View::class.java.getMethod("setPassWindowBlurEnabled", Boolean::class.javaPrimitiveType)
+                .invoke(button, false)
+        }
+        val background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(
+                if (!showBackground) {
+                    Color.TRANSPARENT
+                } else when (mode) {
+                    CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_PURE ->
+                        preferences.getInt(
+                            KEY_CONTROL_CENTER_TOP_BUTTONS_PURE_COLOR,
+                            SHORTCUT_PURE_COLOR,
+                        )
+                    CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_ADVANCED,
+                    CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_SOFT_GLASS ->
+                        Color.argb(1, 255, 255, 255)
+                    else -> Color.TRANSPARENT
+                },
+            )
+        }
+        button.background = null
+        button.setImageDrawable(background)
+        button.visibility = if (showBackground) View.VISIBLE else View.INVISIBLE
+        button.clipToOutline = showBackground
+        button.outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) {
+                outline.setOval(0, 0, view.width, view.height)
+            }
+        }
+        if (showBackground) applyControlCenterTopButtonMaterial(button, preferences, classLoader, mode)
+        button.invalidateOutline()
+        if (showBackground && mode == CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_SOFT_GLASS) {
+            // Dynamic background layers need a second registration after their measured size
+            // changes, otherwise some HyperOS builds retain only the legacy blend color.
+            button.post {
+                if (button.isAttachedToWindow && button.visibility == View.VISIBLE) {
+                    applyControlCenterTopButtonSoftGlass(button, preferences, classLoader)
+                }
+            }
+        }
+    }
+
+    private fun applyControlCenterTopButtonIconScale(button: View, preferences: SharedPreferences) {
+        val icon = (button as? ViewGroup)
+            ?.findViewWithTag<View>("${button.tag}.icon")
+            ?: return
+        val scale = preferences.getFloat(KEY_CONTROL_CENTER_TOP_BUTTONS_ICON_SCALE, 1f)
+            .coerceIn(CONTROL_CENTER_TOP_BUTTONS_ICON_SCALE_MIN, CONTROL_CENTER_TOP_BUTTONS_ICON_SCALE_MAX)
+        icon.scaleX = scale
+        icon.scaleY = scale
+    }
+
+    private fun controlCenterTopButtonsMaterialClassLoader(root: View): ClassLoader =
+        synchronized(controlCenterButtonsLock) {
+            controlCenterControllerClassLoader ?: systemUiClassLoader
+        } ?: root.context.classLoader
+
+    private fun applyControlCenterTopButtonMaterial(
+        button: ImageView,
+        preferences: SharedPreferences,
+        classLoader: ClassLoader,
+        mode: Int,
+    ) {
+        when (mode) {
+            CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_ADVANCED -> runCatching {
+                applyLegacyBackdropMaterial(
+                    view = button,
+                    opacity = preferences.getInt(
+                        KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_OPACITY,
+                        DEFAULT_ADVANCED_MATERIAL_OPACITY,
+                    ),
+                    blurRadius = preferences.getInt(
+                        KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_BLUR_RADIUS,
+                        DEFAULT_ADVANCED_MATERIAL_BLUR_RADIUS,
+                    ),
+                    color = preferences.getInt(
+                        KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_COLOR,
+                        DEFAULT_ADVANCED_MATERIAL_COLOR,
+                    ),
+                    showHighlight = preferences.getBoolean(
+                        KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_HIGHLIGHT,
+                        false,
+                    ),
+                )
+            }.onFailure { error -> log(Log.DEBUG, TAG, "Top button advanced material unavailable", error) }
+            CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_SOFT_GLASS -> {
+                applyControlCenterTopButtonSoftGlass(button, preferences, classLoader)
+            }
+        }
+    }
+
+    private fun applyControlCenterTopButtonSoftGlass(
+        button: ImageView,
+        preferences: SharedPreferences,
+        classLoader: ClassLoader,
+    ) = runCatching {
+        applyLegacyBackdropMaterial(
+            view = button,
+            opacity = preferences.getInt(
+                KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_OPACITY,
+                DEFAULT_SOFT_GLASS_OPACITY,
+            ),
+            blurRadius = preferences.getInt(
+                KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_BACKDROP_BLUR_RADIUS,
+                DEFAULT_SOFT_GLASS_BACKDROP_BLUR_RADIUS,
+            ),
+            color = preferences.getInt(
+                KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_COLOR,
+                DEFAULT_SOFT_GLASS_COLOR,
+            ),
+            showHighlight = false,
+        )
+        applySystemGlassMaterial(
+            view = button,
+            classLoader = classLoader,
+            blurRadius = preferences.getInt(
+                KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_BLUR_RADIUS,
+                DEFAULT_SOFT_GLASS_BLUR_RADIUS,
+            ),
+            luminance = preferences.getFloat(
+                KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_LUMINANCE,
+                DEFAULT_SOFT_GLASS_LUMINANCE,
+            ),
+        )
+    }.onFailure { error -> log(Log.DEBUG, TAG, "Top button soft-glass material unavailable", error) }
+
+    private fun showCachedGlobalActions() {
+        val (component, impl, queue, plugin, manager) = synchronized(globalActionsLock) {
+            listOf(globalActionsComponent, globalActionsImpl, commandQueue, globalActionsPlugin, globalActionsManager)
+        }
+        val attempts = listOf(
+            Triple("GlobalActionsComponent.handleShowGlobalActionsMenu", component, null),
+            Triple("GlobalActionsPlugin.showGlobalActions", plugin, manager),
+            Triple("GlobalActionsImpl.showGlobalActions", impl, manager),
+            Triple("CommandQueue.showGlobalActionsMenu", queue, null),
+        )
+        for ((label, target, arg) in attempts) {
+            if (target == null) {
+                log(Log.DEBUG, TAG, "Power button action unavailable: $label target=null")
+                continue
+            }
+            val success = runCatching {
+                val methodName = label.substringAfterLast('.')
+                val method = target.javaClass.methods.firstOrNull { candidate ->
+                    candidate.name == methodName &&
+                        candidate.parameterCount == (if (arg == null) 0 else 1) &&
+                        (arg == null || candidate.parameterTypes[0].isInstance(arg))
+                } ?: generateSequence<Class<*>>(target.javaClass) { it.superclass }
+                    .flatMap { it.declaredMethods.asSequence() }
+                    .firstOrNull { candidate ->
+                        candidate.name == methodName &&
+                            candidate.parameterCount == (if (arg == null) 0 else 1) &&
+                            (arg == null || candidate.parameterTypes[0].isInstance(arg))
+                    }?.apply { isAccessible = true }
+                    ?: error("method not found")
+                if (arg == null) method.invoke(target) else method.invoke(target, arg)
+                true
+            }.getOrElse { error ->
+                log(Log.DEBUG, TAG, "Power button action failed: $label", error)
+                false
+            }
+            if (success) {
+                log(Log.INFO, TAG, "Shown system global actions from control-center power button via $label")
+                return
+            }
+        }
+        log(Log.WARN, TAG, "Could not show system global actions: no usable target")
+    }
+
+    private fun installGlobalActionsHook(classLoader: ClassLoader, alreadyLoadedClass: Class<*>? = null) {
+        val candidates = listOf(
+            GLOBAL_ACTIONS_PLUGIN_CLASS,
+            GLOBAL_ACTIONS_COMPONENT_CLASS,
+            GLOBAL_ACTIONS_IMPL_CLASS,
+            COMMAND_QUEUE_CLASS,
+        )
+        candidates.forEach { className ->
+            if (globalActionsHookedClasses.contains(className)) return@forEach
+            runCatching {
+                val targetClass = alreadyLoadedClass?.takeIf { it.name == className }
+                    ?: classLoader.loadClass(className)
+                var hooked = false
+                targetClass.methods.filter { method ->
+                    when (className) {
+                        GLOBAL_ACTIONS_PLUGIN_CLASS,
+                        GLOBAL_ACTIONS_IMPL_CLASS -> method.name == "showGlobalActions" && method.parameterCount == 1
+                        GLOBAL_ACTIONS_COMPONENT_CLASS -> method.name in setOf("handleShowGlobalActionsMenu", "handleShowOrHideGlobalActionsMenu", "start")
+                        COMMAND_QUEUE_CLASS -> method.name == "showGlobalActionsMenu" && method.parameterCount == 0
+                        else -> false
+                    }
+                }.forEachIndexed { index, method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("control-center:global-actions-${className.hashCode()}-$index")
+                        .intercept { chain ->
+                            synchronized(globalActionsLock) {
+                                when (className) {
+                                    GLOBAL_ACTIONS_PLUGIN_CLASS -> {
+                                        globalActionsPlugin = chain.thisObject
+                                        if (chain.getArg(0) != null) globalActionsManager = chain.getArg(0)
+                                    }
+                                    GLOBAL_ACTIONS_IMPL_CLASS -> {
+                                        globalActionsImpl = chain.thisObject
+                                        if (chain.getArg(0) != null) globalActionsManager = chain.getArg(0)
+                                    }
+                                    GLOBAL_ACTIONS_COMPONENT_CLASS -> {
+                                        globalActionsComponent = chain.thisObject
+                                        // GlobalActionsComponent implements GlobalActionsManager;
+                                        // plugins must receive this object, not themselves.
+                                        globalActionsManager = chain.thisObject
+                                        readInstanceField(chain.thisObject, "mPlugin")?.let { globalActionsPlugin = it }
+                                        readInstanceField(chain.thisObject, "mCommandQueue")?.let { commandQueue = it }
+                                        readInstanceField(chain.thisObject, "mExtension")?.let { extension ->
+                                            readInstanceField(extension, "mItem")?.let { item -> globalActionsPlugin = item }
+                                        }
+                                        readInstanceField(chain.thisObject, "mGlobalActions")?.let { globalActionsImpl = it }
+                                    }
+                                    COMMAND_QUEUE_CLASS -> commandQueue = chain.thisObject
+                                }
+                            }
+                            val result = chain.proceed()
+                            if (className == GLOBAL_ACTIONS_COMPONENT_CLASS) {
+                                synchronized(globalActionsLock) {
+                                    globalActionsComponent = chain.thisObject
+                                    globalActionsManager = chain.thisObject
+                                    readInstanceField(chain.thisObject, "mPlugin")?.let { globalActionsPlugin = it }
+                                    readInstanceField(chain.thisObject, "mCommandQueue")?.let { commandQueue = it }
+                                    readInstanceField(chain.thisObject, "mExtension")?.let { extension ->
+                                        readInstanceField(extension, "mItem")?.let { item -> globalActionsPlugin = item }
+                                    }
+                                }
+                            }
+                            result
+                        }
+                    hooked = true
+                }
+                if (hooked) {
+                    globalActionsHookedClasses.add(className)
+                    globalActionsHookInstalled = true
+                    log(Log.INFO, TAG, "Installed global-actions hook for $className")
+                }
+            }.onFailure { error -> log(Log.DEBUG, TAG, "GlobalActions hook unavailable for $className", error) }
+        }
     }
 
     private fun installMusicControlWhitelistHook(
@@ -719,6 +1987,17 @@ class HyperSystemUiModule : XposedModule() {
                 .setId("status-bar:visibility")
                 .intercept { chain ->
                     val view = chain.thisObject as? View
+                    val requestedVisibility = chain.getArg(0) as? Int
+                    if (preferences.getBoolean(KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON, false) &&
+                        isControlCenterEditButtonView(view) &&
+                        requestedVisibility != View.GONE
+                    ) {
+                        logControlCenterEditButtonHidden(view, "visibility")
+                        return@intercept chain.proceedWith(
+                            chain.thisObject,
+                            arrayOf(View.GONE),
+                        )
+                    }
                     val resourceName = runCatching {
                         view?.resources?.getResourceEntryName(view.id)
                     }.getOrNull()
@@ -732,7 +2011,8 @@ class HyperSystemUiModule : XposedModule() {
                     val hideNetworkActivity = preferences.getBoolean(KEY_HIDE_STATUS_BAR_NETWORK_ACTIVITY, false)
                     val isIndependentMobileType = isIndependentMobileTypeView(view)
                     val hideSecondaryMobileRoot = isStackedSecondaryMobileRoot(view)
-                    val hideOriginalDualSignal = resourceName == "mobile_signal" &&
+                    val hideOriginalDualSignal =
+                        (resourceName == "mobile_signal" || resourceName == "mobile_signal_container") &&
                         shouldHideSystemMobileSignal(view, preferences.getInt(KEY_MOBILE_SIGNAL_HIDE_MODE, 0))
                     val forcedHidden =
                         hideSecondaryMobileRoot || hideOriginalDualSignal ||
@@ -751,6 +2031,26 @@ class HyperSystemUiModule : XposedModule() {
                     }
                 }
 
+            // Some SystemUI builds leave the customize button visible without calling
+            // setVisibility after inflation. Apply the setting when the view enters a
+            // window as a second, lifecycle-level guard.
+            hook(View::class.java.getDeclaredMethod("onAttachedToWindow"))
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("control-center:hide-edit-button-attach")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    val view = chain.thisObject as? View
+                    if (preferences.getBoolean(KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON, false) &&
+                        view != null &&
+                        isControlCenterEditButtonView(view) &&
+                        view.visibility != View.GONE
+                    ) {
+                        logControlCenterEditButtonHidden(view, "attach")
+                        view.visibility = View.GONE
+                    }
+                    result
+                }
+
             installBatteryThemeAndTextHooks(classLoader, preferences)
             installBatteryInternalTextHooks(classLoader, preferences)
             installBatteryDrawableHistoryHook(preferences)
@@ -759,6 +2059,20 @@ class HyperSystemUiModule : XposedModule() {
         }.onFailure { error ->
             log(Log.WARN, TAG, "Could not install status-bar visibility hooks", error)
         }
+    }
+
+    private fun isControlCenterEditButtonView(view: View?): Boolean {
+        if (view == null || view.id == View.NO_ID) return false
+        return runCatching {
+            view.resources.getResourceEntryName(view.id) == "qs_customize_button"
+        }.getOrDefault(false)
+    }
+
+    private fun logControlCenterEditButtonHidden(view: View?, source: String) {
+        val resourceName = runCatching {
+            view?.resources?.getResourceEntryName(view.id)
+        }.getOrNull() ?: "unknown"
+        log(Log.INFO, TAG, "Hid control-center edit button view ($source, id=$resourceName)")
     }
 
     private fun isBatteryPercentageView(view: TextView?, resourceName: String?): Boolean {
@@ -1475,40 +2789,125 @@ class HyperSystemUiModule : XposedModule() {
         }.getOrDefault(false)
     }
 
-    private fun installDynamicIslandClassDiscovery(preferences: SharedPreferences) {
+    private fun installDynamicIslandClassDiscovery(
+        preferences: SharedPreferences,
+        systemUiClassLoader: ClassLoader,
+    ) {
         runCatching {
-            hook(ClassLoader::class.java.getMethod("loadClass", String::class.java))
+            val loadClassMethod = ClassLoader::class.java.getMethod("loadClass", String::class.java)
+            // ClassLoader.loadClass(String, boolean) is protected on Android.  Looking it up
+            // with getMethod() throws before either discovery hook is installed, which leaves
+            // lazily loaded SystemUI plugin classes invisible to the module.
+            val loadClassWithResolveMethod = ClassLoader::class.java.getDeclaredMethod(
+                "loadClass",
+                String::class.java,
+                Boolean::class.javaPrimitiveType,
+            ).apply { isAccessible = true }
+            fun handleLoadedClass(loadedClass: Class<*>) {
+                if (controlCenterClassDiscoveryInProgress.get() == true) return
+                controlCenterClassDiscoveryInProgress.set(true)
+                try {
+                if ((loadedClass.name == CONTROL_CENTER_EDIT_BUTTON_CONTROLLER_CLASS ||
+                    loadedClass.name == CONTROL_CENTER_CONTENT_DISTRIBUTOR_CLASS ||
+                    loadedClass.name == CONTROL_CENTER_MAIN_PANEL_CONTROLLER_CLASS ||
+                    loadedClass.name == CONTROL_CENTER_EXPAND_CONTROLLER_CLASS ||
+                    loadedClass.name == CONTROL_CENTER_HEADER_CONTROLLER_CLASS ||
+                    loadedClass.name == CONTROL_CENTER_TOUCH_CONTROLLER_CLASS ||
+                    loadedClass.name == CONTROL_CENTER_EVENT_HANDLER_CLASS) &&
+                    (!controlCenterEditButtonHookInstalled || !controlCenterContentDistributorHookInstalled ||
+                        !controlCenterTopButtonsHookInstalled || !controlCenterExpandLifecycleHookInstalled ||
+                        !controlCenterHeaderLifecycleHookInstalled ||
+                        !controlCenterTouchHookInstalled)
+                ) {
+                    loadedClass.classLoader?.let { pluginClassLoader ->
+                        if (loadedClass.name == CONTROL_CENTER_EDIT_BUTTON_CONTROLLER_CLASS ||
+                            loadedClass.name == CONTROL_CENTER_CONTENT_DISTRIBUTOR_CLASS
+                        ) {
+                            installControlCenterEditButtonHook(pluginClassLoader, preferences, loadedClass)
+                        }
+                if (loadedClass.name == CONTROL_CENTER_MAIN_PANEL_CONTROLLER_CLASS) {
+                            installControlCenterMainPanelHook(pluginClassLoader, preferences, loadedClass)
+                        }
+                        if (loadedClass.name == CONTROL_CENTER_EXPAND_CONTROLLER_CLASS) {
+                            installControlCenterExpandLifecycleHook(pluginClassLoader, loadedClass)
+                        }
+                        if (loadedClass.name == CONTROL_CENTER_HEADER_CONTROLLER_CLASS) {
+                            installControlCenterHeaderLifecycleHook(pluginClassLoader, preferences, loadedClass)
+                        }
+                        if (loadedClass.name == CONTROL_CENTER_TOUCH_CONTROLLER_CLASS) {
+                            installControlCenterTouchHook(pluginClassLoader, loadedClass)
+                        }
+                        if (loadedClass.name == CONTROL_CENTER_EVENT_HANDLER_CLASS) {
+                            installControlCenterEventHandlerHook(pluginClassLoader)
+                        }
+                    }
+                }
+                if (loadedClass.name in setOf(
+                        GLOBAL_ACTIONS_PLUGIN_CLASS,
+                        GLOBAL_ACTIONS_COMPONENT_CLASS,
+                        GLOBAL_ACTIONS_IMPL_CLASS,
+                        COMMAND_QUEUE_CLASS,
+                    ) && !globalActionsHookedClasses.contains(loadedClass.name)
+                ) {
+                    loadedClass.classLoader?.let { pluginClassLoader ->
+                        installGlobalActionsHook(pluginClassLoader, loadedClass)
+                    }
+                }
+                if (loadedClass.name == DYNAMIC_ISLAND_BACKGROUND_CLASS && !dynamicIslandHooksInstalled) {
+                    dynamicIslandHooksInstalled = true
+                    loadedClass.classLoader?.let { pluginClassLoader ->
+                        runCatching {
+                            installDynamicIslandHooks(pluginClassLoader, preferences)
+                        }.onFailure { error ->
+                            dynamicIslandHooksInstalled = false
+                            log(Log.ERROR, TAG, "Could not initialize dynamic-island hooks from plugin loader", error)
+                        }
+                    }
+                }
+                if (loadedClass.name == PLUGIN_NOTIFICATION_SETTINGS_MANAGER_CLASS &&
+                    !focusIslandWhitelistPluginHooksInstalled &&
+                    focusIslandWhitelistPluginInstalling.get() != true
+                ) {
+                    loadedClass.classLoader?.let { pluginClassLoader ->
+                        focusIslandWhitelistPluginInstalling.set(true)
+                        try {
+                            focusIslandWhitelistPluginHooksInstalled =
+                                installFocusIslandWhitelistPluginHooks(pluginClassLoader, preferences)
+                        } finally {
+                            focusIslandWhitelistPluginInstalling.remove()
+                        }
+                    }
+                }
+                } finally {
+                    controlCenterClassDiscoveryInProgress.remove()
+                }
+            }
+            hook(loadClassMethod)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("dynamic-island-class-discovery")
                 .intercept { chain ->
                     val loadedClass = chain.proceed() as? Class<*> ?: return@intercept null
-                    if (loadedClass.name == DYNAMIC_ISLAND_BACKGROUND_CLASS && !dynamicIslandHooksInstalled) {
-                        dynamicIslandHooksInstalled = true
-                        loadedClass.classLoader?.let { pluginClassLoader ->
-                            runCatching {
-                                installDynamicIslandHooks(pluginClassLoader, preferences)
-                            }.onFailure { error ->
-                                dynamicIslandHooksInstalled = false
-                                log(Log.ERROR, TAG, "Could not initialize dynamic-island hooks from plugin loader", error)
-                            }
-                        }
-                    }
-                    if (loadedClass.name == PLUGIN_NOTIFICATION_SETTINGS_MANAGER_CLASS &&
-                        !focusIslandWhitelistPluginHooksInstalled &&
-                        focusIslandWhitelistPluginInstalling.get() != true
-                    ) {
-                        loadedClass.classLoader?.let { pluginClassLoader ->
-                            focusIslandWhitelistPluginInstalling.set(true)
-                            try {
-                                focusIslandWhitelistPluginHooksInstalled =
-                                    installFocusIslandWhitelistPluginHooks(pluginClassLoader, preferences)
-                            } finally {
-                                focusIslandWhitelistPluginInstalling.remove()
-                            }
-                        }
-                    }
+                    handleLoadedClass(loadedClass)
                     loadedClass
                 }
+            hook(loadClassWithResolveMethod)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("dynamic-island-class-discovery-resolve")
+                .intercept { chain ->
+                    val loadedClass = chain.proceed() as? Class<*> ?: return@intercept null
+                    handleLoadedClass(loadedClass)
+                    loadedClass
+                }
+            // The plugin may have loaded before SystemUI delivered its package callback.
+            runCatching { systemUiClassLoader.loadClass(CONTROL_CENTER_EDIT_BUTTON_CONTROLLER_CLASS) }
+                .getOrNull()
+                ?.let(::handleLoadedClass)
+            runCatching { systemUiClassLoader.loadClass(CONTROL_CENTER_MAIN_PANEL_CONTROLLER_CLASS) }
+                .getOrNull()
+                ?.let(::handleLoadedClass)
+            runCatching { systemUiClassLoader.loadClass(CONTROL_CENTER_EXPAND_CONTROLLER_CLASS) }
+                .getOrNull()
+                ?.let(::handleLoadedClass)
             log(Log.INFO, TAG, "Installed dynamic-island plugin class discovery hook")
         }.onFailure { error ->
             log(Log.ERROR, TAG, "Could not install dynamic-island plugin class discovery hook", error)
@@ -1986,6 +3385,22 @@ class HyperSystemUiModule : XposedModule() {
     ) {
         stackedMobilePreferences = preferences
         val enabled = { preferences.getBoolean(KEY_STACKED_MOBILE_SIGNAL_ENABLED, false) }
+        if (!stackedMobilePreferenceListenerRegistered) {
+            val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                when (key) {
+                    KEY_MOBILE_NETWORK_TYPE_MODE,
+                    KEY_MOBILE_NETWORK_TYPE_POSITION,
+                    KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC,
+                    KEY_MOBILE_NETWORK_TYPE_CUSTOM_TEXT,
+                    KEY_MOBILE_NETWORK_TYPE_SHRINK_5GA_A,
+                    KEY_MOBILE_NETWORK_TYPE_BOLD,
+                    -> refreshStackedMobilePresentations(enabled)
+                }
+            }
+            preferences.registerOnSharedPreferenceChangeListener(preferenceListener)
+            stackedMobilePreferenceChangeListener = preferenceListener
+            stackedMobilePreferenceListenerRegistered = true
+        }
         val presentationRequired = {
             enabled() ||
                 preferences.getInt(KEY_MOBILE_SIGNAL_HIDE_MODE, 0).coerceIn(0, 2) == 1 ||
@@ -2003,6 +3418,21 @@ class HyperSystemUiModule : XposedModule() {
             hook(notifyListeners)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("status-bar:stacked-mobile-controller")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    val controller = chain.thisObject ?: return@intercept result
+                    updateStackedMobileSubscription(controller)
+                    refreshStackedMobilePresentations(enabled)
+                    result
+                }
+            hookCount++
+
+            val updateConnectivity = controllerClass.methods.firstOrNull { method ->
+                method.name == "updateConnectivity" && method.parameterCount == 2
+            } ?: error("MobileSignalController.updateConnectivity was not found")
+            hook(updateConnectivity)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("status-bar:stacked-mobile-connectivity")
                 .intercept { chain ->
                     val result = chain.proceed()
                     val controller = chain.thisObject ?: return@intercept result
@@ -2247,8 +3677,11 @@ class HyperSystemUiModule : XposedModule() {
         val slotIndex = invokeInt(subscriptionInfo, "getSimSlotIndex")
             ?: SubscriptionManager.getSlotIndex(subscriptionId)
         if (slotIndex < 0) return
-        val currentState = readInheritedField(controller, "mCurrentState") ?: return
-        val dataSim = readInheritedField(currentState, "dataSim") as? Boolean ?: false
+        val currentState = readInheritedField(controller, "mCurrentState")
+        val reportedDataSim = currentState?.let { readInheritedField(it, "dataSim") as? Boolean }
+        val dataSim = resolveDataSim(subscriptionId, reportedDataSim)
+        val dataConnected = currentState?.let { readInheritedField(it, "dataConnected") as? Boolean }
+        val isDefault = currentState?.let { readInheritedField(it, "isDefault") as? Boolean }
         val signalLevel = (readInheritedField(currentState, "level") as? Number)
             ?.toInt()
             ?.coerceIn(0, 4)
@@ -2257,6 +3690,8 @@ class HyperSystemUiModule : XposedModule() {
             stackedMobileSubscriptions[subscriptionId] = StackedMobileSubscription(
                 slot = slotIndex,
                 dataSim = dataSim,
+                dataConnected = dataConnected,
+                isDefault = isDefault,
                 signalLevel = signalLevel,
             )
             stackedMobileActiveSubscriptionIds += subscriptionId
@@ -2277,7 +3712,9 @@ class HyperSystemUiModule : XposedModule() {
             }
             updated[subscriptionId] = StackedMobileSubscription(
                 slot = slotIndex,
-                dataSim = previous?.dataSim == true,
+                dataSim = resolveDataSim(subscriptionId, previous?.dataSim),
+                dataConnected = previous?.dataConnected,
+                isDefault = previous?.isDefault,
                 signalLevel = previous?.signalLevel ?: 0,
             )
         }
@@ -2312,6 +3749,34 @@ class HyperSystemUiModule : XposedModule() {
             findViewByEntryName(presentation.root, "mobile_group") as? ViewGroup
         presentation.mobileSignalContainer =
             findViewByEntryName(presentation.root, "mobile_signal_container") as? ViewGroup
+        presentation.systemMobileType =
+            findViewByEntryName(presentation.root, "mobile_type") as? ImageView
+    }
+
+    private fun resolveDataSim(subscriptionId: Int, fallback: Boolean?): Boolean? {
+        // MobileSignalController updates mCurrentState.dataSim from MobileStatus and from
+        // ACTION_DEFAULT_DATA_SUBSCRIPTION_CHANGED. Keep that state authoritative when it is
+        // available, then fall back to the live active-data subscription for early callbacks.
+        if (fallback != null) return fallback
+
+        val activeDataSubscriptionId = runCatching {
+            SubscriptionManager.getActiveDataSubscriptionId()
+        }.getOrNull()
+        if (activeDataSubscriptionId != null &&
+            SubscriptionManager.isValidSubscriptionId(activeDataSubscriptionId)
+        ) {
+            return subscriptionId == activeDataSubscriptionId
+        }
+
+        val defaultDataSubscriptionId = runCatching {
+            SubscriptionManager.getDefaultDataSubscriptionId()
+        }.getOrNull()
+        if (defaultDataSubscriptionId != null &&
+            SubscriptionManager.isValidSubscriptionId(defaultDataSubscriptionId)
+        ) {
+            return subscriptionId == defaultDataSubscriptionId
+        }
+        return null
     }
 
     private fun ensureIndependentMobileType(presentation: StackedMobilePresentation) {
@@ -2374,7 +3839,12 @@ class HyperSystemUiModule : XposedModule() {
         presentation.savedIndependentMargins?.let { original ->
             applyHorizontalMargins(baselineView, original, 0, 0)
         }
+        if (presentation.hasSavedIndependentTypeface) {
+            baselineView.typeface = presentation.savedIndependentTypeface
+        }
         presentation.savedIndependentView = null
+        presentation.savedIndependentTypeface = null
+        presentation.hasSavedIndependentTypeface = false
         presentation.savedIndependentTranslationY = null
         presentation.savedIndependentMargins = null
         val originalParent = presentation.savedIndependentParent
@@ -2389,6 +3859,16 @@ class HyperSystemUiModule : XposedModule() {
         presentation.savedIndependentParent = null
         presentation.savedIndependentIndex = -1
         presentation.savedIndependentLayoutParams = null
+    }
+
+    private fun applyIndependentMobileTypeTypeface(presentation: StackedMobilePresentation) {
+        val textView = presentation.independentType ?: return
+        if (!presentation.hasSavedIndependentTypeface) return
+        if (stackedMobilePreferences?.getBoolean(KEY_MOBILE_NETWORK_TYPE_BOLD, false) == true) {
+            textView.setTypeface(presentation.savedIndependentTypeface, Typeface.BOLD)
+        } else {
+            textView.typeface = presentation.savedIndependentTypeface
+        }
     }
 
     private fun applyIndependentMobileType(
@@ -2417,6 +3897,8 @@ class HyperSystemUiModule : XposedModule() {
             if (presentation.savedIndependentView !== textView) {
                 restoreIndependentMobileType(presentation)
                 presentation.savedIndependentView = textView
+                presentation.savedIndependentTypeface = textView.typeface
+                presentation.hasSavedIndependentTypeface = true
                 presentation.savedIndependentTranslationY = textView.translationY
                 presentation.savedIndependentMargins = captureHorizontalMargins(textView)
             }
@@ -2447,6 +3929,7 @@ class HyperSystemUiModule : XposedModule() {
             textView.scaleX = scale
             textView.scaleY = scale
             textView.translationY = baseTranslationY + verticalOffset * density
+            applyIndependentMobileTypeTypeface(presentation)
             applyHorizontalMargins(
                 textView,
                 presentation.savedIndependentMargins,
@@ -2499,6 +3982,7 @@ class HyperSystemUiModule : XposedModule() {
                 } finally {
                     stackedMobileApplying.remove()
                 }
+                applyIndependentMobileTypeTypeface(presentation)
                 val color = presentation.signal.imageTintList?.getColorForState(
                     presentation.signal.drawableState,
                     Color.WHITE,
@@ -2534,8 +4018,15 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
-    /** Matches HyperCeiler's mobile-data display mode. */
+    /** Matches the mobile data state used by SystemUI's MobileState. */
     private fun isUsingMobileData(presentation: StackedMobilePresentation): Boolean {
+        val cached = synchronized(stackedMobileSignalLock) {
+            stackedMobileSubscriptions[presentation.subscriptionId]
+        }
+        if (cached?.dataSim != null && cached.dataConnected != null && cached.isDefault != null) {
+            return cached.isDefault && cached.dataSim && cached.dataConnected
+        }
+
         val context = presentation.root.context
         val airplaneMode = runCatching {
             Settings.Global.getInt(
@@ -2553,6 +4044,60 @@ class HyperSystemUiModule : XposedModule() {
         val network = connectivity.activeNetwork ?: return false
         val capabilities = connectivity.getNetworkCapabilities(network) ?: return false
         return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+    }
+
+    private fun anchorSystemMobileTypeToDualSignal(presentation: StackedMobilePresentation) {
+        val mobileType = presentation.systemMobileType ?: return
+        val dualContainer = presentation.dualContainer ?: return
+        val params = mobileType.layoutParams ?: return
+        val marginParams = params as? ViewGroup.MarginLayoutParams
+        if (presentation.savedSystemMobileTypeEndToStart == null) {
+            presentation.savedSystemMobileTypeEndToStart = getLayoutParamInt(params, "endToStart")
+            presentation.savedSystemMobileTypeTopToTop = getLayoutParamInt(params, "topToTop")
+            presentation.savedSystemMobileTypeEndMargin = marginParams?.marginEnd
+            presentation.savedSystemMobileTypeTopMargin = marginParams?.topMargin
+        }
+        setLayoutParamInt(params, "endToStart", dualContainer.id)
+        setLayoutParamInt(params, "topToTop", dualContainer.id)
+        val gapPx = (mobileType.resources.displayMetrics.density * 0.5f).roundToInt()
+        val dualWidth = dualContainer.width.takeIf { it > 0 }
+            ?: resolveDualMobileSignalWidth(presentation.signal)
+        val rightShiftPx = (dualWidth * 0.4f).roundToInt()
+        marginParams?.let { margins ->
+            presentation.savedSystemMobileTypeEndMargin?.let {
+                // Reducing the end margin moves the type toward the signal by 40% of its width.
+                margins.setMarginEnd(it + gapPx - rightShiftPx)
+            }
+            presentation.savedSystemMobileTypeTopMargin?.let {
+                margins.topMargin = it - gapPx
+            }
+        }
+        mobileType.layoutParams = params
+    }
+
+    private fun restoreSystemMobileType(presentation: StackedMobilePresentation) {
+        val mobileType = presentation.systemMobileType
+        val params = mobileType?.layoutParams
+        if (mobileType != null && params != null) {
+            presentation.savedSystemMobileTypeEndToStart?.let {
+                setLayoutParamInt(params, "endToStart", it)
+            }
+            presentation.savedSystemMobileTypeTopToTop?.let {
+                setLayoutParamInt(params, "topToTop", it)
+            }
+            val marginParams = params as? ViewGroup.MarginLayoutParams
+            presentation.savedSystemMobileTypeEndMargin?.let {
+                marginParams?.setMarginEnd(it)
+            }
+            presentation.savedSystemMobileTypeTopMargin?.let {
+                marginParams?.topMargin = it
+            }
+            mobileType.layoutParams = params
+        }
+        presentation.savedSystemMobileTypeEndToStart = null
+        presentation.savedSystemMobileTypeTopToTop = null
+        presentation.savedSystemMobileTypeEndMargin = null
+        presentation.savedSystemMobileTypeTopMargin = null
     }
 
     private fun readCurrentFlowValue(flow: Any?): Any? = flow?.let {
@@ -2579,6 +4124,7 @@ class HyperSystemUiModule : XposedModule() {
         }
         registerMobileNetworkStateCallback(root.context, enabled)
         captureMobileSignalLayout(presentation)
+        enforceSystemMobileSignalVisibility(presentation)
         if (stackedMobilePreferences?.getInt(KEY_MOBILE_NETWORK_TYPE_MODE, 0) == 1) {
             ensureIndependentMobileType(presentation)
         }
@@ -2643,18 +4189,32 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
+    private fun enforceSystemMobileSignalVisibility(presentation: StackedMobilePresentation) {
+        val mode = stackedMobilePreferences
+            ?.getInt(KEY_MOBILE_SIGNAL_HIDE_MODE, 0)
+            ?.coerceIn(0, 2) ?: 0
+        if (mode == 0) return
+        val target = presentation.mobileSignalContainer ?: presentation.signal
+        if (shouldHideSystemMobileSignal(target, mode)) {
+            // The binder may have made the container visible before the presentation was
+            // registered. Apply the setting once so the first state update is not required.
+            target.visibility = View.GONE
+        }
+    }
+
     private fun shouldHideSystemMobileSignal(view: View?, configuredMode: Int): Boolean {
         val mode = configuredMode.coerceIn(0, 2)
-        if (mode == 0 || view !is ImageView) return false
+        if (mode == 0 || view == null) return false
         val presentation = synchronized(stackedMobileSignalLock) {
             stackedMobilePresentations.values.firstOrNull { presentation ->
                 presentation.signal === view || isDescendantOf(view, presentation.root)
             }
         } ?: return mode == 2
         if (mode == 2) return true
-        val dataSim = synchronized(stackedMobileSignalLock) {
+        val cachedDataSim = synchronized(stackedMobileSignalLock) {
             stackedMobileSubscriptions[presentation.subscriptionId]?.dataSim
         }
+        val dataSim = resolveDataSim(presentation.subscriptionId, cachedDataSim)
         // If SystemUI has not reported the state for this subscription yet, keep the
         // icon visible instead of hiding the wrong SIM during initialization.
         return dataSim == false
@@ -2741,6 +4301,12 @@ class HyperSystemUiModule : XposedModule() {
     private fun applyStackedMobilePresentation(presentation: StackedMobilePresentation, enabled: Boolean) {
         if (!presentation.root.isAttachedToWindow) return
         val useStacked = enabled && isStackedMobileDualSim()
+        val mobileNetworkTypeMode = stackedMobilePreferences
+            ?.getInt(KEY_MOBILE_NETWORK_TYPE_MODE, 0)
+            ?.coerceIn(0, 2) ?: 0
+        if (!useStacked || mobileNetworkTypeMode != 0) {
+            restoreSystemMobileType(presentation)
+        }
         applyIndependentMobileType(presentation, useStacked)
         if (!useStacked) {
             restoreSecondaryMobileRoot(presentation)
@@ -2817,6 +4383,11 @@ class HyperSystemUiModule : XposedModule() {
                 presentation.signal.colorFilter?.let(::setColorFilter)
             },
         )
+        if (mobileNetworkTypeMode == 0) {
+            // SystemUI anchors mobile_type to mobile_signal.  The latter is GONE while the
+            // merged glyph is active, so keep the stock network type anchored to its replacement.
+            anchorSystemMobileTypeToDualSignal(presentation)
+        }
         setDualMobileSignalVisibility(presentation, true)
     }
 
@@ -2851,7 +4422,7 @@ class HyperSystemUiModule : XposedModule() {
         val wasCreated = existing == null
         val dualContainer = existing ?: FrameLayout(signalContainer.context).apply {
             id = stackedMobileDualContainerId
-            layoutParams = ViewGroup.LayoutParams(
+            layoutParams = copyLayoutParams(presentation.signal) ?: ViewGroup.LayoutParams(
                 resolveDualMobileSignalWidth(presentation.signal),
                 ViewGroup.LayoutParams.MATCH_PARENT,
             )
@@ -2928,6 +4499,32 @@ class HyperSystemUiModule : XposedModule() {
         dualContainer.layoutParams = params
     }
 
+    private fun copyLayoutParams(view: View): ViewGroup.LayoutParams? {
+        val source = view.layoutParams ?: return null
+        return runCatching {
+            source.javaClass
+                .getConstructor(ViewGroup.LayoutParams::class.java)
+                .newInstance(source) as ViewGroup.LayoutParams
+        }.getOrNull() ?: runCatching {
+            ViewGroup.LayoutParams(source)
+        }.getOrNull()
+    }
+
+    private fun getLayoutParamInt(params: ViewGroup.LayoutParams, name: String): Int? {
+        var type: Class<*>? = params.javaClass
+        while (type != null) {
+            val field = runCatching { type.getDeclaredField(name) }.getOrNull()
+            if (field != null) {
+                return runCatching {
+                    field.isAccessible = true
+                    field.getInt(params)
+                }.getOrNull()
+            }
+            type = type.superclass
+        }
+        return null
+    }
+
     private fun setLayoutParamInt(params: ViewGroup.LayoutParams, name: String, value: Int) {
         var type: Class<*>? = params.javaClass
         while (type != null) {
@@ -2959,6 +4556,7 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun restoreDualMobileSignal(presentation: StackedMobilePresentation) {
+        restoreSystemMobileType(presentation)
         val dualContainer = presentation.dualContainer
         if (dualContainer != null) {
             dualContainer.visibility = View.GONE
@@ -3820,6 +5418,28 @@ class HyperSystemUiModule : XposedModule() {
      * injected content while the vendor scene is transitioning.
      */
     private fun installLockscreenWidgetSceneVisibilityHooks(classLoader: ClassLoader) {
+        runCatching {
+            val statusBarStateClass = classLoader.loadClass(
+                "com.android.systemui.statusbar.StatusBarStateControllerImpl",
+            )
+            val dozingMethods = statusBarStateClass.declaredMethods.filter {
+                it.name == "setIsDozing" && it.parameterCount == 1 &&
+                    it.parameterTypes[0] == Boolean::class.javaPrimitiveType
+            }
+            check(dozingMethods.isNotEmpty()) { "StatusBarStateControllerImpl.setIsDozing was not found" }
+            dozingMethods.forEachIndexed { index, method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("lockscreen-widget:aod-scene-$index")
+                    .intercept { chain ->
+                        LockscreenWidgetSceneState.setAodActive(chain.getArg(0) == true)
+                        chain.proceed()
+                    }
+            }
+            log(Log.INFO, TAG, "Installed lockscreen-widget AOD visibility hook(s)")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install lockscreen-widget AOD visibility hooks", error)
+        }
         runCatching {
             val editorClass = classLoader.loadClass(KEYGUARD_EDITOR_HELPER_CLASS)
             val stateMethods = editorClass.declaredMethods.filter {
@@ -4846,7 +6466,19 @@ class HyperSystemUiModule : XposedModule() {
         blurRadius: Int,
         luminance: Float,
     ) {
-        val glassCompat = Class.forName(MI_GLASS_COMPAT_CLASS, false, classLoader)
+        val loaders = LinkedHashSet<ClassLoader>().apply {
+            add(classLoader)
+            synchronized(controlCenterButtonsLock) {
+                controlCenterControllerClassLoader?.let(::add)
+                systemUiClassLoader?.let(::add)
+            }
+            add(view.context.classLoader)
+        }
+        val glassCompat = loaders.asSequence().mapNotNull { loader ->
+            runCatching { Class.forName(MI_GLASS_COMPAT_CLASS, false, loader) }.getOrNull()
+        }.firstOrNull() ?: throw ClassNotFoundException(
+            "$MI_GLASS_COMPAT_CLASS was not available from any SystemUI class loader",
+        )
         val smallBlur = blurRadius.coerceIn(0, MAX_SHORTCUT_GLASS_BLUR_RADIUS)
         val glassParameters = SHORTCUT_GLASS_PARAMETERS.copyOf().apply {
             this[GLASS_LUMINANCE_AMOUNT_INDEX] = luminance.coerceIn(0f, MAX_SHORTCUT_GLASS_LUMINANCE)
@@ -6197,6 +7829,133 @@ class HyperSystemUiModule : XposedModule() {
             }
     }
 
+    private fun installNotificationColorHooks(preferences: SharedPreferences) {
+        val methods = listOfNotNull(
+            runCatching { Resources::class.java.getMethod("getColor", Int::class.javaPrimitiveType) }.getOrNull(),
+            runCatching {
+                Resources::class.java.getMethod(
+                    "getColor",
+                    Int::class.javaPrimitiveType,
+                    Resources.Theme::class.java,
+                )
+            }.getOrNull(),
+            runCatching { Resources::class.java.getMethod("getColorStateList", Int::class.javaPrimitiveType) }.getOrNull(),
+            runCatching {
+                Resources::class.java.getMethod(
+                    "getColorStateList",
+                    Int::class.javaPrimitiveType,
+                    Resources.Theme::class.java,
+                )
+            }.getOrNull(),
+        )
+        methods.forEachIndexed { index, method ->
+            hook(method)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("heads-up-notification-color-$index")
+                .intercept { chain ->
+                    val resources = chain.thisObject as? Resources
+                    val resourceId = chain.getArg(0) as? Int
+                    if (resources != null && resourceId != null &&
+                        preferences.getBoolean(KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS, false) &&
+                        isHeadsUpNotificationColorResource(resources, resourceId)
+                    ) {
+                        if (method.name == "getColorStateList") {
+                            ColorStateList.valueOf(HEADS_UP_NOTIFICATION_TEXT_COLOR)
+                        } else {
+                            HEADS_UP_NOTIFICATION_TEXT_COLOR
+                        }
+                    } else {
+                        chain.proceed()
+                    }
+                }
+        }
+    }
+
+    private fun isHeadsUpNotificationColorResource(resources: Resources, resourceId: Int): Boolean =
+        runCatching {
+            resources.getResourcePackageName(resourceId) == SYSTEM_UI &&
+                resourceId != 0 &&
+                resourceId.let { resources.getResourceEntryName(it) } in HEADS_UP_NOTIFICATION_COLOR_NAMES
+        }.getOrDefault(false)
+
+    private fun installHeadsUpNotificationSoftGlassHooks(
+        preferences: SharedPreferences,
+        classLoader: ClassLoader,
+    ) {
+        var installed = 0
+        HEADS_UP_NOTIFICATION_GLASS_EFFECT_CLASSES.forEach { className ->
+            runCatching {
+                val effectClass = classLoader.loadClass(className)
+                val methods = effectClass.declaredMethods.filter {
+                    it.name == "apply" && it.parameterCount == 2 &&
+                        Context::class.java.isAssignableFrom(it.parameterTypes[1])
+                }
+                methods.forEachIndexed { index, method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("heads-up-soft-glass:${effectClass.simpleName}:$index")
+                        .intercept { chain ->
+                            val result = chain.proceed()
+                            if (preferences.getBoolean(KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS, false)) {
+                                val row = chain.getArg(0) as? View
+                                val context = chain.getArg(1) as? Context
+                                if (row != null && context != null) {
+                                    applyHeadsUpNotificationSoftGlass(row, context, classLoader)
+                                }
+                            }
+                            result
+                        }
+                    installed++
+                }
+            }.onFailure { error ->
+                log(Log.DEBUG, TAG, "Heads-up glass effect hook unavailable for $className", error)
+            }
+        }
+        log(Log.INFO, TAG, "Installed heads-up soft-glass hooks ($installed methods)")
+    }
+
+    private fun applyHeadsUpNotificationSoftGlass(
+        row: View,
+        context: Context,
+        classLoader: ClassLoader,
+    ) {
+        runCatching {
+            val injector = row.javaClass.methods.firstOrNull {
+                it.name == "getInjector" && it.parameterCount == 0
+            }?.invoke(row) ?: return@runCatching
+            val background = injector.javaClass.methods.firstOrNull {
+                it.name == "getBackgroundNormal" && it.parameterCount == 0
+            }?.invoke(injector) as? View ?: return@runCatching
+            val resourceId = context.resources.getIdentifier(
+                HEADS_UP_NOTIFICATION_GLASS_PARAMS_ARRAY,
+                "array",
+                SYSTEM_UI,
+            )
+            if (resourceId == 0) return@runCatching
+            val params = context.resources.getStringArray(resourceId)
+                .mapNotNull { it.toFloatOrNull() }
+                .toFloatArray()
+                .takeIf { it.isNotEmpty() } ?: return@runCatching
+            val loaders = LinkedHashSet<ClassLoader>().apply {
+                add(classLoader)
+                row.javaClass.classLoader?.let(::add)
+                add(context.classLoader)
+            }
+            val glassCompat = loaders.asSequence().mapNotNull { loader ->
+                runCatching { Class.forName(MI_GLASS_COMPAT_CLASS, false, loader) }.getOrNull()
+            }.firstOrNull() ?: return@runCatching
+            glassCompat.getMethod("setMiGlassCompat", View::class.java, FloatArray::class.java)
+                .invoke(null, background, params)
+            glassCompat.getMethod(
+                "setMiViewMaterialTypeCompat",
+                Int::class.javaPrimitiveType,
+                View::class.java,
+            ).invoke(null, 1, background)
+        }.onFailure { error ->
+            log(Log.DEBUG, TAG, "Could not apply heads-up soft glass", error)
+        }
+    }
+
     private fun installCornerRadiusHooks(preferences: SharedPreferences) {
         // MIUI loads its Control Center implementation through a plugin class loader.
         // Discover target classes at the point that loader resolves them.
@@ -7475,6 +9234,20 @@ class HyperSystemUiModule : XposedModule() {
         private const val MIUI_MEDIA_HEADER_VIEW_CLASS =
             "com.android.systemui.statusbar.notification.mediacontrol.MiuiMediaHeaderView"
         private const val MI_GLASS_COMPAT_CLASS = "com.miui.systemui.util.MiGlassCompat"
+        private const val HEADS_UP_NOTIFICATION_GLASS_PARAMS_ARRAY = "notification_glass_params_normal"
+        private const val HEADS_UP_NOTIFICATION_TEXT_COLOR = 0xE2FFFFFF.toInt()
+        private val HEADS_UP_NOTIFICATION_COLOR_NAMES = setOf(
+            "notification_action_text_color",
+            "notification_time_color",
+            "optimized_heads_up_notification_text",
+            "notification_primary_text_color_light",
+            "notification_secondary_text_color_light",
+            "optimized_heads_up_notification_action_text",
+        )
+        private val HEADS_UP_NOTIFICATION_GLASS_EFFECT_CLASSES = listOf(
+            "com.android.systemui.statusbar.notification.style.vieweffect.HeadsUpNotificationGlassEffect",
+            "com.android.systemui.statusbar.notification.style.vieweffect.HeadsUpNotificationGlassDarkEffect",
+        )
         private const val CHARGING_INDICATION_TYPE = 3
         private const val IMAGE_THRESHOLD_FIELD = "IMAGE_THRESHOLD"
         private const val THRESHOLD_RATE_FIELD = "rate"
@@ -7489,6 +9262,64 @@ class HyperSystemUiModule : XposedModule() {
         private const val LOCKSCREEN_HIDDEN_FINGERPRINT_ICON_RESOURCE = 0x7f080000
         private const val TOP_BUTTONS_CLASS =
             "miui.systemui.controlcenter.qs.tileview.QSCardItemView"
+        private const val CONTROL_CENTER_EDIT_BUTTON_CONTROLLER_CLASS =
+            "miui.systemui.controlcenter.panel.main.qs.EditButtonController"
+        private const val CONTROL_CENTER_CONTENT_DISTRIBUTOR_CLASS =
+            "miui.systemui.controlcenter.panel.main.MainPanelContentDistributor"
+        private const val CONTROL_CENTER_MAIN_PANEL_CONTROLLER_CLASS =
+            "miui.systemui.controlcenter.panel.main.MainPanelController"
+        private const val CONTROL_CENTER_EXPAND_CONTROLLER_CLASS =
+            "miui.systemui.controlcenter.windowview.ControlCenterExpandController"
+        private const val CONTROL_CENTER_EVENT_HANDLER_CLASS =
+            "com.miui.systemui.controlcenter.container.ControlCenterEventHandlerImpl"
+        private const val GLOBAL_ACTIONS_PLUGIN_CLASS = "miui.systemui.globalactions.GlobalActionsPlugin"
+        private const val GLOBAL_ACTIONS_COMPONENT_CLASS =
+            "com.android.systemui.globalactions.GlobalActionsComponent"
+        private const val GLOBAL_ACTIONS_IMPL_CLASS =
+            "com.android.systemui.globalactions.GlobalActionsImpl"
+        private const val COMMAND_QUEUE_CLASS = "com.android.systemui.statusbar.CommandQueue"
+        private const val ADD_CONTROL_CENTER_TOP_BUTTONS_KEY = "add_control_center_top_buttons"
+        private const val KEY_CONTROL_CENTER_TOP_BUTTONS_ICON_SCALE =
+            "control_center_top_buttons_icon_scale"
+        private const val KEY_CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_MODE =
+            "control_center_top_buttons_background_mode"
+        private const val KEY_CONTROL_CENTER_TOP_BUTTONS_PURE_COLOR =
+            "control_center_top_buttons_pure_color"
+        private const val KEY_CONTROL_CENTER_TOP_BUTTONS_PURE_BACKGROUND_RADIUS =
+            "control_center_top_buttons_pure_background_radius"
+        private const val KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_COLOR =
+            "control_center_top_buttons_advanced_material_color"
+        private const val KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_BACKGROUND_RADIUS =
+            "control_center_top_buttons_advanced_material_background_radius"
+        private const val KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_OPACITY =
+            "control_center_top_buttons_advanced_material_opacity"
+        private const val KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_BLUR_RADIUS =
+            "control_center_top_buttons_advanced_material_blur_radius"
+        private const val KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_HIGHLIGHT =
+            "control_center_top_buttons_advanced_material_highlight"
+        private const val KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_COLOR =
+            "control_center_top_buttons_soft_glass_color"
+        private const val KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_BACKGROUND_RADIUS =
+            "control_center_top_buttons_soft_glass_background_radius"
+        private const val KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_OPACITY =
+            "control_center_top_buttons_soft_glass_opacity"
+        private const val KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_BACKDROP_BLUR_RADIUS =
+            "control_center_top_buttons_soft_glass_backdrop_blur_radius"
+        private const val KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_BLUR_RADIUS =
+            "control_center_top_buttons_soft_glass_blur_radius"
+        private const val KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_LUMINANCE =
+            "control_center_top_buttons_soft_glass_luminance"
+        private const val CONTROL_CENTER_PLUS_TAG = "hyperchanger.control_center.plus"
+        private const val CONTROL_CENTER_POWER_TAG = "hyperchanger.control_center.power"
+        private const val CONTROL_CENTER_BUTTON_ACTION_DEBOUNCE_MS = 400L
+        private const val CONTROL_CENTER_TOP_BUTTONS_ICON_SCALE_MIN = 0.5f
+        private const val CONTROL_CENTER_TOP_BUTTONS_ICON_SCALE_MAX = 2f
+        private const val CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_RADIUS_DEFAULT_DP = 22f
+        private const val CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_RADIUS_MAX_DP = 22f
+        private const val CONTROL_CENTER_TOUCH_CONTROLLER_CLASS =
+            "miui.systemui.controlcenter.panel.main.MainPanelTouchController"
+        private const val CONTROL_CENTER_HEADER_CONTROLLER_CLASS =
+            "miui.systemui.controlcenter.panel.main.header.MainPanelHeaderController"
         private const val NOTIFICATION_BACKGROUND_VIEW_CLASS =
             "com.android.systemui.statusbar.notification.row.NotificationBackgroundView"
         private const val NOTIFICATION_ROW_GLASS_EFFECT_CLASS =
@@ -7757,11 +9588,13 @@ class HyperSystemUiModule : XposedModule() {
         private const val KEY_HIDE_STATUS_BAR_WIFI_STANDARD = "hide_status_bar_wifi_standard"
         private const val KEY_HIDE_STATUS_BAR_CLOCK_TEXT = "hide_status_bar_clock_text"
         private const val KEY_HIDE_STATUS_BAR_NETWORK_ACTIVITY = "hide_status_bar_network_activity"
+        private const val KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON = "hide_control_center_edit_button"
         private const val KEY_MOBILE_NETWORK_TYPE_MODE = "mobile_network_type_mode"
         private const val KEY_MOBILE_NETWORK_TYPE_POSITION = "mobile_network_type_position"
-        private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_display_logic"
+private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_display_logic"
         private const val KEY_MOBILE_NETWORK_TYPE_CUSTOM_TEXT = "mobile_network_type_custom_text"
         private const val KEY_MOBILE_NETWORK_TYPE_SHRINK_5GA_A = "mobile_network_type_shrink_5ga_a"
+        private const val KEY_MOBILE_NETWORK_TYPE_BOLD = "mobile_network_type_bold"
         private const val INDEPENDENT_MOBILE_TYPE_TAG = "hyper_system_ui_hook.independent_mobile_type"
         private const val BATTERY_METER_VIEW_CLASS =
             "com.android.systemui.statusbar.views.MiuiBatteryMeterView"
@@ -7875,6 +9708,10 @@ class HyperSystemUiModule : XposedModule() {
             WeakHashMap<Resources, MutableMap<String, FloatArray>>()
         private val controlCenterMaterialHits = Collections.synchronizedSet(mutableSetOf<String>())
         private val focusMaterialEnforcementHits = Collections.synchronizedSet(mutableSetOf<String>())
+        private val controlCenterRootDispatchHookedClasses =
+            Collections.synchronizedSet(mutableSetOf<String>())
+        private val globalActionsHookedClasses =
+            Collections.synchronizedSet(mutableSetOf<String>())
         private val expandedIslandMaterialSettings =
             Collections.synchronizedMap(WeakHashMap<View, Int>())
         // ClassLoader discovery callbacks can arrive concurrently while SystemUI plugins are
@@ -7896,6 +9733,44 @@ class HyperSystemUiModule : XposedModule() {
         private val restoringBatteryDrawable = ThreadLocal<Boolean>()
         private val stackedMobileSignalLock = Any()
         private var stackedMobilePreferences: SharedPreferences? = null
+        private var stackedMobilePreferenceChangeListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
+        private var stackedMobilePreferenceListenerRegistered = false
+        private var controlCenterEditButtonHookInstalled = false
+        private var controlCenterContentDistributorHookInstalled = false
+        private var controlCenterTopButtonsHookInstalled = false
+        private var controlCenterExpandLifecycleHookInstalled = false
+        private var globalActionsHookInstalled = false
+        private var controlCenterTouchHookInstalled = false
+        private var controlCenterTouchDispatchHookInstalled = false
+        private var controlCenterEventHandlerHookInstalled = false
+        private var controlCenterRootDispatchHookInstalled = false
+        private var controlCenterRootClickHookInstalled = false
+        private var controlCenterHeaderLifecycleHookInstalled = false
+        private var controlCenterMainPanelHookInstalled = false
+        private val controlCenterClassDiscoveryInProgress = ThreadLocal.withInitial<Boolean> { false }
+        private var controlCenterPreferenceListenerInstalled = false
+        private var controlCenterHookRetryScheduled = false
+        private val globalActionsLock = Any()
+        private var globalActionsPlugin: Any? = null
+        private var globalActionsManager: Any? = null
+        private var globalActionsComponent: Any? = null
+        private var globalActionsImpl: Any? = null
+        private var commandQueue: Any? = null
+        private val controlCenterButtonsLock = Any()
+        private var controlCenterRoot: ViewGroup? = null
+        private var controlCenterEditTarget: View? = null
+        private var systemUiClassLoader: ClassLoader? = null
+        private var controlCenterControllerClassLoader: ClassLoader? = null
+        private var controlCenterPlusButton: View? = null
+        private var controlCenterPowerButton: View? = null
+        private var controlCenterActiveTouchButton: View? = null
+        private var controlCenterLastActionButton: View? = null
+        private var controlCenterLastActionUptime = 0L
+        private var controlCenterExpandController: Any? = null
+        private var controlCenterEditController: Any? = null
+        private var controlCenterButtonsExpansionProgress = 0f
+        private var controlCenterButtonsHiddenByCollapse = true
+        private var controlCenterButtonsCollapsing = false
         private var stackedMobileNetworkCallbackRegistered = false
         private var stackedMobileNetworkController: Any? = null
         private val stackedMobileSubscriptions = LinkedHashMap<Int, StackedMobileSubscription>()

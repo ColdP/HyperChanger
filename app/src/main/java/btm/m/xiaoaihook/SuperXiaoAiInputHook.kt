@@ -13,6 +13,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Outline
+import android.graphics.Path
+import android.graphics.RectF
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
@@ -137,7 +139,18 @@ object HookConfig {
     }
 
     fun getCornerRadius(): Float {
-        return getFloat(KEY_CORNER_RADIUS, 30f).coerceIn(0f, 48f)
+        return getFloat(KEY_CORNER_RADIUS, 24f).coerceIn(0f, 48f)
+    }
+
+    /**
+     * The settings writer stores the complete settings object, so preference
+     * presence cannot distinguish the default from an explicit choice. Treat
+     * both the current 24dp default and the previous 30dp default as follow-
+     * native values; every other value is an intentional override.
+     */
+    fun hasCornerRadiusOverride(): Boolean {
+        val value = getFloat(KEY_CORNER_RADIUS, 24f)
+        return value !in 23.999f..24.001f && value !in 29.999f..30.001f
     }
 
     fun getOpacity(): Int {
@@ -313,16 +326,14 @@ object HookTools {
  */
 object SearchPageAppearance {
     private const val IME_SERVICE_CLASS = "com.mi.ime.MiInputMethodService"
-    private const val HYPER_MATERIAL_HELPER_CLASS = "bb.t"
+    // 0.2.701 moved the HyperMaterial implementation from bb.t to bb.u.
+    // bb.t is still the OutlineProvider in the newer build, so keep this
+    // lookup separate from the outline hook below.
+    private val HYPER_MATERIAL_HELPER_CLASSES = arrayOf("bb.u", "bb.t")
     private const val BLUR_CAPABILITY_CLASS = "xe.b"
     private const val QUICK_SEARCH_PACKAGE = "com.android.quicksearchbox"
     private const val HYPER_MATERIAL_HELPER_GETTER =
         "getHyperMaterialHelper\$app_iflytekFullRelease"
-    private const val MATERIAL_SUPPORT_FIELD = "f3472t"
-    private const val CURRENT_PACKAGE_FIELD = "f3473u"
-    private const val PACKAGE_VERSIONS_FIELD = "f3474v"
-    private const val FORCE_DARK_PACKAGES_FIELD = "f3475w"
-    private const val FORCE_LIGHT_PACKAGES_FIELD = "f3476x"
     private const val REFRESH_METHOD = "k"
     private const val SUPPORTED_MATERIAL_VERSION = 2
     private val installed = AtomicBoolean(false)
@@ -361,7 +372,7 @@ object SearchPageAppearance {
                 val originalPackage = editorInfo.packageName
                 editorInfo.packageName = QUICK_SEARCH_PACKAGE
                 try {
-                    // onStartInputView() calls bb.t.k() before returning. Prepare the
+                    // onStartInputView() calls the helper's k() before returning. Prepare the
                     // real helper before that call instead of relying on a late refresh.
                     prepareServiceMaterial(chain.thisObject)
                     chain.proceed()
@@ -426,7 +437,7 @@ object SearchPageAppearance {
     private fun installMaterialEligibilityHooks(module: XposedInterface, classLoader: ClassLoader): Int {
         var hookCount = 0
 
-        val helperClass = HookTools.findClass(HYPER_MATERIAL_HELPER_CLASS, classLoader)
+        val helperClass = findMaterialHelperClass(classLoader)
         val refresh = helperClass?.let { HookTools.findMethodExact(it, REFRESH_METHOD) }
         if (refresh != null) {
             module.hook(refresh).intercept { chain ->
@@ -437,7 +448,7 @@ object SearchPageAppearance {
             }
             hookCount++
         } else {
-            HookTools.logWarn(module, "[Search Appearance] bb.t.k() is unavailable")
+            HookTools.logWarn(module, "[Search Appearance] HyperMaterial helper k() is unavailable")
         }
 
         val blurClass = HookTools.findClass(BLUR_CAPABILITY_CLASS, classLoader)
@@ -469,40 +480,71 @@ object SearchPageAppearance {
     private fun prepareMaterialEligibility(helper: Any?) {
         if (helper == null) return
 
-        HookTools.setObjectField(helper, MATERIAL_SUPPORT_FIELD, true)
-        HookTools.setObjectField(helper, CURRENT_PACKAGE_FIELD, QUICK_SEARCH_PACKAGE)
+        setHelperFieldCompat(helper, true, "f3551u", "f3472t", "u", "t")
+        setHelperFieldCompat(helper, QUICK_SEARCH_PACKAGE, "f3552v", "f3473u", "v", "u")
 
-        val currentVersions = HookTools.getObjectField(helper, PACKAGE_VERSIONS_FIELD) as? Map<*, *>
+        val currentVersions = getHelperFieldCompat(helper, "f3553w", "f3474v", "w", "v") as? Map<*, *>
         val updatedVersions = LinkedHashMap<Any?, Any?>()
         currentVersions?.forEach { (packageName, version) ->
             updatedVersions[packageName] = version
         }
         updatedVersions[QUICK_SEARCH_PACKAGE] = SUPPORTED_MATERIAL_VERSION
-        HookTools.setObjectField(helper, PACKAGE_VERSIONS_FIELD, updatedVersions)
+        setHelperFieldCompat(helper, updatedVersions, "f3553w", "f3474v", "w", "v")
 
-        // bb.t.k() treats these as explicit theme overrides. Add the search
+        // HyperMaterial k() treats these as explicit theme overrides. Add the search
         // package to the set matching the current IME configuration so the
         // global appearance follows the device theme instead of falling back
         // to the stock whitelist decision.
-        val context = HookTools.getObjectField(helper, "f3458a") as? Context
-            ?: HookTools.getObjectField(helper, "a") as? Context
+        val context = getHelperFieldCompat(helper, "f3536a", "f3458a", "a") as? Context
         val systemDark = context?.resources?.configuration?.uiMode?.let {
             (it and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         } ?: false
         val dark = HookConfig.isKeyboardSurfaceDark(systemDark)
         val darkPackages = LinkedHashSet<Any?>()
-        (HookTools.getObjectField(helper, FORCE_DARK_PACKAGES_FIELD) as? Set<*>)?.forEach {
+        (getHelperFieldCompat(helper, "f3554x", "f3475w", "x", "w") as? Set<*>)?.forEach {
             darkPackages.add(it)
         }
         val lightPackages = LinkedHashSet<Any?>()
-        (HookTools.getObjectField(helper, FORCE_LIGHT_PACKAGES_FIELD) as? Set<*>)?.forEach {
+        (getHelperFieldCompat(helper, "f3555y", "f3476x", "y", "x") as? Set<*>)?.forEach {
             lightPackages.add(it)
         }
         darkPackages.remove(QUICK_SEARCH_PACKAGE)
         lightPackages.remove(QUICK_SEARCH_PACKAGE)
         if (dark) darkPackages.add(QUICK_SEARCH_PACKAGE) else lightPackages.add(QUICK_SEARCH_PACKAGE)
-        HookTools.setObjectField(helper, FORCE_DARK_PACKAGES_FIELD, darkPackages)
-        HookTools.setObjectField(helper, FORCE_LIGHT_PACKAGES_FIELD, lightPackages)
+        setHelperFieldCompat(helper, darkPackages, "f3554x", "f3475w", "x", "w")
+        setHelperFieldCompat(helper, lightPackages, "f3555y", "f3476x", "y", "x")
+    }
+
+    private fun findMaterialHelperClass(classLoader: ClassLoader): Class<*>? =
+        HYPER_MATERIAL_HELPER_CLASSES
+            .mapNotNull { HookTools.findClass(it, classLoader) }
+            .firstOrNull { clazz ->
+                // The old APK also contains bb.u, but that class is only a
+                // synthetic ThreadFactory. The helper always owns k().
+                clazz.declaredMethods.any { it.name == REFRESH_METHOD && it.parameterCount == 0 }
+            }
+
+    private fun getHelperFieldCompat(helper: Any, vararg names: String): Any? =
+        names.firstNotNullOfOrNull { HookTools.getObjectField(helper, it) }
+
+    private fun setHelperFieldCompat(helper: Any, value: Any?, vararg names: String): Boolean {
+        for (name in names) {
+            var current: Class<*>? = helper.javaClass
+            while (current != null && current != Any::class.java) {
+                try {
+                    current.getDeclaredField(name).apply {
+                        isAccessible = true
+                        set(helper, value)
+                    }
+                    return true
+                } catch (_: NoSuchFieldException) {
+                    current = current.superclass
+                } catch (_: Throwable) {
+                    break
+                }
+            }
+        }
+        return false
     }
 }
 
@@ -1928,13 +1970,15 @@ object KeyboardSurface {
     }
 
     private fun materialView(helper: Any): View? =
-        helperField(helper, "f3463h", "h") as? View
+        // 0.2.701 (bb.u) keeps the material surface in `i`; older builds use
+        // the R8 names below. `h` in bb.u is a boolean state flag.
+        helperField(helper, "f3542i", "f3463h", "i", "h") as? View
 
     private fun rimView(helper: Any): View? =
-        helperField(helper, "f3464i", "i") as? View
+        helperField(helper, "j", "f3464i", "i") as? View
 
     private fun helperService(helper: Any): android.inputmethodservice.InputMethodService? =
-        helperField(helper, "f3458a", "a") as? android.inputmethodservice.InputMethodService
+        helperField(helper, "f3536a", "f3458a", "a") as? android.inputmethodservice.InputMethodService
 
     fun install(module: XposedModule, classLoader: ClassLoader) {
         val imeServiceClass = HookTools.findClass("com.mi.ime.MiInputMethodService", classLoader)
@@ -2014,9 +2058,11 @@ object KeyboardSurface {
                 val f0Method = naMClass.declaredMethods.find { it.name == "F0" }
                 if (f0Method != null) {
                     module.hook(f0Method).intercept { chain ->
-                        if (HookConfig.isStyleEnabled()) {
+                        if (HookConfig.isStyleEnabled() && HookConfig.hasCornerRadiusOverride()) {
                             HookConfig.getCornerRadius().toFloat()
                         } else {
+                            // With no explicit value, keep Compose's own radius so
+                            // firmware resource changes continue to be respected.
                             chain.proceed()
                         }
                     }
@@ -2075,11 +2121,12 @@ object KeyboardSurface {
             HookTools.logError(module, "Error hooking Compose style tokens", t)
         }
 
-        // 6. Hook the verified HyperMaterial helper. In 0.2.520 this class is
-        // bb.t; bb.u is only a synthetic ThreadFactory and has no material API.
-        val materialHelperClass = HookTools.findClass("bb.t", classLoader)
+        // 6. Hook the HyperMaterial helper. In 0.2.701 it is bb.u; older
+        // 0.2.520 builds keep the implementation in bb.t.
+        val materialHelperClass = findHyperMaterialHelperClass(classLoader)
         if (materialHelperClass != null) {
-            // Hook bb.t.h(): Unblock HyperMaterial support check
+            val helperName = materialHelperClass.name
+            // Hook h(): Unblock HyperMaterial support check
             val hMethod = materialHelperClass.declaredMethods.find { it.name == "h" }
             if (hMethod != null) {
                 module.hook(hMethod).intercept { chain ->
@@ -2089,10 +2136,10 @@ object KeyboardSurface {
                         chain.proceed()
                     }
                 }
-                HookTools.log(module, "KeyboardSurface: Hooked bb.t.h (Global HyperMaterial unblock)")
+                HookTools.log(module, "KeyboardSurface: Hooked $helperName.h (Global HyperMaterial unblock)")
             }
 
-            // Hook bb.t.k(): Package whitelist update hook
+            // Hook k(): Package whitelist update hook
             val kMethod = materialHelperClass.declaredMethods.find { it.name == "k" }
             if (kMethod != null) {
                 module.hook(kMethod).intercept { chain ->
@@ -2106,7 +2153,7 @@ object KeyboardSurface {
                     val res = chain.proceed()
                     if (HookConfig.isStyleEnabled()) {
                         val helper = chain.thisObject
-                        val f3497d = helperField(helper, "f3460d", "d")
+                        val f3497d = helperField(helper, "f3539e", "f3460d", "e", "d")
                         if (f3497d != null) {
                             try {
                                 val setValueMethod = f3497d.javaClass.methods.find { it.name == "setValue" }
@@ -2116,10 +2163,10 @@ object KeyboardSurface {
                     }
                     res
                 }
-                HookTools.log(module, "KeyboardSurface: Hooked bb.t.k (Whitelist bypass)")
+                HookTools.log(module, "KeyboardSurface: Hooked $helperName.k (Whitelist bypass)")
             }
 
-            // Hook bb.t.e(boolean): Custom dynamic glass blur radius & parameters
+            // Hook e(boolean): Custom dynamic glass blur radius & parameters
             val eMethod = materialHelperClass.declaredMethods.find { it.name == "e" && it.parameterTypes.size == 1 }
             if (eMethod != null) {
                 module.hook(eMethod).intercept { chain ->
@@ -2129,6 +2176,7 @@ object KeyboardSurface {
                             setObjectFieldCompat(
                                 result,
                                 HookConfig.getBlurRadius().coerceIn(0f, 45f).roundToInt(),
+                                "f18726p",
                                 "f18517p",
                                 "p",
                             )
@@ -2136,10 +2184,10 @@ object KeyboardSurface {
                     }
                     result
                 }
-                HookTools.log(module, "KeyboardSurface: Hooked bb.t.e (Dynamic glass blur tuning)")
+                HookTools.log(module, "KeyboardSurface: Hooked $helperName.e (Dynamic glass blur tuning)")
             }
 
-            // bb.t.a() calls c(h) again when the keyboard interaction state
+            // a() calls c(h) again when the keyboard interaction state
             // changes. Let the native method finish its required view setup,
             // then restore our custom drawable after its delayed background
             // cleanup has also run.
@@ -2166,35 +2214,41 @@ object KeyboardSurface {
                     }
                     result
                 }
-                HookTools.log(module, "KeyboardSurface: Hooked bb.t.c (Restore custom background)")
+                HookTools.log(module, "KeyboardSurface: Hooked $helperName.c (Restore custom background)")
             }
 
-            // Hook bb.t.b(View): Synchronize RuntimeShader uRadii corner radius on f3501i
-            val bMethod = materialHelperClass.declaredMethods.find { it.name == "b" && it.parameterTypes.size == 1 && it.parameterTypes[0] == View::class.java }
+            // Hook b(View): the native method rewrites every shader uniform on
+            // each layout pass. Apply our controls after that write so they are
+            // effective on both the initial frame and subsequent relayouts.
+            val bMethod = materialHelperClass.declaredMethods.find {
+                it.name == "b" &&
+                    it.parameterTypes.size == 1 &&
+                    it.parameterTypes[0] == View::class.java &&
+                    it.returnType == Void.TYPE
+            }?.apply { isAccessible = true }
             if (bMethod != null) {
                 module.hook(bMethod).intercept { chain ->
                     val res = chain.proceed()
                     if (HookConfig.isStyleEnabled()) {
                         val helper = chain.thisObject
                         val view = chain.getArg(0) as? View
-                        val runtimeShader = helperField(helper, "s") as? android.graphics.RuntimeShader
-                        if (view != null && runtimeShader != null) {
-                            val radiusDp = HookConfig.getCornerRadius()
-                            val density = view.resources.displayMetrics.density
-                            val radiusPx = radiusDp * density
-                            runtimeShader.setFloatUniform("uRadii", radiusPx, 0.0f, 0.0f, radiusPx)
-                            applyRuntimeShaderTuning(runtimeShader, helper, density)
-                            try {
-                                view.setRenderEffect(android.graphics.RenderEffect.createRuntimeShaderEffect(runtimeShader, "uInputContent"))
-                            } catch (_: Throwable) {}
+                        if (view != null && applyRuntimeShaderControls(helper, view)) {
+                            // A few firmware builds perform one more RenderEffect
+                            // update from a posted layout callback. Re-apply once
+                            // after that callback without creating a polling loop.
+                            view.post {
+                                if (HookConfig.isStyleEnabled()) {
+                                    applyRuntimeShaderControls(helper, view)
+                                }
+                            }
                         }
                     }
                     res
                 }
-                HookTools.log(module, "KeyboardSurface: Hooked bb.t.b (RuntimeShader uRadii sync)")
+                HookTools.log(module, "KeyboardSurface: Hooked $helperName.b (RuntimeShader uRadii sync)")
             }
 
-            // Hook bb.t.g(boolean, FrameLayout, int): Update views on attach
+            // Hook g(boolean, FrameLayout, int): Update views on attach
             val gMethod = materialHelperClass.declaredMethods.find { it.name == "g" }
             if (gMethod != null) {
                 module.hook(gMethod).intercept { chain ->
@@ -2209,15 +2263,15 @@ object KeyboardSurface {
                     }
                     res
                 }
-                HookTools.log(module, "KeyboardSurface: Hooked bb.t.g")
+                HookTools.log(module, "KeyboardSurface: Hooked $helperName.g")
             }
 
-            // In non-floating mode bb.t.g creates the material view with height=0.
-            // bb.t.o later posts the real height after InputMethodService computes
+            // In non-floating mode g() creates the material view with height=0.
+            // o()/p() later posts the real height after InputMethodService computes
             // contentTopInsets. Applying material before that layout produces the
             // opaque white cold-start frame seen after force-stopping the IME.
             val oMethod = materialHelperClass.declaredMethods.find {
-                it.name == "o" &&
+                (it.name == "o" || it.name == "p") &&
                     it.parameterTypes.size == 2 &&
                     it.parameterTypes.all { type -> type == Int::class.javaPrimitiveType }
             }
@@ -2228,7 +2282,7 @@ object KeyboardSurface {
                         val helper = chain.thisObject
                         val service = helperService(helper)
                         if (service != null) {
-                            // bb.t.o posts the final material height before this
+                            // o()/p() posts the final material height before this
                             // callback. Queue the complete style pass behind it so
                             // contentTopInsets and target screen coordinates are
                             // recomputed together, including the toolbar area.
@@ -2242,7 +2296,7 @@ object KeyboardSurface {
                     }
                     res
                 }
-                HookTools.log(module, "KeyboardSurface: Hooked bb.t.o (post-layout material refresh)")
+                HookTools.log(module, "KeyboardSurface: Hooked $helperName.${oMethod.name} (post-layout material refresh)")
             }
         }
 
@@ -2272,17 +2326,13 @@ object KeyboardSurface {
                 val getOutlineMethod = HookTools.findMethodExact(bbTClass, "getOutline", View::class.java, Outline::class.java)
                 if (getOutlineMethod != null) {
                     module.hook(getOutlineMethod).intercept { chain ->
-                        if (HookConfig.isStyleEnabled()) {
+                        if (HookConfig.isStyleEnabled() && HookConfig.hasCornerRadiusOverride()) {
                             val view = chain.getArg(0) as? View
                             val outline = chain.getArg(1) as? Outline
                             if (view != null && outline != null && view.width > 0 && view.height > 0) {
                                 val radiusDp = HookConfig.getCornerRadius()
                                 val radiusPx = radiusDp * view.resources.displayMetrics.density
-                                if (radiusPx <= 0f) {
-                                    outline.setRect(0, 0, view.width, view.height)
-                                } else {
-                                    outline.setRoundRect(0, 0, view.width, view.height, radiusPx)
-                                }
+                                setKeyboardOutline(outline, view, radiusPx, isFloatingOutlineOwner(chain.thisObject))
                                 return@intercept null
                             }
                         }
@@ -2350,32 +2400,32 @@ object KeyboardSurface {
     }
 
     /**
-     * bb.t.k() removes both material views when the current editor package is
+     * HyperMaterial k() removes both material views when the current editor package is
      * absent from its downloaded whitelist. Add only the active package before
      * that check so the native method keeps the blur views alive.
      */
     private fun forceCurrentPackageIntoMaterialWhitelist(helper: Any) {
-        val packageName = helperField(helper, "f3473u", "u") as? String ?: return
+        val packageName = helperField(helper, "f3552v", "f3473u", "v", "u") as? String ?: return
 
         val versions = LinkedHashMap<Any?, Any?>()
-        (helperField(helper, "f3474v", "v") as? Map<*, *>)?.forEach { (key, value) ->
+        (helperField(helper, "f3553w", "f3474v", "w", "v") as? Map<*, *>)?.forEach { (key, value) ->
             versions[key] = value
         }
         versions[packageName] = 2
-        setHelperField(helper, versions, "f3474v", "v")
+        setHelperField(helper, versions, "f3553w", "f3474v", "w", "v")
 
         val darkPackages = LinkedHashSet<Any?>()
-        (helperField(helper, "f3475w", "w") as? Set<*>)?.forEach {
+        (helperField(helper, "f3554x", "f3475w", "x", "w") as? Set<*>)?.forEach {
             darkPackages.add(it)
         }
         val lightPackages = LinkedHashSet<Any?>()
-        (helperField(helper, "f3476x", "x") as? Set<*>)?.forEach {
+        (helperField(helper, "f3555y", "f3476x", "y", "x") as? Set<*>)?.forEach {
             lightPackages.add(it)
         }
         darkPackages.remove(packageName)
         lightPackages.remove(packageName)
 
-        val context = helperField(helper, "f3458a", "a") as? Context
+        val context = helperField(helper, "f3536a", "f3458a", "a") as? Context
         val systemDark = context?.resources?.configuration?.uiMode?.let {
             (it and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         } ?: false
@@ -2384,8 +2434,82 @@ object KeyboardSurface {
         } else {
             lightPackages.add(packageName)
         }
-        setHelperField(helper, darkPackages, "f3475w", "w")
-        setHelperField(helper, lightPackages, "f3476x", "x")
+        setHelperField(helper, darkPackages, "f3554x", "f3475w", "x", "w")
+        setHelperField(helper, lightPackages, "f3555y", "f3476x", "y", "x")
+    }
+
+    private fun isFloatingMaterial(helper: Any): Boolean {
+        val mode = helperField(helper, "f3544m", "f3465l", "m", "l") ?: return false
+        return runCatching {
+            val ordinal = mode.javaClass.methods.firstOrNull {
+                it.name == "ordinal" && it.parameterCount == 0
+            }?.invoke(mode) as? Number
+            ordinal?.toInt() == 2 || mode.toString().equals("FLOATING", ignoreCase = true)
+        }.getOrDefault(false)
+    }
+
+    /** bb.t is the newer ViewOutlineProvider and keeps its helper in f3528a. */
+    private fun isFloatingOutlineOwner(owner: Any?): Boolean {
+        val helper = owner?.let { helperField(it, "f3528a", "a") } ?: return false
+        return isFloatingMaterial(helper)
+    }
+
+    private fun nativeCornerRadiusPx(helper: Any, view: View): Float? {
+        val service = helperService(helper)
+        val context = service ?: view.context
+        val resourceName = if (isFloatingMaterial(helper)) {
+            "floating_corner_radius"
+        } else {
+            "keyboard_container_corner_radius"
+        }
+        val resources = context.resources
+        val packageName = context.packageName
+        var resourceId = runCatching {
+            resources.getIdentifier(resourceName, "dimen", packageName)
+        }.getOrDefault(0)
+        if (resourceId == 0) {
+            resourceId = runCatching {
+                val rClass = Class.forName("z9.b", false, context.classLoader)
+                rClass.getDeclaredField(resourceName).apply { isAccessible = true }.getInt(null)
+            }.getOrDefault(0)
+        }
+        return resourceId.takeIf { it != 0 }?.let {
+            runCatching { resources.getDimension(it) }.getOrNull()
+        }
+    }
+
+    private fun resolveCornerRadiusPx(helper: Any, view: View): Float {
+        val density = view.resources.displayMetrics.density
+        if (HookConfig.hasCornerRadiusOverride()) {
+            return HookConfig.getCornerRadius().coerceAtLeast(0f) * density
+        }
+        return nativeCornerRadiusPx(helper, view)
+            ?: (24f * density)
+    }
+
+    private fun setKeyboardOutline(
+        outline: Outline,
+        view: View,
+        radiusPx: Float,
+        floating: Boolean,
+    ) {
+        if (radiusPx <= 0f) {
+            outline.setRect(0, 0, view.width, view.height)
+            return
+        }
+        val radii = if (floating) {
+            floatArrayOf(radiusPx, radiusPx, radiusPx, radiusPx, radiusPx, radiusPx, radiusPx, radiusPx)
+        } else {
+            floatArrayOf(radiusPx, radiusPx, radiusPx, radiusPx, 0f, 0f, 0f, 0f)
+        }
+        val path = Path().apply {
+            addRoundRect(
+                RectF(0f, 0f, view.width.toFloat(), view.height.toFloat()),
+                radii,
+                Path.Direction.CW,
+            )
+        }
+        outline.setPath(path)
     }
 
     private fun helperField(helper: Any, vararg names: String): Any? =
@@ -2408,6 +2532,13 @@ object KeyboardSurface {
         }?.let { HookTools.setObjectField(helper, it, value) }
     }
 
+    private fun findHyperMaterialHelperClass(classLoader: ClassLoader): Class<*>? =
+        arrayOf("bb.u", "bb.t")
+            .mapNotNull { HookTools.findClass(it, classLoader) }
+            .firstOrNull { clazz ->
+                clazz.declaredMethods.any { it.name == "k" && it.parameterCount == 0 }
+            }
+
     /** Compose stores sRGB colors as an unsigned ARGB value in the high 32 bits. */
     private fun composeColor(argb: Int): Long =
         (argb.toLong() and 0xffffffffL) shl 32
@@ -2415,16 +2546,20 @@ object KeyboardSurface {
     // R8 retains some one-letter fields but gives collision-prone fields a stable
     // renamed form. Keep logical names here so color replacements stay readable.
     private val composeColorFieldAliases = mapOf(
-        "a" to arrayOf("f13191a", "a"),
-        "d" to arrayOf("f13199d", "d"),
-        "e" to arrayOf("f13202e", "e"),
-        "h" to arrayOf("f13210h", "h"),
-        "i" to arrayOf("f13213i", "i"),
-        "l" to arrayOf("f13220l", "l"),
-        "m" to arrayOf("f13222m", "m"),
-        "w" to arrayOf("f13241w", "w"),
-        "x" to arrayOf("f13243x", "x"),
-        "z" to arrayOf("f13247z", "z")
+        "a" to arrayOf("f13310a", "f13191a", "a"),
+        "d" to arrayOf("f13318d", "f13199d", "d"),
+        "e" to arrayOf("f13321e", "f13202e", "e"),
+        "h" to arrayOf("f13329h", "f13210h", "h"),
+        "i" to arrayOf("f13332i", "f13213i", "i"),
+        "l" to arrayOf("f13339l", "f13220l", "l"),
+        "m" to arrayOf("f13342m", "f13222m", "m"),
+        "u" to arrayOf("f13360u", "f13237u", "u"),
+        "v" to arrayOf("f13362v", "f13239v", "v"),
+        "w" to arrayOf("f13364w", "f13241w", "w"),
+        "x" to arrayOf("f13366x", "f13243x", "x"),
+        "y" to arrayOf("f13368y", "f13245y", "y"),
+        "z" to arrayOf("f13370z", "f13247z", "z"),
+        "o1" to arrayOf("f13350o1", "o1")
     )
 
     private fun findField(instance: Any, logicalName: String): Field? {
@@ -2484,7 +2619,10 @@ object KeyboardSurface {
         menuCardColor: String,
         letterKeycapColor: String
     ) {
-        val coreFields = arrayOf("a", "d", "e", "h", "i", "k", "l", "m", "w", "x", "z", "A", "B")
+        val coreFields = arrayOf(
+            "a", "d", "e", "h", "i", "k", "l", "m",
+            "u", "v", "w", "x", "y", "z", "A", "B"
+        )
         val appsPanelFields = arrayOf("B0", "C0", "D0", "E0", "F0", "G0", "H0", "I0", "J0", "K0", "L0")
         val fieldNames = coreFields + appsPanelFields
         synchronized(originalAppsPanelColors) {
@@ -2499,7 +2637,9 @@ object KeyboardSurface {
                 return
             }
 
-            val systemDark = readBooleanField(colors, "f13219k1", "n1") ?: false
+            // In 0.2.701 na.d.n1 is a Long color token; the actual theme
+            // switch moved to the adjacent o1 Boolean field.
+            val systemDark = readBooleanField(colors, "f13219k1", "o1", "n1") ?: false
             val surfaceDark = HookConfig.isKeyboardSurfaceDark(systemDark)
             val customText = textColor.takeIf { it.isNotBlank() }?.let {
                 try {
@@ -2538,26 +2678,33 @@ object KeyboardSurface {
                 )
             } ?: if (menuSurfaceDark) Color.argb(217, 255, 255, 255) else Color.argb(178, 0, 0, 0)
             val divider = if (surfaceDark) Color.argb(54, 255, 255, 255) else Color.argb(42, 0, 0, 0)
-            val card = if (surfaceDark) Color.argb(46, 255, 255, 255) else Color.argb(105, 255, 255, 255)
-            val tooltip = if (surfaceDark) Color.rgb(45, 48, 53) else Color.rgb(250, 250, 250)
-            val tooltipBorder = if (surfaceDark) Color.argb(80, 255, 255, 255) else Color.argb(42, 0, 0, 0)
-            val tooltipShadow = Color.argb(if (surfaceDark) 110 else 60, 0, 0, 0)
-            val accent = Color.rgb(52, 130, 255)
+            // These Compose surfaces are drawn above bb.u's HyperMaterial view.
+            // Keep them transparent/translucent so the configured glass remains
+            // visible while retaining a small tint for panel readability.
+            val opacityStrength = HookConfig.getOpacity().coerceIn(0, 100) / 100f
+            val toolbarSurface = Color.TRANSPARENT
+            val panelSurface = if (surfaceDark) {
+                Color.argb((74 * opacityStrength).roundToInt(), 255, 255, 255)
+            } else {
+                Color.argb((92 * opacityStrength).roundToInt(), 255, 255, 255)
+            }
 
             val replacements = mutableMapOf(
-                "B0" to Color.TRANSPARENT,
-                // aa.w8.H0 uses C0 for ordinary tool-card icons. It must follow
-                // the readable foreground, not the translucent card surface.
-                "C0" to menuPrimary,
-                "D0" to menuSecondary,
+                // The top toolbar background is na.d.u. A transparent token
+                // lets the HyperMaterial surface remain visible.
+                "u" to toolbarSurface,
+                "B" to toolbarSurface,
+                // Toolbar/toolbox foreground icons.
+                "y" to menuPrimary,
+                "x" to keyPrimary,
+                "z" to keyPrimary,
+                // Apps/toolbox panel surfaces and foreground colors. In the
+                // 0.2.701 panel D0/G0 are backgrounds, E0/F0/H0 are content.
+                "D0" to panelSurface,
+                "G0" to panelSurface,
                 "E0" to menuPrimary,
-                "F0" to Color.argb(48, 52, 130, 255),
-                "G0" to accent,
+                "F0" to menuSecondary,
                 "H0" to menuPrimary,
-                "I0" to tooltip,
-                "J0" to (customText ?: if (surfaceDark) Color.WHITE else Color.BLACK),
-                "K0" to tooltipBorder,
-                "L0" to tooltipShadow
             )
             if (customFunctionKeycap != null) {
                 replacements["e"] = customFunctionKeycap
@@ -2573,8 +2720,7 @@ object KeyboardSurface {
                     "w" to keyPrimary,
                     "x" to keyPrimary,
                     "z" to keyPrimary,
-                    "A" to divider,
-                    "B" to divider
+                    "A" to divider
                 )
             )
             replacements.forEach { (name, value) -> writeLongField(colors, name, composeColor(value)) }
@@ -3021,8 +3167,8 @@ object KeyboardSurface {
     }
 
     /**
-     * bb.t caches the light and dark material tokens in Kotlin lazy fields.
-     * Updating only the bb.t.e(boolean) factory cannot change a token that has
+     * HyperMaterial caches the light and dark material tokens in Kotlin lazy fields.
+     * Updating only the e(boolean) factory cannot change a token that has
      * already been created, so update both cached tokens before reapplying it.
      */
     private fun updateCachedGlassTokens(helper: Any, blurRadiusDp: Float, opacity: Int): Boolean {
@@ -3032,10 +3178,12 @@ object KeyboardSurface {
         val clampedBlur = blurRadiusDp.coerceIn(0f, 45f).roundToInt()
         val clampedOpacity = opacity.coerceIn(0, 100)
 
-        val lazyFields = if (helperField(helper, "f3469p") != null || helperField(helper, "f3470q") != null) {
-            arrayOf("f3469p", "f3470q")
-        } else {
-            arrayOf("p", "q")
+        val lazyFields = when {
+            helperField(helper, "f3548q") != null || helperField(helper, "f3549r") != null ->
+                arrayOf("f3548q", "f3549r")
+            helperField(helper, "f3469p") != null || helperField(helper, "f3470q") != null ->
+                arrayOf("f3469p", "f3470q")
+            else -> arrayOf("p", "q")
         }
         for ((index, lazyFieldName) in lazyFields.withIndex()) {
             try {
@@ -3047,6 +3195,7 @@ object KeyboardSurface {
                 updated = setObjectFieldCompat(
                     token,
                     clampedBlur,
+                    "f18726p",
                     "f18517p",
                     "p",
                 ) || updated
@@ -3066,13 +3215,13 @@ object KeyboardSurface {
     private fun updateGlassTokenColors(token: Any, opacity: Int): Boolean {
         var updated = false
         val fields = arrayOf(
-            Triple("f18502e", "e", "primary"),
-            Triple("f18509i", "i", "secondary"),
+            arrayOf("f18711e", "f18502e", "e", "primary"),
+            arrayOf("f18718i", "f18509i", "i", "secondary"),
         )
         synchronized(originalGlassTokenColors) {
             val originals = originalGlassTokenColors.getOrPut(token) { LinkedHashMap() }
-            for ((fieldName, legacyName, key) in fields) {
-                val current = helperField(token, fieldName, legacyName) as? IntArray ?: continue
+            for ((fieldName, oldFieldName, legacyName, key) in fields) {
+                val current = helperField(token, fieldName, oldFieldName, legacyName) as? IntArray ?: continue
                 if (current.isEmpty()) continue
                 val original = originals[key]?.takeIf { it.size == current.size }
                     ?: current.clone().also { originals[key] = it }
@@ -3081,14 +3230,62 @@ object KeyboardSurface {
                     Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color))
                 }.toIntArray()
                 if (!current.contentEquals(adjusted)) {
-                    updated = setObjectFieldCompat(token, adjusted, fieldName, legacyName) || updated
+                    updated = setObjectFieldCompat(token, adjusted, fieldName, oldFieldName, legacyName) || updated
                 }
             }
         }
         return updated
     }
 
-    /** Apply the user-facing edge and shadow controls to bb.t's real shader. */
+    /**
+     * Re-apply all user-facing controls to the shader after HyperMaterial has
+     * written its native uniforms. This is intentionally self-contained so it
+     * can be called from b(View), delayed layout callbacks, and our refresh pass.
+     */
+    private fun applyRuntimeShaderControls(helper: Any, view: View): Boolean {
+        if (!HookConfig.isStyleEnabled()) return false
+        // bb.u stores the compiled shader in t; s is only the lazy shader
+        // source string (Loc.j). Keep the old aliases for 0.2.520.
+        val runtimeShader = helperField(helper, "f3550t", "t", "s") as? android.graphics.RuntimeShader
+            ?: return false
+        val parent = view.parent as? View
+        val frameParams = view.layoutParams as? android.widget.FrameLayout.LayoutParams
+        val horizontalMargin = (frameParams?.leftMargin ?: 0) * 2
+        val verticalMargin = (frameParams?.topMargin ?: 0) * 2
+        val width = ((parent?.width ?: view.width) - horizontalMargin).coerceAtLeast(0)
+        val height = ((frameParams?.height?.takeIf { it > 0 }
+            ?: ((parent?.height ?: view.height) - verticalMargin))).coerceAtLeast(0)
+        if (width <= 0 || height <= 0) return false
+
+        val density = view.resources.displayMetrics.density
+        val radiusPx = resolveCornerRadiusPx(helper, view)
+        val floating = isFloatingMaterial(helper)
+        return runCatching {
+            runtimeShader.setFloatUniform("uResolution", width.toFloat(), height.toFloat())
+            if (floating) {
+                runtimeShader.setFloatUniform(
+                    "uRadii",
+                    radiusPx,
+                    radiusPx,
+                    radiusPx,
+                    radiusPx,
+                )
+            } else {
+                runtimeShader.setFloatUniform("uRadii", radiusPx, 0.0f, 0.0f, radiusPx)
+            }
+            applyRuntimeShaderTuning(runtimeShader, helper, density)
+            view.setRenderEffect(
+                android.graphics.RenderEffect.createRuntimeShaderEffect(
+                    runtimeShader,
+                    "uInputContent",
+                )
+            )
+            view.visibility = View.VISIBLE
+            true
+        }.getOrDefault(false)
+    }
+
+    /** Apply the user-facing edge and shadow controls to HyperMaterial's shader. */
     private fun applyRuntimeShaderTuning(
         runtimeShader: android.graphics.RuntimeShader,
         helper: Any,
@@ -3099,19 +3296,28 @@ object KeyboardSurface {
                 "uStrokeWidth",
                 HookConfig.getStrokeWidth().coerceIn(0f, 4f) * density,
             )
+            // bb.u stores the resolved dark state in l; k is a separate
+            // boolean lifecycle flag. Older bb.t builds use k.
+            val dark = readBooleanField(helper, "f3543l", "l", "k") ?: false
+            // Keep the platform's calibrated light/dark alpha at 100%, then
+            // scale it by the user percentage. This avoids turning the normal
+            // 0.596/0.122 native highlight into an overbright solid white line.
+            val nativeTopAlpha = if (dark) 0.12156863f else 0.59607846f
             runtimeShader.setFloatUniform(
                 "uStrokeAlphaTop",
-                HookConfig.getHighlight().coerceIn(0, 100) / 100.0f,
+                nativeTopAlpha * (HookConfig.getHighlight().coerceIn(0, 100) / 100.0f),
             )
             runtimeShader.setFloatUniform(
                 "uStrokeAlphaBottom",
-                HookConfig.getBottomHighlight().coerceIn(0, 100) / 100.0f,
+                0.050980393f * (HookConfig.getBottomHighlight().coerceIn(0, 100) / 100.0f),
             )
-            val dark = helperField(helper, "k") as? Boolean ?: false
-            val nativeShadowAlpha = if (dark) 0.12156863f else 0.59607846f
             runtimeShader.setFloatUniform(
                 "uShadowAlpha",
-                nativeShadowAlpha * (HookConfig.getShadow().coerceIn(0, 100) / 100.0f),
+                // Native bb.u constants are C=0x08000000 (light) and
+                // D=0x14484848 (dark); their alpha channels are the shadow
+                // strengths. The 0.596/0.122 values above are stroke alpha.
+                (if (dark) 0.078431375f else 0.03137255f) *
+                    (HookConfig.getShadow().coerceIn(0, 100) / 100.0f),
             )
         }
     }
@@ -3354,11 +3560,10 @@ object KeyboardSurface {
 
         val bgType = HookConfig.getBgType() // 0: DYNAMIC_GLASS, 1: COLOR, 2: IMAGE
         val opacity = HookConfig.getOpacity()
-        val cornerRadiusDp = HookConfig.getCornerRadius()
         val blurRadiusDp = HookConfig.getBlurRadius()
 
         val density = f3500h.resources.displayMetrics.density
-        val radiusPx = cornerRadiusDp * density
+        val radiusPx = resolveCornerRadiusPx(helper, f3500h)
         val isDark = isDarkSurface(service)
 
         f3500h.post {
@@ -3398,8 +3603,10 @@ object KeyboardSurface {
                         if (f3501i != null) {
                             try {
                                 f3501i.alpha = 0.55f + 0.25f * glassStrength
-                                val bMethod = helper.javaClass.declaredMethods.find { it.name == "b" && it.parameterTypes.size == 1 }
-                                bMethod?.invoke(helper, f3501i)
+                                // b(View) writes the native uniforms first;
+                                // immediately follow it with our complete set.
+                                invokeHelperMethod(helper, "b", f3501i)
+                                applyRuntimeShaderControls(helper, f3501i)
                                 f3501i.visibility = View.VISIBLE
                             } catch (_: Throwable) {
                                 f3501i.visibility = View.GONE
@@ -3424,7 +3631,12 @@ object KeyboardSurface {
                             val w = v.width
                             val h = v.height
                             if (w <= 0 || h <= 0) return
-                            outline.setRoundRect(0, 0, w, h, radiusPx)
+                            setKeyboardOutline(
+                                outline,
+                                v,
+                                radiusPx,
+                                isFloatingMaterial(helper),
+                            )
                         }
                     }
                     f3500h.invalidateOutline()
@@ -3532,7 +3744,7 @@ object KeyboardSurface {
                 } else {
                     rootView
                 }
-                // The actual keyboard card is bb.t.f3463h. Applying a second
+                // The actual keyboard card is the helper's material view. Applying a second
                 // gradient to the full Compose root made the key area opaque
                 // and produced a visible seam above the navigation strip.
                 targetView.background = null

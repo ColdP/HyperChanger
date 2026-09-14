@@ -132,7 +132,7 @@ data class HookSettings(
     val superXiaoAiVoiceSafetyUnblocked: Boolean = false,
     val superXiaoAiKeyboardStyleEnabled: Boolean = false,
     val superXiaoAiKeyboardColorMode: Int = 0,
-    val superXiaoAiKeyboardCornerRadius: Float = 30f,
+    val superXiaoAiKeyboardCornerRadius: Float = 24f,
     val superXiaoAiKeyboardOpacity: Int = 56,
     val superXiaoAiKeyboardBlur: Float = 15f,
     val superXiaoAiKeyboardHighlight: Int = 100,
@@ -210,6 +210,7 @@ data class HookSettings(
     val lockscreenMiniPlayerHeight: Float = 36f,
     val lockscreenMiniPlayerArtworkCornerRadius: Float = 12f,
     val lockscreenWidgetEnabled: Boolean = false,
+    val lockscreenWidgetHideOnAod: Boolean = false,
     /** Empty means use the current ro.product.marketname value. */
     val lockscreenWidgetDeviceName: String = "",
     /** Selected lock-screen widgets, persisted as a bit mask. */
@@ -252,10 +253,28 @@ data class HookSettings(
     val miniPlayerSoftGlassBlurRadius: Int = 36,
     val miniPlayerSoftGlassLuminance: Float = 0.14f,
     val keepSoftGlassAfterGlobalTheme: Boolean = false,
+    val headsUpNotificationSoftGlass: Boolean = false,
     val removeClockMaterialLimit: Boolean = false,
     val hideStatusBarWifiStandard: Boolean = false,
     val hideStatusBarClockText: Boolean = false,
     val hideStatusBarNetworkActivity: Boolean = false,
+    val hideControlCenterEditButton: Boolean = false,
+    val addControlCenterTopButtons: Boolean = false,
+    val controlCenterTopButtonsIconScale: Float = 1f,
+    val controlCenterTopButtonsBackgroundMode: Int = CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_NONE,
+    val controlCenterTopButtonsPureColor: Int = 0x73FFFFFF,
+    val controlCenterTopButtonsPureBackgroundRadius: Float = 22f,
+    val controlCenterTopButtonsAdvancedMaterialColor: Int = 0xFFFFFFFF.toInt(),
+    val controlCenterTopButtonsAdvancedMaterialBackgroundRadius: Float = 22f,
+    val controlCenterTopButtonsAdvancedMaterialOpacity: Int = 14,
+    val controlCenterTopButtonsAdvancedMaterialBlurRadius: Int = 40,
+    val controlCenterTopButtonsAdvancedMaterialHighlight: Boolean = false,
+    val controlCenterTopButtonsSoftGlassColor: Int = 0xFFFFFFFF.toInt(),
+    val controlCenterTopButtonsSoftGlassBackgroundRadius: Float = 22f,
+    val controlCenterTopButtonsSoftGlassOpacity: Int = 10,
+    val controlCenterTopButtonsSoftGlassBackdropBlurRadius: Int = 40,
+    val controlCenterTopButtonsSoftGlassBlurRadius: Int = 36,
+    val controlCenterTopButtonsSoftGlassLuminance: Float = 0.14f,
     val stackedMobileSignalEnabled: Boolean = false,
     val stackedMobileSignalScale: Float = 1f,
     val stackedMobileSignalVerticalOffset: Float = 0f,
@@ -271,6 +290,7 @@ data class HookSettings(
     val mobileNetworkTypeDisplayLogic: Int = 0,
     val mobileNetworkTypeCustomText: String = "",
     val mobileNetworkTypeShrink5gaA: Boolean = false,
+    val mobileNetworkTypeBold: Boolean = false,
     val mobileNetworkTypeScale: Float = 1f,
     val mobileNetworkTypeVerticalOffset: Float = 0f,
     val mobileNetworkTypeLeftMargin: Float = 0f,
@@ -490,6 +510,7 @@ private const val KEY_LOCKSCREEN_MINI_PLAYER_ARTWORK_CORNER_RADIUS =
 private const val KEY_LOCKSCREEN_MINI_PLAYER_HEIGHT_RADIUS_MIGRATED =
     "lockscreen_mini_player_height_radius_migrated"
 internal const val KEY_LOCKSCREEN_WIDGET_ENABLED = "lockscreen_widget_enabled"
+internal const val KEY_LOCKSCREEN_WIDGET_HIDE_ON_AOD = "lockscreen_widget_hide_on_aod"
 internal const val KEY_LOCKSCREEN_WIDGET_DEVICE_NAME = "lockscreen_widget_device_name"
 internal const val KEY_LOCKSCREEN_WIDGET_ITEMS = "lockscreen_widget_items"
 internal const val KEY_LOCKSCREEN_WIDGET_ORDER = "lockscreen_widget_order"
@@ -529,6 +550,10 @@ internal const val LOCKSCREEN_WIDGET_BACKGROUND_FOLLOW_SHORTCUT = 0
 internal const val LOCKSCREEN_WIDGET_BACKGROUND_PURE = 1
 internal const val LOCKSCREEN_WIDGET_BACKGROUND_ADVANCED = 2
 internal const val LOCKSCREEN_WIDGET_BACKGROUND_SOFT_GLASS = 3
+internal const val CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_NONE = 0
+internal const val CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_PURE = 1
+internal const val CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_ADVANCED = 2
+internal const val CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_SOFT_GLASS = 3
 internal const val LOCKSCREEN_WIDGET_COMBINATION_ONE = 0
 internal const val LOCKSCREEN_WIDGET_COMBINATION_TWO = 1
 /** The two original combination-one cards remain distinct widgets in the editor. */
@@ -577,15 +602,48 @@ private const val KEY_MINI_PLAYER_SOFT_GLASS_BACKDROP_BLUR_RADIUS =
 private const val KEY_MINI_PLAYER_SOFT_GLASS_BLUR_RADIUS = "mini_player_soft_glass_blur_radius"
 private const val KEY_MINI_PLAYER_SOFT_GLASS_LUMINANCE = "mini_player_soft_glass_luminance"
 private const val KEY_KEEP_SOFT_GLASS_AFTER_GLOBAL_THEME = "keep_soft_glass_after_global_theme"
+internal const val KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS = "heads_up_notification_soft_glass"
 private const val KEY_REMOVE_CLOCK_MATERIAL_LIMIT = "remove_clock_material_limit"
 private const val KEY_HIDE_STATUS_BAR_WIFI_STANDARD = "hide_status_bar_wifi_standard"
 private const val KEY_HIDE_STATUS_BAR_CLOCK_TEXT = "hide_status_bar_clock_text"
 private const val KEY_HIDE_STATUS_BAR_NETWORK_ACTIVITY = "hide_status_bar_network_activity"
+private const val KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON = "hide_control_center_edit_button"
+private const val KEY_ADD_CONTROL_CENTER_TOP_BUTTONS = "add_control_center_top_buttons"
+private const val KEY_CONTROL_CENTER_TOP_BUTTONS_ICON_SCALE = "control_center_top_buttons_icon_scale"
+private const val KEY_CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_MODE =
+    "control_center_top_buttons_background_mode"
+private const val KEY_CONTROL_CENTER_TOP_BUTTONS_PURE_COLOR =
+    "control_center_top_buttons_pure_color"
+private const val KEY_CONTROL_CENTER_TOP_BUTTONS_PURE_BACKGROUND_RADIUS =
+    "control_center_top_buttons_pure_background_radius"
+private const val KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_COLOR =
+    "control_center_top_buttons_advanced_material_color"
+private const val KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_BACKGROUND_RADIUS =
+    "control_center_top_buttons_advanced_material_background_radius"
+private const val KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_OPACITY =
+    "control_center_top_buttons_advanced_material_opacity"
+private const val KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_BLUR_RADIUS =
+    "control_center_top_buttons_advanced_material_blur_radius"
+private const val KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_HIGHLIGHT =
+    "control_center_top_buttons_advanced_material_highlight"
+private const val KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_COLOR =
+    "control_center_top_buttons_soft_glass_color"
+private const val KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_BACKGROUND_RADIUS =
+    "control_center_top_buttons_soft_glass_background_radius"
+private const val KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_OPACITY =
+    "control_center_top_buttons_soft_glass_opacity"
+private const val KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_BACKDROP_BLUR_RADIUS =
+    "control_center_top_buttons_soft_glass_backdrop_blur_radius"
+private const val KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_BLUR_RADIUS =
+    "control_center_top_buttons_soft_glass_blur_radius"
+private const val KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_LUMINANCE =
+    "control_center_top_buttons_soft_glass_luminance"
 private const val KEY_MOBILE_NETWORK_TYPE_MODE = "mobile_network_type_mode"
 private const val KEY_MOBILE_NETWORK_TYPE_POSITION = "mobile_network_type_position"
 private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_display_logic"
 private const val KEY_MOBILE_NETWORK_TYPE_CUSTOM_TEXT = "mobile_network_type_custom_text"
 private const val KEY_MOBILE_NETWORK_TYPE_SHRINK_5GA_A = "mobile_network_type_shrink_5ga_a"
+private const val KEY_MOBILE_NETWORK_TYPE_BOLD = "mobile_network_type_bold"
 private const val KEY_THEME_MODE = "theme_mode"
 private const val KEY_NAVIGATION_STYLE = "navigation_style"
 private const val KEY_NAVIGATION_LABEL_MODE = "navigation_label_mode"
@@ -768,7 +826,7 @@ private fun SharedPreferences.toSettings(): HookSettings {
     superXiaoAiVoiceSafetyUnblocked = getBoolean(KEY_SUPER_XIAOAI_VOICE_SAFETY_UNBLOCKED, false),
     superXiaoAiKeyboardStyleEnabled = getBoolean(KEY_SUPER_XIAOAI_KEYBOARD_STYLE_ENABLED, false),
     superXiaoAiKeyboardColorMode = getInt(KEY_SUPER_XIAOAI_KEYBOARD_COLOR_MODE, 0).coerceIn(0, 2),
-    superXiaoAiKeyboardCornerRadius = getFloatCompat(KEY_SUPER_XIAOAI_KEYBOARD_CORNER_RADIUS, 30f).coerceIn(0f, 48f),
+    superXiaoAiKeyboardCornerRadius = getFloatCompat(KEY_SUPER_XIAOAI_KEYBOARD_CORNER_RADIUS, 24f).coerceIn(0f, 48f),
     superXiaoAiKeyboardOpacity = getInt(KEY_SUPER_XIAOAI_KEYBOARD_OPACITY, 56).coerceIn(0, 100),
     superXiaoAiKeyboardBlur = getFloatCompat(KEY_SUPER_XIAOAI_KEYBOARD_BLUR, 15f).coerceIn(0f, 45f),
     superXiaoAiKeyboardHighlight = getInt(KEY_SUPER_XIAOAI_KEYBOARD_HIGHLIGHT, 100).coerceIn(0, 100),
@@ -912,6 +970,7 @@ private fun SharedPreferences.toSettings(): HookSettings {
         12f,
     ).coerceIn(0f, 60f),
     lockscreenWidgetEnabled = getBoolean(KEY_LOCKSCREEN_WIDGET_ENABLED, false),
+    lockscreenWidgetHideOnAod = getBoolean(KEY_LOCKSCREEN_WIDGET_HIDE_ON_AOD, false),
     lockscreenWidgetDeviceName = getString(KEY_LOCKSCREEN_WIDGET_DEVICE_NAME, "")
         .orEmpty().take(64),
     lockscreenWidgetItems = readLockscreenWidgetItems(),
@@ -1018,10 +1077,76 @@ private fun SharedPreferences.toSettings(): HookSettings {
     miniPlayerSoftGlassLuminance = getFloat(KEY_MINI_PLAYER_SOFT_GLASS_LUMINANCE, 0.14f)
         .coerceIn(0f, 0.4f),
     keepSoftGlassAfterGlobalTheme = getBoolean(KEY_KEEP_SOFT_GLASS_AFTER_GLOBAL_THEME, false),
+    headsUpNotificationSoftGlass = getBoolean(KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS, false),
     removeClockMaterialLimit = getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false),
     hideStatusBarWifiStandard = getBoolean(KEY_HIDE_STATUS_BAR_WIFI_STANDARD, false),
     hideStatusBarClockText = getBoolean(KEY_HIDE_STATUS_BAR_CLOCK_TEXT, false),
     hideStatusBarNetworkActivity = getBoolean(KEY_HIDE_STATUS_BAR_NETWORK_ACTIVITY, false),
+    hideControlCenterEditButton = getBoolean(KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON, false),
+    addControlCenterTopButtons = getBoolean(KEY_ADD_CONTROL_CENTER_TOP_BUTTONS, false),
+    controlCenterTopButtonsIconScale = getFloat(
+        KEY_CONTROL_CENTER_TOP_BUTTONS_ICON_SCALE,
+        1f,
+    ).coerceIn(0.5f, 2f),
+    controlCenterTopButtonsBackgroundMode = getInt(
+        KEY_CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_MODE,
+        CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_NONE,
+    ).coerceIn(
+        CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_NONE,
+        CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_SOFT_GLASS,
+    ),
+    controlCenterTopButtonsPureColor = getInt(
+        KEY_CONTROL_CENTER_TOP_BUTTONS_PURE_COLOR,
+        0x73FFFFFF,
+    ),
+    controlCenterTopButtonsPureBackgroundRadius = getFloat(
+        KEY_CONTROL_CENTER_TOP_BUTTONS_PURE_BACKGROUND_RADIUS,
+        22f,
+    ).coerceIn(0f, 22f),
+    controlCenterTopButtonsAdvancedMaterialColor = getInt(
+        KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_COLOR,
+        0xFFFFFFFF.toInt(),
+    ),
+    controlCenterTopButtonsAdvancedMaterialBackgroundRadius = getFloat(
+        KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_BACKGROUND_RADIUS,
+        22f,
+    ).coerceIn(0f, 22f),
+    controlCenterTopButtonsAdvancedMaterialOpacity = getInt(
+        KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_OPACITY,
+        14,
+    ).coerceIn(0, 100),
+    controlCenterTopButtonsAdvancedMaterialBlurRadius = getInt(
+        KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_BLUR_RADIUS,
+        40,
+    ).coerceIn(0, 40),
+    controlCenterTopButtonsAdvancedMaterialHighlight = getBoolean(
+        KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_HIGHLIGHT,
+        false,
+    ),
+    controlCenterTopButtonsSoftGlassColor = getInt(
+        KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_COLOR,
+        0xFFFFFFFF.toInt(),
+    ),
+    controlCenterTopButtonsSoftGlassBackgroundRadius = getFloat(
+        KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_BACKGROUND_RADIUS,
+        22f,
+    ).coerceIn(0f, 22f),
+    controlCenterTopButtonsSoftGlassOpacity = getInt(
+        KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_OPACITY,
+        10,
+    ).coerceIn(0, 100),
+    controlCenterTopButtonsSoftGlassBackdropBlurRadius = getInt(
+        KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_BACKDROP_BLUR_RADIUS,
+        40,
+    ).coerceIn(0, 40),
+    controlCenterTopButtonsSoftGlassBlurRadius = getInt(
+        KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_BLUR_RADIUS,
+        36,
+    ).coerceIn(0, 40),
+    controlCenterTopButtonsSoftGlassLuminance = getFloat(
+        KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_LUMINANCE,
+        0.14f,
+    ).coerceIn(0f, 0.4f),
     stackedMobileSignalEnabled = getBoolean(KEY_STACKED_MOBILE_SIGNAL_ENABLED, false),
     stackedMobileSignalScale = getFloat(KEY_STACKED_MOBILE_SIGNAL_SCALE, 1f)
         .coerceIn(0.1f, 3f),
@@ -1038,6 +1163,7 @@ private fun SharedPreferences.toSettings(): HookSettings {
     mobileNetworkTypeCustomText = getString(KEY_MOBILE_NETWORK_TYPE_CUSTOM_TEXT, "")
         .orEmpty().take(128),
     mobileNetworkTypeShrink5gaA = getBoolean(KEY_MOBILE_NETWORK_TYPE_SHRINK_5GA_A, false),
+    mobileNetworkTypeBold = getBoolean(KEY_MOBILE_NETWORK_TYPE_BOLD, false),
     mobileNetworkTypeScale = getFloat(KEY_MOBILE_NETWORK_TYPE_SCALE, 1f)
         .coerceIn(0.1f, 3f),
     mobileNetworkTypeVerticalOffset = getFloat(KEY_MOBILE_NETWORK_TYPE_VERTICAL_OFFSET, 0f)
@@ -1357,6 +1483,7 @@ private fun SharedPreferences.write(value: HookSettings) {
         )
         .putBoolean(KEY_LOCKSCREEN_MINI_PLAYER_HEIGHT_RADIUS_MIGRATED, true)
         .putBoolean(KEY_LOCKSCREEN_WIDGET_ENABLED, value.lockscreenWidgetEnabled)
+        .putBoolean(KEY_LOCKSCREEN_WIDGET_HIDE_ON_AOD, value.lockscreenWidgetHideOnAod)
         .putString(KEY_LOCKSCREEN_WIDGET_DEVICE_NAME, value.lockscreenWidgetDeviceName.take(64))
         .putInt(
             KEY_LOCKSCREEN_WIDGET_ITEMS,
@@ -1456,10 +1583,70 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putInt(KEY_MINI_PLAYER_SOFT_GLASS_BLUR_RADIUS, value.miniPlayerSoftGlassBlurRadius)
         .putFloat(KEY_MINI_PLAYER_SOFT_GLASS_LUMINANCE, value.miniPlayerSoftGlassLuminance)
         .putBoolean(KEY_KEEP_SOFT_GLASS_AFTER_GLOBAL_THEME, value.keepSoftGlassAfterGlobalTheme)
+        .putBoolean(KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS, value.headsUpNotificationSoftGlass)
         .putBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, value.removeClockMaterialLimit)
         .putBoolean(KEY_HIDE_STATUS_BAR_WIFI_STANDARD, value.hideStatusBarWifiStandard)
         .putBoolean(KEY_HIDE_STATUS_BAR_CLOCK_TEXT, value.hideStatusBarClockText)
         .putBoolean(KEY_HIDE_STATUS_BAR_NETWORK_ACTIVITY, value.hideStatusBarNetworkActivity)
+        .putBoolean(KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON, value.hideControlCenterEditButton)
+        .putBoolean(KEY_ADD_CONTROL_CENTER_TOP_BUTTONS, value.addControlCenterTopButtons)
+        .putFloat(
+            KEY_CONTROL_CENTER_TOP_BUTTONS_ICON_SCALE,
+            value.controlCenterTopButtonsIconScale.coerceIn(0.5f, 2f),
+        )
+        .putInt(
+            KEY_CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_MODE,
+            value.controlCenterTopButtonsBackgroundMode.coerceIn(
+                CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_NONE,
+                CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_SOFT_GLASS,
+            ),
+        )
+        .putInt(KEY_CONTROL_CENTER_TOP_BUTTONS_PURE_COLOR, value.controlCenterTopButtonsPureColor)
+        .putFloat(
+            KEY_CONTROL_CENTER_TOP_BUTTONS_PURE_BACKGROUND_RADIUS,
+            value.controlCenterTopButtonsPureBackgroundRadius.coerceIn(0f, 22f),
+        )
+        .putInt(
+            KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_COLOR,
+            value.controlCenterTopButtonsAdvancedMaterialColor,
+        )
+        .putFloat(
+            KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_BACKGROUND_RADIUS,
+            value.controlCenterTopButtonsAdvancedMaterialBackgroundRadius.coerceIn(0f, 22f),
+        )
+        .putInt(
+            KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_OPACITY,
+            value.controlCenterTopButtonsAdvancedMaterialOpacity.coerceIn(0, 100),
+        )
+        .putInt(
+            KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_BLUR_RADIUS,
+            value.controlCenterTopButtonsAdvancedMaterialBlurRadius.coerceIn(0, 40),
+        )
+        .putBoolean(
+            KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_HIGHLIGHT,
+            value.controlCenterTopButtonsAdvancedMaterialHighlight,
+        )
+        .putInt(KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_COLOR, value.controlCenterTopButtonsSoftGlassColor)
+        .putFloat(
+            KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_BACKGROUND_RADIUS,
+            value.controlCenterTopButtonsSoftGlassBackgroundRadius.coerceIn(0f, 22f),
+        )
+        .putInt(
+            KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_OPACITY,
+            value.controlCenterTopButtonsSoftGlassOpacity.coerceIn(0, 100),
+        )
+        .putInt(
+            KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_BACKDROP_BLUR_RADIUS,
+            value.controlCenterTopButtonsSoftGlassBackdropBlurRadius.coerceIn(0, 40),
+        )
+        .putInt(
+            KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_BLUR_RADIUS,
+            value.controlCenterTopButtonsSoftGlassBlurRadius.coerceIn(0, 40),
+        )
+        .putFloat(
+            KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_LUMINANCE,
+            value.controlCenterTopButtonsSoftGlassLuminance.coerceIn(0f, 0.4f),
+        )
         .putBoolean(KEY_STACKED_MOBILE_SIGNAL_ENABLED, value.stackedMobileSignalEnabled)
         .putFloat(KEY_STACKED_MOBILE_SIGNAL_SCALE, value.stackedMobileSignalScale.coerceIn(0.1f, 3f))
         .putFloat(
@@ -1480,6 +1667,7 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putInt(KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC, value.mobileNetworkTypeDisplayLogic.coerceIn(0, 1))
         .putString(KEY_MOBILE_NETWORK_TYPE_CUSTOM_TEXT, value.mobileNetworkTypeCustomText.take(128))
         .putBoolean(KEY_MOBILE_NETWORK_TYPE_SHRINK_5GA_A, value.mobileNetworkTypeShrink5gaA)
+        .putBoolean(KEY_MOBILE_NETWORK_TYPE_BOLD, value.mobileNetworkTypeBold)
         .putFloat(KEY_MOBILE_NETWORK_TYPE_SCALE, value.mobileNetworkTypeScale.coerceIn(0.1f, 3f))
         .putFloat(
             KEY_MOBILE_NETWORK_TYPE_VERTICAL_OFFSET,

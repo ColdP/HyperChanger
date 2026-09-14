@@ -79,6 +79,8 @@ internal object LockscreenWidgetSceneState {
     @Volatile private var editorActive = false
     @Volatile private var chargingActive = false
     @Volatile private var controlCenterActive = false
+    @Volatile var aodActive = false
+        private set
     private val controllers = Collections.newSetFromMap(
         WeakHashMap<LockscreenWidgetController, Boolean>(),
     )
@@ -109,6 +111,12 @@ internal object LockscreenWidgetSceneState {
     fun setControlCenterActive(active: Boolean) {
         if (controlCenterActive == active) return
         controlCenterActive = active
+        notifyControllers()
+    }
+
+    fun setAodActive(active: Boolean) {
+        if (aodActive == active) return
+        aodActive = active
         notifyControllers()
     }
 
@@ -1023,6 +1031,11 @@ internal class LockscreenWidgetController(
     private var hideAnimationRunning = false
     private var lastLockscreenVisible: Boolean? = null
     private var notificationStack: WeakReference<View>? = null
+    private val preferenceListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == KEY_LOCKSCREEN_WIDGET_ENABLED || key == KEY_LOCKSCREEN_WIDGET_HIDE_ON_AOD) {
+            host.post(::refresh)
+        }
+    }
     // Depth clocks can split the visible hour and minute into independent roots. Track our
     // contribution per root so their own AOD and gesture translations remain untouched.
     private val appliedClockAvoidanceOffsets = WeakHashMap<View, Float>()
@@ -1056,6 +1069,7 @@ internal class LockscreenWidgetController(
         host.clipChildren = false
         host.clipToPadding = false
         LockscreenWidgetSceneState.register(this)
+        preferences.registerOnSharedPreferenceChangeListener(preferenceListener)
         host.rootView.viewTreeObserver.addOnGlobalLayoutListener(layoutListener)
         leftShortcut.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> schedulePosition() }
         rightShortcut.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> schedulePosition() }
@@ -1064,6 +1078,7 @@ internal class LockscreenWidgetController(
 
     fun destroy() {
         LockscreenWidgetSceneState.unregister(this)
+        runCatching { preferences.unregisterOnSharedPreferenceChangeListener(preferenceListener) }
         runCatching { host.rootView.viewTreeObserver.removeOnGlobalLayoutListener(layoutListener) }
         restoreClockPosition()
         runCatching { view?.let(host::removeView) }
@@ -1153,9 +1168,17 @@ internal class LockscreenWidgetController(
             (widget.parent as? ViewGroup)?.removeView(widget)
             host.addView(widget, ViewGroup.LayoutParams(dp(WIDGET_WIDTH_DP), dp(WIDGET_HEIGHT_DP)))
         }
-        val shouldShow = preferences.getBoolean(KEY_LOCKSCREEN_WIDGET_ENABLED, false) && isLockscreenVisible()
+        val shouldShow = preferences.getBoolean(KEY_LOCKSCREEN_WIDGET_ENABLED, false) &&
+            isLockscreenVisible() &&
+            !(preferences.getBoolean(KEY_LOCKSCREEN_WIDGET_HIDE_ON_AOD, false) &&
+                LockscreenWidgetSceneState.aodActive)
         if (!shouldShow) {
-            hideWidget(widget, immediately = LockscreenWidgetSceneState.hasBlockingOverlay)
+            hideWidget(
+                widget,
+                immediately = LockscreenWidgetSceneState.hasBlockingOverlay ||
+                    (LockscreenWidgetSceneState.aodActive &&
+                        preferences.getBoolean(KEY_LOCKSCREEN_WIDGET_HIDE_ON_AOD, false)),
+            )
             return
         }
         showWidget(widget)

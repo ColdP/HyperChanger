@@ -874,7 +874,7 @@ private fun CategoryHome(
     AppList(padding, scroll) {
         item { Entry(tr("\u7cfb\u7edf\u754c\u9762", "\u7cfb\u7edf\u754c\u9762"), enabled = connected) { open(PageId.SHADE) } }
         item { Entry(tr("\u8d85\u7ea7\u5c9b", "\u8d85\u7ea7\u5c9b"), enabled = connected) { open(PageId.ISLAND) } }
-        item { Entry(tr("\u72b6\u6001\u680f", "\u72b6\u6001\u680f"), enabled = connected) { open(PageId.STATUS) } }
+        item { Entry(tr("\u72b6\u6001\u680f\u4e0e\u63a7\u5236\u4e2d\u5fc3", "\u72b6\u6001\u680f\u4e0e\u63a7\u5236\u4e2d\u5fc3"), enabled = connected) { open(PageId.STATUS) } }
         item { Entry(tr("\u9501\u5c4f", "\u9501\u5c4f"), enabled = connected) { open(PageId.LOCK) } }
         item { Entry(tr("\u8d85\u7ea7\u5c0f\u7231\u8f93\u5165\u6cd5", "\u8d85\u7ea7\u5c0f\u7231\u8f93\u5165\u6cd5"), enabled = connected) { open(PageId.SUPER_XIAOAI) } }
         item { Entry(tr("\u76f8\u673a\u4e0e\u76f8\u518c\u7f16\u8f91", "\u76f8\u673a\u4e0e\u76f8\u518c\u7f16\u8f91"), enabled = connected) { open(PageId.CAMERA) } }
@@ -2825,7 +2825,7 @@ private fun SuperXiaoAi(
                 OverlayDropdownPreference(title = tr("superXiaoAiKeyboardColorMode", "\u952e\u76d8\u989c\u8272\u6a21\u5f0f"), items = listOf(tr("followSystem", "\u8ddf\u968f\u7cfb\u7edf"), tr("superXiaoAiLightMode", "\u6d45\u8272\u6a21\u5f0f"), tr("superXiaoAiDarkMode", "\u6df1\u8272\u6a21\u5f0f")), selectedIndex = settings.superXiaoAiKeyboardColorMode, onSelectedIndexChange = { value -> update { it.copy(superXiaoAiKeyboardColorMode = value) } })
                 SwitchPreference(title = tr("superXiaoAiKeyboardTuning", "\u952e\u76d8\u5916\u89c2\u53c2\u6570\u8c03\u6574"), checked = settings.superXiaoAiKeyboardStyleEnabled, onCheckedChange = { value -> update { it.copy(superXiaoAiKeyboardStyleEnabled = value) } })
                 if (settings.superXiaoAiKeyboardStyleEnabled) {
-                    ParameterDpSlide(tr("superXiaoAiKeyboardCorner", "\u952e\u76d8\u5706\u89d2"), settings.superXiaoAiKeyboardCornerRadius, 0f..48f, defaultValue = 30f) { value -> update { it.copy(superXiaoAiKeyboardCornerRadius = value) } }
+                    ParameterDpSlide(tr("superXiaoAiKeyboardCorner", "\u952e\u76d8\u5706\u89d2"), settings.superXiaoAiKeyboardCornerRadius, 0f..48f, defaultValue = 24f) { value -> update { it.copy(superXiaoAiKeyboardCornerRadius = value) } }
                     ParameterIntSlide(tr("superXiaoAiKeyboardOpacity", "\u952e\u76d8\u80cc\u666f\u4e0d\u900f\u660e\u5ea6"), settings.superXiaoAiKeyboardOpacity, 0..100, "%", defaultValue = 56) { value -> update { it.copy(superXiaoAiKeyboardOpacity = value) } }
                     ParameterDpSlide(tr("superXiaoAiKeyboardBlur", "\u952e\u76d8\u80cc\u666f\u6a21\u7cca\u5ea6"), settings.superXiaoAiKeyboardBlur, 0f..45f, defaultValue = 15f) { value -> update { it.copy(superXiaoAiKeyboardBlur = value) } }
                     ParameterIntSlide(tr("superXiaoAiKeyboardHighlight", "\u952e\u76d8\u9876\u90e8\u9ad8\u5149"), settings.superXiaoAiKeyboardHighlight, 0..100, "%", defaultValue = 100) { value -> update { it.copy(superXiaoAiKeyboardHighlight = value) } }
@@ -2996,6 +2996,13 @@ private fun Shade(
                     checked = s.unifyNotificationMaterial,
                     onCheckedChange = { enabled ->
                         update { it.copy(unifyNotificationMaterial = enabled) }
+                    },
+                )
+                SwitchPreference(
+                    title = tr("\u60ac\u6d6e\u901a\u77e5\u542f\u52a8\u67d4\u5149\u73bb\u7483\u6750\u8d28", "\u60ac\u6d6e\u901a\u77e5\u542f\u52a8\u67d4\u5149\u73bb\u7483\u6750\u8d28"),
+                    checked = s.headsUpNotificationSoftGlass,
+                    onCheckedChange = { enabled ->
+                        update { it.copy(headsUpNotificationSoftGlass = enabled) }
                     },
                 )
                 SwitchPreference(
@@ -3735,7 +3742,7 @@ private fun Status(
     update: ((HookSettings) -> HookSettings) -> Unit,
     open: (PageId) -> Unit,
     back: () -> Unit,
-) = AppPage(tr("\u72b6\u6001\u680f", "\u72b6\u6001\u680f"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI)) { p, scroll ->
+) = AppPage(tr("\u72b6\u6001\u680f\u4e0e\u63a7\u5236\u4e2d\u5fc3", "\u72b6\u6001\u680f\u4e0e\u63a7\u5236\u4e2d\u5fc3"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI)) { p, scroll ->
     AppList(p, scroll, 28) {
         item { Card(Modifier.fillMaxWidth()) {
         Dim(tr("\u65f6\u949f\u5927\u5c0f", "\u65f6\u949f\u5927\u5c0f"), s.clockEnabled, { v -> update { it.copy(clockEnabled = v) } }, s.clockSize, 10f..24f, defaultValue = 14.8f) { v -> update { it.copy(clockSize = v) } }
@@ -3755,6 +3762,141 @@ private fun Status(
                     title = tr("\u72b6\u6001\u680f\u4fe1\u53f7\u81ea\u5b9a\u4e49", "\u72b6\u6001\u680f\u4fe1\u53f7\u81ea\u5b9a\u4e49"),
                     onClick = { open(PageId.STATUS_SIGNAL_CUSTOMIZATION) },
                 )
+            }
+        }
+        item {
+            Group(tr("\u63a7\u5236\u4e2d\u5fc3", "\u63a7\u5236\u4e2d\u5fc3")) {
+                SwitchPreference(
+                    title = tr("\u63a7\u5236\u4e2d\u5fc3\u9690\u85cf\u5e95\u90e8\u7f16\u8f91\u6309\u94ae", "\u63a7\u5236\u4e2d\u5fc3\u9690\u85cf\u5e95\u90e8\u7f16\u8f91\u6309\u94ae"),
+                    checked = s.hideControlCenterEditButton,
+                    onCheckedChange = { enabled -> update { it.copy(hideControlCenterEditButton = enabled) } },
+                )
+                SwitchPreference(
+                    title = tr("\u63a7\u5236\u4e2d\u5fc3\u9876\u90e8\u6dfb\u52a0\u63a7\u5236\u6309\u94ae", "\u63a7\u5236\u4e2d\u5fc3\u9876\u90e8\u6dfb\u52a0\u63a7\u5236\u6309\u94ae"),
+                    checked = s.addControlCenterTopButtons,
+                    onCheckedChange = { enabled -> update { it.copy(addControlCenterTopButtons = enabled) } },
+                )
+                AnimatedVisibility(
+                    visible = s.addControlCenterTopButtons,
+                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                ) {
+                    ParameterFloatSlide(
+                        title = tr("\u9876\u90e8\u6309\u94ae\u56fe\u6807\u7f29\u653e", "\u9876\u90e8\u6309\u94ae\u56fe\u6807\u7f29\u653e"),
+                        value = s.controlCenterTopButtonsIconScale,
+                        range = 0.5f..2f,
+                        defaultValue = 1f,
+                    ) { value -> update { it.copy(controlCenterTopButtonsIconScale = value) } }
+                }
+                OverlayDropdownPreference(
+                    title = tr("\u9876\u90e8\u6309\u94ae\u80cc\u666f\u6750\u8d28", "\u9876\u90e8\u6309\u94ae\u80cc\u666f\u6750\u8d28"),
+                    items = listOf(
+                        tr("\u4e0d\u663e\u793a", "\u4e0d\u663e\u793a"),
+                        tr("\u7eaf\u8272", "\u7eaf\u8272"),
+                        tr("\u9ad8\u7ea7\u6750\u8d28", "\u9ad8\u7ea7\u6750\u8d28"),
+                        tr("\u67d4\u5149\u73bb\u7483", "\u67d4\u5149\u73bb\u7483"),
+                    ),
+                    selectedIndex = s.controlCenterTopButtonsBackgroundMode.coerceIn(0, 3),
+                    enabled = s.addControlCenterTopButtons,
+                    onSelectedIndexChange = { value ->
+                        update { it.copy(controlCenterTopButtonsBackgroundMode = value) }
+                    },
+                )
+                AnimatedVisibility(
+                    visible = s.addControlCenterTopButtons &&
+                        s.controlCenterTopButtonsBackgroundMode != CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_NONE,
+                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                ) {
+                    Column(Modifier.fillMaxWidth()) {
+                        when (s.controlCenterTopButtonsBackgroundMode.coerceIn(0, 3)) {
+                        CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_PURE -> {
+                            ShortcutBackgroundColorPreference(
+                                color = s.controlCenterTopButtonsPureColor,
+                                onColorChange = { value -> update { it.copy(controlCenterTopButtonsPureColor = value) } },
+                            )
+                            ParameterDpSlide(
+                                title = tr("\u9876\u90e8\u6309\u94ae\u80cc\u666f\u5706\u5f62\u534a\u5f84", "\u9876\u90e8\u6309\u94ae\u80cc\u666f\u5706\u5f62\u534a\u5f84"),
+                                value = s.controlCenterTopButtonsPureBackgroundRadius,
+                                range = 0f..22f,
+                                defaultValue = 22f,
+                            ) { value -> update { it.copy(controlCenterTopButtonsPureBackgroundRadius = value) } }
+                        }
+                        CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_ADVANCED -> {
+                            ShortcutBackgroundColorPreference(
+                                title = tr("\u6df7\u8272\u989c\u8272", "\u6df7\u8272\u989c\u8272"),
+                                color = s.controlCenterTopButtonsAdvancedMaterialColor,
+                                onColorChange = { value -> update { it.copy(controlCenterTopButtonsAdvancedMaterialColor = value) } },
+                            )
+                            ParameterDpSlide(
+                                title = tr("\u9876\u90e8\u6309\u94ae\u80cc\u666f\u5706\u5f62\u534a\u5f84", "\u9876\u90e8\u6309\u94ae\u80cc\u666f\u5706\u5f62\u534a\u5f84"),
+                                value = s.controlCenterTopButtonsAdvancedMaterialBackgroundRadius,
+                                range = 0f..22f,
+                                defaultValue = 22f,
+                            ) { value -> update { it.copy(controlCenterTopButtonsAdvancedMaterialBackgroundRadius = value) } }
+                            ParameterIntSlide(
+                                title = tr("\u4e0d\u900f\u660e\u5ea6", "\u4e0d\u900f\u660e\u5ea6"),
+                                value = s.controlCenterTopButtonsAdvancedMaterialOpacity,
+                                range = 0..100,
+                                suffix = "%",
+                                defaultValue = 14,
+                            ) { value -> update { it.copy(controlCenterTopButtonsAdvancedMaterialOpacity = value) } }
+                            ParameterIntSlide(
+                                title = tr("\u80cc\u666f\u6a21\u7cca\u5ea6", "\u80cc\u666f\u6a21\u7cca\u5ea6"),
+                                value = s.controlCenterTopButtonsAdvancedMaterialBlurRadius,
+                                range = 0..40,
+                                suffix = " px",
+                                defaultValue = 40,
+                            ) { value -> update { it.copy(controlCenterTopButtonsAdvancedMaterialBlurRadius = value) } }
+                            SwitchPreference(
+                                title = tr("\u663e\u793a\u9ad8\u5149", "\u663e\u793a\u9ad8\u5149"),
+                                checked = s.controlCenterTopButtonsAdvancedMaterialHighlight,
+                                onCheckedChange = { value -> update { it.copy(controlCenterTopButtonsAdvancedMaterialHighlight = value) } },
+                            )
+                        }
+                        CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_SOFT_GLASS -> {
+                            ShortcutBackgroundColorPreference(
+                                title = tr("\u6df7\u8272\u989c\u8272", "\u6df7\u8272\u989c\u8272"),
+                                color = s.controlCenterTopButtonsSoftGlassColor,
+                                onColorChange = { value -> update { it.copy(controlCenterTopButtonsSoftGlassColor = value) } },
+                            )
+                            ParameterDpSlide(
+                                title = tr("\u9876\u90e8\u6309\u94ae\u80cc\u666f\u5706\u5f62\u534a\u5f84", "\u9876\u90e8\u6309\u94ae\u80cc\u666f\u5706\u5f62\u534a\u5f84"),
+                                value = s.controlCenterTopButtonsSoftGlassBackgroundRadius,
+                                range = 0f..22f,
+                                defaultValue = 22f,
+                            ) { value -> update { it.copy(controlCenterTopButtonsSoftGlassBackgroundRadius = value) } }
+                            ParameterIntSlide(
+                                title = tr("\u4e0d\u900f\u660e\u5ea6", "\u4e0d\u900f\u660e\u5ea6"),
+                                value = s.controlCenterTopButtonsSoftGlassOpacity,
+                                range = 0..100,
+                                suffix = "%",
+                                defaultValue = 10,
+                            ) { value -> update { it.copy(controlCenterTopButtonsSoftGlassOpacity = value) } }
+                            ParameterIntSlide(
+                                title = tr("\u80cc\u666f\u6a21\u7cca\u5ea6", "\u80cc\u666f\u6a21\u7cca\u5ea6"),
+                                value = s.controlCenterTopButtonsSoftGlassBackdropBlurRadius,
+                                range = 0..40,
+                                suffix = " px",
+                                defaultValue = 40,
+                            ) { value -> update { it.copy(controlCenterTopButtonsSoftGlassBackdropBlurRadius = value) } }
+                            ParameterIntSlide(
+                                title = tr("Glass \u6a21\u7cca\u5ea6", "Glass \u6a21\u7cca\u5ea6"),
+                                value = s.controlCenterTopButtonsSoftGlassBlurRadius,
+                                range = 0..40,
+                                suffix = " px",
+                                defaultValue = 36,
+                            ) { value -> update { it.copy(controlCenterTopButtonsSoftGlassBlurRadius = value) } }
+                            ParameterFloatSlide(
+                                title = tr("\u67d4\u5149\u5f3a\u5ea6", "\u67d4\u5149\u5f3a\u5ea6"),
+                                value = s.controlCenterTopButtonsSoftGlassLuminance,
+                                range = 0f..0.4f,
+                                defaultValue = .14f,
+                            ) { value -> update { it.copy(controlCenterTopButtonsSoftGlassLuminance = value) } }
+                        }
+                        }
+                    }
+                }
             }
         }
     }
@@ -3830,6 +3972,11 @@ OverlayDropdownPreference(
                             title = tr("5GA\u65f6\u81ea\u52a8\u7f29\u5c0f\u5b57\u6bcd A", "5GA\u65f6\u81ea\u52a8\u7f29\u5c0f\u5b57\u6bcd A"),
                             checked = s.mobileNetworkTypeShrink5gaA,
                             onCheckedChange = { value -> update { it.copy(mobileNetworkTypeShrink5gaA = value) } },
+                        )
+                        SwitchPreference(
+                            title = tr("\u72ec\u7acb\u79fb\u52a8\u7f51\u7edc\u7c7b\u578b\u7c97\u4f53\u663e\u793a", "\u72ec\u7acb\u79fb\u52a8\u7f51\u7edc\u7c7b\u578b\u7c97\u4f53\u663e\u793a"),
+                            checked = s.mobileNetworkTypeBold,
+                            onCheckedChange = { value -> update { it.copy(mobileNetworkTypeBold = value) } },
                         )
                     }
                 }
@@ -4091,6 +4238,13 @@ OverlayDropdownPreference(
                     checked = s.lockscreenWidgetEnabled,
                     onCheckedChange = { value ->
                         update { it.copy(lockscreenWidgetEnabled = value) }
+                    },
+                )
+                SwitchPreference(
+                    title = tr("\u606f\u5c4f\u663e\u793a\u65f6\u9690\u85cf\u9501\u5c4f\u5c0f\u7ec4\u4ef6", "\u606f\u5c4f\u663e\u793a\u65f6\u9690\u85cf\u9501\u5c4f\u5c0f\u7ec4\u4ef6"),
+                    checked = s.lockscreenWidgetHideOnAod,
+                    onCheckedChange = { value ->
+                        update { it.copy(lockscreenWidgetHideOnAod = value) }
                     },
                 )
                 AnimatedVisibility(
@@ -5644,6 +5798,7 @@ OverlayDropdownPreference(
             onSelectedIndexChange = { i -> update { it.copy(instantMode = i.coerceIn(0, 1)) } },
         )
         SwitchPreference(title = tr("\u76f8\u518c\u7f16\u8f91\u5168\u6c34\u5370", "\u76f8\u518c\u7f16\u8f91\u5168\u6c34\u5370"), checked = c.galleryAllWatermarks, onCheckedChange = { v -> update { it.copy(galleryAllWatermarks = v) } })
+        SwitchPreference(title = tr("\u89e3\u9501\u76f8\u518c\u7f16\u8f91 Xiaomi 18 \u7cfb\u5217\u65b0\u529f\u80fd", "\u89e3\u9501\u76f8\u518c\u7f16\u8f91 Xiaomi 18 \u7cfb\u5217\u65b0\u529f\u80fd"), checked = c.galleryPaletteUnlocked, onCheckedChange = { v -> update { it.copy(galleryPaletteUnlocked = v) } })
     } } }
 }
 

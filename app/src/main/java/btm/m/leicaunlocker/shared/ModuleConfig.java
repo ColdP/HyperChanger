@@ -16,6 +16,8 @@ public final class ModuleConfig {
     public static final String KEY_LEICA_UI = "leica_ui";
     public static final String KEY_PRESERVE_NATIVE_FOCAL_LENGTHS = "preserve_native_focal_lengths";
     public static final String KEY_GALLERY_ALL_WATERMARKS = "gallery_all_watermarks";
+    /** Enables the Xiaomi 18 Pro Max (madrid) gated MediaEditor AI features. */
+    public static final String KEY_GALLERY_PALETTE_UNLOCKED = "gallery_palette_unlocked";
     public static final String KEY_INSTANT_MODE = "instant_mode";
 
     public static final String[] TARGET_PACKAGES = {
@@ -37,6 +39,31 @@ public final class ModuleConfig {
             Map.entry("ro.product.mod_device", "nezha"),
             Map.entry("ro.miui.build.region", "cn"),
             Map.entry("ro.miui.region", "CN")
+    );
+
+    /** AI feature identity; watermark identity remains in WATERMARK_PROPERTIES. */
+    private static final Map<String, String> AI_PROPERTIES = Map.ofEntries(
+            Map.entry("ro.product.device", "madrid"),
+            Map.entry("ro.build.product", "madrid"),
+            Map.entry("ro.product.name", "madrid"),
+            Map.entry("ro.product.system.device", "madrid"),
+            Map.entry("ro.product.vendor.device", "madrid"),
+            Map.entry("ro.product.odm.device", "madrid"),
+            Map.entry("ro.product.mod_device", "madrid"),
+            Map.entry("ro.product.model", "Xiaomi 18 Pro Max"),
+            Map.entry("ro.product.marketname", "Xiaomi 18 Pro Max"),
+            Map.entry("ro.miui.build.region", "cn"),
+            Map.entry("ro.miui.region", "CN")
+    );
+
+    private static final Map<String, String> WATERMARK_PROPERTIES = Map.ofEntries(
+            Map.entry("ro.product.device", "lhasa"),
+            Map.entry("ro.build.product", "lhasa"),
+            Map.entry("ro.product.name", "lhasa"),
+            Map.entry("ro.product.system.device", "lhasa"),
+            Map.entry("ro.product.vendor.device", "lhasa"),
+            Map.entry("ro.product.odm.device", "lhasa"),
+            Map.entry("ro.product.mod_device", "lhasa")
     );
 
     private ModuleConfig() {
@@ -78,5 +105,16 @@ public final class ModuleConfig {
             return "lcc";
         }
         return NEZHA_PROPERTIES.get(key);
+    }
+
+    public static String aiPropertyOverride(String key) {
+        if ("ro.product.camera.livephoto.support".equals(key)) {
+            return "63";
+        }
+        return AI_PROPERTIES.get(key);
+    }
+
+    public static String galleryWatermarkPropertyOverride(String key) {
+        return WATERMARK_PROPERTIES.get(key);
     }
 }

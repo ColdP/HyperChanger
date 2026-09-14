@@ -103,6 +103,7 @@
     "动态显示": "Dynamic display",
     "独立显示": "Show independently",
     "独立移动网络类型": "Independent mobile network type",
+    "独立移动网络类型粗体显示": "Show independent mobile network type in bold",
     "独立移动网络类型显示逻辑": "Independent mobile network type display logic",
     "独立移动网络类型显示位置": "Independent mobile network type position",
     "独立于LOGO和版本号": "Independent of logo and version number",
@@ -262,6 +263,7 @@
     "时钟大小": "Clock size",
     "使用": "Use",
     "使用全局主题后保持柔光玻璃": "Keep soft glass after using global themes",
+    "悬浮通知启动柔光玻璃材质": "Enable soft glass material for heads-up notifications",
     "使用骁龙处理器图标": "Use Snapdragon processor icon",
     "解锁更多自动锁屏选项": "Unlock more automatic screen timeout options",
     "显示 Google 服务入口": "Show Google service entry",
@@ -286,6 +288,7 @@
     "锁屏输入": "Lock screen input",
     "锁屏输入密码界面数字圆形背景": "Circular background for lock screen password keypad",
     "锁屏小组件": "Lock screen widget",
+    "息屏显示时隐藏锁屏小组件": "Hide lock screen widget during always-on display",
     "锁屏小组件背景调整": "Lock screen widget background adjustment",
     "锁屏小组件背景类型": "Lock screen widget background type",
     "体感": "Feels Like",
@@ -448,9 +451,16 @@
     "重置": "Reset",
     "主题模式": "Theme mode",
     "状态栏": "Status bar",
+    "状态栏与控制中心": "Status bar & Control center",
     "状态栏高度": "Status bar height",
     "状态栏显示": "Status bar display",
     "状态栏信号自定义": "Status bar signal customization",
+    "控制中心隐藏底部编辑按钮": "Hide the bottom edit button in Control center",
+    "控制中心顶部添加控制按钮": "Add control buttons to the top of Control center",
+    "顶部按钮背景材质": "Top button background material",
+    "顶部按钮图标缩放": "Top button icon scale",
+    "顶部按钮背景圆形半径": "Top button background circle radius",
+    "顶部按钮材质参数": "Top button material parameters",
     "字体颜色": "Font color",
     "自带语言": "Built-in language",
     "自定义": "Custom",
@@ -619,5 +629,6 @@
     "media_notification_pause": "Pause",
     "media_notification_next": "Next",
     "calendar_permission_required": "Please allow calendar read permission first"
-  }
+  },
+  "解锁相册编辑 Xiaomi 18 系列新功能": "Unlock new Xiaomi 18 series features in Album Editor"
 }

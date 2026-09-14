@@ -12,6 +12,7 @@ private const val CAMERA_MASTER_ENABLED = "master_enabled"
 private const val CAMERA_LEICA_UI = "leica_ui"
 private const val CAMERA_PRESERVE_FOCAL_LENGTHS = "preserve_native_focal_lengths"
 private const val CAMERA_GALLERY_WATERMARKS = "gallery_all_watermarks"
+private const val CAMERA_GALLERY_PALETTE = "gallery_palette_unlocked"
 private const val CAMERA_INSTANT_MODE = "instant_mode"
 
 data class CameraSettings(
@@ -19,6 +20,7 @@ data class CameraSettings(
     val leicaUi: Boolean = true,
     val preserveNativeFocalLengths: Boolean = true,
     val galleryAllWatermarks: Boolean = true,
+    val galleryPaletteUnlocked: Boolean = false,
     val instantMode: Int = 0,
     val paletteFilter: String = "自然",
     val paletteTone: Float = 0f,
@@ -59,6 +61,7 @@ private fun SharedPreferences.toCameraSettings() = CameraSettings(
     leicaUi = getBoolean(CAMERA_LEICA_UI, true),
     preserveNativeFocalLengths = getBoolean(CAMERA_PRESERVE_FOCAL_LENGTHS, true),
     galleryAllWatermarks = getBoolean(CAMERA_GALLERY_WATERMARKS, true),
+    galleryPaletteUnlocked = getBoolean(CAMERA_GALLERY_PALETTE, false),
     instantMode = getInt(CAMERA_INSTANT_MODE, 0).coerceIn(0, 1),
     paletteFilter = getString("palette_filter", "自然") ?: "自然",
     paletteTone = getFloat("palette_tone", 0f).coerceIn(-1f, 1f),
@@ -79,6 +82,7 @@ private fun SharedPreferences.writeCameraSettings(value: CameraSettings) {
         .putBoolean(CAMERA_LEICA_UI, value.leicaUi)
         .putBoolean(CAMERA_PRESERVE_FOCAL_LENGTHS, value.preserveNativeFocalLengths)
         .putBoolean(CAMERA_GALLERY_WATERMARKS, value.galleryAllWatermarks)
+        .putBoolean(CAMERA_GALLERY_PALETTE, value.galleryPaletteUnlocked)
         .putInt(CAMERA_INSTANT_MODE, value.instantMode.coerceIn(0, 1))
         .putString("palette_filter", value.paletteFilter)
         .putFloat("palette_tone", value.paletteTone.coerceIn(-1f, 1f))
