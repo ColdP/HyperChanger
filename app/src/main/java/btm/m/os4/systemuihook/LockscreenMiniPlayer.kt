@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.media.MediaMetadata
@@ -38,6 +39,7 @@ import io.github.proify.lyricon.subscriber.LyriconFactory
 import io.github.proify.lyricon.subscriber.LyriconSubscriber
 import io.github.proify.lyricon.subscriber.ProviderInfo
 import java.util.Collections
+import java.util.LinkedHashMap
 import java.util.WeakHashMap
 import kotlin.math.max
 import kotlin.math.min
@@ -63,6 +65,14 @@ internal data class MiniPlayerAppearance(
     val softGlassBlurRadius: Int = 36,
     val softGlassLuminance: Float = 0.14f,
 )
+
+/** A lockscreen clock root and the vendor container that exposes its rendered bounds. */
+private data class LockscreenMusicClockTarget(
+    val clock: View,
+    val container: View,
+)
+
+private const val MUSIC_CLOCK_NOTIFICATION_SAFE_GAP_DP = 16f
 
 /** Values sourced from SystemUI's NotificationMediaManager rather than an inferred session list. */
 internal object LockscreenMediaBridge {
@@ -1234,6 +1244,11 @@ internal class LockscreenMusicLockscreenController(
     private var view: LockscreenMusicLockscreenView? = null
     private var refreshPosted = false
     private var tickPosted = false
+    // Keep the vendor clock's own gesture/AOD translation intact and track only our delta.
+    private val appliedClockAvoidanceOffsets = WeakHashMap<View, Float>()
+    private val globalLayoutListener = ViewTreeObserver.OnGlobalLayoutListener {
+        if (view?.visibility == View.VISIBLE) position()
+    }
     private val sessionCallback = object : MediaSessionManager.OnActiveSessionsChangedListener {
         override fun onActiveSessionsChanged(controllers: MutableList<MediaController>?) {
             selectController(controllers.orEmpty())
@@ -1261,6 +1276,7 @@ internal class LockscreenMusicLockscreenController(
         host.clipToPadding = false
         LockscreenMediaPresentationBridge.register(this)
         LockscreenMediaBridge.registerArtworkListener(artworkListener)
+        host.rootView.viewTreeObserver.addOnGlobalLayoutListener(globalLayoutListener)
         host.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> position() }
         runCatching {
             sessions?.addOnActiveSessionsChangedListener(sessionCallback, null, handler)
@@ -1272,8 +1288,10 @@ internal class LockscreenMusicLockscreenController(
     fun destroy() {
         LockscreenMediaPresentationBridge.unregister(this)
         LockscreenMediaBridge.unregisterArtworkListener(artworkListener)
+        runCatching { host.rootView.viewTreeObserver.removeOnGlobalLayoutListener(globalLayoutListener) }
         runCatching { sessions?.removeOnActiveSessionsChangedListener(sessionCallback) }
         runCatching { activeController?.unregisterCallback(controllerCallback) }
+        restoreClockPosition()
         view?.let { host.removeView(it) }
         handler.removeCallbacksAndMessages(null)
         view = null
@@ -1343,6 +1361,7 @@ internal class LockscreenMusicLockscreenController(
         val controller = activeController
         val state = controller?.playbackState
         if (!enabled() || !isLockscreenShowing() || controller == null || !isUsable(controller)) {
+            restoreClockPosition()
             view?.visibility = View.GONE
             return
         }
@@ -1388,13 +1407,20 @@ internal class LockscreenMusicLockscreenController(
     private fun animateIn(target: View) {
         target.animate().cancel()
         target.visibility = View.VISIBLE
+        // Position first so the entrance offset is relative to the actual full-screen panel,
+        // while clock avoidance is calculated against its final bounds.
+        position()
+        val settledTranslationY = target.translationY
         target.alpha = 0f
-        target.translationY = dp(18f).toFloat()
-        target.animate().alpha(1f).translationY(0f).setDuration(260L)
-            .setInterpolator(android.view.animation.DecelerateInterpolator()).start()
+        target.translationY = settledTranslationY + dp(18f)
+        target.animate().alpha(1f).translationY(settledTranslationY).setDuration(260L)
+            .setInterpolator(android.view.animation.DecelerateInterpolator())
+            .withEndAction { position() }
+            .start()
     }
 
     private fun animateOut(target: View) {
+        restoreClockPosition()
         if (target.visibility != View.VISIBLE) return
         target.animate().cancel()
         target.animate().alpha(0f).translationY(dp(18f).toFloat()).setDuration(180L)
@@ -1421,8 +1447,157 @@ internal class LockscreenMusicLockscreenController(
         }
         target.translationX = (host.width - width) / 2f
         target.translationY = (host.height * .27f).coerceAtMost((host.height - height - dp(72f)).toFloat())
+        adjustClockForMusic(target)
         target.bringToFront()
     }
+
+    /**
+     * Keep the system clock clear of the full-screen music surface. MIUI's clock owns its
+     * translation during gestures and AOD transitions, so add only the required delta and
+     * remove it again when the music surface is hidden.
+     */
+    private fun adjustClockForMusic(music: View) {
+        if (music.visibility != View.VISIBLE ||
+            !music.isAttachedToWindow ||
+            !enabled() ||
+            !isLockscreenShowing() ||
+            LockscreenMediaPresentationBridge.presentation != LockscreenMediaPresentation.MUSIC_LOCKSCREEN
+        ) {
+            restoreClockPosition()
+            return
+        }
+        val targets = findLockscreenClockTargets(host.rootView)
+            .filter { target ->
+                target.clock.isAttachedToWindow && isVisibleForClockAvoidance(target.clock)
+            }
+        if (targets.isEmpty()) {
+            restoreClockPosition()
+            return
+        }
+        restoreStaleClockPositions(targets.mapTo(LinkedHashSet()) { it.clock })
+        val musicLocation = IntArray(2).also(music::getLocationOnScreen)
+        val candidateBottoms = mutableListOf<Float>()
+        targets.forEach { target ->
+            val containerLocation = IntArray(2).also(target.container::getLocationOnScreen)
+            target.container.getClockBottomForAvoidance()?.let { bottom ->
+                candidateBottoms += containerLocation[1] + bottom
+            }
+            // All-in-one clocks use a full-height root; mClockViewRect is the actual glyph bound.
+            val clockLocation = IntArray(2).also(target.clock::getLocationOnScreen)
+            val previousOffset = appliedClockAvoidanceOffsets[target.clock] ?: 0f
+            target.clock.getRenderedClockContentBottomForAvoidance()?.let { bottom ->
+                candidateBottoms += clockLocation[1] + bottom - previousOffset
+            }
+        }
+        val clockBottomOnScreen = candidateBottoms.maxOrNull() ?: run {
+            restoreClockPosition()
+            return
+        }
+        val requiredOffset = minOf(
+            0f,
+            musicLocation[1] - dp(MUSIC_CLOCK_NOTIFICATION_SAFE_GAP_DP) - clockBottomOnScreen,
+        )
+        targets.forEach { target ->
+            val clock = target.clock
+            val previousOffset = appliedClockAvoidanceOffsets[clock] ?: 0f
+            val systemOffset = clock.translationY - previousOffset
+            clock.translationY = systemOffset + requiredOffset
+            appliedClockAvoidanceOffsets[clock] = requiredOffset
+        }
+    }
+
+    private fun restoreClockPosition() {
+        appliedClockAvoidanceOffsets.entries.toList().forEach { (clock, offset) ->
+            if (clock.isAttachedToWindow) clock.translationY -= offset
+        }
+        appliedClockAvoidanceOffsets.clear()
+    }
+
+    private fun restoreStaleClockPositions(activeClocks: Set<View>) {
+        appliedClockAvoidanceOffsets.entries.toList()
+            .filter { (clock, _) -> clock !in activeClocks }
+            .forEach { (clock, offset) ->
+                if (clock.isAttachedToWindow) clock.translationY -= offset
+                appliedClockAvoidanceOffsets.remove(clock)
+            }
+    }
+
+    private fun findLockscreenClockTargets(root: View?): List<LockscreenMusicClockTarget> {
+        if (root == null) return emptyList()
+        val targets = LinkedHashMap<View, LockscreenMusicClockTarget>()
+        findPrimaryLockscreenClock(root)?.let { target -> targets[target.clock] = target }
+        findViewByIdNameForClock(
+            root,
+            setOf("miui_keyguard_foreground_clock_container", "keyguard_foreground_clock_container"),
+        )?.let { container ->
+            findVendorClockRoot(container)?.let { clock ->
+                targets[clock] = LockscreenMusicClockTarget(clock, container)
+            }
+        }
+        return targets.values.toList()
+    }
+
+    private fun findPrimaryLockscreenClock(root: View): LockscreenMusicClockTarget? {
+        val container = findViewByClassNameForClock(
+            root,
+            "com.android.keyguard.clock.KeyguardClockContainer",
+        ) ?: return null
+        return readMiuiClockView(container)?.let { LockscreenMusicClockTarget(it, container) }
+    }
+
+    private fun findVendorClockRoot(root: View): View? {
+        if (root.javaClass.name.startsWith("com.miui.clock.")) return root
+        if (root is ViewGroup) {
+            for (index in 0 until root.childCount) {
+                findVendorClockRoot(root.getChildAt(index))?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private fun findViewByClassNameForClock(root: View, className: String): View? {
+        if (root.javaClass.name == className) return root
+        if (root is ViewGroup) {
+            for (index in 0 until root.childCount) {
+                findViewByClassNameForClock(root.getChildAt(index), className)?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private fun findViewByIdNameForClock(root: View, names: Set<String>): View? {
+        val idName = runCatching { root.resources.getResourceEntryName(root.id) }.getOrDefault("")
+        if (idName in names) return root
+        if (root is ViewGroup) {
+            for (index in 0 until root.childCount) {
+                findViewByIdNameForClock(root.getChildAt(index), names)?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private fun readMiuiClockView(container: View): View? = runCatching {
+        val controllerField = container.javaClass.getDeclaredField("mMiuiClockController")
+            .apply { isAccessible = true }
+        val controller = controllerField.get(container) ?: return@runCatching null
+        val clockField = controller.javaClass.getDeclaredField("mClockView")
+            .apply { isAccessible = true }
+        clockField.get(controller) as? View
+    }.getOrNull()
+
+    private fun View.getClockBottomForAvoidance(): Float? = runCatching {
+        (javaClass.getMethod("getClockBottom").invoke(this) as? Number)
+            ?.toFloat()?.takeIf { it > 0f }
+    }.getOrNull()
+
+    private fun View.getRenderedClockContentBottomForAvoidance(): Float? = runCatching {
+        (javaClass.getMethod("getMClockViewRect").invoke(this) as? Rect)
+            ?.takeIf { !it.isEmpty }?.bottom?.toFloat()
+    }.getOrNull()
+
+    private fun isVisibleForClockAvoidance(candidate: View): Boolean =
+        candidate.visibility == View.VISIBLE && candidate.alpha > 0.01f &&
+            candidate.width > 0 && candidate.height > dp(24f)
 
     private fun toggle(controller: MediaController) {
         runCatching {
