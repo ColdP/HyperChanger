@@ -53,6 +53,7 @@ private const val MODULE_PACKAGE = "btm.m.os4.systemuihook"
 private const val CLOCK_DATA_UTILS_CLASS = "com.miui.clock.utils.DataUtils"
 private const val WIDGET_WIDTH_DP = 360f
 private const val WIDGET_HEIGHT_DP = 64f
+private const val WIDGET_PRESENTATION_POSITION_DURATION_MS = 360L
 private const val WIDGET_COMBINATION_TWO_HEIGHT_DP = 64f
 private const val WIDGET_VERTICAL_OFFSET_DP = 80f
 private const val WIDGET_TEXT_SIZE_SP = 15.3f
@@ -1013,7 +1014,7 @@ internal class LockscreenWidgetController(
     private val classLoader: ClassLoader,
     private val applyBatteryTrackMaterial: (View) -> Unit,
     private val applyShortcutSurfaceMaterial: (View) -> Unit,
-) {
+) : LockscreenMediaPresentationListener {
     private val context = host.context
     private val handler = Handler(Looper.getMainLooper())
     private var view: LockscreenWidgetView? = null
@@ -1029,6 +1030,17 @@ internal class LockscreenWidgetController(
     private var targetVisible = false
     private var appearanceAnimating = false
     private var hideAnimationRunning = false
+    private var presentationPositionAnimating = false
+    private var positionAnimationTargetX = Float.NaN
+    private var positionAnimationTargetY = Float.NaN
+    private val finishPresentationPositionAnimation = Runnable {
+        presentationPositionAnimating = false
+        positionAnimationTargetX = Float.NaN
+        positionAnimationTargetY = Float.NaN
+        view?.let { widget ->
+            if (widget.isAttachedToWindow && widget.visibility == View.VISIBLE) position()
+        }
+    }
     private var lastLockscreenVisible: Boolean? = null
     private var notificationStack: WeakReference<View>? = null
     private val preferenceListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -1069,6 +1081,7 @@ internal class LockscreenWidgetController(
         host.clipChildren = false
         host.clipToPadding = false
         LockscreenWidgetSceneState.register(this)
+        LockscreenMediaPresentationBridge.register(this)
         preferences.registerOnSharedPreferenceChangeListener(preferenceListener)
         host.rootView.viewTreeObserver.addOnGlobalLayoutListener(layoutListener)
         leftShortcut.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> schedulePosition() }
@@ -1078,13 +1091,18 @@ internal class LockscreenWidgetController(
 
     fun destroy() {
         LockscreenWidgetSceneState.unregister(this)
+        LockscreenMediaPresentationBridge.unregister(this)
         runCatching { preferences.unregisterOnSharedPreferenceChangeListener(preferenceListener) }
         runCatching { host.rootView.viewTreeObserver.removeOnGlobalLayoutListener(layoutListener) }
         restoreClockPosition()
         runCatching { view?.let(host::removeView) }
         handler.removeCallbacksAndMessages(null)
         host.removeCallbacks(animationFollower)
+        host.removeCallbacks(finishPresentationPositionAnimation)
         followerPosted = false
+        presentationPositionAnimating = false
+        positionAnimationTargetX = Float.NaN
+        positionAnimationTargetY = Float.NaN
         view = null
         displayedItemMask = -1
         displayedItemOrder = emptyList()
@@ -1110,6 +1128,19 @@ internal class LockscreenWidgetController(
         } else {
             host.post(updateVisibility)
         }
+    }
+
+    override fun onMediaPresentationChanged(presentation: LockscreenMediaPresentation) {
+        // The media header is inserted/removed from the notification stack asynchronously.
+        // Keep the widget's current position as the origin and retarget it as the stack settles,
+        // otherwise notification avoidance moves it above the island in one traversal.
+        presentationPositionAnimating = true
+        host.removeCallbacks(finishPresentationPositionAnimation)
+        host.postDelayed(
+            finishPresentationPositionAnimation,
+            WIDGET_PRESENTATION_POSITION_DURATION_MS + 80L,
+        )
+        host.post(::refresh)
     }
 
     private fun refresh() {
@@ -1170,6 +1201,8 @@ internal class LockscreenWidgetController(
         }
         val shouldShow = preferences.getBoolean(KEY_LOCKSCREEN_WIDGET_ENABLED, false) &&
             isLockscreenVisible() &&
+            LockscreenMediaPresentationBridge.presentation != LockscreenMediaPresentation.MUSIC_LOCKSCREEN &&
+            LockscreenMediaPresentationBridge.presentation != LockscreenMediaPresentation.MUSIC_LOCKSCREEN_STYLE2 &&
             !(preferences.getBoolean(KEY_LOCKSCREEN_WIDGET_HIDE_ON_AOD, false) &&
                 LockscreenWidgetSceneState.aodActive)
         if (!shouldShow) {
@@ -1554,7 +1587,7 @@ internal class LockscreenWidgetController(
             return
         }
         if (widget.width <= 0 || widget.height <= 0) return
-        widget.translationX = centerX - widget.width / 2f - widget.left
+        val targetX = centerX - widget.width / 2f - widget.left
         val normalTargetY = centerY - widget.height / 2f - dp(WIDGET_VERTICAL_OFFSET_DP) - widget.top
         val notificationTargetY = if (preferences.getBoolean(KEY_LOCKSCREEN_WIDGET_NOTIFICATION_AVOID, true)) {
             firstVisibleNotificationTop()?.let { notificationTop ->
@@ -1563,7 +1596,26 @@ internal class LockscreenWidgetController(
         } else {
             null
         }
-        widget.translationY = notificationTargetY?.let { minOf(normalTargetY, it) } ?: normalTargetY
+        val targetY = notificationTargetY?.let { minOf(normalTargetY, it) } ?: normalTargetY
+        if (presentationPositionAnimating) {
+            val targetChanged = positionAnimationTargetX.isNaN() ||
+                kotlin.math.abs(positionAnimationTargetX - targetX) > 1f ||
+                kotlin.math.abs(positionAnimationTargetY - targetY) > 1f
+            if (targetChanged) {
+                positionAnimationTargetX = targetX
+                positionAnimationTargetY = targetY
+                if (!appearanceAnimating) widget.animate().cancel()
+                widget.animate()
+                    .translationX(targetX)
+                    .translationY(targetY)
+                    .setDuration(WIDGET_PRESENTATION_POSITION_DURATION_MS)
+                    .setInterpolator(android.view.animation.DecelerateInterpolator(1.35f))
+                    .start()
+            }
+        } else {
+            widget.translationX = targetX
+            widget.translationY = targetY
+        }
         adjustClockForWidget(widget)
         if (!appearanceAnimating) syncShortcutAppearance(widget)
     }
@@ -1583,6 +1635,17 @@ internal class LockscreenWidgetController(
             return
         }
         restoreStaleClockPositions(targets.mapTo(LinkedHashSet()) { it.clock })
+        // Remove this controller's previous frame before reading geometry. The OEM clock may
+        // have moved down during the same gesture; subtracting an old negative avoidance value
+        // from that measurement made the next frame keep the stale offset instead of following
+        // the finger back to its natural size/position.
+        targets.forEach { target ->
+            val clock = target.clock
+            val previousOffset = appliedClockAvoidanceOffsets.remove(clock) ?: 0f
+            if (clock.isAttachedToWindow && previousOffset != 0f) {
+                clock.translationY -= previousOffset
+            }
+        }
         val widgetLocation = IntArray(2).also(widget::getLocationOnScreen)
         val candidateBottoms = buildList {
             targets.forEach { target ->
@@ -1593,9 +1656,8 @@ internal class LockscreenWidgetController(
                 // All-in-one clocks animate their contents inside a full-height root. Its
                 // measured height is unusable, while mClockViewRect tracks the time glyph.
                 val clockLocation = IntArray(2).also(target.clock::getLocationOnScreen)
-                val previousOffset = appliedClockAvoidanceOffsets[target.clock] ?: 0f
                 target.clock.getRenderedClockContentBottom()?.let { bottom ->
-                    add(clockLocation[1] + bottom - previousOffset)
+                    add(clockLocation[1] + bottom)
                 }
             }
         }
@@ -1609,9 +1671,7 @@ internal class LockscreenWidgetController(
         )
         targets.forEach { target ->
             val clock = target.clock
-            val previousOffset = appliedClockAvoidanceOffsets[clock] ?: 0f
-            val systemOffset = clock.translationY - previousOffset
-            clock.translationY = systemOffset + requiredOffset
+            clock.translationY += requiredOffset
             appliedClockAvoidanceOffsets[clock] = requiredOffset
         }
     }

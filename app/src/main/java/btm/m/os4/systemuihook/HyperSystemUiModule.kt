@@ -3,9 +3,11 @@
 package btm.m.os4.systemuihook
 
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.app.KeyguardManager
 import android.content.res.ColorStateList
+import android.content.res.Configuration
 import android.content.res.Resources
 import android.net.ConnectivityManager
 import android.net.Network
@@ -40,8 +42,10 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
+import android.view.ViewConfiguration
 import android.view.animation.DecelerateInterpolator
 import android.view.ViewParent
+import android.view.ViewTreeObserver
 import android.view.inputmethod.EditorInfo
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -52,6 +56,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import btm.m.xiaoaihook.SuperXiaoAiInputHook
 import java.util.Collections
+import java.lang.ref.WeakReference
 import java.lang.reflect.Method
 import java.util.IdentityHashMap
 import java.util.LinkedHashMap
@@ -75,6 +80,31 @@ private data class StackedMobileSubscription(
     val isDefault: Boolean?,
     val signalLevel: Int,
 )
+
+/** Applies the music-lockscreen clock collapse at the OEM TimeView size boundary. */
+internal object LockscreenNativeClockScaler {
+    private const val SCALE = 0.62f
+    @Volatile private var active = false
+
+    fun scaleFor(view: View, value: Float): Float =
+        if (active && isKeyguardClock(view)) value * SCALE else value
+
+    fun setActive(value: Boolean) { active = value }
+
+    fun restore() { active = false }
+
+    private fun isKeyguardClock(view: View): Boolean {
+        var current: View? = view
+        while (current != null) {
+            val name = current.javaClass.name
+            if (name.contains("KeyguardClock", ignoreCase = true) ||
+                name.contains("ClockContainer", ignoreCase = true)
+            ) return true
+            current = current.parent as? View
+        }
+        return false
+    }
+}
 
 private class StackedMobilePresentation(
     val root: ViewGroup,
@@ -248,6 +278,11 @@ class HyperSystemUiModule : XposedModule() {
 
     override fun onPackageLoaded(param: PackageLoadedParam) {
         if (!OsCompatibility.areHooksAllowed()) return
+        if (param.packageName == LOCKSCREEN_WALLPAPER) {
+            // HyperMusicCover's original Java WallpaperProbe is registered separately through
+            // java_init.list and owns this process's GL upload hook.
+            return
+        }
         if (param.packageName !in SYSTEM_UI_TARGETS) return
         if (param.packageName == SUPER_XIAOAI_IME || param.packageName == SUPER_XIAOAI_PHRASE) {
             installSuperXiaoAiHooks(param.packageName, param.defaultClassLoader)
@@ -261,6 +296,7 @@ class HyperSystemUiModule : XposedModule() {
                         synchronized(controlCenterButtonsLock) {
                             systemUiClassLoader = param.defaultClassLoader
                         }
+                        installHyperMusicCoverGestureBridge(param.defaultClassLoader, preferences)
                         scheduleSoftGlassThemeActivation(preferences)
                     }
                     if (!resourceHooksInstalled) {
@@ -317,17 +353,27 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     if (param.packageName == SYSTEM_UI && !lockscreenNotificationHookInstalled) {
                         installLockscreenNotificationHook(param.defaultClassLoader, preferences)
-                        installLockscreenMediaNotificationHook(param.defaultClassLoader, preferences)
                         lockscreenNotificationHookInstalled = true
                     }
-                    if (param.packageName == SYSTEM_UI && !lockscreenClockDateFollowHookInstalled) {
-                        installLockscreenClockDateFollowHook(param.defaultClassLoader)
-                        lockscreenClockDateFollowHookInstalled = true
+                    if (param.packageName == SYSTEM_UI && !lockscreenMediaNotificationHookInstalled) {
+                        // Keep the imported Main.java as the owner of the card's animation and
+                        // wallpaper. This hook only supplies the real MIUI header lifecycle and
+                        // the artwork gesture bridge that Main cannot see below the window.
+                        installLockscreenMediaNotificationHook(param.defaultClassLoader, preferences)
+                        lockscreenMediaNotificationHookInstalled = true
                     }
+                    // The native clock already keeps the date attached while its glyph group is
+                    // scaled for music lockscreen. A second date-follow translation fights that
+                    // layout and can move the date off-screen, so do not install the legacy
+                    // avoidance hook here.
+                    lockscreenClockDateFollowHookInstalled = true
                     if (param.packageName == SYSTEM_UI && !systemUiLockscreenClockColonHookInstalled) {
                         installLockscreenClockColonHook(param.defaultClassLoader, preferences, "systemui")
                         systemUiLockscreenClockColonHookInstalled = true
                     }
+                    // HyperMusicCover hooks TimeView itself and applies its original clock
+                    // response/collapse path. Do not stack the former Kotlin size interceptor.
+                    systemUiNativeClockScalerHookInstalled = true
                     if (param.packageName == SYSTEM_UI && !fingerprintIconHookInstalled) {
                         installFingerprintIconVisualHook(param.defaultClassLoader, preferences)
                         // This optional visual hook varies between HyperOS builds.  Do not
@@ -360,10 +406,9 @@ class HyperSystemUiModule : XposedModule() {
                         installLockscreenWidgetSceneVisibilityHooks(param.defaultClassLoader)
                         lockscreenWidgetSceneVisibilityHookInstalled = true
                     }
-                    if (param.packageName == SYSTEM_UI && !lockscreenMusicLockscreenHookInstalled) {
-                        installLockscreenMusicLockscreenHook(param.defaultClassLoader, preferences)
-                        lockscreenMusicLockscreenHookInstalled = true
-                    }
+                    // The imported Java module is the music-lockscreen implementation. The old
+                    // Kotlin full-screen host is deliberately not installed alongside it.
+                    lockscreenMusicLockscreenHookInstalled = true
                     if (param.packageName == SYSTEM_UI && !lockscreenPinCircleBackgroundHookInstalled) {
                         installLockscreenPinCircleBackgroundHook(param.defaultClassLoader, preferences)
                         lockscreenPinCircleBackgroundHookInstalled = true
@@ -427,6 +472,138 @@ class HyperSystemUiModule : XposedModule() {
             log(Log.INFO, TAG, "Installed hooks for ${param.packageName}")
         }.onFailure { error ->
             log(Log.ERROR, TAG, "Could not install hooks for ${param.packageName}", error)
+        }
+    }
+
+    /**
+     * Keeps the existing mini-player gesture and setting as a thin control surface for the
+     * imported runtime. The cover, clock and media-card implementation remain in
+     * HyperMusicCover's Main; this only sends its public PROBE commands after Main has attached
+     * its receiver to the keyguard clock.
+     */
+    private fun installHyperMusicCoverGestureBridge(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
+        if (hyperMusicCoverGestureBridgeInstalled) return
+        hyperMusicCoverGestureBridgeInstalled = true
+
+        LockscreenMediaPresentationBridge.onPresentationChanged = { presentation ->
+            dispatchHyperMusicCoverState(preferences, presentation)
+        }
+        val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED) {
+                dispatchHyperMusicCoverState(preferences, LockscreenMediaPresentationBridge.presentation)
+            }
+        }
+        runCatching {
+            preferences.registerOnSharedPreferenceChangeListener(preferenceListener)
+            hyperMusicCoverPreferenceChangeListener = preferenceListener
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not observe HyperMusicCover setting changes", error)
+        }
+
+        runCatching {
+            val clockContainer = classLoader.loadClass("com.android.keyguard.clock.KeyguardClockContainer")
+            val attach = generateSequence(clockContainer as Class<*>?) { it.superclass }
+                .flatMap { it.declaredMethods.asSequence() }
+                .firstOrNull { it.name == "onAttachedToWindow" && it.parameterCount == 0 }
+                ?: error("KeyguardClockContainer.onAttachedToWindow was not found")
+            hook(attach)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("hypermusiccover:gesture-bridge-ready")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    (chain.thisObject as? View)?.let { clock ->
+                        systemUiApplicationContext = clock.context.applicationContext
+                        activeLockscreenClockContainer = WeakReference(clock)
+                        clock.post {
+                            dispatchHyperMusicCoverState(
+                                preferences,
+                                LockscreenMediaPresentationBridge.presentation,
+                            )
+                        }
+                    }
+                    result
+                }
+            log(Log.INFO, TAG, "Installed HyperMusicCover gesture bridge")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install HyperMusicCover gesture bridge", error)
+        }
+    }
+
+    private fun dispatchHyperMusicCoverState(
+        preferences: SharedPreferences,
+        presentation: LockscreenMediaPresentation,
+    ) {
+        val enabled = preferences.getBoolean(KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED, false)
+        val context = systemUiApplicationContext ?: return
+        // Music lockscreen is gesture-selected. Letting Main follow the media card would restore
+        // a cover behind SYSTEM_MEDIA during process/keyguard startup and create a mixed state.
+        sendHyperMusicCoverCommand(context, "auto", false)
+        val musicLockscreen = enabled && presentation == LockscreenMediaPresentation.MUSIC_LOCKSCREEN
+        val musicLockscreenStyle2 = enabled &&
+            presentation == LockscreenMediaPresentation.MUSIC_LOCKSCREEN_STYLE2
+        if (musicLockscreen) {
+            // Main.java owns the card transition. Set its targets before pushart changes
+            // sCoverMode, so its existing spring drives artwork alpha/scale and glyph
+            // translation together.
+            sendHyperMusicCoverMediaCardCommand(context, hideArtwork = true, centerText = true)
+            sendHyperMusicCoverCommand(context, "style2", false)
+            sendHyperMusicCoverCommand(context, "pushart", true)
+        } else if (musicLockscreenStyle2) {
+            sendHyperMusicCoverMediaCardCommand(context, hideArtwork = true, centerText = true)
+            sendHyperMusicCoverCommand(context, "style2", true)
+        } else {
+            // Keep Main's hide/centre targets alive while its exit spring runs. Clearing them
+            // first would make the notification snap back before the wallpaper/clock settle.
+            sendHyperMusicCoverCommand(context, "style2", false)
+            sendHyperMusicCoverCommand(context, "pushart", false)
+            Handler(Looper.getMainLooper()).postDelayed({
+                val current = LockscreenMediaPresentationBridge.presentation
+                val stillOutsideMusic = !preferences.getBoolean(
+                    KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED, false,
+                ) || (current != LockscreenMediaPresentation.MUSIC_LOCKSCREEN &&
+                    current != LockscreenMediaPresentation.MUSIC_LOCKSCREEN_STYLE2)
+                if (stillOutsideMusic) {
+                    sendHyperMusicCoverMediaCardCommand(
+                        context,
+                        hideArtwork = false,
+                        centerText = false,
+                    )
+                }
+            }, HYPER_MUSIC_COVER_CARD_RESET_DELAY_MS)
+        }
+    }
+
+    private fun sendHyperMusicCoverMediaCardCommand(
+        context: Context,
+        hideArtwork: Boolean,
+        centerText: Boolean,
+    ) {
+        runCatching {
+            context.sendBroadcast(
+                Intent(HYPER_MUSIC_COVER_ACTION)
+                    .setPackage(SYSTEM_UI)
+                    .putExtra("op", "mediacard")
+                    .putExtra("hideart", hideArtwork)
+                    .putExtra("centertext", centerText),
+            )
+        }.onFailure { error ->
+            log(Log.DEBUG, TAG, "Could not send HyperMusicCover mediacard command", error)
+        }
+    }
+
+    private fun sendHyperMusicCoverCommand(context: Context, op: String, on: Boolean) {
+        runCatching {
+            context.sendBroadcast(
+                Intent(HYPER_MUSIC_COVER_ACTION)
+                    .setPackage(SYSTEM_UI)
+                    .putExtra("op", op)
+                    .putExtra("on", on),
+            )
+        }.onFailure { error ->
+            log(Log.DEBUG, TAG, "Could not send HyperMusicCover $op command", error)
         }
     }
 
@@ -600,6 +777,7 @@ class HyperSystemUiModule : XposedModule() {
             if (!controlCenterPreferenceListenerInstalled) {
                 val listener = SharedPreferences.OnSharedPreferenceChangeListener { changed, key ->
                     if (key == ADD_CONTROL_CENTER_TOP_BUTTONS_KEY ||
+                        key == KEY_SHOW_CONTROL_CENTER_TOP_BUTTONS_IN_LANDSCAPE ||
                         key == KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON ||
                         key == KEY_CONTROL_CENTER_TOP_BUTTONS_ICON_SCALE ||
                         key == KEY_CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_MODE ||
@@ -1200,7 +1378,9 @@ class HyperSystemUiModule : XposedModule() {
     private fun installControlCenterTopButtonsIntoRoot(root: ViewGroup, preferences: SharedPreferences) {
         synchronized(controlCenterButtonsLock) { controlCenterRoot = root }
         installControlCenterRootDispatchHook(root)
-        val enabled = preferences.getBoolean(ADD_CONTROL_CENTER_TOP_BUTTONS_KEY, false)
+        val enabled = preferences.getBoolean(ADD_CONTROL_CENTER_TOP_BUTTONS_KEY, false) &&
+            (root.resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE ||
+                preferences.getBoolean(KEY_SHOW_CONTROL_CENTER_TOP_BUTTONS_IN_LANDSCAPE, false))
         log(
             Log.DEBUG,
             TAG,
@@ -3608,7 +3788,55 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     result
                 }
-            hookCount += 3
+
+            // Some HyperOS status-bar builds use a PorterDuff color filter for dark-icon
+            // transitions instead of updating ImageView.imageTintList.  The replacement glyph
+            // and the independent label must follow that path too. Hook every public overload so
+            // vendor changes in the filter API do not leave either presentation stale.
+            ImageView::class.java.methods
+                .filter { it.name == "setColorFilter" }
+                .distinctBy { method -> method.parameterTypes.toList() }
+                .forEachIndexed { index, method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("status-bar:stacked-mobile-color-filter-$index")
+                        .intercept { chain ->
+                            val result = chain.proceed()
+                            (chain.thisObject as? ImageView)?.let { view ->
+                                refreshStackedMobilePresentationForView(view, enabled)
+                            }
+                            result
+                        }
+                }
+            ImageView::class.java.methods
+                .firstOrNull { it.name == "clearColorFilter" && it.parameterCount == 0 }
+                ?.let { method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("status-bar:stacked-mobile-clear-color-filter")
+                        .intercept { chain ->
+                            val result = chain.proceed()
+                            (chain.thisObject as? ImageView)?.let { view ->
+                                refreshStackedMobilePresentationForView(view, enabled)
+                            }
+                            result
+                        }
+                }
+
+            // A stateful tint can change when SystemUI refreshes the ImageView drawable state,
+            // without calling setImageTintList again. Coalescing in the presentation scheduler
+            // keeps this broad hook cheap while covering those transitions.
+            hook(View::class.java.getMethod("refreshDrawableState"))
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("status-bar:stacked-mobile-drawable-state")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    (chain.thisObject as? ImageView)?.let { view ->
+                        refreshStackedMobilePresentationForView(view, enabled)
+                    }
+                    result
+                }
+            hookCount += 4
         }.onFailure { error ->
             log(Log.WARN, TAG, "Stacked mobile drawable hooks unavailable", error)
         }
@@ -3640,6 +3868,43 @@ class HyperSystemUiModule : XposedModule() {
             hookCount++
         }.onFailure { error ->
             log(Log.DEBUG, TAG, "Mobile network type text hook unavailable", error)
+        }
+
+        // SystemUI may apply the resolved dark/light color directly to the independent
+        // TextView after the signal callback. Re-apply the signal's effective color after either
+        // TextView.setTextColor overload so that late framework updates cannot overwrite it.
+        runCatching {
+            TextView::class.java.methods
+                .filter { it.name == "setTextColor" }
+                .distinctBy { method -> method.parameterTypes.toList() }
+                .forEachIndexed { index, method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("status-bar:independent-mobile-type-color-$index")
+                        .intercept { chain ->
+                            val result = chain.proceed()
+                            val sourceView = chain.thisObject as? TextView
+                            if (sourceView != null && stackedMobileApplying.get() != true) {
+                                val presentation = synchronized(stackedMobileSignalLock) {
+                                    stackedMobilePresentations.values.firstOrNull {
+                                        it.independentType === sourceView
+                                    }
+                                }
+                                if (presentation != null) {
+                                    stackedMobileApplying.set(true)
+                                    try {
+                                        sourceView.setTextColor(resolveMobileSignalColor(presentation.signal))
+                                    } finally {
+                                        stackedMobileApplying.remove()
+                                    }
+                                }
+                            }
+                            result
+                        }
+                }
+            hookCount++
+        }.onFailure { error ->
+            log(Log.DEBUG, TAG, "Independent mobile network type color hook unavailable", error)
         }
 
         // The modern view assigns its subscription id after inflation. This also covers builds
@@ -3991,10 +4256,7 @@ class HyperSystemUiModule : XposedModule() {
                     stackedMobileApplying.remove()
                 }
                 applyIndependentMobileTypeTypeface(presentation)
-                val color = presentation.signal.imageTintList?.getColorForState(
-                    presentation.signal.drawableState,
-                    Color.WHITE,
-                ) ?: Color.WHITE
+                val color = resolveMobileSignalColor(presentation.signal)
                 textView.setTextColor(color)
                 setStackedMobileViewVisibility(
                     textView,
@@ -4384,11 +4646,15 @@ class HyperSystemUiModule : XposedModule() {
             (leftMargin * density).roundToInt(),
             (rightMargin * density).roundToInt(),
         )
+        val sourceTint = presentation.signal.imageTintList
+            ?: resolveDrawableTintList(presentation.signal.drawable)
+        val sourceColorFilter = resolveMobileSignalColorFilter(presentation.signal)
         dualSignal.setImageDrawable(
             StackedMobileDrawable(upperSubscription.signalLevel, lowerSubscription.signalLevel).apply {
                 alpha = presentation.signal.imageAlpha
-                setTintList(presentation.signal.imageTintList)
-                presentation.signal.colorFilter?.let(::setColorFilter)
+                setTintList(sourceTint)
+                state = presentation.signal.drawableState
+                sourceColorFilter?.let(::setColorFilter)
             },
         )
         if (mobileNetworkTypeMode == 0) {
@@ -5033,18 +5299,81 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun notificationOnKeyguard(view: View): Boolean {
+        // The NSSL status and expanded height are the lockscreen/shade ownership boundary. The
+        // same MiuiMediaHeaderView instance is reused by both surfaces, so never mutate it for
+        // the notification shade while a pull-down is in progress.
+        val stack = generateSequence<View>(view) { it.parent as? View }
+            .firstOrNull { it.javaClass.name.contains("NotificationStackScrollLayout") }
+        val stackState = generateSequence<View>(view) { it.parent as? View }
+            .mapNotNull { candidate ->
+                if (!candidate.javaClass.name.contains("NotificationStackScrollLayout")) return@mapNotNull null
+                runCatching {
+                    (candidate.javaClass.methods.firstOrNull {
+                        it.name == "onKeyguard" && it.parameterCount == 0
+                    }?.invoke(candidate) as? Boolean)
+                        ?: ((readInstanceField(candidate, "mStatusBarState") as? Number)?.toInt() == 1)
+                }.getOrNull()
+            }
+            .firstOrNull()
+        if (stackState != null) {
+            // mExpandedHeight is non-zero on the lockscreen before the first shade frame, so it
+            // cannot identify the notification center. mIsExpanded is the NSSL ownership flag
+            // and remains false for the lockscreen island's collapsed media header.
+            val shadeExpanded = (stack?.let { readInstanceField(it, "mIsExpanded") } as? Boolean) == true
+            if (shadeExpanded) return false
+            // During lockscreen-island creation NSSL can still report shade state 0 even though
+            // KeyguardManager already reports the device locked. Keep the keyguard signal alive
+            // until the shade explicitly owns the shared header.
+            return stackState || lockscreenMediaKeyguardShowing || isLockscreenMediaView(view)
+        }
         val state = generateSequence<View>(view) { it.parent as? View }
             .mapNotNull { candidate ->
                 runCatching {
                     readInstanceField(candidate, "mOnKeyguard") as? Boolean
                         ?: (candidate.javaClass.methods.firstOrNull {
-                            it.name == "isOnKeyguard" && it.parameterCount == 0
+                            (it.name == "isOnKeyguard" || it.name == "onKeyguard") && it.parameterCount == 0
                         }?.invoke(candidate) as? Boolean)
                 }.getOrNull()
             }
             .firstOrNull()
         if (state != null) return state
-        return isMediaNotificationView(view) && isLockscreenMediaView(view)
+        // Some vendor builds do not expose NSSL's onKeyguard/status fields. The media controller
+        // callback is the remaining lockscreen signal; the expanded-shade guard above has already
+        // ruled out the shared notification-center instance before this fallback is reached.
+        return (lockscreenMediaKeyguardShowing || isLockscreenMediaView(view)) &&
+            isMediaNotificationView(view) && !isExpandedNotificationShade(view)
+    }
+
+    /** The media header is shared by keyguard and the expanded notification shade. */
+    private fun isExpandedNotificationShade(view: View): Boolean {
+        val stack = generateSequence<View>(view) { it.parent as? View }
+            .firstOrNull { it.javaClass.name.contains("NotificationStackScrollLayout") }
+            ?: return false
+        return (readInstanceField(stack, "mIsExpanded") as? Boolean) == true ||
+            (readInstanceField(stack, "mExpandedHeight") as? Number)?.toFloat()?.let { it > 1f } == true &&
+            (readInstanceField(stack, "mStatusBarState") as? Number)?.toInt() != 1
+    }
+
+    /**
+     * Header attachment can precede the vendor keyguard callback by one traversal. Fall back to
+     * KeyguardManager only when the notification shade is definitely not expanded, so entering
+     * the compact island hides the card in the current lockscreen frame instead of on relock.
+     */
+    private fun mediaHeaderOnActiveKeyguard(header: View): Boolean {
+        if (isExpandedNotificationShade(header)) return false
+        // The media controller's state flow often still says "not on keyguard" during the
+        // first frame that creates the lockscreen island.  The attached clock container is the
+        // same authoritative lockscreen signal used by the imported Main.java and is already
+        // visible at that point.  Prefer it after ruling out an expanded shade, so MINI_PLAYER
+        // can hide the media header in this frame instead of waiting for a later relock.
+        val clockShowing = activeLockscreenClockContainer?.get()?.let { clock ->
+            clock.isAttachedToWindow && clock.isShown
+        } == true
+        if (clockShowing) return true
+        if (notificationOnKeyguard(header)) return true
+        return runCatching {
+            header.context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true
+        }.getOrDefault(false)
     }
 
     private fun applySystemNotificationRowGlass(background: View, source: String): Boolean {
@@ -5903,6 +6232,36 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
+    /**
+     * Resolves the color currently rendered by the stock signal view. Depending on the
+     * SystemUI generation, dark-icon transitions arrive as a stateful image tint, a
+     * PorterDuff filter, or a tint/filter installed directly on the source drawable.
+     */
+    private fun resolveMobileSignalColor(signal: ImageView): Int {
+        val state = signal.drawableState
+        val tint = signal.imageTintList ?: resolveDrawableTintList(signal.drawable)
+        val tintedColor = tint?.getColorForState(state, tint.defaultColor)
+        val filter = signal.colorFilter ?: signal.drawable?.colorFilter
+        val filteredColor = resolveColorFilterColor(filter)
+        return filteredColor ?: tintedColor ?: Color.WHITE
+    }
+
+    private fun resolveMobileSignalColorFilter(signal: ImageView): ColorFilter? =
+        signal.colorFilter ?: signal.drawable?.colorFilter
+
+    private fun resolveDrawableTintList(drawable: Drawable?): ColorStateList? = drawable?.let {
+        runCatching {
+            it.javaClass.getMethod("getTintList").invoke(it) as? ColorStateList
+        }.getOrNull()
+    }
+
+    private fun resolveColorFilterColor(filter: ColorFilter?): Int? {
+        if (filter == null) return null
+        return runCatching {
+            filter.javaClass.getMethod("getColor").invoke(filter) as? Int
+        }.getOrNull()
+    }
+
     private fun installLockscreenMusicLockscreen(
         host: ViewGroup,
         isLockscreenShowing: () -> Boolean,
@@ -5921,24 +6280,9 @@ class HyperSystemUiModule : XposedModule() {
         val controller = LockscreenMusicLockscreenController(
             host = host,
             enabled = {
-                preferences.getBoolean(KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED, false) &&
-                    preferences.getBoolean(KEY_LOCKSCREEN_MINI_PLAYER_ENABLED, false)
+                preferences.getBoolean(KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED, false)
             },
             isLockscreenShowing = isLockscreenShowing,
-            appearance = { miniPlayerAppearance(preferences) },
-            iconColor = {
-                when (shortcutIconColorMode(preferences)) {
-                    SHORTCUT_ICON_COLOR_DARK -> SHORTCUT_ICON_DARK_COLOR
-                    SHORTCUT_ICON_COLOR_LIGHT, SHORTCUT_ICON_COLOR_AUTO -> SHORTCUT_ICON_LIGHT_COLOR
-                    else -> SHORTCUT_ICON_LIGHT_COLOR
-                }
-            },
-            applyPlatformMaterial = { view, currentAppearance ->
-                runCatching { applyMiniPlayerMaterial(view, currentAppearance, classLoader) }
-                    .onFailure { error ->
-                        log(Log.ERROR, TAG, "Could not initialize music-lockscreen material", error)
-                    }
-            },
         )
         synchronized(lockscreenMusicLockscreenControllers) {
             lockscreenMusicLockscreenControllers[host] = controller
@@ -6957,11 +7301,34 @@ class HyperSystemUiModule : XposedModule() {
     ) {
         runCatching {
             installLockscreenMediaManagerBridgeHooks(classLoader)
+            installLockscreenMediaControllerVisibilityHook(classLoader, preferences)
             installLockscreenMediaHeaderHook(classLoader, preferences)
+            installLockscreenMediaEffectRefreshHook(classLoader)
             installLockscreenCustomizationMenuHook(classLoader)
             installLockscreenMediaVisibilityProviderHooks(classLoader, preferences)
             installLockscreenMediaPipelineHook(classLoader, preferences)
             installTinyLockscreenMediaHook(classLoader, preferences)
+            installLockscreenMediaRowVisibilityHook(classLoader, preferences)
+            log(Log.INFO, TAG, "Installed lockscreen media-notification header/row/pipeline hooks")
+        }.onFailure { error ->
+            log(Log.ERROR, TAG, "Could not install lockscreen media-notification visibility hook", error)
+        }
+    }
+
+    /**
+     * Keep the actual lockscreen notification row in the same presentation state as the vendor
+     * media header. This is the dynamic path used by 1.1.1: hide only while the row is assigned
+     * to keyguard, then immediately hand the same row back when the island is tapped.
+     *
+     * The media entry remains in the pipeline for dynamic presentation, so restoring visibility
+     * cannot produce the blank state caused by filtering an entry that SystemUI has already
+     * discarded.
+     */
+    private fun installLockscreenMediaRowVisibilityHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
+        runCatching {
             val rowClass = classLoader.loadClass(EXPANDABLE_NOTIFICATION_ROW_CLASS)
             val getEntry = rowClass.getMethod("getEntry")
             val setOnKeyguard = rowClass.getMethod("setOnKeyguard", Boolean::class.javaPrimitiveType)
@@ -6972,7 +7339,7 @@ class HyperSystemUiModule : XposedModule() {
             } ?: error("ExpandableNotificationRow.setVisibility was not found")
             hook(setOnKeyguard)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("lockscreen-hide-media-notification:keyguard")
+                .setId("lockscreen-hide-media-notification:row-keyguard")
                 .intercept { chain ->
                     val result = chain.proceed()
                     val row = chain.thisObject as? View ?: return@intercept result
@@ -6985,7 +7352,9 @@ class HyperSystemUiModule : XposedModule() {
                         lockscreenMediaRows -= row
                         if (lockscreenHiddenRows.remove(row)) row.visibility = View.VISIBLE
                     }
-                    if (onKeyguard && shouldHideLockscreenMedia(preferences) && isMediaRow(row, getEntry)) {
+                    if (onKeyguard && shouldHideLockscreenMedia(preferences) &&
+                        isMediaRow(row, getEntry)
+                    ) {
                         lockscreenHiddenRows += row
                         row.visibility = View.GONE
                     }
@@ -6993,7 +7362,7 @@ class HyperSystemUiModule : XposedModule() {
                 }
             hook(setVisibility)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("lockscreen-hide-media-notification:visibility")
+                .setId("lockscreen-hide-media-notification:row-visibility")
                 .intercept { chain ->
                     val row = chain.thisObject as? View
                     val requested = chain.getArg(0) as? Int
@@ -7001,14 +7370,63 @@ class HyperSystemUiModule : XposedModule() {
                         row in lockscreenRows && shouldHideLockscreenMedia(preferences) &&
                         isMediaRow(row, getEntry)
                     ) {
+                        lockscreenHiddenRows += row
                         chain.proceedWith(arrayOf(View.GONE))
                     } else {
                         chain.proceed()
                     }
                 }
-            log(Log.INFO, TAG, "Installed lockscreen media-notification visibility hook")
+            log(Log.INFO, TAG, "Installed lockscreen media notification-row dynamic visibility hook")
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install lockscreen media-notification visibility hook", error)
+            log(Log.ERROR, TAG, "Could not install lockscreen media notification-row visibility hook", error)
+        }
+    }
+
+    /**
+     * The current HyperOS media card is a MiuiMediaHeaderView, not an
+     * ExpandableNotificationRow.  Its controller owns both the view state and the notification
+     * stack's add/remove bookkeeping through `visibilityChangedListener`.  Changing the view
+     * alone leaves that bookkeeping at VISIBLE until a keyguard rebuild, which is why the old
+     * implementation only appeared to work after leaving the lockscreen and coming back.
+     */
+    private fun installLockscreenMediaControllerVisibilityHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
+        runCatching {
+            val controllerClass = classLoader.loadClass(
+                "com.android.systemui.statusbar.notification.mediacontrol.MiuiMediaNotificationControllerImpl",
+            )
+            val setVisibility = controllerClass.getMethod(
+                "setVisibility",
+                Boolean::class.javaPrimitiveType,
+            )
+            hook(setVisibility)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("lockscreen-hide-media-notification:media-controller-visibility")
+                .intercept { chain ->
+                    val controller = chain.thisObject
+                    val header = readInstanceField(controller, "mediaContainerView") as? View
+                    if (header != null) {
+                        lockscreenMediaControllers[header] = controller
+                        lockscreenMediaHeaders += header
+                        installLockscreenMediaHeaderGuard(header, preferences)
+                    }
+                    // The system invokes setVisibility(true) again when its keyguard callback
+                    // arrives. Rewrite that request before the controller examines the current
+                    // state, so it emits the matching remove callback instead of briefly
+                    // resurrecting a card that the island has already replaced.
+                    val args = chain.args.toTypedArray()
+                    if (header != null && mediaHeaderOnActiveKeyguard(header) &&
+                        shouldHideLockscreenMedia(preferences) && args[0] == true
+                    ) {
+                        args[0] = false
+                    }
+                    chain.proceed(args)
+                }
+            log(Log.INFO, TAG, "Installed MiuiMediaNotificationController visibility hook")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install media-controller visibility hook", error)
         }
     }
 
@@ -7074,8 +7492,26 @@ class HyperSystemUiModule : XposedModule() {
             val headerClass = classLoader.loadClass(
                 MIUI_MEDIA_HEADER_VIEW_CLASS,
             )
-            LockscreenMediaPresentationBridge.onPresentationChanged = {
+            val previousPresentationCallback = LockscreenMediaPresentationBridge.onPresentationChanged
+            LockscreenMediaPresentationBridge.onPresentationChanged = { presentation ->
+                previousPresentationCallback?.invoke(presentation)
                 applyLockscreenMediaPresentation(preferences)
+            }
+            // The first lockscreen island is commonly attached before either the media-data or
+            // keyguard callback arrives. Port Main.guardCard's timing: own the real header from
+            // construction and correct it on every traversal until it is handed back to shade.
+            headerClass.declaredConstructors.forEachIndexed { index, constructor ->
+                hook(constructor)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("lockscreen-media-presentation:header-construct-$index")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        (chain.thisObject as? View)?.let { header ->
+                            lockscreenMediaHeaders += header
+                            installLockscreenMediaHeaderGuard(header, preferences)
+                        }
+                        result
+                    }
             }
             // The media controller's keyguard callback is a generated nested class on this ROM.
             // KeyguardManager is not reliable from the SystemUI process during transitions, so
@@ -7122,14 +7558,17 @@ class HyperSystemUiModule : XposedModule() {
                     val result = chain.proceed()
                     (chain.thisObject as? View)?.takeIf(headerClass::isInstance)?.let {
                         lockscreenMediaHeaders += it
+                        installLockscreenMediaHeaderGuard(it, preferences)
                     }
                     if (shouldHideLockscreenMedia(preferences) &&
                         headerClass.isInstance(chain.thisObject) &&
-                        (lockscreenMediaKeyguardShowing || isLockscreenMediaView(chain.thisObject)) &&
+                        mediaHeaderOnActiveKeyguard(chain.thisObject as? View ?: return@intercept result) &&
                         (chain.thisObject as? View)?.visibility != View.GONE
                     ) {
-                        log(Log.DEBUG, TAG, "Lockscreen media header forced GONE")
-                        (chain.thisObject as? View)?.visibility = View.GONE
+                        updateLockscreenMediaHeaderVisibility(
+                            chain.thisObject as View,
+                            hidden = true,
+                        )
                     }
                     result
                 }
@@ -7148,14 +7587,21 @@ class HyperSystemUiModule : XposedModule() {
                         val header = (chain.thisObject as? View)?.takeIf(headerClass::isInstance)
                         if (header != null) {
                             lockscreenMediaHeaders += header
+                            installLockscreenMediaHeaderGuard(header, preferences)
                             installLockscreenMediaArtworkClick(header, preferences)
-                            captureLockscreenIslandArtwork(header)
-                            header.post { captureLockscreenIslandArtwork(header) }
+                            scheduleLockscreenMediaPresentation(header, preferences)
+                            header.postDelayed({
+                                installLockscreenMediaArtworkClick(header, preferences)
+                                scheduleLockscreenMediaPresentation(header, preferences)
+                            }, 120L)
                         }
                         if (shouldHideLockscreenMedia(preferences) &&
-                            (lockscreenMediaKeyguardShowing || isLockscreenMediaView(chain.thisObject))
+                            mediaHeaderOnActiveKeyguard(chain.thisObject as? View ?: return@intercept result)
                         ) {
-                            (chain.thisObject as? View)?.visibility = View.GONE
+                            updateLockscreenMediaHeaderVisibility(
+                                chain.thisObject as View,
+                                hidden = true,
+                            )
                         }
                         result
                     }
@@ -7177,22 +7623,53 @@ class HyperSystemUiModule : XposedModule() {
                     val result = chain.proceed()
                     (chain.thisObject as? View)?.takeIf(headerClass::isInstance)?.let { header ->
                         lockscreenMediaHeaders += header
+                        installLockscreenMediaHeaderGuard(header, preferences)
                         installLockscreenMediaArtworkClick(header, preferences)
-                        captureLockscreenIslandArtwork(header)
                         // Some holder children are attached on the next traversal.
                         header.post {
                             installLockscreenMediaArtworkClick(header, preferences)
-                            captureLockscreenIslandArtwork(header)
+                            scheduleLockscreenMediaPresentation(header, preferences)
                         }
+                        header.postDelayed({
+                            installLockscreenMediaArtworkClick(header, preferences)
+                            scheduleLockscreenMediaPresentation(header, preferences)
+                        }, 120L)
                     }
                     result
                 }
+            // updateLayout$1 reapplies ConstraintLayout and text appearances after every
+            // configuration/media-data update. Re-apply our lockscreen-only presentation after
+            // that vendor pass, otherwise the album and title alignment can randomly return.
+            runCatching {
+                val controllerClass = classLoader.loadClass(
+                    "com.android.systemui.statusbar.notification.mediacontrol.MiuiMediaNotificationControllerImpl",
+                )
+                controllerClass.declaredMethods.filter {
+                    it.name == "updateLayout\$1" && it.parameterCount == 0
+                }.forEachIndexed { index, method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("lockscreen-media-presentation:update-layout-$index")
+                        .intercept { chain ->
+                            val result = chain.proceed()
+                            val header = readInstanceField(chain.thisObject, "mediaContainerView") as? View
+                            if (header != null) {
+                                lockscreenMediaHeaders += header
+                                installLockscreenMediaHeaderGuard(header, preferences)
+                                scheduleLockscreenMediaPresentation(header, preferences)
+                            }
+                            result
+                        }
+                }
+            }.onFailure { error ->
+                log(Log.DEBUG, TAG, "Could not install media update-layout presentation hook", error)
+            }
             // `MiuiMediaViewControllerImpl` owns the drawable that the lockscreen island will
             // animate into albumImageView. Capture that source immediately after binding rather
             // than waiting for the ImageView's later flip-animation callback. On a SystemUI
             // restart this is the only point at which the first track's art is guaranteed to be
             // available before the custom music surface is shown.
-            installLockscreenIslandArtworkBridge(classLoader, headerClass)
+            installLockscreenIslandArtworkBridge(classLoader, headerClass, preferences)
             log(
                 Log.INFO,
                 TAG,
@@ -7208,6 +7685,7 @@ class HyperSystemUiModule : XposedModule() {
     private fun installLockscreenIslandArtworkBridge(
         classLoader: ClassLoader,
         headerClass: Class<*>,
+        preferences: SharedPreferences,
     ) {
         runCatching {
             val controllerClass = classLoader.loadClass(
@@ -7227,10 +7705,12 @@ class HyperSystemUiModule : XposedModule() {
                     val header = findLockscreenMediaHeader(player, headerClass)
                     if (header != null) {
                         lockscreenMediaHeaders += header
-                        captureLockscreenIslandArtwork(header, chain.thisObject)
+                        installLockscreenMediaHeaderGuard(header, preferences)
                         // The animation can replace the displayed drawable one traversal later;
                         // repeat through the same source path without requiring a track switch.
-                        player?.post { captureLockscreenIslandArtwork(header, chain.thisObject) }
+                        player?.post {
+                            scheduleLockscreenMediaPresentation(header, preferences)
+                        }
                     }
                     result
                 }
@@ -7409,19 +7889,30 @@ class HyperSystemUiModule : XposedModule() {
         else -> LOCKSCREEN_MEDIA_NOTIFICATION_DO_NOT_HIDE
     }
 
-    private fun shouldHideLockscreenMedia(preferences: SharedPreferences): Boolean =
-        preferences.getBoolean(KEY_LOCKSCREEN_MINI_PLAYER_ENABLED, false) && when (
+    private fun shouldHideLockscreenMedia(preferences: SharedPreferences): Boolean {
+        if (preferences.getBoolean(KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED, false)) {
+            // The three explicit gesture states own media-header visibility while the imported
+            // music-lockscreen feature is enabled. MINI_PLAYER hides the system card immediately;
+            // SYSTEM_MEDIA must always be able to restore it after a lockscreen-island tap.
+            return LockscreenMediaPresentationBridge.presentation ==
+                LockscreenMediaPresentation.MINI_PLAYER ||
+                LockscreenMediaPresentationBridge.presentation ==
+                LockscreenMediaPresentation.MUSIC_LOCKSCREEN_STYLE2
+        }
+        return preferences.getBoolean(KEY_LOCKSCREEN_MINI_PLAYER_ENABLED, false) && when (
             lockscreenMediaNotificationMode(preferences)
         ) {
             LOCKSCREEN_MEDIA_NOTIFICATION_ALWAYS_HIDE -> true
             LOCKSCREEN_MEDIA_NOTIFICATION_DYNAMIC ->
-                LockscreenMediaPresentationBridge.presentation != LockscreenMediaPresentation.SYSTEM_MEDIA
+                LockscreenMediaPresentationBridge.presentation == LockscreenMediaPresentation.MINI_PLAYER
             else -> false
         }
+    }
 
     /** Dynamic mode must retain the notification entry so it can be shown after a card tap. */
     private fun shouldFilterLockscreenMedia(preferences: SharedPreferences): Boolean =
         preferences.getBoolean(KEY_LOCKSCREEN_MINI_PLAYER_ENABLED, false) &&
+            !preferences.getBoolean(KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED, false) &&
             lockscreenMediaNotificationMode(preferences) == LOCKSCREEN_MEDIA_NOTIFICATION_ALWAYS_HIDE
 
     private fun applyLockscreenMediaPresentation(preferences: SharedPreferences) {
@@ -7432,37 +7923,345 @@ class HyperSystemUiModule : XposedModule() {
                 lockscreenMediaHeaders.remove(header)
                 return@forEach
             }
-            if (hidden || lockscreenMediaKeyguardShowing || isLockscreenMediaView(header)) {
-                // SystemUI hosts the fingerprint and notification surfaces on separate loopers.
-                // A presentation change originates from the mini player, so apply each update
-                // through the target view's own queue instead of assuming the caller's thread.
-                // MiuiMediaHeaderView is shared by the keyguard and notification shade.
-                // Do not animate transforms on this real SystemUI view: an unlock or shade
-                // rebind can detach it before the animation end action runs, leaving the
-                // notification permanently scaled or transparent.
-                header.post {
-                    updateLockscreenMediaHeaderVisibility(header, hidden)
-                }
+            // The bridge is called from the gesture's UI-thread event. Apply synchronously so
+            // a long press that opens the island cannot leave the system media card visible for
+            // a frame (or until the next lockscreen lifecycle event). The scheduled passes below
+            // are retained solely to counter later vendor layout/visibility writes.
+            if (mediaHeaderOnActiveKeyguard(header)) {
+                updateLockscreenMediaHeaderVisibility(
+                    header,
+                    hidden,
+                )
             }
+            scheduleLockscreenMediaPresentation(header, preferences)
         }
+        // Restore the retained entry synchronously on the island's short tap. Waiting for
+        // setOnKeyguard() to run again is the stale-GONE failure that required a relock.
         lockscreenMediaRows.toList().forEach { row ->
-            if (row in lockscreenRows) {
-                val visibility = if (hidden) View.GONE else View.VISIBLE
-                row.post { row.visibility = visibility }
+            if (row !in lockscreenRows) return@forEach
+            if (hidden) {
+                lockscreenHiddenRows += row
+                if (row.visibility != View.GONE) row.visibility = View.GONE
+            } else if (lockscreenHiddenRows.remove(row)) {
+                row.visibility = View.VISIBLE
             }
         }
     }
 
     private fun updateLockscreenMediaHeaderVisibility(header: View, hidden: Boolean) {
         if (!isMiuiMediaHeaderView(header)) return
-        // Cancel any vendor animation currently targeting this shared view and restore the
-        // neutral visual state before changing visibility. This also repairs state left behind
-        // by older module versions without touching the notification's own background drawable.
+        val visible = !hidden
+        val previousTarget = lockscreenMediaTransitionTargets[header]
+        if (previousTarget == visible) {
+            if (header in lockscreenMediaTransitionsRunning) return
+            if (visible && header.visibility == View.VISIBLE &&
+                header.alpha >= LOCKSCREEN_MEDIA_TRANSITION_COMPLETE_ALPHA &&
+                header.scaleX >= LOCKSCREEN_MEDIA_TRANSITION_COMPLETE_SCALE &&
+                header.scaleY >= LOCKSCREEN_MEDIA_TRANSITION_COMPLETE_SCALE
+            ) return
+            if (!visible && header.visibility != View.VISIBLE) return
+        }
+
+        lockscreenMediaTransitionTargets[header] = visible
+        val generation = (lockscreenMediaTransitionGenerations[header] ?: 0) + 1
+        lockscreenMediaTransitionGenerations[header] = generation
+        lockscreenMediaTransitionsRunning += header
         header.animate().cancel()
-        header.alpha = 1f
-        header.scaleX = 1f
-        header.scaleY = 1f
-        header.visibility = if (hidden) View.GONE else View.VISIBLE
+        animateLockscreenMediaHeaderContents(header, visible)
+        val baseTranslationY = lockscreenMediaTransitionBaseTranslationY[header]
+            ?: header.translationY.also { lockscreenMediaTransitionBaseTranslationY[header] = it }
+        val travel = header.resources.displayMetrics.density *
+            LOCKSCREEN_MEDIA_TRANSITION_TRAVEL_DP
+
+        if (visible) {
+            val wasNotVisible = header.visibility != View.VISIBLE
+            if (!requestLockscreenMediaControllerVisibility(header, true)) {
+                header.visibility = View.VISIBLE
+            }
+            if (wasNotVisible || header.alpha <= LOCKSCREEN_MEDIA_TRANSITION_HIDDEN_ALPHA) {
+                header.alpha = 0f
+                header.scaleX = LOCKSCREEN_MEDIA_TRANSITION_START_SCALE
+                header.scaleY = LOCKSCREEN_MEDIA_TRANSITION_START_SCALE
+                header.translationY = baseTranslationY + travel
+            }
+            reapplyNativeMediaEffect(header)
+            header.animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .translationY(baseTranslationY)
+                .setDuration(LOCKSCREEN_MEDIA_SHOW_DURATION_MS)
+                .setInterpolator(DecelerateInterpolator(1.45f))
+                .withEndAction {
+                    if (lockscreenMediaTransitionGenerations[header] != generation ||
+                        lockscreenMediaTransitionTargets[header] != true
+                    ) return@withEndAction
+                    lockscreenMediaTransitionsRunning -= header
+                    header.alpha = 1f
+                    header.scaleX = 1f
+                    header.scaleY = 1f
+                    reapplyNativeMediaEffect(header)
+                }
+                .start()
+        } else {
+            if (header.visibility != View.VISIBLE ||
+                header.alpha <= LOCKSCREEN_MEDIA_TRANSITION_HIDDEN_ALPHA
+            ) {
+                if (!requestLockscreenMediaControllerVisibility(header, false)) {
+                    header.visibility = View.GONE
+                }
+                lockscreenMediaTransitionsRunning -= header
+                return
+            }
+            header.animate()
+                .alpha(0f)
+                .scaleX(LOCKSCREEN_MEDIA_TRANSITION_START_SCALE)
+                .scaleY(LOCKSCREEN_MEDIA_TRANSITION_START_SCALE)
+                .translationY(baseTranslationY + travel)
+                .setDuration(LOCKSCREEN_MEDIA_HIDE_DURATION_MS)
+                .setInterpolator(DecelerateInterpolator(1.2f))
+                .withEndAction {
+                    if (lockscreenMediaTransitionGenerations[header] != generation ||
+                        lockscreenMediaTransitionTargets[header] != false
+                    ) return@withEndAction
+                    if (!requestLockscreenMediaControllerVisibility(header, false)) {
+                        header.visibility = View.GONE
+                    }
+                    lockscreenMediaTransitionsRunning -= header
+                }
+                .start()
+        }
+    }
+
+    /**
+     * The MIUI header and the imported cover use the same media data, but they are separate
+     * view trees. Animate the real header children as well so returning from the music lockscreen
+     * does not reveal an already-snapped album/title/artist row underneath the header fade.
+     */
+    private fun animateLockscreenMediaHeaderContents(header: View, systemVisible: Boolean) {
+        val holder = readInstanceField(header, "mediaViewHolder") ?: return
+        val album = readInstanceField(holder, "albumImageView") as? View
+        val title = readInstanceField(holder, "titleText") as? TextView
+        val artist = readInstanceField(holder, "artistText") as? TextView
+        val duration = if (systemVisible) {
+            LOCKSCREEN_MEDIA_SHOW_DURATION_MS
+        } else {
+            LOCKSCREEN_MEDIA_HIDE_DURATION_MS
+        }
+        album?.let { image ->
+            if (systemVisible) {
+                image.visibility = View.VISIBLE
+                if (image.alpha <= LOCKSCREEN_MEDIA_TRANSITION_HIDDEN_ALPHA) {
+                    image.alpha = 0f
+                    image.scaleX = LOCKSCREEN_MEDIA_TRANSITION_START_SCALE
+                    image.scaleY = LOCKSCREEN_MEDIA_TRANSITION_START_SCALE
+                }
+                image.animate().cancel()
+                image.animate()
+                    .alpha(1f)
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setDuration(duration)
+                    .setInterpolator(DecelerateInterpolator(1.35f))
+                    .start()
+            } else {
+                image.animate().cancel()
+                image.animate()
+                    .alpha(0f)
+                    .scaleX(LOCKSCREEN_MEDIA_TRANSITION_START_SCALE)
+                    .scaleY(LOCKSCREEN_MEDIA_TRANSITION_START_SCALE)
+                    .setDuration(duration)
+                    .setInterpolator(DecelerateInterpolator(1.2f))
+                    .start()
+            }
+        }
+        listOfNotNull(title, artist).forEach { text ->
+            val base = lockscreenMediaTextBaseTranslations.getOrPut(text) { text.translationX }
+            val target = if (systemVisible) base else centeredMediaTextTranslation(header, text, base)
+            text.animate().cancel()
+            text.animate()
+                .translationX(target)
+                .setDuration(duration)
+                .setInterpolator(DecelerateInterpolator(1.25f))
+                .start()
+        }
+    }
+
+    private fun centeredMediaTextTranslation(header: View, text: TextView, base: Float): Float {
+        val layout = text.layout ?: return base
+        if (layout.lineCount == 0 || header.width <= 0) return base
+        val width = layout.getLineWidth(0)
+        if (width <= 0f) return base
+        val currentInkStart = text.left + text.paddingLeft + layout.getLineLeft(0)
+        return (header.width - width) / 2f - currentInkStart
+    }
+
+    /**
+     * Ask SystemUI's owner to change the media card.  Calling this method rather than changing
+     * the shared header directly is essential: its `visibilityChangedListener` generates the
+     * remove/add animation and recalculates the notification stack in the same frame.
+     */
+    private fun requestLockscreenMediaControllerVisibility(header: View, visible: Boolean): Boolean {
+        val controller = lockscreenMediaControllers[header]
+            ?: readInstanceField(header, "mediaNotificationController")
+            ?: return false
+        return runCatching {
+            val method = controller.javaClass.methods.firstOrNull {
+                it.name == "setVisibility" &&
+                    it.parameterTypes.contentEquals(arrayOf(Boolean::class.javaPrimitiveType))
+            } ?: return false
+            lockscreenMediaControllers[header] = controller
+            method.invoke(controller, visible)
+            true
+        }.getOrElse { error ->
+            log(Log.DEBUG, TAG, "Could not request native media-card visibility", error)
+            false
+        }
+    }
+
+    /** Re-assert after the vendor's asynchronous layout writes without waiting for a relock. */
+    private fun scheduleLockscreenMediaPresentation(header: View, preferences: SharedPreferences) {
+        val apply = Runnable {
+            if (!header.isAttachedToWindow || !isMiuiMediaHeaderView(header)) return@Runnable
+            if (!mediaHeaderOnActiveKeyguard(header)) return@Runnable
+            updateLockscreenMediaHeaderVisibility(
+                header,
+                shouldHideLockscreenMedia(preferences),
+            )
+        }
+        header.post(apply)
+        header.postDelayed(apply, LOCKSCREEN_MEDIA_PRESENTATION_REAPPLY_SHORT_DELAY_MS)
+        header.postDelayed(apply, LOCKSCREEN_MEDIA_PRESENTATION_REAPPLY_SETTLE_DELAY_MS)
+    }
+
+    private fun installLockscreenNativeClockScalerHook(classLoader: ClassLoader) {
+        runCatching {
+            val timeView = classLoader.loadClass("com.miui.clock.allInOne.TimeView")
+            timeView.declaredMethods.filter { method ->
+                method.name == "setSizeInternal" &&
+                    method.parameterTypes.contentEquals(arrayOf(Float::class.javaPrimitiveType))
+            }.forEachIndexed { index, method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("lockscreen-native-clock-size-$index")
+                    .intercept { chain ->
+                        val args = chain.args.toTypedArray()
+                        if (args[0] is Float && chain.thisObject is View) {
+                            args[0] = LockscreenNativeClockScaler.scaleFor(
+                                chain.thisObject as View,
+                                args[0] as Float,
+                            )
+                        }
+                        chain.proceed(args)
+                    }
+            }
+            log(Log.INFO, TAG, "Installed native TimeView size scaler")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Native TimeView size scaler unavailable", error)
+        }
+    }
+
+    /**
+     * MediaViewBinder normally reapplies the material effect from a coroutine flow. During a
+     * lockscreen-island/fullscreen transition that flow can emit while the shared header is
+     * detached, leaving mediaBg with the clear() state after it is attached again. Re-apply the
+     * same vendor effect whenever our presentation code makes the header visible.
+     */
+    private fun installLockscreenMediaEffectRefreshHook(classLoader: ClassLoader) {
+        runCatching {
+            val binder = classLoader.loadClass(
+                "com.android.systemui.statusbar.notification.style.view.MediaViewBinder",
+            )
+            val bind = binder.getMethod(
+                "bind",
+                classLoader.loadClass(
+                    MIUI_MEDIA_HEADER_VIEW_CLASS,
+                ),
+                classLoader.loadClass(
+                    "com.android.systemui.statusbar.notification.style.domain.NotificationMaterialStateInteractor",
+                ),
+            )
+            hook(bind)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("lockscreen-media-effect-refresh")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    val header = chain.getArg(0) as? View
+                    if (header != null) {
+                        lockscreenMediaInteractors[header] = chain.getArg(1)
+                        // The first collector emission can race attachment; a short post lets
+                        // SystemUI finish adding mediaBg before the corrective apply runs.
+                        header.post { reapplyNativeMediaEffect(header) }
+                    }
+                    result
+                }
+            log(Log.INFO, TAG, "Installed native media material-effect refresh hook")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install native media material-effect refresh hook", error)
+        }
+    }
+
+    private fun reapplyNativeMediaEffect(header: View) {
+        runCatching {
+            if (!isMiuiMediaHeaderView(header) || !header.isAttachedToWindow) return
+            val interactor = lockscreenMediaInteractors[header] ?: return
+            val material = (readInstanceField(interactor, "materialType") as? Enum<*>)?.name ?: "NONE"
+            val keyguard = mediaHeaderOnActiveKeyguard(header)
+            val lightWallpaper = readStateFlowBoolean(interactor, "isLightWallPaper")
+            val suffix = when {
+                material == "GLASS" && keyguard && lightWallpaper -> "MediaViewGlassOnKeyguardLightWallPaperEffect"
+                material == "GLASS" && keyguard -> "MediaViewGlassOnKeyguardEffect"
+                material == "GLASS" -> "MediaViewGlassEffect"
+                material == "BLUR" && keyguard -> "MediaViewBlurOnKeyguardEffect"
+                material == "BLUR" -> "MediaViewBlurEffect"
+                else -> "MediaViewNormalEffect"
+            }
+            val effectClass = header.javaClass.classLoader?.loadClass(
+                "com.android.systemui.statusbar.notification.style.vieweffect.$suffix",
+            ) ?: return
+            val instance = effectClass.fields.firstOrNull { it.name == "INSTANCE" }?.get(null)
+                ?: effectClass.declaredFields.firstOrNull { it.name == "INSTANCE" }
+                    ?.apply { isAccessible = true }?.get(null)
+                ?: return
+            val apply = effectClass.methods.firstOrNull { it.name == "apply" && it.parameterCount == 2 }
+                ?: return
+            apply.invoke(instance, header, header.context)
+        }.onFailure { error ->
+            log(Log.DEBUG, TAG, "Native media material-effect refresh failed", error)
+        }
+    }
+
+    private fun readStateFlowBoolean(owner: Any, fieldName: String): Boolean {
+        val flow = readInstanceField(owner, fieldName) ?: return false
+        val delegate = readInstanceField(flow, "\$\$delegate_0") ?: flow
+        return (delegate.javaClass.methods.firstOrNull { it.name == "getValue" && it.parameterCount == 0 }
+            ?.invoke(delegate) as? Boolean) == true
+    }
+
+    private val lockscreenMediaInteractors = Collections.synchronizedMap(
+        WeakHashMap<View, Any>(),
+    )
+    private val lockscreenMediaHeaderGuards = Collections.synchronizedMap(
+        WeakHashMap<View, ViewTreeObserver.OnPreDrawListener>(),
+    )
+
+    /** Main.guardCard equivalent for the actual MiuiMediaHeaderView. It handles the initial
+     * island frame, where no later media-data callback exists to correct vendor writes. */
+    private fun installLockscreenMediaHeaderGuard(header: View, preferences: SharedPreferences) {
+        if (lockscreenMediaHeaderGuards.containsKey(header)) return
+        val listener = ViewTreeObserver.OnPreDrawListener {
+            if (!header.isAttachedToWindow) return@OnPreDrawListener true
+            val onKeyguard = mediaHeaderOnActiveKeyguard(header)
+            val hidden = shouldHideLockscreenMedia(preferences)
+            if (onKeyguard && header.visibility != if (hidden) View.GONE else View.VISIBLE) {
+                updateLockscreenMediaHeaderVisibility(header, hidden)
+            }
+            true
+        }
+        runCatching {
+            header.viewTreeObserver.addOnPreDrawListener(listener)
+            lockscreenMediaHeaderGuards[header] = listener
+        }
     }
 
     private fun installLockscreenMediaArtworkClick(header: View, preferences: SharedPreferences) {
@@ -7472,42 +8271,50 @@ class HyperSystemUiModule : XposedModule() {
             readInstanceField(holder, "albumView") as? View,
         )
         artworkViews.forEach { artwork ->
+            val longPressRunnable = Runnable {
+                if (artwork.getTag(LOCKSCREEN_MEDIA_LONG_PRESS_TAG) == true) {
+                    artwork.setTag(LOCKSCREEN_MEDIA_LONG_PRESS_TAG, false)
+                    artwork.setTag(LOCKSCREEN_MEDIA_LONG_PRESS_TRIGGERED_TAG, true)
+                    log(Log.DEBUG, TAG, "System media artwork long-pressed; showing mini player")
+                    LockscreenMediaPresentationBridge.setPresentation(
+                        LockscreenMediaPresentation.MINI_PLAYER,
+                    )
+                }
+            }
             artwork.setOnTouchListener { _, event ->
-                if (lockscreenMediaNotificationMode(preferences) != LOCKSCREEN_MEDIA_NOTIFICATION_DYNAMIC) {
+                if (lockscreenMediaNotificationMode(preferences) != LOCKSCREEN_MEDIA_NOTIFICATION_DYNAMIC &&
+                    !preferences.getBoolean(KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED, false)
+                ) {
                     return@setOnTouchListener false
                 }
                 when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        artwork.setTag(LOCKSCREEN_MEDIA_LONG_PRESS_TAG, true)
+                        artwork.setTag(LOCKSCREEN_MEDIA_LONG_PRESS_TRIGGERED_TAG, false)
+                        artwork.postDelayed(longPressRunnable, ViewConfiguration.getLongPressTimeout().toLong())
+                    }
                     MotionEvent.ACTION_UP -> {
-                        log(Log.DEBUG, TAG, "System media artwork tapped; showing mini player")
-                        LockscreenMediaPresentationBridge.setPresentation(
-                            LockscreenMediaPresentation.MINI_PLAYER,
-                        )
+                        artwork.removeCallbacks(longPressRunnable)
+                        val longPressed = artwork.getTag(LOCKSCREEN_MEDIA_LONG_PRESS_TRIGGERED_TAG) == true
+                        artwork.setTag(LOCKSCREEN_MEDIA_LONG_PRESS_TAG, false)
+                        artwork.setTag(LOCKSCREEN_MEDIA_LONG_PRESS_TRIGGERED_TAG, false)
+                        if (!longPressed) {
+                            log(Log.DEBUG, TAG, "System media artwork tapped; showing music lockscreen")
+                            LockscreenMediaPresentationBridge.setPresentation(
+                                LockscreenMediaPresentation.MUSIC_LOCKSCREEN,
+                            )
+                        }
+                    }
+                    MotionEvent.ACTION_CANCEL -> {
+                        artwork.removeCallbacks(longPressRunnable)
+                        artwork.setTag(LOCKSCREEN_MEDIA_LONG_PRESS_TAG, false)
+                        artwork.setTag(LOCKSCREEN_MEDIA_LONG_PRESS_TRIGGERED_TAG, false)
                     }
                 }
                 // Consume the complete gesture so the vendor click listener cannot replace the
                 // presentation change after the artwork tap.
                 true
             }
-        }
-    }
-
-    /**
-     * MiuiMediaHeaderView is the lockscreen island's own media pipeline. Reuse its final album
-     * drawable instead of assuming every player copies artwork into MediaController metadata.
-     */
-    private fun captureLockscreenIslandArtwork(header: View, controller: Any? = null) {
-        val sourceArtwork = controller?.let { readInstanceField(it, "artWorkDrawable") as? Drawable }
-        sourceArtwork?.let(::drawableBitmap)?.let { bitmap ->
-            LockscreenMediaBridge.updateArtwork(bitmap, LockscreenMediaBridge.notificationKey)
-            return
-        }
-        val holder = readInstanceField(header, "mediaViewHolder") ?: return
-        val image = listOfNotNull(
-            readInstanceField(holder, "albumImageView") as? ImageView,
-            readInstanceField(holder, "albumView") as? ImageView,
-        ).firstOrNull { it.drawable != null } ?: return
-        drawableBitmap(image.drawable, image.width, image.height)?.let { bitmap ->
-            LockscreenMediaBridge.updateArtwork(bitmap, LockscreenMediaBridge.notificationKey)
         }
     }
 
@@ -9366,6 +10173,7 @@ class HyperSystemUiModule : XposedModule() {
     companion object {
         private const val TAG = "HyperSystemUIHook"
         private const val SYSTEM_UI = "com.android.systemui"
+        private const val LOCKSCREEN_WALLPAPER = "com.miui.miwallpaper"
         private const val SYSTEM_UI_PLUGIN = "miui.systemui.plugin"
         private const val AOD = "com.miui.aod"
         private const val SUPER_XIAOAI_IME = "com.xiaomi.type"
@@ -9438,6 +10246,10 @@ class HyperSystemUiModule : XposedModule() {
             "com.android.systemui.statusbar.notification.row.ExpandableNotificationRowInjector"
         private const val MIUI_MEDIA_HEADER_VIEW_CLASS =
             "com.android.systemui.statusbar.notification.mediacontrol.MiuiMediaHeaderView"
+        private const val LOCKSCREEN_MEDIA_LONG_PRESS_TAG = 0x7f0f0abc
+        private const val LOCKSCREEN_MEDIA_LONG_PRESS_TRIGGERED_TAG = 0x7f0f0abd
+        private const val LOCKSCREEN_MEDIA_PRESENTATION_REAPPLY_SHORT_DELAY_MS = 96L
+        private const val LOCKSCREEN_MEDIA_PRESENTATION_REAPPLY_SETTLE_DELAY_MS = 320L
         private const val MI_GLASS_COMPAT_CLASS = "com.miui.systemui.util.MiGlassCompat"
         private const val HEADS_UP_NOTIFICATION_GLASS_PARAMS_ARRAY = "notification_glass_params_normal"
         private const val HEADS_UP_NOTIFICATION_TEXT_COLOR = 0xE2FFFFFF.toInt()
@@ -9484,6 +10296,8 @@ class HyperSystemUiModule : XposedModule() {
             "com.android.systemui.globalactions.GlobalActionsImpl"
         private const val COMMAND_QUEUE_CLASS = "com.android.systemui.statusbar.CommandQueue"
         private const val ADD_CONTROL_CENTER_TOP_BUTTONS_KEY = "add_control_center_top_buttons"
+        private const val KEY_SHOW_CONTROL_CENTER_TOP_BUTTONS_IN_LANDSCAPE =
+            "show_control_center_top_buttons_in_landscape"
         private const val KEY_CONTROL_CENTER_TOP_BUTTONS_ICON_SCALE =
             "control_center_top_buttons_icon_scale"
         private const val KEY_CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_MODE =
@@ -9763,6 +10577,10 @@ class HyperSystemUiModule : XposedModule() {
         private const val KEY_LOCKSCREEN_SHORTCUT_GLASS_ENABLED = "lockscreen_shortcut_glass_enabled"
         private const val KEY_LOCKSCREEN_MINI_PLAYER_ENABLED = "lockscreen_mini_player_enabled"
         private const val KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED = "lockscreen_music_lockscreen_enabled"
+        private const val HYPER_MUSIC_COVER_ACTION =
+            "btm.m.os4.systemuihook.hypermusiccover.PROBE"
+        private const val HYPER_MUSIC_COVER_CARD_RESET_DELAY_MS = 720L
+        private const val MUSIC_CLOCK_SCALE = 0.62f
         private const val KEY_LOCKSCREEN_MINI_PLAYER_LYRICS_ENABLED =
             "lockscreen_mini_player_lyrics_enabled"
         private const val KEY_LOCKSCREEN_MINI_PLAYER_HIDE_MEDIA_NOTIFICATION =
@@ -9855,7 +10673,13 @@ private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_d
         private var aospVolumePanelHooksInstalled = false
         private var depthEffectHookInstalled = false
         private var lockscreenNotificationHookInstalled = false
+        private var hyperMusicCoverGestureBridgeInstalled = false
+        private var hyperMusicCoverPreferenceChangeListener:
+            SharedPreferences.OnSharedPreferenceChangeListener? = null
+        @Volatile private var systemUiApplicationContext: Context? = null
+        @Volatile private var activeLockscreenClockContainer: WeakReference<View>? = null
         private var lockscreenClockDateFollowHookInstalled = false
+        private var systemUiNativeClockScalerHookInstalled = false
         private var systemUiLockscreenClockColonHookInstalled = false
         private var fingerprintIconHookInstalled = false
         private var systemUiDepthHookInstalled = false
@@ -9864,6 +10688,7 @@ private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_d
         private var lockscreenShortcutGlassHookInstalled = false
         private var lockscreenWidgetSceneVisibilityHookInstalled = false
         private var lockscreenMusicLockscreenHookInstalled = false
+        private var lockscreenMediaNotificationHookInstalled = false
         private var lockscreenPinCircleBackgroundHookInstalled = false
         private var shadeMaterialHooksInstalled = false
         private var softGlassThemeSystemUiHookInstalled = false
@@ -9891,6 +10716,34 @@ private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_d
         private val lockscreenMediaHeaders = Collections.synchronizedSet(
             Collections.newSetFromMap(WeakHashMap<View, Boolean>()),
         )
+        /** MiuiMediaHeaderView -> its owning controller; both are replaced on a keyguard rebuild. */
+        private val lockscreenMediaControllers = Collections.synchronizedMap(
+            WeakHashMap<View, Any>(),
+        )
+        /** Presentation state for the shared SystemUI media header. Values survive repeated
+         * vendor layout callbacks so those callbacks cannot restart a transition every frame. */
+        private val lockscreenMediaTransitionTargets = Collections.synchronizedMap(
+            WeakHashMap<View, Boolean>(),
+        )
+        private val lockscreenMediaTransitionGenerations = Collections.synchronizedMap(
+            WeakHashMap<View, Int>(),
+        )
+        private val lockscreenMediaTransitionBaseTranslationY = Collections.synchronizedMap(
+            WeakHashMap<View, Float>(),
+        )
+        private val lockscreenMediaTextBaseTranslations = Collections.synchronizedMap(
+            WeakHashMap<TextView, Float>(),
+        )
+        private val lockscreenMediaTransitionsRunning = Collections.synchronizedSet(
+            Collections.newSetFromMap(WeakHashMap<View, Boolean>()),
+        )
+        private const val LOCKSCREEN_MEDIA_HIDE_DURATION_MS = 300L
+        private const val LOCKSCREEN_MEDIA_SHOW_DURATION_MS = 420L
+        private const val LOCKSCREEN_MEDIA_TRANSITION_TRAVEL_DP = 14f
+        private const val LOCKSCREEN_MEDIA_TRANSITION_START_SCALE = 0.94f
+        private const val LOCKSCREEN_MEDIA_TRANSITION_HIDDEN_ALPHA = 0.01f
+        private const val LOCKSCREEN_MEDIA_TRANSITION_COMPLETE_ALPHA = 0.99f
+        private const val LOCKSCREEN_MEDIA_TRANSITION_COMPLETE_SCALE = 0.99f
         private val lockscreenMiniPlayerControllers = Collections.synchronizedMap(
             WeakHashMap<View, LockscreenMiniPlayerController>(),
         )

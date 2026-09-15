@@ -261,6 +261,7 @@ data class HookSettings(
     val hideStatusBarNetworkActivity: Boolean = false,
     val hideControlCenterEditButton: Boolean = false,
     val addControlCenterTopButtons: Boolean = false,
+    val showControlCenterTopButtonsInLandscape: Boolean = false,
     val controlCenterTopButtonsIconScale: Float = 1f,
     val controlCenterTopButtonsBackgroundMode: Int = CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_NONE,
     val controlCenterTopButtonsPureColor: Int = 0x73FFFFFF,
@@ -611,6 +612,8 @@ private const val KEY_HIDE_STATUS_BAR_CLOCK_TEXT = "hide_status_bar_clock_text"
 private const val KEY_HIDE_STATUS_BAR_NETWORK_ACTIVITY = "hide_status_bar_network_activity"
 private const val KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON = "hide_control_center_edit_button"
 private const val KEY_ADD_CONTROL_CENTER_TOP_BUTTONS = "add_control_center_top_buttons"
+private const val KEY_SHOW_CONTROL_CENTER_TOP_BUTTONS_IN_LANDSCAPE =
+    "show_control_center_top_buttons_in_landscape"
 private const val KEY_CONTROL_CENTER_TOP_BUTTONS_ICON_SCALE = "control_center_top_buttons_icon_scale"
 private const val KEY_CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_MODE =
     "control_center_top_buttons_background_mode"
@@ -1087,6 +1090,10 @@ private fun SharedPreferences.toSettings(): HookSettings {
     hideStatusBarNetworkActivity = getBoolean(KEY_HIDE_STATUS_BAR_NETWORK_ACTIVITY, false),
     hideControlCenterEditButton = getBoolean(KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON, false),
     addControlCenterTopButtons = getBoolean(KEY_ADD_CONTROL_CENTER_TOP_BUTTONS, false),
+    showControlCenterTopButtonsInLandscape = getBoolean(
+        KEY_SHOW_CONTROL_CENTER_TOP_BUTTONS_IN_LANDSCAPE,
+        false,
+    ),
     controlCenterTopButtonsIconScale = getFloat(
         KEY_CONTROL_CENTER_TOP_BUTTONS_ICON_SCALE,
         1f,
@@ -1594,6 +1601,10 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putBoolean(KEY_HIDE_STATUS_BAR_NETWORK_ACTIVITY, value.hideStatusBarNetworkActivity)
         .putBoolean(KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON, value.hideControlCenterEditButton)
         .putBoolean(KEY_ADD_CONTROL_CENTER_TOP_BUTTONS, value.addControlCenterTopButtons)
+        .putBoolean(
+            KEY_SHOW_CONTROL_CENTER_TOP_BUTTONS_IN_LANDSCAPE,
+            value.showControlCenterTopButtonsInLandscape,
+        )
         .putFloat(
             KEY_CONTROL_CENTER_TOP_BUTTONS_ICON_SCALE,
             value.controlCenterTopButtonsIconScale.coerceIn(0.5f, 2f),

@@ -19,8 +19,8 @@ android {
         applicationId = "btm.m.os4.systemuihook"
         minSdk = 33
         targetSdk = 35
-        versionCode = 1010201
-        versionName = "1.1.2 RC1"
+        versionCode = 1010239
+        versionName = "1.1.2"
 
     }
 

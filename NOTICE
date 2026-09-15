@@ -6,3 +6,14 @@ copyright notice is retained here as a historical attribution and tribute
 to the original licensing of HyperChanger. Current distributions are made
 available under the Apache License, Version 2.0; see LICENSE for the full
 license text.
+
+This product includes the HyperMusicCover lock-screen runtime implementation
+(Main.java, WallpaperProbe.java, Xp.java, MiBlur.java, ShadeBlur.java,
+ShadeGate.java, ShadeHeader.java, ShadeLayer.java, and ShadeSpring.java)
+adapted from HyperMusicCover by zyl6932.
+
+HyperMusicCover
+Copyright 2026 zyl6932
+https://github.com/zyl6932/HyperMusicCover
+
+The imported implementation is licensed under the Apache License, Version 2.0.

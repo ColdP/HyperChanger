@@ -185,3 +185,5 @@ Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before openin
 ## License
 
 HyperChanger is released under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for historical attribution to the original MIT-licensed release.
+
+The lock-screen music-cover runtime is directly imported and adapted from [HyperMusicCover](https://github.com/zyl6932/HyperMusicCover) (Copyright 2026 zyl6932, Apache License 2.0). Its retained attribution and license notice are in [NOTICE](NOTICE).

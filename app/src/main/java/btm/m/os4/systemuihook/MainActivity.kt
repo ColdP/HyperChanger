@@ -27,6 +27,7 @@ import android.os.Build
 import android.util.Log
 import android.widget.Toast
 import android.widget.ImageView
+import org.json.JSONArray
 import org.json.JSONObject
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -155,6 +156,8 @@ import top.yukonga.miuix.kmp.theme.*
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.security.SecureRandom
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -237,7 +240,7 @@ private enum class PageId {
     SHADE_NOTIFICATION_BACKGROUND,
     SHADE_CONTROL_CENTER_BACKGROUND,
     ISLAND, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, DEVICE_PROFILE,
-    SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN,
+    SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     REAR_SCREEN, REAR_MUSIC_APPS, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION,
 }
 
@@ -1227,6 +1230,7 @@ OverlayDropdownPreference(
                 ArrowPreference(title = tr("\u5173\u4e8e", "\u5173\u4e8e"), onClick = { open(PageId.ABOUT) })
                 ArrowPreference(title = tr("\u6350\u8d60", "\u6350\u8d60"), onClick = { open(PageId.DONATE) })
                 ArrowPreference(title = tr("\u5f00\u6e90\u4ee3\u7801\u58f0\u660e", "\u5f00\u6e90\u4ee3\u7801\u58f0\u660e"), onClick = { open(PageId.OPEN) })
+                ArrowPreference(title = tr("contributors", "\u8d21\u732e\u8005"), onClick = { open(PageId.CONTRIBUTORS) })
                 ArrowPreference(title = tr("\u672c\u9879\u76ee\u57fa\u4e8e MIUIX \u6784\u5efa", "\u672c\u9879\u76ee\u57fa\u4e8e MIUIX \u6784\u5efa"), onClick = { openUrl(context, "https://compose-miuix-ui.github.io/miuix/") })
             }
         }
@@ -2262,6 +2266,7 @@ private fun Detail(
         PageId.LANGUAGE -> LanguagePage(back)
         PageId.DONATE -> Donate(back)
         PageId.OPEN -> OpenSource(back)
+        PageId.CONTRIBUTORS -> Contributors(back)
         PageId.REAR_SCREEN -> RearScreen(musicWhitelist, updateMusicWhitelist, openPage, back)
         PageId.REAR_MUSIC_APPS -> RearMusicApps(musicWhitelist, updateMusicWhitelist, back)
         PageId.SIMULATE_MEDIA_NOTIFICATION -> SimulateMediaNotificationPage(
@@ -3776,6 +3781,19 @@ private fun Status(
                     checked = s.addControlCenterTopButtons,
                     onCheckedChange = { enabled -> update { it.copy(addControlCenterTopButtons = enabled) } },
                 )
+                AnimatedVisibility(
+                    visible = s.addControlCenterTopButtons,
+                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                ) {
+                    SwitchPreference(
+                        title = tr("\u6a2a\u5c4f\u663e\u793a\u63a7\u5236\u4e2d\u5fc3\u9876\u90e8\u63a7\u5236\u6309\u94ae", "\u6a2a\u5c4f\u663e\u793a\u63a7\u5236\u4e2d\u5fc3\u9876\u90e8\u63a7\u5236\u6309\u94ae"),
+                        checked = s.showControlCenterTopButtonsInLandscape,
+                        onCheckedChange = { enabled ->
+                            update { it.copy(showControlCenterTopButtonsInLandscape = enabled) }
+                        },
+                    )
+                }
                 AnimatedVisibility(
                     visible = s.addControlCenterTopButtons,
                     enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
@@ -6452,13 +6470,167 @@ private fun Donate(back: () -> Unit) = AppPage(tr("\u6350\u8d60", "\u6350\u8d60"
     }
 }
 
+private const val CONTRIBUTORS_URL = "https://coldp.github.io/hyperchanger-updateinfo/contributors.json"
+
+private data class Contributor(
+    val name: String,
+    val avatarUrl: String,
+    val githubLink: String,
+    val descriptions: Map<String, String>,
+)
+
+private data class ContributorsResult(
+    val contributors: List<Contributor> = emptyList(),
+    val error: Boolean = false,
+)
+
+private fun fetchContributors(): Result<List<Contributor>> = runCatching {
+    val connection = (URL(CONTRIBUTORS_URL).openConnection() as HttpURLConnection).apply {
+        connectTimeout = 10_000
+        readTimeout = 15_000
+        requestMethod = "GET"
+        setRequestProperty("Accept", "application/json")
+        setRequestProperty("User-Agent", "HyperChanger/${BuildConfig.VERSION_NAME}")
+    }
+    try {
+        check(connection.responseCode in 200..299) { "HTTP ${connection.responseCode}" }
+        val array = JSONArray(connection.inputStream.bufferedReader().use { it.readText() })
+        buildList {
+            for (index in 0 until array.length()) {
+                val objectValue = array.optJSONObject(index) ?: continue
+                val name = objectValue.optString("name").trim()
+                if (name.isBlank()) continue
+                val descriptionObject = objectValue.optJSONObject("description")
+                val descriptions = buildMap {
+                    descriptionObject?.keys()?.forEach { key ->
+                        descriptionObject.optString(key).trim().takeIf { it.isNotBlank() }?.let { put(key, it) }
+                    }
+                }
+                add(
+                    Contributor(
+                        name = name,
+                        avatarUrl = objectValue.optString("avatar").trim(),
+                        githubLink = objectValue.optString("github_link").trim(),
+                        descriptions = descriptions,
+                    )
+                )
+            }
+        }
+    } finally {
+        connection.disconnect()
+    }
+}
+
+private fun loadContributorAvatar(url: String): Bitmap? = runCatching {
+    if (url.isBlank()) return@runCatching null
+    val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+        connectTimeout = 10_000
+        readTimeout = 15_000
+        requestMethod = "GET"
+        setRequestProperty("User-Agent", "HyperChanger/${BuildConfig.VERSION_NAME}")
+    }
+    try {
+        if (connection.responseCode !in 200..299) return@runCatching null
+        connection.inputStream.use { BitmapFactory.decodeStream(it) }
+    } finally {
+        connection.disconnect()
+    }
+}.getOrNull()
+
+private fun contributorDescription(context: android.content.Context, descriptions: Map<String, String>): String {
+    if (descriptions.isEmpty()) return ""
+    val prefs = context.getSharedPreferences("languages", android.content.Context.MODE_PRIVATE)
+    val selection = prefs.getString("selected", "system") ?: "system"
+    val locale = when (selection) {
+        "system" -> systemLanguage(context)
+        "zh", "en", "ja" -> selection
+        else -> loadLanguagePacks(prefs).firstOrNull { it.name == selection }?.let {
+            runCatching { JSONObject(it.json).optString("locale") }.getOrDefault("")
+        }.orEmpty()
+    }.lowercase(Locale.ROOT)
+    return descriptions[locale]
+        ?: descriptions[locale.substringBefore('-')]
+        ?: descriptions["en"]
+        ?: descriptions["zh"]
+        ?: descriptions.values.firstOrNull().orEmpty()
+}
+
+@Composable
+private fun ContributorCard(contributor: Contributor) {
+    val context = LocalContext.current
+    val avatar by produceState<Bitmap?>(initialValue = null, contributor.avatarUrl) {
+        value = withContext(Dispatchers.IO) { loadContributorAvatar(contributor.avatarUrl) }
+    }
+    val description = contributorDescription(context, contributor.descriptions)
+    val cardModifier = Modifier.fillMaxWidth().then(
+        if (contributor.githubLink.isNotBlank()) Modifier.clickable { openUrl(context, contributor.githubLink) } else Modifier
+    )
+    Card(cardModifier, insideMargin = PaddingValues(14.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(52.dp).clip(CircleShape).background(MiuixTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (avatar != null) {
+                    Image(avatar!!.asImageBitmap(), contributor.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                } else {
+                    Text(contributor.name.take(1).uppercase(Locale.getDefault()), style = MiuixTheme.textStyles.title3)
+                }
+            }
+            Column(Modifier.padding(start = 14.dp).weight(1f)) {
+                Text(contributor.name, style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (contributor.githubLink.isNotBlank()) {
+                    Text(contributor.githubLink, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
+                }
+                if (description.isNotBlank()) {
+                    Text(description, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 5.dp))
+                }
+            }
+            if (contributor.githubLink.isNotBlank()) {
+                Image(MiuixIcons.Regular.ChevronForward, null, Modifier.padding(start = 12.dp).size(22.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary))
+            }
+        }
+    }
+}
+
+@Composable
+private fun Contributors(back: () -> Unit) = AppPage(tr("contributors", "\u8d21\u732e\u8005"), back) { padding, scroll ->
+    var reloadToken by remember { mutableIntStateOf(0) }
+    val result by produceState<ContributorsResult?>(initialValue = null, reloadToken) {
+        value = withContext(Dispatchers.IO) { fetchContributors() }.fold(
+            onSuccess = { ContributorsResult(contributors = it) },
+            onFailure = { ContributorsResult(error = true) },
+        )
+    }
+    AppList(padding, scroll, 28) {
+        when {
+            result == null -> item {
+                Text(tr("contributors_loading", "正在加载贡献者"), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+            }
+            result!!.error -> item {
+                Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(16.dp)) {
+                    Text(tr("contributors_load_failed", "无法加载贡献者列表"), style = MiuixTheme.textStyles.body1)
+                    Button(onClick = { reloadToken++ }, modifier = Modifier.padding(top = 12.dp), colors = ButtonDefaults.buttonColorsPrimary()) {
+                        Text(tr("retry", "重试"))
+                    }
+                }
+            }
+            result!!.contributors.isEmpty() -> item {
+                Text(tr("contributors_empty", "暂无贡献者信息"), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+            }
+            else -> items(result!!.contributors) { contributor -> ContributorCard(contributor) }
+        }
+    }
+}
+
 private data class OpenProject(val name: String, val version: String, val description: String, val url: String)
 private fun openProjects() = listOf(
     OpenProject("MIUIX", "0.9.3", tr("HyperOS \u98ce\u683c\u754c\u9762\u3001\u504f\u597d\u8bbe\u7f6e\u3001\u56fe\u6807\u4e0e\u6a21\u7cca\u6548\u679c", "HyperOS \u98ce\u683c\u754c\u9762\u3001\u504f\u597d\u8bbe\u7f6e\u3001\u56fe\u6807\u4e0e\u6a21\u7cca\u6548\u679c"), "https://github.com/compose-miuix-ui/miuix"),
     OpenProject("LSPosed API", "102", tr("LSPosed \u6a21\u5757 API \u4e0e\u670d\u52a1\u901a\u4fe1", "LSPosed \u6a21\u5757 API \u4e0e\u670d\u52a1\u901a\u4fe1"), "https://github.com/LSPosed/LSPosed"),
     OpenProject("Backdrop / AndroidLiquidGlass", "2.0.0", tr("\u6db2\u6001\u73bb\u7483\u6e32\u67d3\u4e0e\u5e95\u90e8\u5bfc\u822a\u4ea4\u4e92", "\u6db2\u6001\u73bb\u7483\u6e32\u67d3\u4e0e\u5e95\u90e8\u5bfc\u822a\u4ea4\u4e92"), "https://github.com/Kyant0/AndroidLiquidGlass"),
     OpenProject("Compose Multiplatform", "1.11.x", tr("\u58f0\u660e\u5f0f\u754c\u9762\u3001\u5e03\u5c40\u4e0e\u52a8\u753b", "\u58f0\u660e\u5f0f\u754c\u9762\u3001\u5e03\u5c40\u4e0e\u52a8\u753b"), "https://github.com/JetBrains/compose-multiplatform"),
-    OpenProject("AndroidX", tr("\u591a\u4e2a\u7ec4\u4ef6", "\u591a\u4e2a\u7ec4\u4ef6"), tr("Activity\u3001Lifecycle\u3001Core \u7b49 Android \u57fa\u7840\u5e93", "Activity\u3001Lifecycle\u3001Core \u7b49 Android \u57fa\u7840\u5e93"), "https://github.com/androidx/androidx")
+    OpenProject("AndroidX", tr("\u591a\u4e2a\u7ec4\u4ef6", "\u591a\u4e2a\u7ec4\u4ef6"), tr("Activity\u3001Lifecycle\u3001Core \u7b49 Android \u57fa\u7840\u5e93", "Activity\u3001Lifecycle\u3001Core \u7b49 Android \u57fa\u7840\u5e93"), "https://github.com/androidx/androidx"),
+    OpenProject(tr("HyperMusicCover", "HyperMusicCover"), tr("0.0.9", "0.0.9"), tr("\u97f3\u4e50\u9501\u5c4f\u90e8\u5206\u76f8\u5173\u4ee3\u7801", "\u97f3\u4e50\u9501\u5c4f\u90e8\u5206\u76f8\u5173\u4ee3\u7801"), "https://github.com/zyl6932/HyperMusicCover")
 )
 
 @Composable

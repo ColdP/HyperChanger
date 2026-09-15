@@ -185,3 +185,5 @@ HyperChanger/
 ## 许可证
 
 HyperChanger 基于 [Apache License 2.0](LICENSE) 开源；历史 MIT 授权致敬说明请参阅 [NOTICE](NOTICE)。
+
+锁屏音乐封面运行时直接引入并适配自 [HyperMusicCover](https://github.com/zyl6932/HyperMusicCover)（Copyright 2026 zyl6932，Apache License 2.0）。保留的来源与许可证声明见 [NOTICE](NOTICE)。

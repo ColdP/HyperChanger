@@ -10,6 +10,8 @@ import android.graphics.Outline
 import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.graphics.RenderEffect
+import android.graphics.Shader
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.media.MediaMetadata
@@ -28,6 +30,7 @@ import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.ViewTreeObserver
 import android.view.ViewConfiguration
+import android.view.TextureView
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
@@ -40,11 +43,11 @@ import io.github.proify.lyricon.subscriber.LyriconFactory
 import io.github.proify.lyricon.subscriber.LyriconSubscriber
 import io.github.proify.lyricon.subscriber.ProviderInfo
 import java.util.Collections
-import java.util.LinkedHashMap
 import java.util.WeakHashMap
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 internal const val MINI_PLAYER_BACKGROUND_DEFAULT = 0
 internal const val MINI_PLAYER_BACKGROUND_PURE = 1
@@ -68,14 +71,6 @@ internal data class MiniPlayerAppearance(
     val softGlassLuminance: Float = 0.14f,
 )
 
-/** A lockscreen clock root and the vendor container that exposes its rendered bounds. */
-private data class LockscreenMusicClockTarget(
-    val clock: View,
-    val container: View,
-)
-
-private const val MUSIC_CLOCK_NOTIFICATION_SAFE_GAP_DP = 16f
-
 /** Values sourced from SystemUI's NotificationMediaManager rather than an inferred session list. */
 internal object LockscreenMediaBridge {
     @Volatile var controller: MediaController? = null
@@ -85,6 +80,7 @@ internal object LockscreenMediaBridge {
     @Volatile private var artwork: Bitmap? = null
     @Volatile private var artworkKey: String? = null
     @Volatile private var pendingArtwork: Bitmap? = null
+    @Volatile private var artworkGeneration: Long = 0L
     private val artworkListeners = Collections.newSetFromMap(
         WeakHashMap<() -> Unit, Boolean>(),
     )
@@ -96,6 +92,7 @@ internal object LockscreenMediaBridge {
             artwork = null
             artworkKey = null
             pendingArtwork = null
+            artworkGeneration++
             notifyArtworkChanged()
             return
         }
@@ -109,6 +106,7 @@ internal object LockscreenMediaBridge {
         artwork = pendingArtwork?.takeUnless(Bitmap::isRecycled)
         artworkKey = notificationKey
         pendingArtwork = null
+        artworkGeneration++
         notifyArtworkChanged()
     }
 
@@ -136,10 +134,13 @@ internal object LockscreenMediaBridge {
         artwork = bitmap
         artworkKey = notificationKey
         pendingArtwork = null
+        artworkGeneration++
         notifyArtworkChanged()
     }
 
     fun artwork(): Bitmap? = artwork?.takeUnless(Bitmap::isRecycled)
+
+    fun artworkVersion(): Long = artworkGeneration
 
     fun artworkOrMetadata(metadata: MediaMetadata?): Bitmap? = artwork()
         ?: metadata?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
@@ -150,6 +151,7 @@ internal object LockscreenMediaBridge {
 internal enum class LockscreenMediaPresentation {
     MINI_PLAYER,
     MUSIC_LOCKSCREEN,
+    MUSIC_LOCKSCREEN_STYLE2,
     SYSTEM_MEDIA,
 }
 
@@ -163,9 +165,11 @@ internal object LockscreenMediaPresentationBridge {
         WeakHashMap<LockscreenMediaPresentationListener, Boolean>(),
     )
 
-    @Volatile var presentation: LockscreenMediaPresentation = LockscreenMediaPresentation.MINI_PLAYER
+    @Volatile var presentation: LockscreenMediaPresentation = LockscreenMediaPresentation.SYSTEM_MEDIA
         private set
-    val showMiniPlayer: Boolean get() = presentation == LockscreenMediaPresentation.MINI_PLAYER
+    val showMiniPlayer: Boolean
+        get() = presentation == LockscreenMediaPresentation.MINI_PLAYER ||
+            presentation == LockscreenMediaPresentation.MUSIC_LOCKSCREEN_STYLE2
     @Volatile var onPresentationChanged: ((LockscreenMediaPresentation) -> Unit)? = null
 
     fun register(listener: LockscreenMediaPresentationListener) {
@@ -233,6 +237,7 @@ internal class LockscreenMiniPlayerController(
     private var activeController: MediaController? = null
     private var player: LockscreenMiniPlayerView? = null
     private var lyricsCard: LockscreenLyricsView? = null
+    private var lastPresentation: LockscreenMediaPresentation? = null
     private var lyricSubscriber: LyriconLockscreenSubscriber? = null
     private var refreshPosted = false
     private var positionPosted = false
@@ -339,11 +344,20 @@ internal class LockscreenMiniPlayerController(
 
     override fun onMediaPresentationChanged(presentation: LockscreenMediaPresentation) {
         mainHandler.post {
-            if (presentation == LockscreenMediaPresentation.MINI_PLAYER) {
+            val wasShowingMiniPlayer = lastPresentation == LockscreenMediaPresentation.MINI_PLAYER ||
+                lastPresentation == LockscreenMediaPresentation.MUSIC_LOCKSCREEN_STYLE2
+            val showsMiniPlayer = presentation == LockscreenMediaPresentation.MINI_PLAYER ||
+                presentation == LockscreenMediaPresentation.MUSIC_LOCKSCREEN_STYLE2
+            lastPresentation = presentation
+            if (showsMiniPlayer) {
                 mediaPresentationExitAnimating = false
                 refresh()
-                player?.let(::animateMiniPlayerIn)
-                lyricsCard?.takeIf { it.visibility == View.VISIBLE }?.let(::animateMiniPlayerIn)
+                // Style 2 retains the same lockscreen island. Only animate when crossing the
+                // actual hidden/visible boundary, so MINI_PLAYER <-> STYLE2 stays motionless.
+                if (!wasShowingMiniPlayer) {
+                    player?.let(::animateMiniPlayerIn)
+                    lyricsCard?.takeIf { it.visibility == View.VISIBLE }?.let(::animateMiniPlayerIn)
+                }
             } else {
                 animateMiniPlayerOut()
             }
@@ -353,13 +367,16 @@ internal class LockscreenMiniPlayerController(
     private fun animateMiniPlayerIn(view: View) {
         view.animate().cancel()
         view.visibility = View.VISIBLE
+        val settledY = if (view === player) baseTranslationY + customizationLift else lyricsBaseTranslationY + customizationLift
         view.alpha = .68f
         view.scaleX = .78f
         view.scaleY = .78f
+        view.translationY = settledY + dp(14f)
         view.animate()
             .alpha(1f)
             .scaleX(1f)
             .scaleY(1f)
+            .translationY(settledY)
             .setDuration(MEDIA_PRESENTATION_ENTER_DURATION_MS)
             .setInterpolator(android.view.animation.DecelerateInterpolator())
             .start()
@@ -376,10 +393,14 @@ internal class LockscreenMiniPlayerController(
         var pending = views.size
         views.forEach { view ->
             view.animate().cancel()
+            val settledY = if (view === player) baseTranslationY + customizationLift else {
+                lyricsBaseTranslationY + customizationLift
+            }
             view.animate()
                 .alpha(.68f)
                 .scaleX(.78f)
                 .scaleY(.78f)
+                .translationY(settledY + dp(14f))
                 .setDuration(MEDIA_PRESENTATION_EXIT_DURATION_MS)
                 .setInterpolator(android.view.animation.DecelerateInterpolator())
                 .withEndAction {
@@ -391,6 +412,11 @@ internal class LockscreenMiniPlayerController(
                             card.alpha = 1f
                             card.scaleX = 1f
                             card.scaleY = 1f
+                            card.translationY = if (card === player) {
+                                baseTranslationY + customizationLift
+                            } else {
+                                lyricsBaseTranslationY + customizationLift
+                            }
                         }
                         refresh()
                     }
@@ -474,12 +500,6 @@ internal class LockscreenMiniPlayerController(
             lyricsCard?.visibility = View.GONE
             return
         }
-        val mode = mediaNotificationMode()
-        if (mode != LOCKSCREEN_MEDIA_NOTIFICATION_DYNAMIC &&
-            LockscreenMediaPresentationBridge.presentation == LockscreenMediaPresentation.SYSTEM_MEDIA
-        ) {
-            LockscreenMediaPresentationBridge.setPresentation(LockscreenMediaPresentation.MINI_PLAYER)
-        }
         val currentAppearance = appearance()
         val view = player ?: LockscreenMiniPlayerView(context).also {
             player = it
@@ -494,8 +514,7 @@ internal class LockscreenMiniPlayerController(
                 ),
             )
         }
-        val showMiniPlayer = LockscreenMediaPresentationBridge.presentation ==
-            LockscreenMediaPresentation.MINI_PLAYER
+        val showMiniPlayer = LockscreenMediaPresentationBridge.showMiniPlayer
         if (showMiniPlayer) {
             view.visibility = View.VISIBLE
         } else if (!mediaPresentationExitAnimating) {
@@ -514,14 +533,14 @@ internal class LockscreenMiniPlayerController(
             onSkipToPrevious = { skipTrackSafely(next = false) },
             onSkipToNext = { skipTrackSafely(next = true) },
             onShowSystemMediaNotification = {
-                if (mediaNotificationMode() == LOCKSCREEN_MEDIA_NOTIFICATION_DYNAMIC) {
-                    LockscreenMediaPresentationBridge.setShowMiniPlayer(false)
-                }
+                LockscreenMediaPresentationBridge.setPresentation(
+                    LockscreenMediaPresentation.SYSTEM_MEDIA,
+                )
             },
             onShowMusicLockscreen = {
                 if (musicLockscreenEnabled()) {
                     LockscreenMediaPresentationBridge.setPresentation(
-                        LockscreenMediaPresentation.MUSIC_LOCKSCREEN,
+                        LockscreenMediaPresentation.MUSIC_LOCKSCREEN_STYLE2,
                     )
                 }
             },
@@ -728,8 +747,8 @@ internal class LockscreenMiniPlayerController(
     private fun dp(value: Float): Int = (value * context.resources.displayMetrics.density + .5f).toInt()
 
     private companion object {
-        const val MEDIA_PRESENTATION_ENTER_DURATION_MS = 260L
-        const val MEDIA_PRESENTATION_EXIT_DURATION_MS = 220L
+        const val MEDIA_PRESENTATION_ENTER_DURATION_MS = 340L
+        const val MEDIA_PRESENTATION_EXIT_DURATION_MS = 300L
         const val LYRICS_PLAYER_GAP_DP = 12f
     }
 }
@@ -1221,20 +1240,19 @@ internal class LockscreenMusicLockscreenController(
     private val host: ViewGroup,
     private val enabled: () -> Boolean,
     private val isLockscreenShowing: () -> Boolean,
-    private val appearance: () -> MiniPlayerAppearance,
-    private val iconColor: () -> Int,
-    private val applyPlatformMaterial: (ImageView, MiniPlayerAppearance) -> Unit,
 ) : LockscreenMediaPresentationListener {
     private val context = host.context
     private val handler = Handler(Looper.getMainLooper())
     private val sessions = context.getSystemService(MediaSessionManager::class.java)
-    private val audioManager = context.getSystemService(AudioManager::class.java)
     private var activeController: MediaController? = null
     private var view: LockscreenMusicLockscreenView? = null
     private var refreshPosted = false
-    private var tickPosted = false
-    // Keep the vendor clock's own gesture/AOD translation intact and track only our delta.
-    private val appliedClockAvoidanceOffsets = WeakHashMap<View, Float>()
+    private var animateClockCollapse = false
+    private val depthViewVisibility = WeakHashMap<View, Int>()
+    private val depthGuardListener = ViewTreeObserver.OnPreDrawListener {
+        enforceDepthForegroundState()
+        true
+    }
     private val globalLayoutListener = ViewTreeObserver.OnGlobalLayoutListener {
         if (view?.visibility == View.VISIBLE) position()
     }
@@ -1249,23 +1267,13 @@ internal class LockscreenMusicLockscreenController(
         override fun onMetadataChanged(metadata: MediaMetadata?) { scheduleRefresh() }
     }
     private val artworkListener: () -> Unit = { scheduleRefresh() }
-    private val tick = object : Runnable {
-        override fun run() {
-            tickPosted = false
-            refresh()
-            if (isVisibleAndPlaying()) {
-                tickPosted = true
-                handler.postDelayed(this, 500L)
-            }
-        }
-    }
-
     init {
         host.clipChildren = false
         host.clipToPadding = false
         LockscreenMediaPresentationBridge.register(this)
         LockscreenMediaBridge.registerArtworkListener(artworkListener)
         host.rootView.viewTreeObserver.addOnGlobalLayoutListener(globalLayoutListener)
+        host.rootView.viewTreeObserver.addOnPreDrawListener(depthGuardListener)
         host.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> position() }
         runCatching {
             sessions?.addOnActiveSessionsChangedListener(sessionCallback, null, handler)
@@ -1278,10 +1286,11 @@ internal class LockscreenMusicLockscreenController(
         LockscreenMediaPresentationBridge.unregister(this)
         LockscreenMediaBridge.unregisterArtworkListener(artworkListener)
         runCatching { host.rootView.viewTreeObserver.removeOnGlobalLayoutListener(globalLayoutListener) }
+        runCatching { host.rootView.viewTreeObserver.removeOnPreDrawListener(depthGuardListener) }
         runCatching { sessions?.removeOnActiveSessionsChangedListener(sessionCallback) }
         runCatching { activeController?.unregisterCallback(controllerCallback) }
-        restoreClockPosition()
-        view?.let { host.removeView(it) }
+        LockscreenNativeClockScaler.restore()
+        view?.let { (it.parent as? ViewGroup)?.removeView(it) }
         handler.removeCallbacksAndMessages(null)
         view = null
         activeController = null
@@ -1294,7 +1303,13 @@ internal class LockscreenMusicLockscreenController(
             ) {
                 refresh()
                 view?.let(::animateIn)
+            } else if (presentation == LockscreenMediaPresentation.MUSIC_LOCKSCREEN_STYLE2 &&
+                enabled() && isLockscreenShowing()
+            ) {
+                refresh()
+                view?.let(::animateIn)
             } else {
+                LockscreenNativeClockScaler.restore()
                 view?.let(::animateOut)
             }
         }
@@ -1305,7 +1320,9 @@ internal class LockscreenMusicLockscreenController(
             if (!isLockscreenShowing()) {
                 view?.let(::animateOut)
             } else if (LockscreenMediaPresentationBridge.presentation ==
-                LockscreenMediaPresentation.MUSIC_LOCKSCREEN
+                LockscreenMediaPresentation.MUSIC_LOCKSCREEN ||
+                LockscreenMediaPresentationBridge.presentation ==
+                LockscreenMediaPresentation.MUSIC_LOCKSCREEN_STYLE2
             ) {
                 refresh()
             }
@@ -1350,7 +1367,7 @@ internal class LockscreenMusicLockscreenController(
         val controller = activeController
         val state = controller?.playbackState
         if (!enabled() || !isLockscreenShowing() || controller == null || !isUsable(controller)) {
-            restoreClockPosition()
+            restoreDepthForegroundState()
             view?.visibility = View.GONE
             return
         }
@@ -1358,46 +1375,45 @@ internal class LockscreenMusicLockscreenController(
             view = it
             host.addView(it, ViewGroup.LayoutParams(dp(320f), dp(520f)))
         }
+        val currentArtwork = LockscreenMediaBridge.artworkOrMetadata(controller.metadata)
+        val artworkVersion = LockscreenMediaBridge.artworkVersion()
         musicView.bind(
-            title = controller.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty()
-                .ifBlank { "正在播放" },
-            artist = controller.metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST).orEmpty()
-                .ifBlank { controller.metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM).orEmpty() },
-            artwork = LockscreenMediaBridge.artworkOrMetadata(controller.metadata),
-            state = state,
-            duration = controller.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L,
-            appearance = appearance(),
-            iconColor = iconColor(),
-            applyPlatformMaterial = applyPlatformMaterial,
-            onToggle = { toggle(controller) },
-            onPrevious = { skip(controller, false) },
-            onNext = { skip(controller, true) },
-            onSeek = { position ->
-                runCatching { controller.transportControls.seekTo(position) }
-            },
+            artwork = currentArtwork,
+            artworkVersion = artworkVersion,
             onArtworkClick = {
+                if (LockscreenMediaPresentationBridge.presentation ==
+                    LockscreenMediaPresentation.MUSIC_LOCKSCREEN_STYLE2
+                ) {
+                    LockscreenMediaPresentationBridge.setPresentation(
+                        LockscreenMediaPresentation.MINI_PLAYER,
+                    )
+                } else {
+                    LockscreenMediaPresentationBridge.setPresentation(
+                        LockscreenMediaPresentation.SYSTEM_MEDIA,
+                    )
+                }
+            },
+            onArtworkLongClick = {
                 LockscreenMediaPresentationBridge.setPresentation(LockscreenMediaPresentation.MINI_PLAYER)
             },
+            style2 = LockscreenMediaPresentationBridge.presentation ==
+                LockscreenMediaPresentation.MUSIC_LOCKSCREEN_STYLE2,
         )
         musicView.visibility = if (
-            LockscreenMediaPresentationBridge.presentation == LockscreenMediaPresentation.MUSIC_LOCKSCREEN &&
+            (LockscreenMediaPresentationBridge.presentation == LockscreenMediaPresentation.MUSIC_LOCKSCREEN ||
+                LockscreenMediaPresentationBridge.presentation == LockscreenMediaPresentation.MUSIC_LOCKSCREEN_STYLE2) &&
                 isLockscreenShowing()
         ) View.VISIBLE else View.GONE
+        enforceDepthForegroundState()
         position()
-        if (isVisibleAndPlaying() && !tickPosted) {
-            tickPosted = true
-            handler.postDelayed(tick, 500L)
-        }
     }
-
-    private fun isVisibleAndPlaying() = view?.visibility == View.VISIBLE &&
-        activeController?.playbackState?.state == PlaybackState.STATE_PLAYING
 
     private fun animateIn(target: View) {
         target.animate().cancel()
         target.visibility = View.VISIBLE
         // Position first so the entrance offset is relative to the actual full-screen panel,
         // while clock avoidance is calculated against its final bounds.
+        animateClockCollapse = true
         position()
         val settledTranslationY = target.translationY
         target.alpha = 0f
@@ -1409,7 +1425,7 @@ internal class LockscreenMusicLockscreenController(
     }
 
     private fun animateOut(target: View) {
-        restoreClockPosition()
+        LockscreenNativeClockScaler.restore()
         if (target.visibility != View.VISIBLE) return
         target.animate().cancel()
         target.animate().alpha(0f).translationY(dp(18f).toFloat()).setDuration(180L)
@@ -1418,6 +1434,7 @@ internal class LockscreenMusicLockscreenController(
                 target.visibility = View.GONE
                 target.alpha = 1f
                 target.translationY = 0f
+                restoreDepthForegroundState()
             }.start()
     }
 
@@ -1425,8 +1442,8 @@ internal class LockscreenMusicLockscreenController(
         val target = view ?: return
         if (host.width <= 0 || host.height <= 0) return
         // Match the outer span of the lockscreen shortcut backgrounds rather than the screen edges.
-        val width = min(dp(336f), host.width - dp(48f)).coerceAtLeast(dp(240f))
-        val height = min(dp(548f), (host.height * .60f).toInt()).coerceAtLeast(dp(470f))
+        val width = host.width
+        val height = host.height
         val params = target.layoutParams
         if (params == null || params.width != width || params.height != height) {
             target.layoutParams = (params ?: ViewGroup.LayoutParams(width, height)).apply {
@@ -1434,384 +1451,273 @@ internal class LockscreenMusicLockscreenController(
                 this.height = height
             }
         }
-        target.translationX = (host.width - width) / 2f
-        target.translationY = (host.height * .27f).coerceAtMost((host.height - height - dp(72f)).toFloat())
+        target.translationX = 0f
+        target.translationY = 0f
+        // Full-screen background is supplied by the miwallpaper texture hook. Keeping this
+        // controller free of a background View prevents notification-center contamination.
         adjustClockForMusic(target)
+        enforceDepthForegroundState()
         target.bringToFront()
     }
 
-    /**
-     * Keep the system clock clear of the full-screen music surface. MIUI's clock owns its
-     * translation during gestures and AOD transitions, so add only the required delta and
-     * remove it again when the music surface is hidden.
-     */
+    /** HyperMusicCover behavior: shrink the native clock in place and keep its date visible. */
     private fun adjustClockForMusic(music: View) {
-        if (music.visibility != View.VISIBLE ||
-            !music.isAttachedToWindow ||
-            !enabled() ||
-            !isLockscreenShowing() ||
-            LockscreenMediaPresentationBridge.presentation != LockscreenMediaPresentation.MUSIC_LOCKSCREEN
-        ) {
-            restoreClockPosition()
+        val active = music.visibility == View.VISIBLE && music.isAttachedToWindow && enabled() &&
+            isLockscreenShowing() && LockscreenMediaPresentationBridge.presentation ==
+            LockscreenMediaPresentation.MUSIC_LOCKSCREEN
+        if (!active) {
+            LockscreenNativeClockScaler.restore()
             return
         }
-        val targets = findLockscreenClockTargets(host.rootView)
-            .filter { target ->
-                target.clock.isAttachedToWindow && isVisibleForClockAvoidance(target.clock)
-            }
-        if (targets.isEmpty()) {
-            restoreClockPosition()
+        // HyperMusicCover scales the OEM glyph size at TimeView.setSizeInternal(). Do not
+        // transform the clock container here: that also scales/repositions the date and causes
+        // the vendor notification animation to fight our layout.
+        LockscreenNativeClockScaler.setActive(true)
+        animateClockCollapse = false
+    }
+
+    /** Hide only the wallpaper subject/cut-out composited above the clock. */
+    private fun enforceDepthForegroundState() {
+        val active = view?.visibility == View.VISIBLE && enabled() && isLockscreenShowing() &&
+            (LockscreenMediaPresentationBridge.presentation == LockscreenMediaPresentation.MUSIC_LOCKSCREEN ||
+                LockscreenMediaPresentationBridge.presentation == LockscreenMediaPresentation.MUSIC_LOCKSCREEN_STYLE2)
+        if (!active) {
+            restoreDepthForegroundState()
             return
         }
-        restoreStaleClockPositions(targets.mapTo(LinkedHashSet()) { it.clock })
-        val musicLocation = IntArray(2).also(music::getLocationOnScreen)
-        val candidateBottoms = mutableListOf<Float>()
-        targets.forEach { target ->
-            val containerLocation = IntArray(2).also(target.container::getLocationOnScreen)
-            target.container.getClockBottomForAvoidance()?.let { bottom ->
-                candidateBottoms += containerLocation[1] + bottom
-            }
-            // All-in-one clocks use a full-height root; mClockViewRect is the actual glyph bound.
-            val clockLocation = IntArray(2).also(target.clock::getLocationOnScreen)
-            val previousOffset = appliedClockAvoidanceOffsets[target.clock] ?: 0f
-            target.clock.getRenderedClockContentBottomForAvoidance()?.let { bottom ->
-                candidateBottoms += clockLocation[1] + bottom - previousOffset
-            }
-        }
-        val clockBottomOnScreen = candidateBottoms.maxOrNull() ?: run {
-            restoreClockPosition()
-            return
-        }
-        val requiredOffset = minOf(
-            0f,
-            musicLocation[1] - dp(MUSIC_CLOCK_NOTIFICATION_SAFE_GAP_DP) - clockBottomOnScreen,
-        )
-        targets.forEach { target ->
-            val clock = target.clock
-            val previousOffset = appliedClockAvoidanceOffsets[clock] ?: 0f
-            val systemOffset = clock.translationY - previousOffset
-            clock.translationY = systemOffset + requiredOffset
-            appliedClockAvoidanceOffsets[clock] = requiredOffset
+        val candidates = LinkedHashSet<View>()
+        findViewsByIdName(host.rootView, "deducted_image_view", candidates)
+        // Only the foreground layer contains the depth subject. Walking the whole SystemUI
+        // root would also hide unrelated TextureViews used by the shade and media surfaces.
+        collectTextureViews(host, candidates)
+        candidates.forEach { candidate ->
+            if (!depthViewVisibility.containsKey(candidate)) depthViewVisibility[candidate] = candidate.visibility
+            if (candidate.visibility != View.INVISIBLE) candidate.visibility = View.INVISIBLE
         }
     }
 
-    private fun restoreClockPosition() {
-        appliedClockAvoidanceOffsets.entries.toList().forEach { (clock, offset) ->
-            if (clock.isAttachedToWindow) clock.translationY -= offset
+    private fun restoreDepthForegroundState() {
+        depthViewVisibility.entries.toList().forEach { (depthView, visibility) ->
+            if (depthView.isAttachedToWindow) depthView.visibility = visibility
         }
-        appliedClockAvoidanceOffsets.clear()
+        depthViewVisibility.clear()
     }
 
-    private fun restoreStaleClockPositions(activeClocks: Set<View>) {
-        appliedClockAvoidanceOffsets.entries.toList()
-            .filter { (clock, _) -> clock !in activeClocks }
-            .forEach { (clock, offset) ->
-                if (clock.isAttachedToWindow) clock.translationY -= offset
-                appliedClockAvoidanceOffsets.remove(clock)
-            }
-    }
-
-    private fun findLockscreenClockTargets(root: View?): List<LockscreenMusicClockTarget> {
-        if (root == null) return emptyList()
-        val targets = LinkedHashMap<View, LockscreenMusicClockTarget>()
-        findPrimaryLockscreenClock(root)?.let { target -> targets[target.clock] = target }
-        findViewByIdNameForClock(
-            root,
-            setOf("miui_keyguard_foreground_clock_container", "keyguard_foreground_clock_container"),
-        )?.let { container ->
-            findVendorClockRoot(container)?.let { clock ->
-                targets[clock] = LockscreenMusicClockTarget(clock, container)
-            }
-        }
-        return targets.values.toList()
-    }
-
-    private fun findPrimaryLockscreenClock(root: View): LockscreenMusicClockTarget? {
-        val container = findViewByClassNameForClock(
-            root,
-            "com.android.keyguard.clock.KeyguardClockContainer",
-        ) ?: return null
-        return readMiuiClockView(container)?.let { LockscreenMusicClockTarget(it, container) }
-    }
-
-    private fun findVendorClockRoot(root: View): View? {
-        if (root.javaClass.name.startsWith("com.miui.clock.")) return root
-        if (root is ViewGroup) {
-            for (index in 0 until root.childCount) {
-                findVendorClockRoot(root.getChildAt(index))?.let { return it }
-            }
-        }
-        return null
-    }
-
-    private fun findViewByClassNameForClock(root: View, className: String): View? {
-        if (root.javaClass.name == className) return root
-        if (root is ViewGroup) {
-            for (index in 0 until root.childCount) {
-                findViewByClassNameForClock(root.getChildAt(index), className)?.let { return it }
-            }
-        }
-        return null
-    }
-
-    private fun findViewByIdNameForClock(root: View, names: Set<String>): View? {
+    private fun findViewsByIdName(root: View?, name: String, out: MutableSet<View>) {
+        if (root == null) return
         val idName = runCatching { root.resources.getResourceEntryName(root.id) }.getOrDefault("")
-        if (idName in names) return root
+        if (idName == name) out += root
         if (root is ViewGroup) {
-            for (index in 0 until root.childCount) {
-                findViewByIdNameForClock(root.getChildAt(index), names)?.let { return it }
-            }
-        }
-        return null
-    }
-
-    private fun readMiuiClockView(container: View): View? = runCatching {
-        val controllerField = container.javaClass.getDeclaredField("mMiuiClockController")
-            .apply { isAccessible = true }
-        val controller = controllerField.get(container) ?: return@runCatching null
-        val clockField = controller.javaClass.getDeclaredField("mClockView")
-            .apply { isAccessible = true }
-        clockField.get(controller) as? View
-    }.getOrNull()
-
-    private fun View.getClockBottomForAvoidance(): Float? = runCatching {
-        (javaClass.getMethod("getClockBottom").invoke(this) as? Number)
-            ?.toFloat()?.takeIf { it > 0f }
-    }.getOrNull()
-
-    private fun View.getRenderedClockContentBottomForAvoidance(): Float? = runCatching {
-        (javaClass.getMethod("getMClockViewRect").invoke(this) as? Rect)
-            ?.takeIf { !it.isEmpty }?.bottom?.toFloat()
-    }.getOrNull()
-
-    private fun isVisibleForClockAvoidance(candidate: View): Boolean =
-        candidate.visibility == View.VISIBLE && candidate.alpha > 0.01f &&
-            candidate.width > 0 && candidate.height > dp(24f)
-
-    private fun toggle(controller: MediaController) {
-        runCatching {
-            val playing = controller.playbackState?.state == PlaybackState.STATE_PLAYING
-            if (playing) controller.transportControls.pause() else controller.transportControls.play()
-        }.onFailure {
-            val now = android.os.SystemClock.uptimeMillis()
-            val key = if (controller.playbackState?.state == PlaybackState.STATE_PLAYING) {
-                KeyEvent.KEYCODE_MEDIA_PAUSE
-            } else KeyEvent.KEYCODE_MEDIA_PLAY
-            runCatching {
-                audioManager?.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, key, 0))
-                audioManager?.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, key, 0))
-            }
+            for (index in 0 until root.childCount) findViewsByIdName(root.getChildAt(index), name, out)
         }
     }
 
-    private fun skip(controller: MediaController, next: Boolean) {
-        runCatching {
-            if (next) controller.transportControls.skipToNext()
-            else controller.transportControls.skipToPrevious()
-        }.onFailure {
-            val now = android.os.SystemClock.uptimeMillis()
-            val key = if (next) KeyEvent.KEYCODE_MEDIA_NEXT else KeyEvent.KEYCODE_MEDIA_PREVIOUS
-            runCatching {
-                audioManager?.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, key, 0))
-                audioManager?.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, key, 0))
-            }
+    private fun collectTextureViews(root: View?, out: MutableSet<View>) {
+        if (root == null) return
+        if (root is TextureView) out += root
+        if (root is ViewGroup) {
+            for (index in 0 until root.childCount) collectTextureViews(root.getChildAt(index), out)
         }
     }
 
     private fun dp(value: Float) = (value * context.resources.displayMetrics.density + .5f).toInt()
 }
 
-private class LockscreenMusicLockscreenView(context: Context) : FrameLayout(context) {
+private class LockscreenMusicBackgroundView(context: Context) : FrameLayout(context) {
     private val density = resources.displayMetrics.density
-    private val materialLayer = ImageView(context)
-    private val materialEdge = View(context)
-    private val artwork = ImageView(context)
-    private val title = TextView(context)
-    private val artist = TextView(context)
-    private val elapsed = TextView(context)
-    private val remaining = TextView(context)
-    private val seekBar = LockscreenMusicSeekBar(context)
-    private val previous = ImageButton(context)
-    private val toggle = ImageButton(context)
-    private val next = ImageButton(context)
-    private val content = LinearLayout(context)
-    private var lastAppearance: MiniPlayerAppearance? = null
-    private var onSeek: ((Long) -> Unit)? = null
-    private var contentColor = Color.BLACK
+    private val blurredArtwork = ImageView(context)
+    private val monetScrim = View(context)
+    private var lastArtwork: Bitmap? = null
+    private var lastArtworkVersion = Long.MIN_VALUE
 
     init {
-        clipToOutline = true
-        outlineProvider = roundOutline(dp(30f).toFloat())
-        materialLayer.scaleType = ImageView.ScaleType.FIT_XY
-        // The SystemUI material compositor needs the same rounded target as shortcut backgrounds.
-        materialLayer.clipToOutline = true
-        materialLayer.outlineProvider = roundOutline(dp(30f).toFloat())
-        addView(materialLayer, LayoutParams(-1, -1))
-        materialEdge.background = rounded(Color.TRANSPARENT, dp(30f).toFloat()).apply {
-            setStroke(dp(1f), Color.argb(70, 255, 255, 255))
-        }
-        materialEdge.isClickable = false
-        materialEdge.isFocusable = false
-        addView(materialEdge, LayoutParams(-1, -1))
-        content.orientation = LinearLayout.VERTICAL
-        content.gravity = Gravity.START
-        content.setPadding(dp(18f), dp(18f), dp(18f), dp(16f))
-        addView(content, LayoutParams(-1, -1))
-        artwork.scaleType = ImageView.ScaleType.CENTER_CROP
-        artwork.background = rounded(Color.rgb(52, 52, 52), dp(30f).toFloat())
-        artwork.clipToOutline = true
-        artwork.outlineProvider = roundOutline(dp(30f).toFloat())
-        artwork.setOnClickListener { tagArtworkClick?.invoke() }
-        // Do not let LinearLayout measure a 0x0 child first: SystemUI can bind before its
-        // foreground host has a stable size. The width is supplied by the parent measurement.
-        content.addView(artwork, LinearLayout.LayoutParams(-1, 0).apply {
-            gravity = Gravity.START
-        })
-        title.textSize = 20f
-        title.setTextColor(contentColor)
-        title.setTypeface(title.typeface, android.graphics.Typeface.BOLD)
-        title.gravity = Gravity.START or Gravity.CENTER_VERTICAL
-        title.maxLines = 1
-        title.ellipsize = TextUtils.TruncateAt.END
-        content.addView(title, LinearLayout.LayoutParams(-1, dp(30f)).apply { topMargin = dp(14f) })
-        artist.textSize = 15f
-        artist.setTextColor(withAlpha(contentColor, 190))
-        artist.gravity = Gravity.START or Gravity.CENTER_VERTICAL
-        artist.maxLines = 1
-        artist.ellipsize = TextUtils.TruncateAt.END
-        content.addView(artist, LinearLayout.LayoutParams(-1, dp(24f)))
-        content.addView(seekBar, LinearLayout.LayoutParams(-1, dp(24f)).apply { topMargin = dp(8f) })
-        val times = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
-        listOf(elapsed, remaining).forEach {
-            it.textSize = 11f
-            it.setTextColor(withAlpha(contentColor, 190))
-        }
-        times.addView(elapsed, LinearLayout.LayoutParams(0, dp(20f), 1f))
-        remaining.gravity = Gravity.END
-        times.addView(remaining, LinearLayout.LayoutParams(0, dp(20f), 1f))
-        content.addView(times, LinearLayout.LayoutParams(-1, dp(20f)))
-        val controls = LinearLayout(context).apply { gravity = Gravity.CENTER; weightSum = 3f }
-        configureButton(previous, "上一首")
-        configureButton(toggle, "播放或暂停")
-        configureButton(next, "下一首")
-        controls.addView(previous, LinearLayout.LayoutParams(0, dp(68f), 1f))
-        controls.addView(toggle, LinearLayout.LayoutParams(0, dp(76f), 1f))
-        controls.addView(next, LinearLayout.LayoutParams(0, dp(68f), 1f))
-        content.addView(controls, LinearLayout.LayoutParams(-1, dp(80f)).apply { topMargin = dp(4f) })
-        seekBar.onSeekChanged = { position -> onSeek?.invoke(position) }
+        blurredArtwork.scaleType = ImageView.ScaleType.CENTER_CROP
+        blurredArtwork.scaleX = 1.12f
+        blurredArtwork.scaleY = 1.12f
+        blurredArtwork.setRenderEffect(
+            RenderEffect.createBlurEffect(dp(38f).toFloat(), dp(38f).toFloat(), Shader.TileMode.CLAMP),
+        )
+        addView(blurredArtwork, LayoutParams(-1, -1))
+        addView(monetScrim, LayoutParams(-1, -1))
     }
 
-    private var tagArtworkClick: (() -> Unit)? = null
+    fun bind(artwork: Bitmap?, version: Long) {
+        if (version == lastArtworkVersion && artwork === lastArtwork) return
+        lastArtworkVersion = version
+        lastArtwork = artwork
+        val tint = extractMonetSurfaceColor(artwork)
+        monetScrim.setBackgroundColor(Color.argb(170, Color.red(tint), Color.green(tint), Color.blue(tint)))
+        transitionArtwork(artwork)
+    }
+
+    private fun transitionArtwork(bitmap: Bitmap?) {
+        blurredArtwork.animate().cancel()
+        if (blurredArtwork.drawable == null) {
+            blurredArtwork.setImageBitmap(bitmap)
+            return
+        }
+        blurredArtwork.animate().alpha(0f).setDuration(120L).withEndAction {
+            blurredArtwork.setImageBitmap(bitmap)
+            blurredArtwork.animate().alpha(1f).setDuration(220L)
+                .setInterpolator(android.view.animation.DecelerateInterpolator())
+                .start()
+        }.start()
+    }
+
+    private fun extractMonetSurfaceColor(bitmap: Bitmap?): Int {
+        if (bitmap == null || bitmap.isRecycled) return Color.rgb(25, 29, 35)
+        val stepX = (bitmap.width / 18).coerceAtLeast(1)
+        val stepY = (bitmap.height / 18).coerceAtLeast(1)
+        var red = 0L
+        var green = 0L
+        var blue = 0L
+        var count = 0L
+        var y = stepY / 2
+        while (y < bitmap.height) {
+            var x = stepX / 2
+            while (x < bitmap.width) {
+                val pixel = bitmap.getPixel(x, y)
+                red += Color.red(pixel)
+                green += Color.green(pixel)
+                blue += Color.blue(pixel)
+                count++
+                x += stepX
+            }
+            y += stepY
+        }
+        if (count == 0L) return Color.rgb(25, 29, 35)
+        val hsv = FloatArray(3)
+        Color.RGBToHSV((red / count).toInt(), (green / count).toInt(), (blue / count).toInt(), hsv)
+        hsv[1] = hsv[1].coerceIn(.18f, .62f)
+        hsv[2] = hsv[2].coerceIn(.16f, .32f)
+        return Color.HSVToColor(hsv)
+    }
+
+    private fun dp(value: Float) = (value * density + .5f).toInt()
+}
+
+private class LockscreenMusicLockscreenView(context: Context) : FrameLayout(context) {
+    private val density = resources.displayMetrics.density
+    private val artwork = ImageView(context)
+    private var artworkTop = 0
+    private var lastArtwork: Bitmap? = null
+    private var lastArtworkVersion = Long.MIN_VALUE
+    private var artworkLongPressed = false
+    private var artworkDown = false
+    private var onArtworkClick: (() -> Unit)? = null
+    private var onArtworkLongClick: (() -> Unit)? = null
+    private var style2 = false
+    private val longPress = Runnable {
+        if (artworkDown) {
+            artworkLongPressed = true
+            onArtworkLongClick?.invoke()
+        }
+    }
+
+    init {
+        clipChildren = false
+        clipToPadding = false
+        artwork.scaleType = ImageView.ScaleType.CENTER_CROP
+        // HyperMusicCover draws the cover as the real keyguard wallpaper texture so the native
+        // clock glass and notification glass sample it. Keep this transparent hit target only
+        // for the existing artwork tap/long-press switching gesture.
+        artwork.background = null
+        artwork.alpha = 0f
+        artwork.clipToOutline = false
+        artwork.outlineProvider = null
+        artwork.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    artworkDown = true
+                    artworkLongPressed = false
+                    artwork.postDelayed(longPress, ViewConfiguration.getLongPressTimeout().toLong())
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    artwork.removeCallbacks(longPress)
+                    artworkDown = false
+                    if (!artworkLongPressed) {
+                        onArtworkClick?.invoke()
+                        artwork.performClick()
+                    }
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    artwork.removeCallbacks(longPress)
+                    artworkDown = false
+                    true
+                }
+                else -> true
+            }
+        }
+        addView(artwork, LayoutParams(-1, -1, Gravity.CENTER))
+    }
 
     override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
         super.onSizeChanged(width, height, oldWidth, oldHeight)
-        updateArtworkSize()
-        materialLayer.invalidateOutline()
+        updateArtworkGeometry()
     }
 
     fun bind(
-        title: String,
-        artist: String,
         artwork: Bitmap?,
-        state: PlaybackState?,
-        duration: Long,
-        appearance: MiniPlayerAppearance,
-        iconColor: Int,
-        applyPlatformMaterial: (ImageView, MiniPlayerAppearance) -> Unit,
-        onToggle: () -> Unit,
-        onPrevious: () -> Unit,
-        onNext: () -> Unit,
-        onSeek: (Long) -> Unit,
+        artworkVersion: Long,
         onArtworkClick: () -> Unit,
+        onArtworkLongClick: () -> Unit,
+        style2: Boolean,
     ) {
-        if (lastAppearance != appearance) {
-            lastAppearance = appearance
-            materialLayer.setImageDrawable(
-                when (appearance.backgroundMode) {
-                    MINI_PLAYER_BACKGROUND_PURE -> rounded(appearance.pureColor, dp(30f).toFloat())
-                    MINI_PLAYER_BACKGROUND_ADVANCED, MINI_PLAYER_BACKGROUND_SOFT_GLASS ->
-                        rounded(Color.argb(1, 255, 255, 255), dp(30f).toFloat())
-                    else -> rounded(Color.argb(166, 28, 31, 32), dp(30f).toFloat())
-                },
-            )
-            if (appearance.backgroundMode == MINI_PLAYER_BACKGROUND_ADVANCED ||
-                appearance.backgroundMode == MINI_PLAYER_BACKGROUND_SOFT_GLASS
-            ) applyPlatformMaterial(materialLayer, appearance)
-            materialEdge.visibility = if (appearance.backgroundMode == MINI_PLAYER_BACKGROUND_DEFAULT) {
-                View.GONE
-            } else {
-                View.VISIBLE
+        this.onArtworkClick = onArtworkClick
+        this.onArtworkLongClick = onArtworkLongClick
+        this.style2 = style2
+        if (artworkVersion != lastArtworkVersion || artwork !== lastArtwork) {
+            lastArtwork = artwork
+            lastArtworkVersion = artworkVersion
+            transitionArtwork(artwork)
+        }
+        updateArtworkGeometry()
+        post { updateArtworkGeometry() }
+    }
+
+    fun getClockAvoidanceTopOnScreen(): Float {
+        val location = IntArray(2).also(artwork::getLocationOnScreen)
+        return location[1].toFloat()
+    }
+
+    private fun transitionArtwork(bitmap: Bitmap?) {
+        fun update(target: ImageView) {
+            target.animate().cancel()
+            if (target.drawable == null) {
+                target.setImageBitmap(bitmap)
+                return
             }
+            target.animate().alpha(0f).setDuration(120L).withEndAction {
+                target.setImageBitmap(bitmap)
+                target.animate().alpha(1f).setDuration(220L)
+                    .setInterpolator(android.view.animation.DecelerateInterpolator())
+                    .start()
+            }.start()
         }
-        if (contentColor != iconColor) {
-            contentColor = iconColor
-            this.title.setTextColor(contentColor)
-            this.artist.setTextColor(withAlpha(contentColor, 190))
-            elapsed.setTextColor(withAlpha(contentColor, 190))
-            remaining.setTextColor(withAlpha(contentColor, 190))
-        }
-        this.title.text = title
-        this.artist.text = artist
-        this.artwork.setImageBitmap(artwork)
-        val total = duration.coerceAtLeast(0L)
-        val position = currentPosition(state, total)
-        seekBar.setPlayback(total, position, state != null &&
-            state.actions and PlaybackState.ACTION_SEEK_TO != 0L)
-        seekBar.setColor(contentColor)
-        elapsed.text = formatTime(position)
-        remaining.text = "-" + formatTime((total - position).coerceAtLeast(0L))
-        toggle.setImageDrawable(MaterialRoundPathDrawable(if (state?.state == PlaybackState.STATE_PLAYING) {
-            MATERIAL_ICON_PAUSE
-        } else {
-            MATERIAL_ICON_PLAY
-        }, contentColor))
-        previous.setImageDrawable(MaterialRoundPathDrawable(MATERIAL_ICON_SKIP_PREVIOUS, contentColor))
-        next.setImageDrawable(MaterialRoundPathDrawable(MATERIAL_ICON_SKIP_NEXT, contentColor))
-        this.onSeek = onSeek
-        tagArtworkClick = onArtworkClick
-        toggle.setOnClickListener { onToggle() }
-        previous.setOnClickListener { onPrevious() }
-        next.setOnClickListener { onNext() }
-        updateArtworkSize()
-        post { updateArtworkSize() }
+        update(artwork)
     }
 
-    private fun currentPosition(state: PlaybackState?, duration: Long): Long {
-        if (state == null) return 0L
-        val delta = if (state.state == PlaybackState.STATE_PLAYING) {
-            ((android.os.SystemClock.elapsedRealtime() - state.lastPositionUpdateTime) * state.playbackSpeed).toLong()
-        } else 0L
-        return (state.position + delta).coerceIn(0L, duration.takeIf { it > 0 } ?: Long.MAX_VALUE)
-    }
-
-    private fun updateArtworkSize() {
-        val innerWidth = (content.width - content.paddingLeft - content.paddingRight)
-            .coerceAtLeast((width - content.paddingLeft - content.paddingRight).coerceAtLeast(0))
-        // The card has a fixed control area below the art. Its exact first height is not stable
-        // while the foreground layer attaches, but the padded width is, so derive the square
-        // cover from width and never leave it as the initial 0px-high LinearLayout child.
-        val size = innerWidth.coerceAtLeast(0)
-        val params = artwork.layoutParams as? LinearLayout.LayoutParams ?: return
-        if (params.width != size || params.height != size) {
-            params.width = size
-            params.height = size
-            params.gravity = Gravity.START
+    private fun updateArtworkGeometry() {
+        if (width <= 0 || height <= 0) return
+        // Style 1 keeps the historical full-screen hit target. Style 2 only accepts a tap in
+        // the enlarged bottom cover, leaving the visible lockscreen island interactive.
+        val side = width
+        val targetHeight = if (style2) (side * 119.6f / 91.6f).roundToInt() else side
+        val top = if (style2) (height - targetHeight).coerceAtLeast(0) else 0
+        artworkTop = top
+        val params = artwork.layoutParams as? FrameLayout.LayoutParams ?: return
+        if (params.width != side || params.height != targetHeight) {
+            params.width = side
+            params.height = targetHeight
+            params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            params.topMargin = top
+            artwork.layoutParams = params
+        } else if (params.topMargin != top) {
+            params.topMargin = top
             artwork.layoutParams = params
         }
-    }
-
-    private fun withAlpha(color: Int, alpha: Int) = Color.argb(
-        alpha.coerceIn(0, 255),
-        Color.red(color),
-        Color.green(color),
-        Color.blue(color),
-    )
-
-    private fun configureButton(button: ImageButton, description: String) {
-        button.background = null
-        button.contentDescription = description
-        button.scaleType = ImageView.ScaleType.CENTER
-        button.setPadding(dp(14f), dp(14f), dp(14f), dp(14f))
     }
 
     private fun roundOutline(radius: Float) = object : ViewOutlineProvider() {
@@ -1825,104 +1731,7 @@ private class LockscreenMusicLockscreenView(context: Context) : FrameLayout(cont
         setColor(color)
     }
 
-    private fun formatTime(value: Long): String {
-        val seconds = (value / 1000L).coerceAtLeast(0L)
-        return "%d:%02d".format(java.util.Locale.ROOT, seconds / 60L, seconds % 60L)
-    }
-
     private fun dp(value: Float) = (value * density + .5f).toInt()
-}
-
-/** A narrow, non-widget seek control so the lockscreen uses the reference's slim track. */
-private class LockscreenMusicSeekBar(context: Context) : View(context) {
-    private val density = resources.displayMetrics.density
-    private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val progressPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val thumbPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private var duration = 0L
-    private var position = 0L
-    private var enabledForSeek = false
-    private var tracking = false
-    var onSeekChanged: ((Long) -> Unit)? = null
-
-    fun setColor(color: Int) {
-        trackPaint.color = withAlpha(color, 82)
-        progressPaint.color = withAlpha(color, 210)
-        thumbPaint.color = withAlpha(color, 225)
-    }
-
-    fun setPlayback(duration: Long, position: Long, enabled: Boolean) {
-        this.duration = duration.coerceAtLeast(0L)
-        if (!tracking) this.position = position.coerceIn(0L, this.duration)
-        enabledForSeek = enabled && this.duration > 0L
-        alpha = if (enabledForSeek) 1f else .72f
-        invalidate()
-    }
-
-    override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
-        val horizontalInset = dp(3f).toFloat()
-        val start = horizontalInset
-        val end = (width - horizontalInset).coerceAtLeast(horizontalInset)
-        val centerY = height / 2f
-        val radius = dp(2f).toFloat()
-        canvas.drawRoundRect(start, centerY - radius, end, centerY + radius, radius, radius, trackPaint)
-        val fraction = if (duration > 0L) position.toFloat() / duration else 0f
-        val progressEnd = start + (end - start) * fraction.coerceIn(0f, 1f)
-        canvas.drawRoundRect(start, centerY - radius, progressEnd, centerY + radius, radius, radius, progressPaint)
-        if (duration > 0L) canvas.drawCircle(progressEnd, centerY, dp(3.5f).toFloat(), thumbPaint)
-    }
-
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (!enabledForSeek) return false
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                parent?.requestDisallowInterceptTouchEvent(true)
-                tracking = true
-                updateFromX(event.x)
-                return true
-            }
-            MotionEvent.ACTION_MOVE -> {
-                updateFromX(event.x)
-                return true
-            }
-            MotionEvent.ACTION_UP -> {
-                updateFromX(event.x)
-                tracking = false
-                onSeekChanged?.invoke(position)
-                performClick()
-                return true
-            }
-            MotionEvent.ACTION_CANCEL -> {
-                tracking = false
-                invalidate()
-                return true
-            }
-        }
-        return super.onTouchEvent(event)
-    }
-
-    override fun performClick(): Boolean {
-        super.performClick()
-        return true
-    }
-
-    private fun updateFromX(x: Float) {
-        val start = dp(3f).toFloat()
-        val end = (width - dp(3f)).coerceAtLeast(dp(3f)).toFloat()
-        val fraction = ((x - start) / (end - start).coerceAtLeast(1f)).coerceIn(0f, 1f)
-        position = (duration * fraction).toLong()
-        invalidate()
-    }
-
-    private fun dp(value: Float) = value * density + .5f
-
-    private fun withAlpha(color: Int, alpha: Int) = Color.argb(
-        alpha.coerceIn(0, 255),
-        Color.red(color),
-        Color.green(color),
-        Color.blue(color),
-    )
 }
 
 /**

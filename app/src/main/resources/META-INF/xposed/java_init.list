@@ -1,4 +1,5 @@
 btm.m.os4.systemuihook.HyperSystemUiModule
+btm.m.os4.systemuihook.hypermusiccover.Main
 btm.m.leicaunlocker.hook.LeicaUnlockHook
 btm.m.os4.systemuihook.SettingsDeviceModule
 btm.m.os4.systemuihook.SystemUpdateModule
