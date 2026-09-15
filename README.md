@@ -187,3 +187,22 @@ Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before openin
 HyperChanger is released under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for historical attribution to the original MIT-licensed release.
 
 The lock-screen music-cover runtime is directly imported and adapted from [HyperMusicCover](https://github.com/zyl6932/HyperMusicCover) (Copyright 2026 zyl6932, Apache License 2.0). Its retained attribution and license notice are in [NOTICE](NOTICE).
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=ColdP%2FHyperChanger&type=date">
+  <picture>
+    <source
+      media="(prefers-color-scheme: dark)"
+      srcset="https://api.star-history.com/chart?repos=ColdP/HyperChanger&type=date&theme=dark"
+    />
+    <source
+      media="(prefers-color-scheme: light)"
+      srcset="https://api.star-history.com/chart?repos=ColdP/HyperChanger&type=date"
+    />
+    <img
+      alt="Star History Chart"
+      src="https://api.star-history.com/chart?repos=ColdP/HyperChanger&type=date"
+    />
+  </picture>
+</a>
