@@ -125,6 +125,12 @@ data class HookSettings(
     val expandedIslandGlassLargeBlurRadius: Int = 110,
     val expandedIslandSelfBlurRadius: Int = 0,
     val expandedIslandShowHighlight: Boolean = false,
+    val keepNotifications: Boolean = false,
+    val allowAllNotificationsOnLockscreen: Boolean = false,
+    val forceAllNotificationsHeadsUp: Boolean = false,
+    val removeNotificationImportanceLimit: Boolean = false,
+    val removeBleUnlockToast: Boolean = false,
+    val disableNotificationHistoryFolding: Boolean = false,
     val superXiaoAiGlobalSearchAppearance: Boolean = false,
     val superXiaoAiBlacklistUnblocked: Boolean = false,
     val superXiaoAiClipboardUnblocked: Boolean = false,
@@ -202,6 +208,9 @@ data class HookSettings(
     val shortcutSoftGlassLuminance: Float = 0.14f,
     val lockscreenMiniPlayerEnabled: Boolean = false,
     val lockscreenMusicLockscreenEnabled: Boolean = false,
+    val lockscreenMusicLyricsEnabled: Boolean = false,
+    val lockscreenMusicLyricsHdrEnabled: Boolean = false,
+    val lockscreenMusicLyricsKeepScreenOn: Boolean = false,
     val lockscreenMiniPlayerLyricsEnabled: Boolean = false,
     val lockscreenMiniPlayerMediaNotificationMode: Int = LOCKSCREEN_MEDIA_NOTIFICATION_DO_NOT_HIDE,
     val lockscreenMiniPlayerBackgroundMode: Int = 0,
@@ -417,6 +426,12 @@ private const val KEY_EXPANDED_ISLAND_GLASS_BLUR_RADIUS = "expanded_island_glass
 private const val KEY_EXPANDED_ISLAND_GLASS_LARGE_BLUR_RADIUS = "expanded_island_glass_large_blur_radius"
 private const val KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS = "expanded_island_self_blur_radius"
 private const val KEY_EXPANDED_ISLAND_SHOW_HIGHLIGHT = "expanded_island_show_highlight"
+internal const val KEY_KEEP_NOTIFICATIONS = "keep_notifications"
+internal const val KEY_ALLOW_ALL_NOTIFICATIONS_ON_LOCKSCREEN = "allow_all_notifications_on_lockscreen"
+internal const val KEY_FORCE_ALL_NOTIFICATIONS_HEADS_UP = "force_all_notifications_heads_up"
+internal const val KEY_REMOVE_NOTIFICATION_IMPORTANCE_LIMIT = "remove_notification_importance_limit"
+internal const val KEY_REMOVE_BLE_UNLOCK_TOAST = "remove_ble_unlock_toast"
+internal const val KEY_DISABLE_NOTIFICATION_HISTORY_FOLDING = "disable_notification_history_folding"
 private const val KEY_SUPER_XIAOAI_GLOBAL_SEARCH_APPEARANCE =
     "super_xiaoai_global_search_appearance"
 internal const val KEY_SUPER_XIAOAI_BLACKLIST_UNBLOCKED = "super_xiaoai_blacklist_unblocked"
@@ -500,6 +515,10 @@ private const val KEY_SHORTCUT_SOFT_GLASS_BLUR_RADIUS = "shortcut_soft_glass_blu
 private const val KEY_SHORTCUT_SOFT_GLASS_LUMINANCE = "shortcut_soft_glass_luminance"
 private const val KEY_LOCKSCREEN_MINI_PLAYER_ENABLED = "lockscreen_mini_player_enabled"
 private const val KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED = "lockscreen_music_lockscreen_enabled"
+private const val KEY_LOCKSCREEN_MUSIC_LYRICS_ENABLED = "lockscreen_music_lyrics_enabled"
+private const val KEY_LOCKSCREEN_MUSIC_LYRICS_HDR_ENABLED = "lockscreen_music_lyrics_hdr_enabled"
+private const val KEY_LOCKSCREEN_MUSIC_LYRICS_KEEP_SCREEN_ON =
+    "lockscreen_music_lyrics_keep_screen_on"
 private const val KEY_LOCKSCREEN_MINI_PLAYER_LYRICS_ENABLED = "lockscreen_mini_player_lyrics_enabled"
 private const val KEY_LOCKSCREEN_MINI_PLAYER_HIDE_MEDIA_NOTIFICATION =
     "lockscreen_mini_player_hide_media_notification"
@@ -574,6 +593,8 @@ internal const val LOCKSCREEN_WIDGET_ITEM_STAND = 1 shl 10
 internal const val LOCKSCREEN_WIDGET_ITEM_STEPS_WIDE = 1 shl 11
 internal const val LOCKSCREEN_WIDGET_ITEM_ALARM = 1 shl 12
 internal const val LOCKSCREEN_WIDGET_ITEM_SCHEDULE = 1 shl 13
+internal const val LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER_BACKGROUND = 1 shl 14
+internal const val LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY_BACKGROUND = 1 shl 15
 internal const val LOCKSCREEN_WIDGET_ALL_ITEMS =
     LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER or LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY or
         LOCKSCREEN_WIDGET_ITEM_SUN or LOCKSCREEN_WIDGET_ITEM_STEPS or
@@ -581,10 +602,13 @@ internal const val LOCKSCREEN_WIDGET_ALL_ITEMS =
         LOCKSCREEN_WIDGET_ITEM_HUMIDITY or LOCKSCREEN_WIDGET_ITEM_AQI or
         LOCKSCREEN_WIDGET_ITEM_FEELS_LIKE or LOCKSCREEN_WIDGET_ITEM_WIND or
         LOCKSCREEN_WIDGET_ITEM_STAND or LOCKSCREEN_WIDGET_ITEM_STEPS_WIDE or
-        LOCKSCREEN_WIDGET_ITEM_ALARM or LOCKSCREEN_WIDGET_ITEM_SCHEDULE
+        LOCKSCREEN_WIDGET_ITEM_ALARM or LOCKSCREEN_WIDGET_ITEM_SCHEDULE or
+        LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER_BACKGROUND or
+        LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY_BACKGROUND
 internal const val LOCKSCREEN_WIDGET_DEFAULT_ITEMS =
     LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER or LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY
-internal const val LOCKSCREEN_WIDGET_DEFAULT_ORDER = "1,2,16,4,8,32,64,128,256,512,1024,2048,4096,8192"
+internal const val LOCKSCREEN_WIDGET_DEFAULT_ORDER =
+    "1,2,16384,32768,16,4,8,32,64,128,256,512,1024,2048,4096,8192"
 internal const val LOCKSCREEN_WIDGET_COLOR_LIGHT = 0
 internal const val LOCKSCREEN_WIDGET_COLOR_DARK = 1
 internal const val LOCKSCREEN_WIDGET_COLOR_AUTO = 2
@@ -708,10 +732,16 @@ internal fun SharedPreferences.readLockscreenWidgetItems(): Int {
     // flag 1. Migrate that exact legacy composition without changing combination one.
     val legacyCombinationTwo =
         LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER or LOCKSCREEN_WIDGET_ITEM_SUN or LOCKSCREEN_WIDGET_ITEM_STEPS
-    val normalized = if (stored == legacyCombinationTwo) {
+    var normalized = if (stored == legacyCombinationTwo) {
         LOCKSCREEN_WIDGET_ITEM_COMPACT_WEATHER or LOCKSCREEN_WIDGET_ITEM_SUN or LOCKSCREEN_WIDGET_ITEM_STEPS
     } else {
         stored
+    }
+    if (normalized and LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER_BACKGROUND != 0) {
+        normalized = normalized and LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER.inv()
+    }
+    if (normalized and LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY_BACKGROUND != 0) {
+        normalized = normalized and LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY.inv()
     }
     return (normalized and LOCKSCREEN_WIDGET_ALL_ITEMS).takeIf { it != 0 }
         ?: LOCKSCREEN_WIDGET_DEFAULT_ITEMS
@@ -734,6 +764,8 @@ internal fun SharedPreferences.readLockscreenWidgetOrder(itemMask: Int = readLoc
         .filter { it in listOf(
             LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER,
             LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY,
+            LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER_BACKGROUND,
+            LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY_BACKGROUND,
             LOCKSCREEN_WIDGET_ITEM_SUN,
             LOCKSCREEN_WIDGET_ITEM_STEPS,
             LOCKSCREEN_WIDGET_ITEM_STEPS_WIDE,
@@ -752,6 +784,8 @@ internal fun SharedPreferences.readLockscreenWidgetOrder(itemMask: Int = readLoc
             stored + listOf(
                 LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER,
                 LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY,
+                LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER_BACKGROUND,
+                LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY_BACKGROUND,
                 LOCKSCREEN_WIDGET_ITEM_COMPACT_WEATHER,
                 LOCKSCREEN_WIDGET_ITEM_SUN,
                 LOCKSCREEN_WIDGET_ITEM_STEPS,
@@ -821,6 +855,12 @@ private fun SharedPreferences.toSettings(): HookSettings {
     expandedIslandGlassLargeBlurRadius = getInt(KEY_EXPANDED_ISLAND_GLASS_LARGE_BLUR_RADIUS, 10).coerceIn(0, 40),
     expandedIslandSelfBlurRadius = getInt(KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS, 0).coerceIn(0, 40),
     expandedIslandShowHighlight = getBoolean(KEY_EXPANDED_ISLAND_SHOW_HIGHLIGHT, false),
+    keepNotifications = getBoolean(KEY_KEEP_NOTIFICATIONS, false),
+    allowAllNotificationsOnLockscreen = getBoolean(KEY_ALLOW_ALL_NOTIFICATIONS_ON_LOCKSCREEN, false),
+    forceAllNotificationsHeadsUp = getBoolean(KEY_FORCE_ALL_NOTIFICATIONS_HEADS_UP, false),
+    removeNotificationImportanceLimit = getBoolean(KEY_REMOVE_NOTIFICATION_IMPORTANCE_LIMIT, false),
+    removeBleUnlockToast = getBoolean(KEY_REMOVE_BLE_UNLOCK_TOAST, false),
+    disableNotificationHistoryFolding = getBoolean(KEY_DISABLE_NOTIFICATION_HISTORY_FOLDING, false),
     superXiaoAiGlobalSearchAppearance = getBoolean(
         KEY_SUPER_XIAOAI_GLOBAL_SEARCH_APPEARANCE,
         false,
@@ -955,6 +995,12 @@ private fun SharedPreferences.toSettings(): HookSettings {
     shortcutSoftGlassLuminance = getFloat(KEY_SHORTCUT_SOFT_GLASS_LUMINANCE, 0.14f).coerceIn(0f, 0.4f),
     lockscreenMiniPlayerEnabled = getBoolean(KEY_LOCKSCREEN_MINI_PLAYER_ENABLED, false),
     lockscreenMusicLockscreenEnabled = getBoolean(KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED, false),
+    lockscreenMusicLyricsEnabled = getBoolean(KEY_LOCKSCREEN_MUSIC_LYRICS_ENABLED, false),
+    lockscreenMusicLyricsHdrEnabled = getBoolean(KEY_LOCKSCREEN_MUSIC_LYRICS_HDR_ENABLED, false),
+    lockscreenMusicLyricsKeepScreenOn = getBoolean(
+        KEY_LOCKSCREEN_MUSIC_LYRICS_KEEP_SCREEN_ON,
+        false,
+    ),
     lockscreenMiniPlayerLyricsEnabled = getBoolean(KEY_LOCKSCREEN_MINI_PLAYER_LYRICS_ENABLED, false),
     lockscreenMiniPlayerMediaNotificationMode = if (
         contains(KEY_LOCKSCREEN_MINI_PLAYER_MEDIA_NOTIFICATION_MODE)
@@ -1368,6 +1414,12 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putInt(KEY_EXPANDED_ISLAND_GLASS_LARGE_BLUR_RADIUS, value.expandedIslandGlassLargeBlurRadius)
         .putInt(KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS, value.expandedIslandSelfBlurRadius)
         .putBoolean(KEY_EXPANDED_ISLAND_SHOW_HIGHLIGHT, value.expandedIslandShowHighlight)
+        .putBoolean(KEY_KEEP_NOTIFICATIONS, value.keepNotifications)
+        .putBoolean(KEY_ALLOW_ALL_NOTIFICATIONS_ON_LOCKSCREEN, value.allowAllNotificationsOnLockscreen)
+        .putBoolean(KEY_FORCE_ALL_NOTIFICATIONS_HEADS_UP, value.forceAllNotificationsHeadsUp)
+        .putBoolean(KEY_REMOVE_NOTIFICATION_IMPORTANCE_LIMIT, value.removeNotificationImportanceLimit)
+        .putBoolean(KEY_REMOVE_BLE_UNLOCK_TOAST, value.removeBleUnlockToast)
+        .putBoolean(KEY_DISABLE_NOTIFICATION_HISTORY_FOLDING, value.disableNotificationHistoryFolding)
         .putBoolean(
             KEY_SUPER_XIAOAI_GLOBAL_SEARCH_APPEARANCE,
             value.superXiaoAiGlobalSearchAppearance,
@@ -1476,6 +1528,12 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putFloat(KEY_SHORTCUT_SOFT_GLASS_LUMINANCE, value.shortcutSoftGlassLuminance)
         .putBoolean(KEY_LOCKSCREEN_MINI_PLAYER_ENABLED, value.lockscreenMiniPlayerEnabled)
         .putBoolean(KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED, value.lockscreenMusicLockscreenEnabled)
+        .putBoolean(KEY_LOCKSCREEN_MUSIC_LYRICS_ENABLED, value.lockscreenMusicLyricsEnabled)
+        .putBoolean(KEY_LOCKSCREEN_MUSIC_LYRICS_HDR_ENABLED, value.lockscreenMusicLyricsHdrEnabled)
+        .putBoolean(
+            KEY_LOCKSCREEN_MUSIC_LYRICS_KEEP_SCREEN_ON,
+            value.lockscreenMusicLyricsKeepScreenOn,
+        )
         .putBoolean(KEY_LOCKSCREEN_MINI_PLAYER_LYRICS_ENABLED, value.lockscreenMiniPlayerLyricsEnabled)
         .putInt(
             KEY_LOCKSCREEN_MINI_PLAYER_MEDIA_NOTIFICATION_MODE,
@@ -1501,7 +1559,7 @@ private fun SharedPreferences.write(value: HookSettings) {
             (value.lockscreenWidgetItems and LOCKSCREEN_WIDGET_ALL_ITEMS)
                 .takeIf { it != 0 } ?: LOCKSCREEN_WIDGET_DEFAULT_ITEMS,
         )
-        .putString(KEY_LOCKSCREEN_WIDGET_ORDER, value.lockscreenWidgetOrder.take(47))
+        .putString(KEY_LOCKSCREEN_WIDGET_ORDER, value.lockscreenWidgetOrder.take(127))
         .putLong(KEY_LOCKSCREEN_WIDGET_PREVIEW_VERSION, value.lockscreenWidgetPreviewVersion)
         .putInt(
             KEY_LOCKSCREEN_WIDGET_COMBINATION,

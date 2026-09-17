@@ -19,8 +19,8 @@ android {
         applicationId = "btm.m.os4.systemuihook"
         minSdk = 33
         targetSdk = 35
-        versionCode = 1010239
-        versionName = "1.1.2"
+        versionCode = 1010339
+        versionName = "1.1.3"
 
     }
 
@@ -76,6 +76,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("com.google.zxing:core:3.5.3")
     implementation("io.github.proify.lyricon:subscriber:0.1.70")
+    implementation("com.mocharealm.accompanist:lyrics-core:0.4.7")
 
     compileOnly("io.github.libxposed:api:102.0.0")
     implementation("io.github.libxposed:service:102.0.0")

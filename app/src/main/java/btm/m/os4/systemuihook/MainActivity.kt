@@ -3,8 +3,10 @@
 package btm.m.os4.systemuihook
 
 import android.app.Activity
+import android.app.DownloadManager
 import android.app.WallpaperManager
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.res.Resources
 import android.content.res.ColorStateList
@@ -24,6 +26,7 @@ import android.net.Uri
 import android.media.MediaMetadataRetriever
 import android.os.Bundle
 import android.os.Build
+import android.os.Environment
 import android.util.Log
 import android.widget.Toast
 import android.widget.ImageView
@@ -95,6 +98,10 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
@@ -142,13 +149,16 @@ import top.yukonga.miuix.kmp.icon.extended.ChevronBackward
 import top.yukonga.miuix.kmp.icon.extended.ChevronForward
 import top.yukonga.miuix.kmp.icon.extended.Download
 import top.yukonga.miuix.kmp.icon.extended.Close
+import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.icon.extended.Ok
 import top.yukonga.miuix.kmp.icon.extended.All
+import top.yukonga.miuix.kmp.icon.extended.Add
 import top.yukonga.miuix.kmp.icon.extended.Import
 import top.yukonga.miuix.kmp.icon.extended.More
 import top.yukonga.miuix.kmp.icon.extended.MoreCircle
 import top.yukonga.miuix.kmp.icon.extended.Refresh
 import top.yukonga.miuix.kmp.icon.extended.Settings
+import top.yukonga.miuix.kmp.icon.extended.SelectAll
 import top.yukonga.miuix.kmp.preference.*
 import top.yukonga.miuix.kmp.preference.SliderPreference as MiuixSliderPreference
 import top.yukonga.miuix.kmp.shader.isRuntimeShaderSupported
@@ -239,9 +249,9 @@ private enum class PageId {
     SHADE_CONTROL_CENTER_ELEMENTS,
     SHADE_NOTIFICATION_BACKGROUND,
     SHADE_CONTROL_CENTER_BACKGROUND,
-    ISLAND, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, DEVICE_PROFILE,
+    ISLAND, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
-    REAR_SCREEN, REAR_MUSIC_APPS, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION,
+    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_MUSIC_APPS, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION,
 }
 
 private data class ShadePresetActions(
@@ -876,7 +886,7 @@ private fun CategoryHome(
 ) { padding, scroll ->
     AppList(padding, scroll) {
         item { Entry(tr("\u7cfb\u7edf\u754c\u9762", "\u7cfb\u7edf\u754c\u9762"), enabled = connected) { open(PageId.SHADE) } }
-        item { Entry(tr("\u8d85\u7ea7\u5c9b", "\u8d85\u7ea7\u5c9b"), enabled = connected) { open(PageId.ISLAND) } }
+        item { Entry(tr("\u901a\u77e5\u4e0e\u8d85\u7ea7\u5c9b", "\u901a\u77e5\u4e0e\u8d85\u7ea7\u5c9b"), enabled = connected) { open(PageId.ISLAND) } }
         item { Entry(tr("\u72b6\u6001\u680f\u4e0e\u63a7\u5236\u4e2d\u5fc3", "\u72b6\u6001\u680f\u4e0e\u63a7\u5236\u4e2d\u5fc3"), enabled = connected) { open(PageId.STATUS) } }
         item { Entry(tr("\u9501\u5c4f", "\u9501\u5c4f"), enabled = connected) { open(PageId.LOCK) } }
         item { Entry(tr("\u8d85\u7ea7\u5c0f\u7231\u8f93\u5165\u6cd5", "\u8d85\u7ea7\u5c0f\u7231\u8f93\u5165\u6cd5"), enabled = connected) { open(PageId.SUPER_XIAOAI) } }
@@ -1010,7 +1020,7 @@ private fun RearMusicApps(
                 }
                 if (visibleApps.isEmpty()) {
                     item {
-                        Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(18.dp)) {
+                        Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(18.dp)) {
                             Text(
                                 tr("\u6ca1\u6709\u5339\u914d\u7684\u5e94\u7528", "\u6ca1\u6709\u5339\u914d\u7684\u5e94\u7528"),
                                 style = MiuixTheme.textStyles.body2,
@@ -1091,6 +1101,7 @@ private fun RearAppCard(
     val packageManager = LocalContext.current.packageManager
     Card(
         modifier = Modifier.fillMaxWidth().height(92.dp),
+        cornerRadius = 22.5.dp,
         insideMargin = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
         onClick = onCheckedChange,
         showIndication = true,
@@ -1228,6 +1239,7 @@ OverlayDropdownPreference(
         item {
             Group(tr("\u5e94\u7528\u4fe1\u606f", "\u5e94\u7528\u4fe1\u606f")) {
                 ArrowPreference(title = tr("\u5173\u4e8e", "\u5173\u4e8e"), onClick = { open(PageId.ABOUT) })
+                ArrowPreference(title = tr("\u8f6f\u4ef6\u66f4\u65b0", "\u8f6f\u4ef6\u66f4\u65b0"), onClick = { open(PageId.SOFTWARE_UPDATE) })
                 ArrowPreference(title = tr("\u6350\u8d60", "\u6350\u8d60"), onClick = { open(PageId.DONATE) })
                 ArrowPreference(title = tr("\u5f00\u6e90\u4ee3\u7801\u58f0\u660e", "\u5f00\u6e90\u4ee3\u7801\u58f0\u660e"), onClick = { open(PageId.OPEN) })
                 ArrowPreference(title = tr("contributors", "\u8d21\u732e\u8005"), onClick = { open(PageId.CONTRIBUTORS) })
@@ -1368,7 +1380,7 @@ private fun SystemSettings(
         }
         item {
             SmallTitle(tr("界面自定义", "界面自定义"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp))
-            Card(Modifier.fillMaxWidth()) {
+            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
                 ArrowPreference(title = tr("自定义设置主界面背景图", "自定义设置主界面背景图"), onClick = { open(PageId.SETTINGS_APPEARANCE_HOME) })
                 ArrowPreference(title = tr("自定义我的设备界面背景图", "自定义我的设备界面背景图"), onClick = { open(PageId.SETTINGS_APPEARANCE_DEVICE) })
                 ArrowPreference(title = tr("自定义我的设备界面", "自定义我的设备界面"), onClick = { open(PageId.TUTORIAL_DEVICE_CARD) })
@@ -1550,7 +1562,7 @@ private fun TutorialDeviceCardSettings(
     }
     AppList(padding, scroll) {
         item {
-            Card(Modifier.fillMaxWidth()) {
+            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
 OverlayDropdownPreference(
                     title = tr("我的设备界面样式", "我的设备界面样式"),
                     items = listOf(tr("系统默认", "系统默认"), tr("样式1 (来自酷安@Mr_Bocchi)", "样式1 (来自酷安@Mr_Bocchi)"), tr("样式2", "样式2")),
@@ -1561,7 +1573,7 @@ OverlayDropdownPreference(
         }
         if (style == DEVICE_INTERFACE_STYLE_SYSTEM) {
             item {
-                Card(Modifier.fillMaxWidth()) {
+                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
                     ArrowPreference(
                         title = tr("导入LOGO", "导入LOGO"),
                         summary = appearance.logoMime.ifBlank { tr("未导入", "未导入") },
@@ -2005,7 +2017,7 @@ private fun SettingsAppearancePage(
     AppPage(if (home) tr("设置主界面背景", "设置主界面背景") else tr("我的设备界面背景", "我的设备界面背景"), back) { padding, scroll ->
         AppList(padding, scroll) {
             item {
-                Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(16.dp)) {
+                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(16.dp)) {
                     Box(
                         Modifier.fillMaxWidth(0.34f).aspectRatio(9f / 19.5f).align(Alignment.CenterHorizontally)
                             .clip(RoundedCornerShape(12.dp)).background(MiuixTheme.colorScheme.surfaceVariant),
@@ -2052,7 +2064,7 @@ private fun SettingsAppearancePage(
                 }
             }
             item {
-                Card(Modifier.fillMaxWidth()) {
+                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
                     SwitchPreference(
                         title = tr("启用自定义背景", "启用自定义背景"),
                         checked = enabled,
@@ -2146,7 +2158,7 @@ private fun DeviceProfileFieldDialog(
 @Composable
 private fun ServiceCard(online: Boolean) {
     val color = if (online) ComposeColor(0xFF38A169) else ComposeColor(0xFFE05353)
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.defaultColors(color.copy(alpha = .14f)), insideMargin = PaddingValues(16.dp)) {
+    Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, colors = CardDefaults.defaultColors(color.copy(alpha = .14f)), insideMargin = PaddingValues(16.dp)) {
         Column(Modifier.fillMaxWidth()) {
             Text("LSPosed", style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold)
             Text(if (online) tr("\u5df2\u8fde\u63a5", "\u5df2\u8fde\u63a5") else tr("\u672a\u8fde\u63a5", "\u672a\u8fde\u63a5"), style = MiuixTheme.textStyles.body2, color = color, modifier = Modifier.padding(top = 4.dp))
@@ -2162,13 +2174,13 @@ private fun Group(
 ) {
     Column(Modifier.fillMaxWidth()) {
         SmallTitle(title, insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp))
-        Card(Modifier.fillMaxWidth(), insideMargin = insideMargin) { content() }
+        Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = insideMargin) { content() }
     }
 }
 
 @Composable
 private fun Entry(title: String, enabled: Boolean = true, click: () -> Unit) {
-    Card(Modifier.fillMaxWidth()) { ArrowPreference(title = title, onClick = click, enabled = enabled) }
+    Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) { ArrowPreference(title = title, onClick = click, enabled = enabled) }
 }
 
 @Composable
@@ -2250,6 +2262,7 @@ private fun Detail(
         PageId.LOCK -> Lock(settings, update, openPage, back)
         PageId.LOCKSCREEN_WIDGET_EDITOR -> LockscreenWidgetEditor(settings, update, back)
         PageId.LOCKSCREEN_WIDGET_BACKGROUND -> LockscreenWidgetBackgroundSettings(settings, update, back)
+        PageId.LYRIC_LIBRARY -> LyricLibraryPage(back)
         PageId.RASTER_WALLPAPER -> RasterWallpaper(settings, update, onPickRasterImages, onApplyRasterWallpaper, back)
         PageId.SUPER_XIAOAI -> SuperXiaoAi(settings, update, back)
         PageId.CAMERA -> Camera(cameras, updateCamera, openPage, back)
@@ -2261,6 +2274,8 @@ private fun Detail(
         PageId.SETTINGS_APPEARANCE_DEVICE -> SettingsAppearancePage(APPEARANCE_SLOT_DEVICE, appearance, updateAppearance, onPickAppearanceDevice, onClearAppearanceDevice, back)
             PageId.TUTORIAL_DEVICE_CARD -> TutorialDeviceCardSettings(appearance, updateAppearance, onPickAppearanceLogo, onClearAppearanceLogo, onPickTutorialDeviceImage, onClearTutorialDeviceImage, onPickCustomDeviceLogo, onClearCustomDeviceLogo, onPickStyle1UpdateBackground, onClearStyle1UpdateBackground, onPickStyle2DeviceImage, onClearStyle2DeviceImage, onPickStyle2DeviceLogo, onClearStyle2DeviceLogo, onPickStyle2UpdateBackground, onClearStyle2UpdateBackground, back)
         PageId.ABOUT -> About(back, openPage, onDebugMode)
+        PageId.SOFTWARE_UPDATE -> SoftwareUpdate(openPage, back)
+        PageId.UPDATE_LOG -> UpdateLog(back)
         PageId.DISCLAIMER -> Disclaimer(back, captcha)
         PageId.LICENSE -> License(back)
         PageId.LANGUAGE -> LanguagePage(back)
@@ -2997,20 +3012,6 @@ private fun Shade(
                     },
                 )
                 SwitchPreference(
-                    title = tr("\u7edf\u4e00\u901a\u77e5\u6750\u8d28", "\u7edf\u4e00\u901a\u77e5\u6750\u8d28"),
-                    checked = s.unifyNotificationMaterial,
-                    onCheckedChange = { enabled ->
-                        update { it.copy(unifyNotificationMaterial = enabled) }
-                    },
-                )
-                SwitchPreference(
-                    title = tr("\u60ac\u6d6e\u901a\u77e5\u542f\u52a8\u67d4\u5149\u73bb\u7483\u6750\u8d28", "\u60ac\u6d6e\u901a\u77e5\u542f\u52a8\u67d4\u5149\u73bb\u7483\u6750\u8d28"),
-                    checked = s.headsUpNotificationSoftGlass,
-                    onCheckedChange = { enabled ->
-                        update { it.copy(headsUpNotificationSoftGlass = enabled) }
-                    },
-                )
-                SwitchPreference(
                     title = tr("\u89e3\u9664\u201c\u73bb\u7483\u201d\u548c\u201c\u53e0\u52a0\u201d\u65f6\u949f\u6750\u8d28\u9650\u5236", "\u89e3\u9664\u201c\u73bb\u7483\u201d\u548c\u201c\u53e0\u52a0\u201d\u65f6\u949f\u6750\u8d28\u9650\u5236"),
                     checked = s.removeClockMaterialLimit,
                     onCheckedChange = { enabled ->
@@ -3139,7 +3140,7 @@ private fun MaterialOverrideCard(
     }
     }
 }
-    if (wrapCard) Card(Modifier.fillMaxWidth()) { content() } else content()
+    if (wrapCard) Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) { content() } else content()
 }
 
 @Composable
@@ -3185,7 +3186,7 @@ private fun MaterialOverrideAdvancedPage(
     onChange: (MaterialOverride) -> Unit,
 ) = AppPage(title, back) { p, scroll ->
     AppList(p, scroll, 28) {
-        item { Card(Modifier.fillMaxWidth()) {
+        item { Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
             SwitchPreference(
                 title = tr("\u542f\u7528\u6750\u8d28\u8c03\u6574", "\u542f\u7528\u6750\u8d28\u8c03\u6574"),
                 checked = value.enabled,
@@ -3247,13 +3248,13 @@ private fun ShadePresets(
             }
         }
         item { SmallTitle(tr("\u5185\u7f6e\u9884\u8bbe", "\u5185\u7f6e\u9884\u8bbe"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp)) }
-        item { Card(Modifier.fillMaxWidth()) {
+        item { Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
             presets.forEach { preset ->
                 PresetRow(preset, onUse = { update { preset.applyTo(it) } }, onLongPress = { selectedPreset = preset })
             }
         } }
         item { SmallTitle(tr("\u7528\u6237\u9884\u8bbe", "\u7528\u6237\u9884\u8bbe"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp)) }
-        item { Card(Modifier.fillMaxWidth()) {
+        item { Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
             if (actions.userPresets.isEmpty()) {
                 Text(tr("\u6682\u65e0\u4fdd\u5b58\u7684\u7528\u6237\u9884\u8bbe", "\u6682\u65e0\u4fdd\u5b58\u7684\u7528\u6237\u9884\u8bbe"), style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(16.dp))
             } else {
@@ -3645,13 +3646,17 @@ private fun Island(
     openPage: (PageId) -> Unit,
     onRequestNotificationPermission: () -> Unit,
     back: () -> Unit,
-) = AppPage(tr("\u8d85\u7ea7\u5c9b", "\u8d85\u7ea7\u5c9b"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI)) { p, scroll ->
+) = AppPage(
+    tr("\u901a\u77e5\u4e0e\u8d85\u7ea7\u5c9b", "\u901a\u77e5\u4e0e\u8d85\u7ea7\u5c9b"),
+    back,
+    restartScopes = setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.SETTINGS),
+) { p, scroll ->
     var showNormalNotificationDialog by remember { mutableStateOf(false) }
     var showFocusNotificationDialog by remember { mutableStateOf(false) }
 
     AppList(p, scroll, 28) {
         item {
-                Card(Modifier.fillMaxWidth()) {
+                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
                 SwitchPreference(
                     title = tr("\u53bb\u9664\u7126\u70b9\u901a\u77e5\u4e0e\u8d85\u7ea7\u5c9b\u767d\u540d\u5355\u9650\u5236", "\u53bb\u9664\u7126\u70b9\u901a\u77e5\u4e0e\u8d85\u7ea7\u5c9b\u767d\u540d\u5355\u9650\u5236"),
                     checked = s.removeFocusAndIslandWhitelistLimit,
@@ -3690,7 +3695,7 @@ private fun Island(
             }
         }
         item {
-            Card(Modifier.fillMaxWidth()) {
+            Group(tr("\u8d85\u7ea7\u5c9b\u80cc\u666f\u8c03\u6574", "\u8d85\u7ea7\u5c9b\u80cc\u666f\u8c03\u6574")) {
                 SwitchPreference(
                     title = tr("\u5c55\u5f00\u6001\u4e0b\u7684\u8d85\u7ea7\u5c9b\u80cc\u666f\u8c03\u6574", "\u5c55\u5f00\u6001\u4e0b\u7684\u8d85\u7ea7\u5c9b\u80cc\u666f\u8c03\u6574"),
                     checked = s.expandedIslandBackgroundEnabled,
@@ -3723,6 +3728,58 @@ private fun Island(
                 }
             }
         }
+        item {
+            Group(tr("\u901a\u77e5\u80cc\u666f\u6750\u8d28", "\u901a\u77e5\u80cc\u666f\u6750\u8d28")) {
+                SwitchPreference(
+                    title = tr("\u7edf\u4e00\u901a\u77e5\u80cc\u666f\u6750\u8d28", "\u7edf\u4e00\u901a\u77e5\u80cc\u666f\u6750\u8d28"),
+                    checked = s.unifyNotificationMaterial,
+                    onCheckedChange = { enabled ->
+                        update { it.copy(unifyNotificationMaterial = enabled) }
+                    },
+                )
+                SwitchPreference(
+                    title = tr("\u60ac\u6d6e\u901a\u77e5\u542f\u7528\u67d4\u5149\u73bb\u7483\u6750\u8d28", "\u60ac\u6d6e\u901a\u77e5\u542f\u7528\u67d4\u5149\u73bb\u7483\u6750\u8d28"),
+                    checked = s.headsUpNotificationSoftGlass,
+                    onCheckedChange = { enabled ->
+                        update { it.copy(headsUpNotificationSoftGlass = enabled) }
+                    },
+                )
+            }
+        }
+        item {
+            Group(tr("\u901a\u77e5\u9650\u5236\u53bb\u9664", "\u901a\u77e5\u9650\u5236\u53bb\u9664")) {
+                SwitchPreference(
+                    title = tr("\u4fdd\u7559\u901a\u77e5", "\u4fdd\u7559\u901a\u77e5"),
+                    checked = s.keepNotifications,
+                    onCheckedChange = { value -> update { it.copy(keepNotifications = value) } },
+                )
+                SwitchPreference(
+                    title = tr("\u5141\u8bb8\u6240\u6709\u901a\u77e5\u5728\u9501\u5c4f\u4e0a\u663e\u793a", "\u5141\u8bb8\u6240\u6709\u901a\u77e5\u5728\u9501\u5c4f\u4e0a\u663e\u793a"),
+                    checked = s.allowAllNotificationsOnLockscreen,
+                    onCheckedChange = { value -> update { it.copy(allowAllNotificationsOnLockscreen = value) } },
+                )
+                SwitchPreference(
+                    title = tr("\u5f3a\u5236\u6240\u6709\u901a\u77e5\u4e3a\u60ac\u6d6e\u901a\u77e5", "\u5f3a\u5236\u6240\u6709\u901a\u77e5\u4e3a\u60ac\u6d6e\u901a\u77e5"),
+                    checked = s.forceAllNotificationsHeadsUp,
+                    onCheckedChange = { value -> update { it.copy(forceAllNotificationsHeadsUp = value) } },
+                )
+                SwitchPreference(
+                    title = tr("\u53bb\u9664\u901a\u77e5\u7684\u91cd\u8981\u7a0b\u5ea6\u9650\u5236", "\u53bb\u9664\u901a\u77e5\u7684\u91cd\u8981\u7a0b\u5ea6\u9650\u5236"),
+                    checked = s.removeNotificationImportanceLimit,
+                    onCheckedChange = { value -> update { it.copy(removeNotificationImportanceLimit = value) } },
+                )
+                SwitchPreference(
+                    title = tr("去除已通过蓝牙设备解锁的Toast通知", "去除已通过蓝牙设备解锁的Toast通知"),
+                    checked = s.removeBleUnlockToast,
+                    onCheckedChange = { value -> update { it.copy(removeBleUnlockToast = value) } },
+                )
+                SwitchPreference(
+                    title = tr("\u7981\u6b62\u6298\u53e0\u4e3a\u5386\u53f2\u901a\u77e5", "\u7981\u6b62\u6298\u53e0\u4e3a\u5386\u53f2\u901a\u77e5"),
+                    checked = s.disableNotificationHistoryFolding,
+                    onCheckedChange = { value -> update { it.copy(disableNotificationHistoryFolding = value) } },
+                )
+            }
+        }
     }
 
     if (showNormalNotificationDialog) {
@@ -3749,7 +3806,7 @@ private fun Status(
     back: () -> Unit,
 ) = AppPage(tr("\u72b6\u6001\u680f\u4e0e\u63a7\u5236\u4e2d\u5fc3", "\u72b6\u6001\u680f\u4e0e\u63a7\u5236\u4e2d\u5fc3"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI)) { p, scroll ->
     AppList(p, scroll, 28) {
-        item { Card(Modifier.fillMaxWidth()) {
+        item { Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
         Dim(tr("\u65f6\u949f\u5927\u5c0f", "\u65f6\u949f\u5927\u5c0f"), s.clockEnabled, { v -> update { it.copy(clockEnabled = v) } }, s.clockSize, 10f..24f, defaultValue = 14.8f) { v -> update { it.copy(clockSize = v) } }
         DeltaDim(tr("\u53f3\u8fb9\u8ddd", "\u53f3\u8fb9\u8ddd"), s.paddingEnd) { v -> update { it.copy(paddingEnd = v, paddingEndEnabled = true, paddingEndLegacyAbsolute = null) } }
         Dim(tr("\u5de6\u8fb9\u8ddd", "\u5de6\u8fb9\u8ddd"), s.paddingStartEnabled, { v -> update { it.copy(paddingStartEnabled = v) } }, s.paddingStart, 0f..32f, defaultValue = 12.5f) { v -> update { it.copy(paddingStart = v) } }
@@ -4142,7 +4199,7 @@ private fun StatusSignalTuning(
 @Composable
 private fun Control(s: HookSettings, update: ((HookSettings) -> HookSettings) -> Unit, back: () -> Unit) = AppPage(tr("\u63a7\u5236\u4e2d\u5fc3", "\u63a7\u5236\u4e2d\u5fc3"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI)) { p, scroll ->
     AppList(p, scroll, 28) {
-        item { Card(Modifier.fillMaxWidth()) {
+        item { Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
         Corner(tr("\u9876\u90e8\u64cd\u4f5c\u6309\u94ae", "\u9876\u90e8\u64cd\u4f5c\u6309\u94ae"), s.topButtonsRadiusEnabled, { v -> update { it.copy(topButtonsRadiusEnabled = v) } }, s.topButtonsRadius) { v -> update { it.copy(topButtonsRadius = v) } }
         Corner(tr("\u5a92\u4f53\u5361\u7247", "\u5a92\u4f53\u5361\u7247"), s.mediaCardRadiusEnabled, { v -> update { it.copy(mediaCardRadiusEnabled = v) } }, s.mediaCardRadius) { v -> update { it.copy(mediaCardRadius = v) } }
         Corner(tr("\u97f3\u91cf / \u4eae\u5ea6\u6761", "\u97f3\u91cf / \u4eae\u5ea6\u6761"), s.sliderRadiusEnabled, { v -> update { it.copy(sliderRadiusEnabled = v) } }, s.sliderRadius) { v -> update { it.copy(sliderRadius = v) } }
@@ -4158,7 +4215,15 @@ private fun Lock(
     update: ((HookSettings) -> HookSettings) -> Unit,
     open: (PageId) -> Unit,
     back: () -> Unit,
-) = AppPage(tr("\u9501\u5c4f", "\u9501\u5c4f"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.AOD)) { p, scroll ->
+) = AppPage(
+    tr("\u9501\u5c4f", "\u9501\u5c4f"),
+    back,
+    restartScopes = setOf(
+        ScopeApplication.SYSTEM_UI,
+        ScopeApplication.WALLPAPER,
+        ScopeApplication.AOD,
+    ),
+) { p, scroll ->
     var showBottomTextDialog by remember { mutableStateOf(false) }
     var showWidgetDeviceNameDialog by remember { mutableStateOf(false) }
     var showLockscreenTemplateLimitDialog by remember { mutableStateOf(false) }
@@ -4335,7 +4400,7 @@ OverlayDropdownPreference(
             }
         }
         item {
-            Group(tr("\u8ff7\u4f60\u97f3\u4e50\u64ad\u653e\u5668", "\u8ff7\u4f60\u97f3\u4e50\u64ad\u653e\u5668")) {
+            Group(tr("\u9501\u5c4f\u5a92\u4f53\u4e0e\u6b4c\u8bcd", "\u9501\u5c4f\u5a92\u4f53\u4e0e\u6b4c\u8bcd")) {
         SwitchPreference(
             title = tr("\u9501\u5c4f\u8ff7\u4f60\u97f3\u4e50\u64ad\u653e\u5668", "\u9501\u5c4f\u8ff7\u4f60\u97f3\u4e50\u64ad\u653e\u5668"),
             summary = tr("\u663e\u793a\u5728\u5e95\u90e8\u5feb\u6377\u6309\u94ae\u4e4b\u95f4\uff0c\u8ddf\u968f\u5f53\u524d\u5a92\u4f53\u4f1a\u8bdd", "\u663e\u793a\u5728\u5e95\u90e8\u5feb\u6377\u6309\u94ae\u4e4b\u95f4\uff0c\u8ddf\u968f\u5f53\u524d\u5a92\u4f53\u4f1a\u8bdd"),
@@ -4348,20 +4413,76 @@ OverlayDropdownPreference(
                 }
             },
         )
+        SwitchPreference(
+            title = tr("\u97f3\u4e50\u9501\u5c4f", "\u97f3\u4e50\u9501\u5c4f"),
+            summary = tr(
+                "\u9700\u8981\u540c\u65f6\u91cd\u542f\u201c\u7cfb\u7edf\u754c\u9762\u201d\u548c\u201c\u58c1\u7eb8\u201d\u5e94\u7528",
+                "\u9700\u8981\u540c\u65f6\u91cd\u542f\u201c\u7cfb\u7edf\u754c\u9762\u201d\u548c\u201c\u58c1\u7eb8\u201d\u5e94\u7528",
+            ),
+            checked = s.lockscreenMusicLockscreenEnabled,
+            onCheckedChange = { value ->
+                update { it.copy(lockscreenMusicLockscreenEnabled = value) }
+            },
+        )
+        AnimatedVisibility(
+            visible = s.lockscreenMusicLockscreenEnabled,
+            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+        ) {
+        Column {
+        SwitchPreference(
+            title = tr("\u9501\u5c4f\u6b4c\u8bcd", "\u9501\u5c4f\u6b4c\u8bcd"),
+            summary = tr(
+                "\u5728\u7cfb\u7edf\u9501\u5c4f\u5a92\u4f53\u901a\u77e5\u4e2d\u6ce8\u5165\u6b4c\u8bcd\u6309\u94ae\uff1b\u9700\u5b89\u88c5\u8bcd\u5e55\u6838\u5fc3\u670d\u52a1\u5e76\u542f\u7528\u4e00\u4e2a Provider",
+                "\u5728\u7cfb\u7edf\u9501\u5c4f\u5a92\u4f53\u901a\u77e5\u4e2d\u6ce8\u5165\u6b4c\u8bcd\u6309\u94ae\uff1b\u9700\u5b89\u88c5\u8bcd\u5e55\u6838\u5fc3\u670d\u52a1\u5e76\u542f\u7528\u4e00\u4e2a Provider",
+            ),
+            checked = s.lockscreenMusicLyricsEnabled,
+            onCheckedChange = { value ->
+                update { it.copy(lockscreenMusicLyricsEnabled = value) }
+            },
+        )
+        AnimatedVisibility(
+            visible = s.lockscreenMusicLyricsEnabled,
+            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+        ) {
+        Column {
+        SwitchPreference(
+            title = tr("HDR \u9ad8\u5149\u6b4c\u8bcd", "HDR \u9ad8\u5149\u6b4c\u8bcd"),
+            summary = tr(
+                "\u957f\u97f3\u7ed3\u5c3e\u53d1\u5149\u65f6\u5728 HDR \u5c4f\u5e55\u4e0a\u4ee5\u66f4\u9ad8\u4eae\u5ea6\u663e\u793a",
+                "\u957f\u97f3\u7ed3\u5c3e\u53d1\u5149\u65f6\u5728 HDR \u5c4f\u5e55\u4e0a\u4ee5\u66f4\u9ad8\u4eae\u5ea6\u663e\u793a",
+            ),
+            checked = s.lockscreenMusicLyricsHdrEnabled,
+            onCheckedChange = { value ->
+                update { it.copy(lockscreenMusicLyricsHdrEnabled = value) }
+            },
+        )
+        SwitchPreference(
+            title = tr("\u64ad\u653e\u6b4c\u8bcd\u65f6\u5c4f\u5e55\u5e38\u4eae", "\u64ad\u653e\u6b4c\u8bcd\u65f6\u5c4f\u5e55\u5e38\u4eae"),
+            summary = tr(
+                "\u9501\u5c4f\u663e\u793a\u6b4c\u8bcd\u4e14\u6b63\u5728\u64ad\u653e\u65f6\u4e0d\u81ea\u52a8\u606f\u5c4f\uff0c\u6682\u505c\u540e\u6062\u590d",
+                "\u9501\u5c4f\u663e\u793a\u6b4c\u8bcd\u4e14\u6b63\u5728\u64ad\u653e\u65f6\u4e0d\u81ea\u52a8\u606f\u5c4f\uff0c\u6682\u505c\u540e\u6062\u590d",
+            ),
+            checked = s.lockscreenMusicLyricsKeepScreenOn,
+            onCheckedChange = { value ->
+                update { it.copy(lockscreenMusicLyricsKeepScreenOn = value) }
+            },
+        )
+        ArrowPreference(
+            title = tr("\u6b4c\u8bcd\u5e93", "\u6b4c\u8bcd\u5e93"),
+            onClick = { open(PageId.LYRIC_LIBRARY) },
+        )
+        }
+        }
+        }
+        }
         AnimatedVisibility(
             visible = s.lockscreenMiniPlayerEnabled,
             enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
             exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
         ) {
             Column {
-                SwitchPreference(
-                    title = "\u97f3\u4e50\u9501\u5c4f",
-                    summary = "\u957f\u6309\u9501\u5c4f\u5c9b\u663e\u793a\u5168\u5c4f\u97f3\u4e50\u64ad\u653e\u5668",
-                    checked = s.lockscreenMusicLockscreenEnabled,
-                    onCheckedChange = { value ->
-                        update { it.copy(lockscreenMusicLockscreenEnabled = value) }
-                    },
-                )
                 OverlayDropdownPreference(
                     title = "\u9501\u5c4f\u5a92\u4f53\u901a\u77e5",
                     items = listOf(tr("\u4e0d\u9690\u85cf", "\u4e0d\u9690\u85cf"), tr("\u59cb\u7ec8\u9690\u85cf", "\u59cb\u7ec8\u9690\u85cf"), tr("\u52a8\u6001\u663e\u793a", "\u52a8\u6001\u663e\u793a")),
@@ -4623,6 +4744,354 @@ OverlayDropdownPreference(
     )
     }
 
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun LyricLibraryPage(back: () -> Unit) {
+    val context = LocalContext.current
+    val store = remember(context) { LyricLibraryStore(context) }
+    var entries by remember { mutableStateOf(store.entries()) }
+    var showEditor by remember { mutableStateOf(false) }
+    var editingId by remember { mutableStateOf<String?>(null) }
+    var title by remember { mutableStateOf("") }
+    var artist by remember { mutableStateOf("") }
+    var aliases by remember { mutableStateOf("") }
+    var lyricBytes by remember { mutableStateOf<ByteArray?>(null) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    var selectionMode by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf(emptySet<String>()) }
+    var confirmBatchDelete by remember { mutableStateOf(false) }
+    var pendingExport by remember { mutableStateOf(emptyList<LocalLyricEntry>()) }
+
+    fun closeSelection() {
+        selectionMode = false
+        selectedIds = emptySet()
+    }
+
+    fun toggleSelection(id: String) {
+        selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
+    }
+
+    fun openEditor(entry: LocalLyricEntry?) {
+        editingId = entry?.id
+        title = entry?.title.orEmpty()
+        artist = entry?.artist.orEmpty()
+        aliases = entry?.aliases.orEmpty()
+        lyricBytes = null
+        showEditor = true
+    }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                ?.takeIf { it.isNotEmpty() }
+                ?: error("empty lyric file")
+        }.onSuccess { lyricBytes = it }.onFailure {
+            Toast.makeText(context, tr("歌词文件导入失败", "歌词文件导入失败"), Toast.LENGTH_SHORT).show()
+        }
+    }
+    val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.openInputStream(uri)?.use(store::importZip)
+                ?: error("unable to open zip")
+            entries = store.entries()
+        }.onSuccess {
+            Toast.makeText(context, tr("歌词库已导入", "歌词库已导入"), Toast.LENGTH_SHORT).show()
+        }.onFailure {
+            Toast.makeText(context, tr("歌词库导入失败", "歌词库导入失败"), Toast.LENGTH_SHORT).show()
+        }
+    }
+    val exporter = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri ->
+        val selected = pendingExport
+        pendingExport = emptyList()
+        if (uri == null || selected.isEmpty()) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.openOutputStream(uri)?.use { store.writeZip(selected, it) }
+                ?: error("unable to create zip")
+        }.onSuccess {
+            Toast.makeText(context, tr("歌词已导出", "歌词已导出"), Toast.LENGTH_SHORT).show()
+            closeSelection()
+        }.onFailure {
+            Toast.makeText(context, tr("歌词导出失败", "歌词导出失败"), Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    BackHandler(enabled = selectionMode) { closeSelection() }
+
+    AppPage(
+        title = tr("歌词库", "歌词库"),
+        onBack = back,
+        actions = {
+            AnimatedVisibility(
+                visible = !selectionMode,
+                enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .9f),
+                exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .9f),
+            ) {
+                Row {
+                    GlassToolbarIconButton(
+                        icon = MiuixIcons.Regular.Import,
+                        description = tr("lyrics_import", "导入"),
+                        onClick = {
+                            importer.launch(
+                                arrayOf("application/zip", "application/x-zip-compressed"),
+                            )
+                        },
+                    )
+                    GlassToolbarIconButton(
+                        icon = MiuixIcons.Regular.Add,
+                        description = tr("添加", "添加"),
+                        onClick = { openEditor(null) },
+                    )
+                }
+            }
+        },
+        floatingToolbarPosition = ToolbarPosition.BottomCenter,
+        floatingToolbar = {
+            AnimatedVisibility(
+                visible = selectionMode,
+                enter = fadeIn(tween(180)) + scaleIn(tween(220), initialScale = .86f),
+                exit = fadeOut(tween(140)) + scaleOut(tween(160), targetScale = .9f),
+            ) {
+                GlassLyricFloatingToolbar {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = {
+                            selectedIds = if (selectedIds.size == entries.size) {
+                                emptySet()
+                            } else {
+                                entries.mapTo(linkedSetOf(), LocalLyricEntry::id)
+                            }
+                        }) {
+                            Icon(
+                                MiuixIcons.Regular.SelectAll,
+                                tr("lyrics_select_all", "全选"),
+                                Modifier.size(26.4.dp),
+                            )
+                        }
+                        IconButton(
+                            enabled = selectedIds.isNotEmpty(),
+                            onClick = {
+                                pendingExport = entries.filter { it.id in selectedIds }
+                                val stamp = SimpleDateFormat("yyyyMMddHHmm", Locale.US).format(Date())
+                                exporter.launch("HyperChanger_Lyrics_$stamp.zip")
+                            },
+                        ) {
+                            Icon(
+                                MiuixIcons.Regular.Download,
+                                tr("lyrics_export", "导出"),
+                                Modifier.size(26.4.dp),
+                            )
+                        }
+                        IconButton(
+                            enabled = selectedIds.isNotEmpty(),
+                            onClick = { confirmBatchDelete = true },
+                        ) {
+                            Icon(
+                                MiuixIcons.Regular.Delete,
+                                tr("lyrics_delete_selected", "删除"),
+                                Modifier.size(26.4.dp),
+                                tint = ComposeColor(0xFFD32F2F),
+                            )
+                        }
+                        IconButton(onClick = ::closeSelection) {
+                            Icon(
+                                MiuixIcons.Regular.Close,
+                                tr("lyrics_close_selection", "关闭"),
+                                Modifier.size(26.4.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        },
+    ) { padding, scroll ->
+        AppList(padding, scroll, if (selectionMode) 112 else 28) {
+            items(entries, key = LocalLyricEntry::id) { entry ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    cornerRadius = 22.5.dp,
+                    insideMargin = PaddingValues(16.dp),
+                    onClick = {
+                        if (selectionMode) toggleSelection(entry.id) else openEditor(entry)
+                    },
+                    onLongPress = {
+                        selectionMode = true
+                        selectedIds = selectedIds + entry.id
+                    },
+                ) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            entry.title,
+                            style = MiuixTheme.textStyles.body1,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            "${entry.artist} · ${entry.type}",
+                            style = MiuixTheme.textStyles.body2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                    AnimatedVisibility(
+                        visible = selectionMode,
+                        enter = fadeIn(tween(180)) + slideInHorizontally(tween(220)) { it / 2 },
+                        exit = fadeOut(tween(120)) + slideOutHorizontally(tween(160)) { it / 2 },
+                    ) {
+                        Checkbox(
+                            state = if (entry.id in selectedIds) ToggleableState.On else ToggleableState.Off,
+                            onClick = { toggleSelection(entry.id) },
+                            modifier = Modifier.padding(start = 12.dp),
+                        )
+                    }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showEditor) {
+        val canSave = title.isNotBlank() && artist.isNotBlank()
+            && (editingId != null || lyricBytes != null)
+        WindowDialog(show = true, onDismissRequest = { showEditor = false }) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                TextField(
+                    value = title,
+                    onValueChange = { title = it.take(256) },
+                    label = tr("歌曲标题", "歌曲标题"),
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                    cornerRadius = 999.dp,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                TextField(
+                    value = artist,
+                    onValueChange = { artist = it.take(256) },
+                    label = tr("歌曲艺术家", "歌曲艺术家"),
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                    cornerRadius = 999.dp,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                TextField(
+                    value = aliases,
+                    onValueChange = { aliases = it.take(1024) },
+                    label = tr("歌曲别名（使用逗号分隔）", "歌曲别名（使用逗号分隔）"),
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                    cornerRadius = 999.dp,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                GlassDialogButton(
+                    onClick = { picker.launch(arrayOf("*/*")) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        if (editingId != null || lyricBytes != null) {
+                            tr("歌词文件 · 已导入", "歌词文件 · 已导入")
+                        } else {
+                            tr("歌词文件", "歌词文件")
+                        },
+                    )
+                }
+                if (editingId != null) {
+                    GlassDialogButton(
+                        onClick = { confirmDelete = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(tr("删除", "删除"), color = ComposeColor(0xFFD32F2F))
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    GlassDialogButton(
+                        onClick = { showEditor = false },
+                        modifier = Modifier.weight(1f),
+                    ) { Text(tr("取消", "取消")) }
+                    GlassDialogButton(
+                        onClick = {
+                            runCatching {
+                                store.save(editingId, title, artist, aliases, lyricBytes)
+                                entries = store.entries()
+                            }.onSuccess {
+                                showEditor = false
+                            }.onFailure {
+                                Toast.makeText(context, tr("歌词保存失败", "歌词保存失败"), Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        enabled = canSave,
+                        colors = ButtonDefaults.buttonColorsPrimary(),
+                    ) { Text(tr("保存", "保存")) }
+                }
+            }
+        }
+    }
+
+    if (confirmDelete) {
+        WindowDialog(show = true, onDismissRequest = { confirmDelete = false }) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    tr("删除这首歌？", "删除这首歌？"),
+                    style = MiuixTheme.textStyles.title3,
+                    fontWeight = FontWeight.Bold,
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    GlassDialogButton(
+                        onClick = { confirmDelete = false },
+                        modifier = Modifier.weight(1f),
+                    ) { Text(tr("取消", "取消")) }
+                    GlassDialogButton(
+                        onClick = {
+                            editingId?.let(store::delete)
+                            entries = store.entries()
+                            confirmDelete = false
+                            showEditor = false
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) { Text(tr("删除", "删除"), color = ComposeColor(0xFFD32F2F)) }
+                }
+            }
+        }
+    }
+
+    if (confirmBatchDelete) {
+        WindowDialog(show = true, onDismissRequest = { confirmBatchDelete = false }) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    tr("删除所选歌词？", "删除所选歌词？"),
+                    style = MiuixTheme.textStyles.title3,
+                    fontWeight = FontWeight.Bold,
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    GlassDialogButton(
+                        onClick = { confirmBatchDelete = false },
+                        modifier = Modifier.weight(1f),
+                    ) { Text(tr("取消", "取消")) }
+                    GlassDialogButton(
+                        onClick = {
+                            store.delete(selectedIds)
+                            entries = store.entries()
+                            confirmBatchDelete = false
+                            closeSelection()
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) { Text(tr("删除", "删除"), color = ComposeColor(0xFFD32F2F)) }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun LockscreenTemplateLimitDialog(
     show: Boolean,
@@ -4708,6 +5177,7 @@ private data class LockscreenWidgetEditorItem(
     val title: String,
     val kind: LockscreenWidgetEditorKind,
     val wide: Boolean = false,
+    val surface: Boolean = true,
 )
 
 private enum class LockscreenWidgetEditorKind {
@@ -4716,8 +5186,10 @@ private enum class LockscreenWidgetEditorKind {
 }
 
 private fun lockscreenWidgetEditorItems() = listOf(
-    LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER, tr("详细天气", "详细天气"), LockscreenWidgetEditorKind.DETAIL_WEATHER, wide = true),
-    LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY, tr("详细电量", "详细电量"), LockscreenWidgetEditorKind.DETAIL_BATTERY, wide = true),
+    LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER, tr("详细天气", "详细天气"), LockscreenWidgetEditorKind.DETAIL_WEATHER, wide = true, surface = false),
+    LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY, tr("详细电量", "详细电量"), LockscreenWidgetEditorKind.DETAIL_BATTERY, wide = true, surface = false),
+    LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER_BACKGROUND, tr("详细天气（有背景）", "详细天气（有背景）"), LockscreenWidgetEditorKind.DETAIL_WEATHER, wide = true),
+    LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY_BACKGROUND, tr("详细电量（有背景）", "详细电量（有背景）"), LockscreenWidgetEditorKind.DETAIL_BATTERY, wide = true),
     LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_COMPACT_WEATHER, tr("简约天气", "简约天气"), LockscreenWidgetEditorKind.COMPACT_WEATHER, wide = true),
     LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_SUN, tr("日出日落", "日出日落"), LockscreenWidgetEditorKind.SUN),
     LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_STEPS, tr("步数", "步数"), LockscreenWidgetEditorKind.STEPS),
@@ -4996,8 +5468,25 @@ private fun LockscreenWidgetEditor(
     }
     fun setItem(item: LockscreenWidgetEditorItem, enabled: Boolean) {
         val current = settings.lockscreenWidgetItems and LOCKSCREEN_WIDGET_ALL_ITEMS
-        val next = if (enabled) current or item.flag else current and item.flag.inv()
-        if (enabled && !lockscreenWidgetCanAdd(selectedItems, item)) {
+        val counterpart = when (item.flag) {
+            LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER -> LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER_BACKGROUND
+            LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER_BACKGROUND -> LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER
+            LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY -> LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY_BACKGROUND
+            LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY_BACKGROUND -> LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY
+            else -> null
+        }
+        val currentWithoutCounterpart = if (enabled && counterpart != null) {
+            current and counterpart.inv()
+        } else {
+            current
+        }
+        val next = if (enabled) {
+            currentWithoutCounterpart or item.flag
+        } else {
+            currentWithoutCounterpart and item.flag.inv()
+        }
+        val layoutWithoutCounterpart = selectedItems.filter { it.flag != counterpart }
+        if (enabled && !lockscreenWidgetCanAdd(layoutWithoutCounterpart, item)) {
             Toast.makeText(context, tr("当前布局已达到组件上限", "当前布局已达到组件上限"), Toast.LENGTH_SHORT).show()
             return
         }
@@ -5007,7 +5496,17 @@ private fun LockscreenWidgetEditor(
         if (next != 0) update {
             val order = lockscreenWidgetItemsInOrder(it.lockscreenWidgetItems, it.lockscreenWidgetOrder)
                 .map(LockscreenWidgetEditorItem::flag)
-                .let { existing -> if (enabled) existing + item.flag else existing.filter { flag -> flag != item.flag } }
+                .let { existing ->
+                    if (enabled) {
+                        existing.map { flag -> if (flag == counterpart) item.flag else flag }
+                            .let { replaced ->
+                                if (item.flag in replaced) replaced else replaced + item.flag
+                            }
+                            .distinct()
+                    } else {
+                        existing.filter { flag -> flag != item.flag }
+                    }
+                }
             it.copy(lockscreenWidgetItems = next, lockscreenWidgetOrder = order.joinToString(","))
         }
     }
@@ -5036,7 +5535,7 @@ private fun LockscreenWidgetEditor(
                 Box(
                     Modifier
                         .matchParentSize()
-                        .clip(RoundedCornerShape(30.dp))
+                        .clip(RoundedCornerShape(22.5.dp))
                         .background(ComposeColor(0xFF54A9F4))
                         .layerBackdrop(previewBackdrop),
                 ) {
@@ -5058,7 +5557,7 @@ private fun LockscreenWidgetEditor(
                 }
                 // The selected strip is clipped by the preview card, so a drag cannot draw
                 // outside the preview area. The editor limit guarantees it remains one row.
-                Box(Modifier.matchParentSize().clip(RoundedCornerShape(30.dp))) {
+                Box(Modifier.matchParentSize().clip(RoundedCornerShape(22.5.dp))) {
                     Row(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
@@ -5097,7 +5596,7 @@ private fun LockscreenWidgetEditor(
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                cornerRadius = 30.dp,
+                cornerRadius = 22.5.dp,
                 insideMargin = PaddingValues(horizontal = 18.dp, vertical = 20.dp),
             ) {
                 Box(Modifier.fillMaxWidth()) {
@@ -5267,11 +5766,12 @@ private fun LockscreenWidgetPreviewTile(
     }
     val shape = when {
         !item.wide -> CircleShape
-        item.kind == LockscreenWidgetEditorKind.DETAIL_WEATHER ||
-            item.kind == LockscreenWidgetEditorKind.DETAIL_BATTERY -> RoundedCornerShape(18.dp)
+        !item.surface && (item.kind == LockscreenWidgetEditorKind.DETAIL_WEATHER ||
+            item.kind == LockscreenWidgetEditorKind.DETAIL_BATTERY) -> RoundedCornerShape(18.dp)
         else -> RoundedCornerShape(32.dp)
     }
-    val showSurface = item.kind != LockscreenWidgetEditorKind.SIGNATURE || signatureBackground
+    val showSurface = item.surface &&
+        (item.kind != LockscreenWidgetEditorKind.SIGNATURE || signatureBackground)
     val interactionModifier = if (onMove == null) {
         Modifier.clickable { onAdd?.invoke() }
     } else {
@@ -5328,7 +5828,22 @@ private fun LockscreenWidgetPreviewTile(
         ) {
             LockscreenWidgetPreviewContent(
                 item = item,
-                modifier = Modifier.matchParentSize().padding(horizontal = if (item.wide) 9.dp else 4.dp),
+                modifier = Modifier
+                    .matchParentSize()
+                    .padding(horizontal = if (item.wide) 9.dp else 4.dp)
+                    .then(
+                        if (item.surface &&
+                            (item.kind == LockscreenWidgetEditorKind.DETAIL_WEATHER ||
+                                item.kind == LockscreenWidgetEditorKind.DETAIL_BATTERY)
+                        ) {
+                            Modifier.graphicsLayer {
+                                scaleX = .88f
+                                scaleY = .88f
+                            }
+                        } else {
+                            Modifier
+                        },
+                    ),
                 signatureType = signatureType,
                 signatureColor = signatureColor,
                 signatureScale = signatureScale,
@@ -5813,7 +6328,7 @@ private fun LockscreenWidgetSignatureColorDialog(
 
 @Composable
 private fun Camera(c: CameraSettings, update: ((CameraSettings) -> CameraSettings) -> Unit, openPage: (PageId) -> Unit, back: () -> Unit) = AppPage(tr("\u76f8\u673a\u4e0e\u76f8\u518c\u7f16\u8f91", "\u76f8\u673a\u4e0e\u76f8\u518c\u7f16\u8f91"), back, restartScopes = setOf(ScopeApplication.CAMERA, ScopeApplication.GALLERY, ScopeApplication.MEDIA_EDITOR)) { p, scroll ->
-    AppList(p, scroll, 28) { item { Card(Modifier.fillMaxWidth()) {
+    AppList(p, scroll, 28) { item { Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
         SwitchPreference(title = tr("\u542f\u7528\u76f8\u673a\u6a21\u5757", "\u542f\u7528\u76f8\u673a\u6a21\u5757"), checked = c.masterEnabled, onCheckedChange = { v -> update { it.copy(masterEnabled = v) } })
         SwitchPreference(title = tr("leica_lcc_ui", "Leica LCC UI"), checked = c.leicaUi, enabled = c.masterEnabled, onCheckedChange = { v -> update { it.copy(leicaUi = v) } })
         SwitchPreference(title = tr("\u4fdd\u7559\u539f\u751f\u7126\u6bb5", "\u4fdd\u7559\u539f\u751f\u7126\u6bb5"), checked = c.preserveNativeFocalLengths, enabled = c.masterEnabled, onCheckedChange = { v -> update { it.copy(preserveNativeFocalLengths = v) } })
@@ -6362,12 +6877,379 @@ private fun ParameterFloatSlide(
 }
 
 @Composable
+private fun SoftwareUpdate(openPage: (PageId) -> Unit, back: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var channel by rememberSaveable { mutableStateOf("github") }
+    var state by remember { mutableStateOf<UpdateState>(UpdateState.Checking) }
+    var downloadId by remember { mutableStateOf<Long?>(null) }
+    var downloadProgress by remember { mutableIntStateOf(0) }
+    var downloaded by remember { mutableStateOf(false) }
+    var rootAvailable by remember { mutableStateOf(false) }
+    var installing by remember { mutableStateOf(false) }
+    val installPreferences = remember { context.getSharedPreferences("software_update", Context.MODE_PRIVATE) }
+    var installMode by remember { mutableStateOf(installPreferences.getString("install_mode", "manual") ?: "manual") }
+    val updateInfo = (state as? UpdateState.Ready)?.info
+    val hasUpdate = updateInfo?.versionCode?.let { it > BuildConfig.VERSION_CODE.toLong() } == true
+
+    fun checkUpdate() {
+        state = UpdateState.Checking
+        downloaded = false
+        scope.launch {
+            state = withContext(Dispatchers.IO) {
+                runCatching {
+                    val info = fetchUpdateInfo(channel)
+                    val note = fetchReleaseNote(info.releaseNoteUrl)
+                    UpdateState.Ready(info, note)
+                }.getOrElse { UpdateState.Error }
+            }
+        }
+    }
+    LaunchedEffect(channel) {
+        lastUpdateChannel = channel
+        checkUpdate()
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            rootAvailable = hasRootAccess()
+            delay(10_000)
+        }
+    }
+    LaunchedEffect(rootAvailable) {
+        if (rootAvailable) {
+            installMode = installPreferences.getString("install_mode", "manual") ?: "manual"
+        }
+    }
+    LaunchedEffect(downloadId) {
+        val id = downloadId ?: return@LaunchedEffect
+        val manager = context.getSystemService(DownloadManager::class.java) ?: return@LaunchedEffect
+        while (true) {
+            val cursor = manager.query(DownloadManager.Query().setFilterById(id))
+            val active = cursor?.use {
+                if (!it.moveToFirst()) return@use false
+                val status = it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                val total = it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+                val current = it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
+                if (total > 0) downloadProgress = ((current * 100L) / total).toInt().coerceIn(0, 100)
+                when (status) {
+                    DownloadManager.STATUS_SUCCESSFUL -> { downloaded = true; false }
+                    DownloadManager.STATUS_FAILED -> { downloadId = null; false }
+                    else -> true
+                }
+            } ?: false
+            if (!active) break
+            delay(500)
+        }
+    }
+    fun startDownload() {
+        val info = updateInfo ?: return
+        if (downloaded) {
+            if (installMode == "silent" && rootAvailable) {
+                installing = true
+                scope.launch {
+                    val success = withContext(Dispatchers.IO) { installDownloadedApk(context, downloadId!!) }
+                    installing = false
+                    if (!success) Toast.makeText(context, tr("静默安装失败，请改用手动安装", "静默安装失败，请改用手动安装"), Toast.LENGTH_SHORT).show()
+                }
+                return
+            }
+            val uri = context.getSystemService(DownloadManager::class.java)
+                ?.getUriForDownloadedFile(downloadId ?: return)
+            if (uri != null) {
+                context.startActivity(Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "application/vnd.android.package-archive")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                })
+            }
+            return
+        }
+        if (downloadId != null) {
+            context.getSystemService(DownloadManager::class.java)?.remove(downloadId!!)
+            downloadId = null
+            downloadProgress = 0
+            downloaded = false
+            return
+        }
+        val request = DownloadManager.Request(Uri.parse(info.apkUrl)).apply {
+            setTitle("${tr("HyperChanger", "HyperChanger")} v${info.versionName}")
+            setDescription(tr("下载更新", "下载更新"))
+            setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, "HyperChanger-v${info.versionName.replace(' ', '-')}.apk")
+            setMimeType("application/vnd.android.package-archive")
+        }
+        downloadId = context.getSystemService(DownloadManager::class.java)?.enqueue(request)
+    }
+
+    AppPage(tr("软件更新", "软件更新"), back) { padding, scroll ->
+        AppList(padding, scroll, 28) {
+            item {
+                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                    OverlayDropdownPreference(
+                        title = tr("更新通道", "更新通道"),
+                        items = listOf(tr("GitHub", "GitHub"), tr("Gitee", "Gitee")),
+                        selectedIndex = if (channel == "github") 0 else 1,
+                        showValueOnEnd = true,
+                        onSelectedIndexChange = { channel = if (it == 0) "github" else "gitee" },
+                    )
+                    OverlayDropdownPreference(
+                        title = tr("安装方式", "安装方式"),
+                        items = listOf(tr("手动安装", "手动安装"), tr("静默安装", "静默安装")),
+                        selectedIndex = if (installMode == "silent" && rootAvailable) 1 else 0,
+                        enabled = rootAvailable,
+                        showValueOnEnd = true,
+                        onSelectedIndexChange = { index ->
+                            installMode = if (index == 1) "silent" else "manual"
+                            installPreferences.edit().putString("install_mode", installMode).apply()
+                        },
+                    )
+                }
+            }
+            item {
+                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 11.4.dp)) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "${tr("HyperChanger", "HyperChanger")} v${if (hasUpdate) updateInfo?.versionName else BuildConfig.VERSION_NAME}",
+                                style = MiuixTheme.textStyles.body1.copy(fontSize = MiuixTheme.textStyles.body1.fontSize * 1.2f),
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                when (state) {
+                                    UpdateState.Checking -> tr("检查更新中", "检查更新中")
+                                    UpdateState.Error -> tr("检查更新失败", "检查更新失败")
+                                    is UpdateState.Ready -> if (hasUpdate) {
+                                        "${tr("检测到新版本", "检测到新版本")} · ${formatApkSize(updateInfo?.apkSize ?: 0L)}"
+                                    } else tr("已是最新版本", "已是最新版本")
+                                },
+                                style = MiuixTheme.textStyles.body2.copy(fontSize = MiuixTheme.textStyles.body2.fontSize * 1.2f),
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
+                    }
+                    when (val current = state) {
+                        UpdateState.Checking -> Text(tr("检查更新中......", "检查更新中......"), color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = .6f), modifier = Modifier.padding(top = 18.dp))
+                        UpdateState.Error -> Text(tr("暂时无法获取更新信息", "暂时无法获取更新信息"), color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 18.dp))
+                        is UpdateState.Ready -> {
+                            Text(stripMarkdown(current.note).lines().take(6).joinToString("\n"), style = MiuixTheme.textStyles.body2, modifier = Modifier.padding(top = 18.dp, bottom = 0.dp))
+                            Text(
+                                tr("了解更多...", "了解更多..."),
+                                color = ComposeColor(0xFF1976D2),
+                                style = MiuixTheme.textStyles.body1,
+                                modifier = Modifier.padding(top = 8.dp).clickable { openPage(PageId.UPDATE_LOG) },
+                            )
+                            if (hasUpdate) {
+                                HorizontalDivider(modifier = Modifier.padding(top = 14.dp, bottom = 12.dp))
+                                val buttonBackdrop = rememberLayerBackdrop()
+                                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                    Box(
+                                        Modifier.matchParentSize()
+                                            .layerBackdrop(buttonBackdrop)
+                                            .background(MiuixTheme.colorScheme.surfaceContainer.copy(alpha = .12f)),
+                                    )
+                                    UpdateToolbarButton(
+                                        onClick = ::startDownload,
+                                        text = when {
+                                            installing -> tr("安装中", "安装中")
+                                            downloaded -> tr("立即安装", "立即安装")
+                                            downloadId != null -> "${tr("下载中", "下载中")} $downloadProgress%"
+                                            else -> tr("立即下载", "立即下载")
+                                        },
+                                        primary = true,
+                                        enabled = !installing,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        backdrop = buttonBackdrop,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private data class UpdateInfo(val versionCode: Long, val versionName: String, val releaseNoteUrl: String, val apkUrl: String, val apkSize: Long)
+private var lastUpdateChannel = "github"
+
+private fun stripMarkdown(value: String): String = value
+    .replace(Regex("^\\s{0,3}#{1,6}\\s*", RegexOption.MULTILINE), "")
+    .replace(Regex("[*_~`]+"), "")
+    .replace(Regex("!\\[([^]]*)]\\([^)]*\\)"), "$1")
+    .replace(Regex("\\[([^]]+)]\\([^)]*\\)"), "$1")
+    .replace(Regex("^\\s*[-+*]\\s+", RegexOption.MULTILINE), "")
+    .replace(Regex("^\\s*\\d+[.)]\\s+", RegexOption.MULTILINE), "")
+
+private fun hasRootAccess(): Boolean = runCatching {
+    Runtime.getRuntime().exec(arrayOf("su", "-c", "id")).let { process ->
+        val output = process.inputStream.bufferedReader().use { it.readText() }
+        process.errorStream.close()
+        process.waitFor(2, TimeUnit.SECONDS) && output.contains("uid=0")
+    }
+}.getOrDefault(false)
+
+private fun installDownloadedApk(context: Context, downloadId: Long): Boolean = runCatching {
+    val manager = context.getSystemService(DownloadManager::class.java) ?: return@runCatching false
+    val cursor = manager.query(DownloadManager.Query().setFilterById(downloadId)) ?: return@runCatching false
+    val uri = cursor.use {
+        if (!it.moveToFirst()) return@use null
+        it.getString(it.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI))
+    } ?: return@runCatching false
+    val path = Uri.parse(uri).path ?: return@runCatching false
+    val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "pm install -r $path"))
+    process.inputStream.close()
+    process.errorStream.close()
+    process.waitFor() == 0
+}.getOrDefault(false)
+
+@Composable
+private fun UpdateToolbarButton(
+    onClick: () -> Unit,
+    text: String,
+    modifier: Modifier = Modifier,
+    primary: Boolean = false,
+    enabled: Boolean = true,
+    backdrop: LayerBackdrop? = LocalToolbarBackdrop.current,
+) {
+    val animationScope = rememberCoroutineScope()
+    val drag = remember(animationScope) {
+        DampedDragAnimation(
+            animationScope = animationScope,
+            initialValue = 0f,
+            valueRange = -1f..1f,
+            visibilityThreshold = .001f,
+            initialScale = 1f,
+            pressedScale = 1.035f,
+            onDragStopped = { animateToValue(0f) },
+            onDrag = { size, amount -> updateValue((targetValue + amount.x / size.width.coerceAtLeast(1)).coerceIn(-1f, 1f)) },
+        )
+    }
+    val highlight = remember(animationScope) {
+        InteractiveHighlight(animationScope) { size, offset -> Offset(offset.x.coerceIn(0f, size.width), offset.y.coerceIn(0f, size.height)) }
+    }
+    val shape = RoundedCornerShape(50.dp)
+    val tint = if (primary) ComposeColor(0xFF1976D2).copy(alpha = .88f) else MiuixTheme.colorScheme.surfaceContainer.copy(alpha = .82f)
+    Box(
+        modifier.height(48.dp)
+            .then(if (enabled) highlight.gestureModifier else Modifier)
+            .then(if (enabled) drag.modifier else Modifier)
+            .clip(shape)
+            .then(if (backdrop != null) Modifier.drawBackdrop(
+                backdrop = backdrop,
+                shape = { shape },
+                effects = { vibrancy(); blur(TOOLBAR_GLASS_BLUR_RADIUS.toPx()); toolbarGlassLens(drag.pressProgress) },
+                highlight = { toolbarGlassHighlight(drag.pressProgress) },
+                shadow = { Shadow.Default.copy(radius = 5.dp, color = ComposeColor.Black, alpha = .24f) },
+                innerShadow = null,
+                onDrawSurface = { drawRoundRect(tint) },
+            ) else Modifier.background(tint))
+            .graphicsLayer {
+                alpha = if (enabled) 1f else .42f
+                scaleX = drag.scaleX
+                scaleY = drag.scaleY
+                translationX = drag.value * 4.dp.toPx()
+            }
+            .then(if (enabled) highlight.modifier else Modifier)
+            .clickable(enabled = enabled, interactionSource = null, indication = null, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, color = if (primary) ComposeColor.White else MiuixTheme.colorScheme.onSurface, style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold)
+    }
+}
+
+private fun formatApkSize(bytes: Long): String = when {
+    bytes >= 1024L * 1024L -> String.format(Locale.US, "%.1f MB", bytes / (1024f * 1024f))
+    bytes >= 1024L -> String.format(Locale.US, "%.0f KB", bytes / 1024f)
+    else -> "$bytes B"
+}
+private sealed interface UpdateState {
+    data object Checking : UpdateState
+    data object Error : UpdateState
+    data class Ready(val info: UpdateInfo, val note: String) : UpdateState
+}
+
+private fun fetchUpdateInfo(channel: String): UpdateInfo {
+    val url = if (channel == "github") "https://coldp.github.io/hyperchanger-updateinfo/update.json" else "https://gitee.com/btm_m/HyperChanger/raw/main/update.json"
+    val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+        connectTimeout = 10_000
+        readTimeout = 15_000
+        requestMethod = "GET"
+        setRequestProperty("Accept", "application/json")
+        setRequestProperty("User-Agent", "HyperChanger/${BuildConfig.VERSION_NAME}")
+    }
+    return try {
+        check(connection.responseCode in 200..299) { "HTTP ${connection.responseCode}" }
+        val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+        val versionCode = json.optString("VersionCode").toLongOrNull() ?: json.optLong("VersionCode", 0L)
+        UpdateInfo(versionCode, json.getString("VersionName"), json.getString("ReleaseNoteURL"), json.getString("APKURL"), json.optLong("APKSize", 0L))
+    } finally {
+        connection.disconnect()
+    }
+}
+
+private fun fetchReleaseNote(url: String): String {
+    val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+        connectTimeout = 10_000
+        readTimeout = 15_000
+        requestMethod = "GET"
+        setRequestProperty("User-Agent", "HyperChanger/${BuildConfig.VERSION_NAME}")
+    }
+    return try {
+        check(connection.responseCode in 200..299) { "HTTP ${connection.responseCode}" }
+        connection.inputStream.bufferedReader().use { it.readText() }.trim()
+    } finally {
+        connection.disconnect()
+    }
+}
+
+private fun markdownAnnotatedString(markdown: String): AnnotatedString = buildAnnotatedString {
+    markdown.lines().forEachIndexed { index, line ->
+        val heading = Regex("^\\s*#{1,6}\\s+(.*)$").find(line)
+        val content = heading?.groupValues?.get(1) ?: line
+        val headingStyle = if (heading != null) SpanStyle(fontWeight = FontWeight.Bold, fontSize = 18.sp) else SpanStyle()
+        withStyle(headingStyle) {
+            var cursor = 0
+            Regex("(\\*\\*|__)(.+?)\\1|`(.+?)`|\\[([^]]+)]\\(([^)]+)\\)").findAll(content).forEach { match ->
+                append(content.substring(cursor, match.range.first))
+                when {
+                    match.groupValues[2].isNotEmpty() -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(match.groupValues[2]) }
+                    match.groupValues[3].isNotEmpty() -> withStyle(SpanStyle(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)) { append(match.groupValues[3]) }
+                    else -> append(match.groupValues[4])
+                }
+                cursor = match.range.last + 1
+            }
+            append(content.substring(cursor))
+        }
+        if (index < markdown.lines().lastIndex) append("\n")
+    }
+}
+
+@Composable
+private fun UpdateLog(back: () -> Unit) {
+    var note by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+            note = withContext(Dispatchers.IO) {
+            runCatching { fetchReleaseNote(fetchUpdateInfo(lastUpdateChannel).releaseNoteUrl) }.getOrNull()
+        }
+    }
+    AppPage(tr("更新日志", "更新日志"), back) { padding, scroll ->
+        AppList(padding, scroll, 28) {
+            item {
+                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(16.dp)) {
+                    Text(note?.let(::markdownAnnotatedString) ?: AnnotatedString(tr("加载中......", "加载中......")), style = MiuixTheme.textStyles.body2)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun About(back: () -> Unit, openPage: (PageId) -> Unit, onDebugMode: () -> Unit) = AppPage(tr("\u5173\u4e8e", "\u5173\u4e8e"), back) { padding, scroll ->
     val context = LocalContext.current
     var iconTaps by remember { mutableIntStateOf(0) }
     AppList(padding, scroll, 28) {
         item {
-            Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(18.dp)) {
+            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(18.dp)) {
                 Image(painterResource(R.drawable.ic_hyperchanger_full), "HyperChanger", Modifier.size(72.dp).clickable {
                     iconTaps++
                     if (iconTaps >= 10) { iconTaps = 0; onDebugMode() }
@@ -6391,7 +7273,7 @@ private fun About(back: () -> Unit, openPage: (PageId) -> Unit, onDebugMode: () 
             }
         }
         item {
-            Card(Modifier.fillMaxWidth()) {
+            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
                 ArrowPreference(title = tr("license", "LICENSE"), summary = "Apache License 2.0", onClick = { openPage(PageId.LICENSE) })
                 ArrowPreference(title = tr("githubRepository", "GitHub Repository"), summary = "github.com/ColdP/HyperChanger", onClick = { openUrl(context, "https://github.com/ColdP/HyperChanger") })
                 ArrowPreference(title = tr("telegramGroup", "Telegram 群组"), summary = "t.me/HyperChanger", onClick = { openUrl(context, "https://t.me/HyperChanger") })
@@ -6449,7 +7331,7 @@ private fun DebugModeDialog(
 private fun Disclaimer(back: () -> Unit, captcha: String) = AppPage("免责声明", back) { padding, scroll ->
     AppList(padding, scroll, 28) {
         item {
-            Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(18.dp)) {
+            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(18.dp)) {
                 Text("HyperChanger 使用免责声明", style = MiuixTheme.textStyles.title2, fontWeight = FontWeight.Bold)
                 Text("本模块通过 Xposed API 调整系统界面与相关应用的显示和行为，仅面向 HyperOS 4 环境设计。由于系统组件版本、厂商实现和第三方模块可能存在差异，非 HyperOS 4 设备上可能出现界面异常、功能失效、应用崩溃或数据丢失。\n\n使用本模块前，请确认你已完成必要的数据备份，并理解启用系统级 Hook 可能带来的风险。由模块导致的任何直接或间接损失由使用者自行承担。模块作者不承诺兼容所有设备、地区版本或未来系统更新。\n\n你可以随时在设置中关闭相关功能，并在出现异常时卸载模块或恢复系统环境。继续使用即表示你已阅读并接受以上条款。", style = MiuixTheme.textStyles.body1, modifier = Modifier.padding(top = 12.dp))
                 Text("本次验证码：$captcha", style = MiuixTheme.textStyles.body2, fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = .58f), modifier = Modifier.padding(top = 20.dp))
@@ -6565,7 +7447,7 @@ private fun ContributorCard(contributor: Contributor) {
     val cardModifier = Modifier.fillMaxWidth().then(
         if (contributor.githubLink.isNotBlank()) Modifier.clickable { openUrl(context, contributor.githubLink) } else Modifier
     )
-    Card(cardModifier, insideMargin = PaddingValues(14.dp)) {
+    Card(cardModifier, cornerRadius = 22.5.dp, insideMargin = PaddingValues(14.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier.size(52.dp).clip(CircleShape).background(MiuixTheme.colorScheme.surfaceVariant),
@@ -6608,7 +7490,7 @@ private fun Contributors(back: () -> Unit) = AppPage(tr("contributors", "\u8d21\
                 Text(tr("contributors_loading", "正在加载贡献者"), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             }
             result!!.error -> item {
-                Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(16.dp)) {
+                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(16.dp)) {
                     Text(tr("contributors_load_failed", "无法加载贡献者列表"), style = MiuixTheme.textStyles.body1)
                     Button(onClick = { reloadToken++ }, modifier = Modifier.padding(top = 12.dp), colors = ButtonDefaults.buttonColorsPrimary()) {
                         Text(tr("retry", "重试"))
@@ -6638,9 +7520,9 @@ private fun OpenSource(back: () -> Unit) = AppPage(tr("\u5f00\u6e90\u4ee3\u7801\
     val context = LocalContext.current
     val projects = openProjects()
     AppList(padding, scroll, 28) {
-        item { Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(16.dp)) { Text(tr("HyperChanger \u4f7f\u7528\u4e86\u4ee5\u4e0b\u5f00\u6e90\u9879\u76ee\u3002\u611f\u8c22\u6240\u6709\u9879\u76ee\u4f5c\u8005\u4e0e\u8d21\u732e\u8005\u3002", "HyperChanger \u4f7f\u7528\u4e86\u4ee5\u4e0b\u5f00\u6e90\u9879\u76ee\u3002\u611f\u8c22\u6240\u6709\u9879\u76ee\u4f5c\u8005\u4e0e\u8d21\u732e\u8005\u3002"), style = MiuixTheme.textStyles.body1) } }
+        item { Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(16.dp)) { Text(tr("HyperChanger \u4f7f\u7528\u4e86\u4ee5\u4e0b\u5f00\u6e90\u9879\u76ee\u3002\u611f\u8c22\u6240\u6709\u9879\u76ee\u4f5c\u8005\u4e0e\u8d21\u732e\u8005\u3002", "HyperChanger \u4f7f\u7528\u4e86\u4ee5\u4e0b\u5f00\u6e90\u9879\u76ee\u3002\u611f\u8c22\u6240\u6709\u9879\u76ee\u4f5c\u8005\u4e0e\u8d21\u732e\u8005\u3002"), style = MiuixTheme.textStyles.body1) } }
         item { SmallTitle(tr("\u754c\u9762\u3001\u529f\u80fd\u4e0e\u5e73\u53f0", "\u754c\u9762\u3001\u529f\u80fd\u4e0e\u5e73\u53f0"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp)) }
-        items(projects.size) { i -> val item = projects[i]; Card(Modifier.fillMaxWidth().clickable { openUrl(context, item.url) }, insideMargin = PaddingValues(16.dp)) { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(item.name, style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold); Text("${item.version} \u00b7 Apache License 2.0", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 3.dp)); Text(item.description, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 6.dp)) }; Image(MiuixIcons.Regular.ChevronForward, null, Modifier.padding(start = 12.dp).size(22.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary)) } } }
+        items(projects.size) { i -> val item = projects[i]; Card(Modifier.fillMaxWidth().clickable { openUrl(context, item.url) }, cornerRadius = 22.5.dp, insideMargin = PaddingValues(16.dp)) { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(item.name, style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold); Text("${item.version} \u00b7 Apache License 2.0", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 3.dp)); Text(item.description, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 6.dp)) }; Image(MiuixIcons.Regular.ChevronForward, null, Modifier.padding(start = 12.dp).size(22.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary)) } } }
     }
 }
 
@@ -6653,6 +7535,8 @@ private fun AppPage(
     restartEnabled: Boolean = true,
     compactTopBar: Boolean = false,
     actions: @Composable RowScope.() -> Unit = {},
+    floatingToolbarPosition: ToolbarPosition = ToolbarPosition.BottomCenter,
+    floatingToolbar: @Composable () -> Unit = {},
     content: @Composable (PaddingValues, ScrollBehavior) -> Unit,
 ) {
     val context = LocalContext.current
@@ -6667,6 +7551,8 @@ private fun AppPage(
         LocalDialogBackdrop provides backdrop,
     ) {
     Scaffold(
+        floatingToolbar = floatingToolbar,
+        floatingToolbarPosition = floatingToolbarPosition,
         topBar = {
             Box {
                 if (isRuntimeShaderSupported()) {
@@ -6788,7 +7674,7 @@ http://www.apache.org/licenses/LICENSE-2.0
 致敬说明：历史授权归属与版权信息见仓库 NOTICE 文件；当前版本依据 Apache License 2.0 发布。"""
     AppList(padding, scroll, 28) {
         item {
-            Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(16.dp)) {
+            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(16.dp)) {
                 Text(licenseText, style = MiuixTheme.textStyles.body2)
             }
         }
@@ -6899,7 +7785,7 @@ private fun LanguagePage(back: () -> Unit) {
                 }
             }
             item {
-                Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(0.dp)) {
+                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
                     SmallTitle(tr("languageActions", "语言操作"), insideMargin = PaddingValues(start = 16.dp, top = 10.dp, end = 16.dp, bottom = 4.dp))
                     ArrowPreference(title = tr("import", "导入..."), onClick = { importer.launch(arrayOf("application/json", "text/json", "text/plain")) })
                     ArrowPreference(title = tr("new", "新建"), summary = tr("newSummary", "根据 example.json 创建"), onClick = { editor = LanguagePack("New Language", "", exampleLanguageJson(context)) })
@@ -6946,8 +7832,9 @@ private fun LanguagePage(back: () -> Unit) {
 private fun LanguageCard(pack: LanguagePack, selected: Boolean, onSelect: () -> Unit, onLongPress: () -> Unit) {
     Card(
         Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(22.5.dp))
             .combinedClickable(onClick = onSelect, onLongClick = onLongPress),
+        cornerRadius = 22.5.dp,
         insideMargin = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -7006,7 +7893,7 @@ private fun LanguageEditor(pack: LanguagePack, onClose: () -> Unit, onSaved: (La
                     if (pack.creator.isNotBlank()) Text(pack.creator, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                 }
             }
-            item { Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(12.dp)) { TextField(value = text, onValueChange = { text = it; dirty = true }, modifier = Modifier.fillMaxWidth(), singleLine = false, label = tr("json", "JSON")) } }
+            item { Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(12.dp)) { TextField(value = text, onValueChange = { text = it; dirty = true }, modifier = Modifier.fillMaxWidth(), singleLine = false, label = tr("json", "JSON")) } }
         }
     }
     if (showDiscardDialog) {
@@ -7022,6 +7909,65 @@ private fun LanguageEditor(pack: LanguagePack, onClose: () -> Unit, onSaved: (La
         }
     }
     }
+}
+
+@Composable
+private fun GlassLyricFloatingToolbar(
+    content: @Composable () -> Unit,
+) {
+    val backdrop = LocalToolbarBackdrop.current
+    val animationScope = rememberCoroutineScope()
+    val touchHighlight = remember(animationScope) {
+        InteractiveHighlight(
+            animationScope = animationScope,
+            radiusMultiplier = .4f,
+            surfaceAlpha = 0f,
+            falloffMultiplier = .25f,
+        ) { size, offset ->
+            Offset(
+                offset.x.coerceIn(0f, size.width),
+                offset.y.coerceIn(0f, size.height),
+            )
+        }
+    }
+    val surface = MiuixTheme.colorScheme.surfaceContainer
+    val isLightTheme = surface.luminance() > .5f
+    val tint = (if (isLightTheme) ComposeColor(0xFFF8F8F8) else surface).copy(alpha = .80f)
+    val shadowColor = if (isLightTheme) ComposeColor.Gray else ComposeColor.Black
+    val shape = RoundedCornerShape(50.dp)
+    val glassModifier = if (backdrop != null && isRuntimeShaderSupported()) {
+        Modifier.drawBackdrop(
+            backdrop = backdrop,
+            shape = { shape },
+            effects = {
+                vibrancy()
+                blur(3.dp.toPx())
+                lens(12.dp.toPx(), 32.dp.toPx(), chromaticAberration = true)
+            },
+            highlight = { Highlight.Default.copy(alpha = .70f) },
+            shadow = {
+                Shadow.Default.copy(
+                    radius = 12.dp,
+                    color = shadowColor,
+                    alpha = .35f,
+                )
+            },
+            innerShadow = null,
+            onDrawSurface = { drawRect(tint) },
+        )
+    } else {
+        Modifier.clip(shape).background(tint)
+    }
+    FloatingToolbar(
+        modifier = glassModifier
+            .then(touchHighlight.gestureModifier)
+            .then(touchHighlight.modifier),
+        color = ComposeColor.Transparent,
+        cornerRadius = 50.dp,
+        shadowElevation = 0.dp,
+        showDivider = false,
+        content = content,
+    )
 }
 
 @Composable
@@ -7275,6 +8221,7 @@ private fun OverlayDropdownPreference(
     selectedIndex: Int,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    showValueOnEnd: Boolean = false,
     onSelectedIndexChange: (Int) -> Unit,
 ) {
     val hapticFeedback = LocalHapticFeedback.current
@@ -7286,6 +8233,7 @@ private fun OverlayDropdownPreference(
         enabled = isEnabled,
         modifier = modifier,
         backdrop = LocalToolbarBackdrop.current,
+        showValueOnEnd = showValueOnEnd,
         onSelectedIndexChange = { selected ->
             hapticFeedback.performHapticFeedback(HapticFeedbackType.Confirm)
             onSelectedIndexChange(selected)

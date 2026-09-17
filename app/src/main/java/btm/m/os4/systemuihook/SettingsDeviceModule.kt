@@ -4,6 +4,7 @@ package btm.m.os4.systemuihook
 
 import android.content.SharedPreferences
 import android.app.Activity
+import android.app.NotificationChannel
 import android.app.admin.DevicePolicyManager
 import android.content.Context
 import android.content.res.Resources
@@ -19,6 +20,7 @@ import android.widget.TextView
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
+import java.lang.reflect.Proxy
 
 /** Hooks only Settings' presentation models; no system property is written. */
 class SettingsDeviceModule : XposedModule() {
@@ -37,6 +39,9 @@ class SettingsDeviceModule : XposedModule() {
             }
             if (hookPreferences.getBoolean(KEY_SHOW_GOOGLE_SERVICE_ENTRY, false)) {
                 installGoogleServiceEntryHook(param.defaultClassLoader)
+            }
+            if (hookPreferences.getBoolean(KEY_REMOVE_NOTIFICATION_IMPORTANCE_LIMIT, false)) {
+                installNotificationImportanceHooks(param.defaultClassLoader)
             }
             installCardBindingHook(param.defaultClassLoader, preferences)
             installDirectDetailHooks(param.defaultClassLoader, preferences)
@@ -216,6 +221,138 @@ class SettingsDeviceModule : XposedModule() {
             log(Log.INFO, TAG, "Installed Google service entry hook")
         }.onFailure { error ->
             log(Log.DEBUG, TAG, "Google service entry hook unavailable", error)
+        }
+    }
+
+    private fun installNotificationImportanceHooks(classLoader: ClassLoader) {
+        runCatching {
+            val base = classLoader.loadClass("com.android.settings.notification.BaseNotificationSettings")
+            allMethods(base)
+                .filter { method ->
+                    method.name == "setPrefVisible" &&
+                        method.parameterCount == 2 &&
+                        method.parameterTypes[1] == Boolean::class.javaPrimitiveType
+                }
+                .forEachIndexed { index, method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("settings-notification-importance:visible:$index")
+                        .intercept { chain ->
+                            val preference = chain.getArg(0)
+                            val key = preference?.javaClass?.methods
+                                ?.firstOrNull { it.name == "getKey" && it.parameterCount == 0 }
+                                ?.invoke(preference) as? String
+                            if (key == "importance") {
+                                chain.proceedWith(chain.thisObject, arrayOf(preference, true))
+                            } else chain.proceed()
+                        }
+                }
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not expose notification importance preference", error)
+        }
+
+        runCatching {
+            val channelSettings = classLoader.loadClass(
+                "com.android.settings.notification.ChannelNotificationSettings",
+            )
+            allMethods(channelSettings)
+                .filter { it.name == "setupChannelDefaultPrefs" && it.parameterCount == 0 }
+                .forEachIndexed { index, method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("settings-notification-importance:bind:$index")
+                        .intercept { chain ->
+                            val result = chain.proceed()
+                            bindNotificationImportancePreference(chain.thisObject, classLoader)
+                            result
+                        }
+                }
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not bind notification importance preference", error)
+        }
+        log(Log.INFO, TAG, "Installed notification importance setting hooks")
+    }
+
+    private fun bindNotificationImportancePreference(fragment: Any, classLoader: ClassLoader) {
+        runCatching {
+            val findPreference = allMethods(fragment.javaClass).firstOrNull {
+                it.name == "findPreference" && it.parameterCount == 1
+            } ?: return
+            findPreference.isAccessible = true
+            val preference = findPreference.invoke(fragment, "importance") ?: return
+            writeField(fragment, "mImportance", preference)
+            val importance = (readField(fragment, "mBackupImportance") as? Number)?.toInt() ?: return
+            if (importance <= 0) return
+
+            preference.javaClass.methods.firstOrNull {
+                it.name == "findSpinnerIndexOfValue" && it.parameterCount == 1
+            }?.invoke(preference, importance.toString())?.let { spinnerIndex ->
+                (spinnerIndex as? Number)?.toInt()?.takeIf { it >= 0 }?.let { validIndex ->
+                    preference.javaClass.methods.firstOrNull {
+                        it.name == "setValueIndex" && it.parameterCount == 1
+                    }?.invoke(preference, validIndex)
+                }
+            }
+
+            val listenerClass = classLoader.loadClass(
+                "androidx.preference.Preference\$OnPreferenceChangeListener",
+            )
+            val listener = Proxy.newProxyInstance(classLoader, arrayOf(listenerClass)) { _, invoked, args ->
+                if (invoked.name == "onPreferenceChange") {
+                    val nextImportance = args?.getOrNull(1)?.toString()?.toIntOrNull()
+                        ?: return@newProxyInstance false
+                    writeField(fragment, "mBackupImportance", nextImportance)
+                    val channel = readField(fragment, "mChannel") as? NotificationChannel
+                        ?: return@newProxyInstance false
+                    channel.importance = nextImportance
+                    channel.javaClass.methods.firstOrNull {
+                        it.name == "lockFields" && it.parameterCount == 1
+                    }?.invoke(channel, 4)
+                    val backend = readField(fragment, "mBackend") ?: return@newProxyInstance false
+                    val packageName = readField(fragment, "mPkg") as? String
+                        ?: return@newProxyInstance false
+                    val uid = (readField(fragment, "mUid") as? Number)?.toInt()
+                        ?: return@newProxyInstance false
+                    allMethods(backend.javaClass).firstOrNull {
+                        it.name == "updateChannel" && it.parameterCount == 3
+                    }?.apply { isAccessible = true }?.invoke(backend, packageName, uid, channel)
+                    allMethods(fragment.javaClass).firstOrNull {
+                        it.name == "updateDependents" && it.parameterCount == 1
+                    }?.apply { isAccessible = true }?.invoke(fragment, false)
+                }
+                true
+            }
+            preference.javaClass.methods.firstOrNull {
+                it.name == "setOnPreferenceChangeListener" && it.parameterCount == 1
+            }?.invoke(preference, listener)
+        }.onFailure { error ->
+            log(Log.DEBUG, TAG, "Notification importance preference is unavailable", error)
+        }
+    }
+
+    private fun readField(instance: Any, name: String): Any? {
+        var current: Class<*>? = instance.javaClass
+        while (current != null && current != Any::class.java) {
+            val field = runCatching { current.getDeclaredField(name) }.getOrNull()
+            if (field != null) return runCatching {
+                field.isAccessible = true
+                field.get(instance)
+            }.getOrNull()
+            current = current.superclass
+        }
+        return null
+    }
+
+    private fun writeField(instance: Any, name: String, value: Any?) {
+        var current: Class<*>? = instance.javaClass
+        while (current != null && current != Any::class.java) {
+            val field = runCatching { current.getDeclaredField(name) }.getOrNull()
+            if (field != null) {
+                field.isAccessible = true
+                field.set(instance, value)
+                return
+            }
+            current = current.superclass
         }
     }
 

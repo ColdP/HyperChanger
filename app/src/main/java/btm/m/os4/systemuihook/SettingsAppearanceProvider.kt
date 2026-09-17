@@ -23,6 +23,7 @@ class SettingsAppearanceProvider : ContentProvider() {
     ): Cursor {
         val slot = uri.pathSegments.firstOrNull().orEmpty()
         if (slot == LOCKSCREEN_SCHEDULE_PATH) return queryNextSchedule(projection)
+        if (slot == LYRIC_LIBRARY_PATH) return queryLyrics(projection)
         val file = appearanceFile(slot)
         val prefs = requireContext().getSharedPreferences(SETTINGS_APPEARANCE_PREFERENCES, 0)
         val columns = projection ?: COLUMNS
@@ -94,6 +95,13 @@ class SettingsAppearanceProvider : ContentProvider() {
         .getString(mimeKey(uri.pathSegments.firstOrNull().orEmpty()), null)
 
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
+        if (uri.pathSegments.firstOrNull() == LYRIC_LIBRARY_PATH) {
+            val id = uri.pathSegments.getOrNull(1) ?: return null
+            val file = runCatching { LyricLibraryStore(requireContext()).lyricFile(id) }.getOrNull()
+                ?: return null
+            if (!file.isFile) return null
+            return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        }
         val file = appearanceFile(uri.pathSegments.firstOrNull().orEmpty())
         if (!file.isFile) return null
         return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
@@ -102,6 +110,23 @@ class SettingsAppearanceProvider : ContentProvider() {
     override fun insert(uri: Uri, values: ContentValues?): Uri? = null
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = 0
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int = 0
+
+    private fun queryLyrics(projection: Array<out String>?): Cursor {
+        val columns = projection ?: LYRIC_COLUMNS
+        return MatrixCursor(columns).apply {
+            LyricLibraryStore(requireContext()).entries().forEach { entry ->
+                val values = mapOf(
+                    COLUMN_LYRIC_ID to entry.id,
+                    COLUMN_LYRIC_TITLE to entry.title,
+                    COLUMN_LYRIC_ARTIST to entry.artist,
+                    COLUMN_LYRIC_ALIASES to entry.aliases,
+                    COLUMN_LYRIC_TYPE to entry.type,
+                )
+                addRow(columns.map { values[it].orEmpty() })
+            }
+            setNotificationUri(requireContext().contentResolver, LYRIC_LIBRARY_URI)
+        }
+    }
 
     private fun queryNextSchedule(projection: Array<out String>?): Cursor {
         val columns = projection ?: SCHEDULE_COLUMNS
@@ -269,8 +294,20 @@ class SettingsAppearanceProvider : ContentProvider() {
         const val COLUMN_SCHEDULE_TITLE = "title"
         const val COLUMN_SCHEDULE_BEGIN = "begin"
         const val COLUMN_SCHEDULE_ALL_DAY = "all_day"
+        const val COLUMN_LYRIC_ID = "id"
+        const val COLUMN_LYRIC_TITLE = "title"
+        const val COLUMN_LYRIC_ARTIST = "artist"
+        const val COLUMN_LYRIC_ALIASES = "aliases"
+        const val COLUMN_LYRIC_TYPE = "type"
         private const val SCHEDULE_LOOKAHEAD_MS = 30L * 24L * 60L * 60L * 1000L
         private val SCHEDULE_COLUMNS = arrayOf(COLUMN_SCHEDULE_TITLE, COLUMN_SCHEDULE_BEGIN, COLUMN_SCHEDULE_ALL_DAY)
+        private val LYRIC_COLUMNS = arrayOf(
+            COLUMN_LYRIC_ID,
+            COLUMN_LYRIC_TITLE,
+            COLUMN_LYRIC_ARTIST,
+            COLUMN_LYRIC_ALIASES,
+            COLUMN_LYRIC_TYPE,
+        )
         const val COLUMN_STYLE1_BACKGROUND_BLUR = "style1_background_blur"
         const val COLUMN_STYLE1_BACKGROUND_VERTICAL_OFFSET = "style1_background_vertical_offset"
         const val COLUMN_STYLE1_BACKGROUND_HORIZONTAL_OFFSET = "style1_background_horizontal_offset"

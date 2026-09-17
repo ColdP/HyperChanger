@@ -64,7 +64,9 @@ private const val WIDGET_CITY_ROW_TOP_DP = 22
 private const val WIDGET_THIRD_ROW_TOP_DP = 42
 private const val DETAILED_WIDGET_WIDTH_DP = 151
 private const val DETAILED_WIDGET_PAIR_GAP_DP = 27
+private const val DETAILED_WIDGET_BACKGROUND_CONTENT_SCALE = .88f
 private const val NOTIFICATION_SAFE_GAP_DP = 16f
+private const val MIN_CLOCK_AVOIDANCE_SCALE = 0.2f
 private const val WEATHER_ICON_SIZE_DP = 20
 private const val MOBILE_ICON_WIDTH_DP = 19
 private const val MOBILE_ICON_HEIGHT_DP = 21
@@ -80,6 +82,8 @@ internal object LockscreenWidgetSceneState {
     @Volatile private var editorActive = false
     @Volatile private var chargingActive = false
     @Volatile private var controlCenterActive = false
+    @Volatile var keyguardGoingAway = false
+        private set
     @Volatile var aodActive = false
         private set
     private val controllers = Collections.newSetFromMap(
@@ -116,8 +120,16 @@ internal object LockscreenWidgetSceneState {
     }
 
     fun setAodActive(active: Boolean) {
-        if (aodActive == active) return
+        val keyguardExitReset = active && keyguardGoingAway
+        if (keyguardExitReset) keyguardGoingAway = false
+        if (aodActive == active && !keyguardExitReset) return
         aodActive = active
+        notifyControllers()
+    }
+
+    fun setKeyguardGoingAway(goingAway: Boolean) {
+        if (keyguardGoingAway == goingAway) return
+        keyguardGoingAway = goingAway
         notifyControllers()
     }
 
@@ -262,6 +274,26 @@ private data class SystemWeatherSnapshot(
 private data class LockscreenClockTarget(
     val clock: View,
     val container: View,
+    val timeContent: View?,
+    val dateContent: View?,
+    val movementRoot: View,
+)
+
+/** The transform contributed by widget avoidance to a time-only clock layer. */
+private data class ClockScaleTransform(
+    val previousScaleX: Float,
+    val previousScaleY: Float,
+    val previousPivotY: Float,
+    val previousTranslationY: Float,
+    val appliedScaleX: Float,
+    val appliedScaleY: Float,
+    val appliedPivotY: Float,
+    val appliedTranslationY: Float,
+)
+
+private data class ClockTranslationTransform(
+    val previousTranslationY: Float,
+    val appliedTranslationY: Float,
 )
 
 /** Draws the long step widget's circular goal indicator and the platform shoe glyph. */
@@ -382,6 +414,26 @@ private class LockscreenWidgetView(
             LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY,
         )
 
+    private val detailedWeatherFlag: Int
+        get() = if (itemMask and LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER_BACKGROUND != 0) {
+            LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER_BACKGROUND
+        } else {
+            LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER
+        }
+
+    private val detailedBatteryFlag: Int
+        get() = if (itemMask and LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY_BACKGROUND != 0) {
+            LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY_BACKGROUND
+        } else {
+            LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY
+        }
+
+    private val hasDetailedWeather: Boolean
+        get() = itemMask and detailedWeatherFlag != 0
+
+    private val hasDetailedBattery: Boolean
+        get() = itemMask and detailedBatteryFlag != 0
+
     private fun buildCombinationOne(context: Context) {
         setPadding(dp(16), 0, dp(16), 0)
         val columns = LinearLayout(context).apply {
@@ -471,6 +523,8 @@ private class LockscreenWidgetView(
         val longCount = listOf(
             LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER,
             LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY,
+            LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER_BACKGROUND,
+            LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY_BACKGROUND,
             LOCKSCREEN_WIDGET_ITEM_COMPACT_WEATHER,
             LOCKSCREEN_WIDGET_ITEM_SIGNATURE,
             LOCKSCREEN_WIDGET_ITEM_STEPS_WIDE,
@@ -479,8 +533,7 @@ private class LockscreenWidgetView(
         val surfaceHeight = if (selectedCount >= 4 && longCount == 0) 56 else 64
         val metricWidth = surfaceHeight
         val hasDetailedPair = selectedCount == 2 &&
-            itemMask and LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER != 0 &&
-            itemMask and LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY != 0
+            hasDetailedWeather && hasDetailedBattery
         val surfaceGap = when {
             hasDetailedPair -> DETAILED_WIDGET_PAIR_GAP_DP
             selectedCount >= 4 -> 8
@@ -494,11 +547,21 @@ private class LockscreenWidgetView(
             })
         }
         val surfaces = LinkedHashMap<Int, Pair<FrameLayout, Int>>()
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER != 0) {
-            // Detailed weather and battery are content-only widgets. Their default pair has
-            // never used a shortcut-style capsule; retain that appearance for every order and
-            // mixed composition instead of letting the generic layout add one.
-            val weatherSurface = createContentSlot()
+        if (hasDetailedWeather) {
+            val hasBackground =
+                detailedWeatherFlag == LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER_BACKGROUND
+            val contentInset = if (hasBackground) dp(12) else 0
+            val weatherSurface = if (hasBackground) {
+                createSurface(widthDp = detailedWidth, heightDp = surfaceHeight, circular = false)
+            } else {
+                createContentSlot()
+            }
+            val weatherContent = FrameLayout(context).apply {
+                if (hasBackground) {
+                    scaleX = DETAILED_WIDGET_BACKGROUND_CONTENT_SCALE
+                    scaleY = DETAILED_WIDGET_BACKGROUND_CONTENT_SCALE
+                }
+            }
             val top = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -509,20 +572,41 @@ private class LockscreenWidgetView(
             style(condition, WIDGET_TEXT_SIZE_SP)
             top.addView(temperature, LinearLayout.LayoutParams(-2, dp(WIDGET_WEATHER_ROW_HEIGHT_DP)).apply { leftMargin = dp(4) })
             top.addView(condition, LinearLayout.LayoutParams(-2, dp(WIDGET_WEATHER_ROW_HEIGHT_DP)).apply { leftMargin = dp(4) })
-            weatherSurface.addView(top, FrameLayout.LayoutParams(-1, dp(WIDGET_WEATHER_ROW_HEIGHT_DP)))
+            weatherContent.addView(top, FrameLayout.LayoutParams(-1, dp(WIDGET_WEATHER_ROW_HEIGHT_DP)).apply {
+                leftMargin = contentInset
+                rightMargin = contentInset
+            })
             style(city, WIDGET_TEXT_SIZE_SP)
-            weatherSurface.addView(city, FrameLayout.LayoutParams(-1, dp(WIDGET_ROW_HEIGHT_DP)).apply {
+            weatherContent.addView(city, FrameLayout.LayoutParams(-1, dp(WIDGET_ROW_HEIGHT_DP)).apply {
                 topMargin = dp(WIDGET_CITY_ROW_TOP_DP)
+                leftMargin = contentInset
+                rightMargin = contentInset
             })
             style(highLow, WIDGET_TEXT_SIZE_SP)
-            weatherSurface.addView(highLow, FrameLayout.LayoutParams(-1, dp(WIDGET_ROW_HEIGHT_DP)).apply {
+            weatherContent.addView(highLow, FrameLayout.LayoutParams(-1, dp(WIDGET_ROW_HEIGHT_DP)).apply {
                 gravity = Gravity.TOP
                 topMargin = dp(WIDGET_THIRD_ROW_TOP_DP)
+                leftMargin = contentInset
+                rightMargin = contentInset
             })
-            surfaces[LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER] = weatherSurface to detailedWidth
+            weatherSurface.addView(weatherContent, LayoutParams(-1, -1))
+            surfaces[detailedWeatherFlag] = weatherSurface to detailedWidth
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY != 0) {
-            val batterySurface = createContentSlot()
+        if (hasDetailedBattery) {
+            val hasBackground =
+                detailedBatteryFlag == LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY_BACKGROUND
+            val contentInset = if (hasBackground) dp(12) else 0
+            val batterySurface = if (hasBackground) {
+                createSurface(widthDp = detailedWidth, heightDp = surfaceHeight, circular = false)
+            } else {
+                createContentSlot()
+            }
+            val batteryContent = FrameLayout(context).apply {
+                if (hasBackground) {
+                    scaleX = DETAILED_WIDGET_BACKGROUND_CONTENT_SCALE
+                    scaleY = DETAILED_WIDGET_BACKGROUND_CONTENT_SCALE
+                }
+            }
             val top = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -532,23 +616,31 @@ private class LockscreenWidgetView(
             top.addView(batteryIcon, LinearLayout.LayoutParams(dp(MOBILE_ICON_WIDTH_DP), dp(MOBILE_ICON_HEIGHT_DP)))
             style(batteryPercent, WIDGET_TEXT_SIZE_SP)
             top.addView(batteryPercent, LinearLayout.LayoutParams(-2, dp(WIDGET_WEATHER_ROW_HEIGHT_DP)).apply { leftMargin = dp(5) })
-            batterySurface.addView(top, FrameLayout.LayoutParams(-1, dp(WIDGET_WEATHER_ROW_HEIGHT_DP)))
+            batteryContent.addView(top, FrameLayout.LayoutParams(-1, dp(WIDGET_WEATHER_ROW_HEIGHT_DP)).apply {
+                leftMargin = contentInset
+                rightMargin = contentInset
+            })
             style(deviceName, WIDGET_TEXT_SIZE_SP)
             deviceName.maxLines = 1
             deviceName.ellipsize = android.text.TextUtils.TruncateAt.END
-            batterySurface.addView(deviceName, FrameLayout.LayoutParams(-1, dp(WIDGET_ROW_HEIGHT_DP)).apply {
+            batteryContent.addView(deviceName, FrameLayout.LayoutParams(-1, dp(WIDGET_ROW_HEIGHT_DP)).apply {
                 topMargin = dp(WIDGET_CITY_ROW_TOP_DP)
+                leftMargin = contentInset
+                rightMargin = contentInset
             })
             batteryBar = FrameLayout(context)
             batteryTrack.background = rounded(Color.argb(76, 255, 255, 255), dp(9).toFloat())
             batteryFill.background = rounded(Color.WHITE, dp(9).toFloat())
             batteryBar.addView(batteryTrack, FrameLayout.LayoutParams(-1, dp(10)))
             batteryBar.addView(batteryFill, FrameLayout.LayoutParams(0, dp(10)))
-            batterySurface.addView(batteryBar, FrameLayout.LayoutParams(-1, dp(10)).apply {
+            batteryContent.addView(batteryBar, FrameLayout.LayoutParams(-1, dp(10)).apply {
                 gravity = Gravity.TOP
                 topMargin = dp(WIDGET_THIRD_ROW_TOP_DP + 5)
+                leftMargin = contentInset
+                rightMargin = contentInset
             })
-            surfaces[LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY] = batterySurface to detailedWidth
+            batterySurface.addView(batteryContent, LayoutParams(-1, -1))
+            surfaces[detailedBatteryFlag] = batterySurface to detailedWidth
         }
         if (itemMask and LOCKSCREEN_WIDGET_ITEM_COMPACT_WEATHER != 0) {
             val weatherSurface = createSurface(widthDp = compactWeatherWidth, heightDp = surfaceHeight, circular = false)
@@ -820,14 +912,14 @@ private class LockscreenWidgetView(
         if (itemMask and LOCKSCREEN_WIDGET_ITEM_COMPACT_WEATHER != 0) {
             combinationWeatherIcon.setImageDrawable(data.weatherIcon)
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER != 0) {
+        if (hasDetailedWeather) {
             temperature.text = data.temperature
             condition.text = data.condition
             city.text = data.city
             highLow.text = data.highLow
             weatherIcon.setImageDrawable(data.weatherIcon)
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY != 0) {
+        if (hasDetailedBattery) {
             batteryPercent.text = "${data.battery}%"
             batteryValue = data.battery.coerceIn(0, 100)
             deviceName.text = data.deviceName
@@ -1050,7 +1142,8 @@ internal class LockscreenWidgetController(
     }
     // Depth clocks can split the visible hour and minute into independent roots. Track our
     // contribution per root so their own AOD and gesture translations remain untouched.
-    private val appliedClockAvoidanceOffsets = WeakHashMap<View, Float>()
+    private val appliedClockAvoidanceOffsets = WeakHashMap<View, ClockTranslationTransform>()
+    private val appliedClockAvoidanceScales = WeakHashMap<View, ClockScaleTransform>()
     private val refreshRunnable = object : Runnable {
         override fun run() {
             refresh()
@@ -1064,6 +1157,13 @@ internal class LockscreenWidgetController(
             refresh()
         }
         schedulePosition()
+    }
+    private val clockAvoidancePreDrawListener = ViewTreeObserver.OnPreDrawListener {
+        val widget = view
+        if (targetVisible && widget?.isAttachedToWindow == true && widget.visibility == View.VISIBLE) {
+            adjustClockForWidget(widget)
+        }
+        true
     }
     private val animationFollower = object : Runnable {
         override fun run() {
@@ -1084,6 +1184,7 @@ internal class LockscreenWidgetController(
         LockscreenMediaPresentationBridge.register(this)
         preferences.registerOnSharedPreferenceChangeListener(preferenceListener)
         host.rootView.viewTreeObserver.addOnGlobalLayoutListener(layoutListener)
+        host.rootView.viewTreeObserver.addOnPreDrawListener(clockAvoidancePreDrawListener)
         leftShortcut.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> schedulePosition() }
         rightShortcut.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> schedulePosition() }
         handler.post(refreshRunnable)
@@ -1094,6 +1195,7 @@ internal class LockscreenWidgetController(
         LockscreenMediaPresentationBridge.unregister(this)
         runCatching { preferences.unregisterOnSharedPreferenceChangeListener(preferenceListener) }
         runCatching { host.rootView.viewTreeObserver.removeOnGlobalLayoutListener(layoutListener) }
+        runCatching { host.rootView.viewTreeObserver.removeOnPreDrawListener(clockAvoidancePreDrawListener) }
         restoreClockPosition()
         runCatching { view?.let(host::removeView) }
         handler.removeCallbacksAndMessages(null)
@@ -1116,7 +1218,9 @@ internal class LockscreenWidgetController(
     internal fun onSceneVisibilityChanged() {
         val updateVisibility = update@{
             val widget = view ?: return@update
-            if (LockscreenWidgetSceneState.hasBlockingOverlay) {
+            if (LockscreenWidgetSceneState.hasBlockingOverlay ||
+                LockscreenWidgetSceneState.keyguardGoingAway
+            ) {
                 hideWidget(widget, immediately = true)
             }
             refresh()
@@ -1202,6 +1306,7 @@ internal class LockscreenWidgetController(
         val shouldShow = preferences.getBoolean(KEY_LOCKSCREEN_WIDGET_ENABLED, false) &&
             isLockscreenVisible() &&
             LockscreenMediaPresentationBridge.presentation != LockscreenMediaPresentation.MUSIC_LOCKSCREEN &&
+            LockscreenMediaPresentationBridge.presentation != LockscreenMediaPresentation.LYRICS_LOCKSCREEN &&
             LockscreenMediaPresentationBridge.presentation != LockscreenMediaPresentation.MUSIC_LOCKSCREEN_STYLE2 &&
             !(preferences.getBoolean(KEY_LOCKSCREEN_WIDGET_HIDE_ON_AOD, false) &&
                 LockscreenWidgetSceneState.aodActive)
@@ -1209,6 +1314,7 @@ internal class LockscreenWidgetController(
             hideWidget(
                 widget,
                 immediately = LockscreenWidgetSceneState.hasBlockingOverlay ||
+                    LockscreenWidgetSceneState.keyguardGoingAway ||
                     (LockscreenWidgetSceneState.aodActive &&
                         preferences.getBoolean(KEY_LOCKSCREEN_WIDGET_HIDE_ON_AOD, false)),
             )
@@ -1495,7 +1601,8 @@ internal class LockscreenWidgetController(
     private fun isLockscreenVisible(): Boolean = runCatching {
         val keyguard = context.getSystemService(KeyguardManager::class.java) ?: return@runCatching false
         val locked = keyguard.isKeyguardLocked || keyguard.isDeviceLocked
-        locked && !LockscreenWidgetSceneState.hasBlockingOverlay && !hasChargingAnimationOverlay() &&
+        locked && !LockscreenWidgetSceneState.keyguardGoingAway &&
+            !LockscreenWidgetSceneState.hasBlockingOverlay && !hasChargingAnimationOverlay() &&
             !isBouncerShowing()
     }.getOrDefault(false)
 
@@ -1616,7 +1723,6 @@ internal class LockscreenWidgetController(
             widget.translationX = targetX
             widget.translationY = targetY
         }
-        adjustClockForWidget(widget)
         if (!appearanceAnimating) syncShortcutAppearance(widget)
     }
 
@@ -1626,75 +1732,157 @@ internal class LockscreenWidgetController(
      * each layer's own gesture and AOD translation.
      */
     private fun adjustClockForWidget(widget: LockscreenWidgetView) {
+        // Read every frame from the OEM's unmodified geometry. This also restores clock layers
+        // that disappeared during a template/depth transition before resolving the new ones.
+        // Keep doing this during full-AOD transitions: SystemUI changes the underlying glyph
+        // geometry every frame, and mapping that live geometry avoids fighting or stepping over
+        // its own lockscreen/AOD interpolation.
+        restoreClockPosition()
         val targets = findLockscreenClockTargets(host.rootView)
             .filter { target ->
                 target.clock.isAttachedToWindow && isVisibleForNotificationAvoidance(target.clock)
             }
-        if (targets.isEmpty()) {
-            restoreClockPosition()
-            return
-        }
-        restoreStaleClockPositions(targets.mapTo(LinkedHashSet()) { it.clock })
-        // Remove this controller's previous frame before reading geometry. The OEM clock may
-        // have moved down during the same gesture; subtracting an old negative avoidance value
-        // from that measurement made the next frame keep the stale offset instead of following
-        // the finger back to its natural size/position.
-        targets.forEach { target ->
-            val clock = target.clock
-            val previousOffset = appliedClockAvoidanceOffsets.remove(clock) ?: 0f
-            if (clock.isAttachedToWindow && previousOffset != 0f) {
-                clock.translationY -= previousOffset
-            }
-        }
+        if (targets.isEmpty()) return
         val widgetLocation = IntArray(2).also(widget::getLocationOnScreen)
-        val candidateBottoms = buildList {
-            targets.forEach { target ->
-                val containerLocation = IntArray(2).also(target.container::getLocationOnScreen)
-                target.container.getClockBottomForNotificationAvoidance()?.let { bottom ->
-                    add(containerLocation[1] + bottom)
+        val desiredBottom = widgetLocation[1] - dp(NOTIFICATION_SAFE_GAP_DP)
+        var remainingTranslation = 0f
+        val dateScaleOffsets = LinkedHashMap<View, Float>()
+        targets.forEach { target ->
+            val clockBottom = target.clockBottomOnScreen() ?: return@forEach
+            val overlap = (clockBottom - desiredBottom).coerceAtLeast(0f)
+            if (overlap <= 0f) return@forEach
+
+            var compressedBy = 0f
+            target.timeContent
+                ?.takeIf { it !== target.clock && it.isAttachedToWindow && it.height > 0 }
+                ?.let { timeContent ->
+                    val timeLocation = IntArray(2).also(timeContent::getLocationOnScreen)
+                    // Only the part of this layer above the reported visible clock bottom can
+                    // contribute to avoidance. mClockViewRect is especially important here for
+                    // all-in-one clocks whose root itself spans the full keyguard.
+                    val compressibleHeight = (clockBottom - timeLocation[1])
+                        .coerceIn(0f, timeContent.height * kotlin.math.abs(timeContent.scaleY))
+                    if (compressibleHeight > 0f) {
+                        val requestedFactor = 1f - overlap / compressibleHeight
+                        val factor = requestedFactor.coerceIn(MIN_CLOCK_AVOIDANCE_SCALE, 1f)
+                        if (factor < 1f) {
+                            val clockLocation = IntArray(2).also(target.clock::getLocationOnScreen)
+                            val glyphTop = target.clock.getRenderedClockContentRect()
+                                ?.let { clockLocation[1].toFloat() + it.top.toFloat() }
+                            val glyphTopOffset = glyphTop
+                                ?.let { (it - timeLocation[1].toFloat()).coerceAtLeast(0f) }
+                                ?: 0f
+                            applyClockScale(timeContent, factor)
+                            compressedBy = compressibleHeight * (1f - factor)
+                            target.dateContent
+                                ?.takeUnless { it === timeContent }
+                                ?.let { date ->
+                                    // Scaling around the time-group top also moves glyph ink
+                                    // above that top. Follow that real top-edge displacement,
+                                    // not the much larger amount removed from the bottom.
+                                    val offset = glyphTopOffset * (factor - 1f)
+                                    dateScaleOffsets[date] = minOf(dateScaleOffsets[date] ?: 0f, offset)
+                                }
+                        }
+                    }
                 }
-                // All-in-one clocks animate their contents inside a full-height root. Its
-                // measured height is unusable, while mClockViewRect tracks the time glyph.
-                val clockLocation = IntArray(2).also(target.clock::getLocationOnScreen)
-                target.clock.getRenderedClockContentBottom()?.let { bottom ->
-                    add(clockLocation[1] + bottom)
+            remainingTranslation = minOf(remainingTranslation, -(overlap - compressedBy).coerceAtLeast(0f))
+        }
+        if (remainingTranslation != 0f || dateScaleOffsets.values.any { it != 0f }) {
+            // clock_animation_container is also driven by the OEM's AOD/unlock animator. Apply
+            // our remaining offset to its children instead: the date follows the time without
+            // moving the entire large-clock root or competing for the animator's property.
+            targets.forEach { target ->
+                val timeContent = target.timeContent
+                if (timeContent != null) {
+                    val scaleTransform = appliedClockAvoidanceScales[timeContent]
+                    if (scaleTransform != null) {
+                        timeContent.translationY += remainingTranslation
+                        appliedClockAvoidanceScales[timeContent] = scaleTransform.copy(
+                            appliedTranslationY = timeContent.translationY,
+                        )
+                    } else {
+                        applyClockTranslation(timeContent, remainingTranslation)
+                    }
+                }
+                target.dateContent
+                    ?.takeUnless { it === timeContent }
+                    ?.let { date ->
+                        val offset = (dateScaleOffsets[date] ?: 0f) + remainingTranslation
+                        if (offset != 0f) applyClockTranslation(date, offset)
+                    }
+                if (timeContent == null && target.dateContent == null) {
+                    applyClockTranslation(target.movementRoot, remainingTranslation)
                 }
             }
-        }
-        val clockBottomOnScreen = candidateBottoms.maxOrNull() ?: run {
-            restoreClockPosition()
-            return
-        }
-        val requiredOffset = minOf(
-            0f,
-            widgetLocation[1] - dp(NOTIFICATION_SAFE_GAP_DP) - clockBottomOnScreen,
-        )
-        targets.forEach { target ->
-            val clock = target.clock
-            clock.translationY += requiredOffset
-            appliedClockAvoidanceOffsets[clock] = requiredOffset
         }
     }
 
+    private fun applyClockTranslation(view: View, offset: Float) {
+        if (view in appliedClockAvoidanceOffsets) return
+        val previous = view.translationY
+        val applied = previous + offset
+        view.translationY = applied
+        appliedClockAvoidanceOffsets[view] = ClockTranslationTransform(
+            previousTranslationY = previous,
+            appliedTranslationY = applied,
+        )
+    }
+
+    /** Uniformly contracts the time layer, keeping its visual top fixed and the date unscaled. */
+    private fun applyClockScale(timeContent: View, factor: Float) {
+        if (timeContent in appliedClockAvoidanceScales) return
+        val previousScaleY = timeContent.scaleY
+        val previousScaleX = timeContent.scaleX
+        val previousPivotY = timeContent.pivotY
+        val previousTranslationY = timeContent.translationY
+        // Changing the pivot to the top would normally move a layer already scaled by the OEM.
+        // Compensate that existing transform so only the lower edge moves during avoidance.
+        val translationOffset = previousPivotY * (1f - previousScaleY)
+        timeContent.pivotY = 0f
+        timeContent.translationY = previousTranslationY + translationOffset
+        timeContent.scaleX = previousScaleX * factor
+        timeContent.scaleY = previousScaleY * factor
+        appliedClockAvoidanceScales[timeContent] = ClockScaleTransform(
+            previousScaleX = previousScaleX,
+            previousScaleY = previousScaleY,
+            previousPivotY = previousPivotY,
+            previousTranslationY = previousTranslationY,
+            appliedScaleX = timeContent.scaleX,
+            appliedScaleY = timeContent.scaleY,
+            appliedPivotY = timeContent.pivotY,
+            appliedTranslationY = timeContent.translationY,
+        )
+    }
+
     private fun restoreClockPosition() {
-        appliedClockAvoidanceOffsets.entries.toList().forEach { (clock, offset) ->
-            if (clock.isAttachedToWindow) {
-                clock.translationY -= offset
+        appliedClockAvoidanceScales.entries.toList().forEach { (timeContent, transform) ->
+            // SystemUI writes absolute AOD/gesture values to these properties. Restore only the
+            // values that are still ours; if OEM code has taken ownership, leave them untouched.
+            if (timeContent.scaleX.approximatelyEquals(transform.appliedScaleX)) {
+                timeContent.scaleX = transform.previousScaleX
+            }
+            if (timeContent.scaleY.approximatelyEquals(transform.appliedScaleY)) {
+                timeContent.scaleY = transform.previousScaleY
+            }
+            if (timeContent.translationY.approximatelyEquals(transform.appliedTranslationY)) {
+                timeContent.translationY = transform.previousTranslationY
+            }
+            if (timeContent.pivotY.approximatelyEquals(transform.appliedPivotY)) {
+                timeContent.pivotY = transform.previousPivotY
+            }
+        }
+        appliedClockAvoidanceScales.clear()
+        appliedClockAvoidanceOffsets.entries.toList().forEach { (root, transform) ->
+            if (root.translationY.approximatelyEquals(transform.appliedTranslationY)) {
+                root.translationY = transform.previousTranslationY
             }
         }
         appliedClockAvoidanceOffsets.clear()
     }
 
-    private fun restoreStaleClockPositions(activeClocks: Set<View>) {
-        appliedClockAvoidanceOffsets.entries.toList()
-            .filter { (clock, _) -> clock !in activeClocks }
-            .forEach { (clock, offset) ->
-                if (clock.isAttachedToWindow) {
-                    clock.translationY -= offset
-                }
-                appliedClockAvoidanceOffsets.remove(clock)
-            }
-    }
+    private fun Float.approximatelyEquals(other: Float): Boolean =
+        kotlin.math.abs(this - other) <= 0.01f
 
     /** Returns the top of the first real, visible notification relative to the widget host. */
     private fun firstVisibleNotificationTop(): Float? {
@@ -1785,7 +1973,17 @@ internal class LockscreenWidgetController(
         if (root == null) return null
         val container = findViewByClassName(root, "com.android.keyguard.clock.KeyguardClockContainer")
         return container?.let { containerView ->
-            readMiuiClockView(containerView)?.let { LockscreenClockTarget(it, containerView) }
+            readMiuiClockView(containerView)?.let { clock ->
+                val timeContent = findClockTimeContent(clock)
+                val dateContent = findClockDateContent(clock, containerView)
+                LockscreenClockTarget(
+                    clock = clock,
+                    container = containerView,
+                    timeContent = timeContent,
+                    dateContent = dateContent,
+                    movementRoot = findClockMovementRoot(clock, timeContent, dateContent),
+                )
+            }
         }
     }
 
@@ -1804,7 +2002,15 @@ internal class LockscreenWidgetController(
             setOf("miui_keyguard_foreground_clock_container", "keyguard_foreground_clock_container"),
         )?.let { container ->
             findVendorClockRoot(container)?.let { clock ->
-                targets[clock] = LockscreenClockTarget(clock, container)
+                val timeContent = findClockTimeContent(clock)
+                val dateContent = findClockDateContent(clock, container)
+                targets[clock] = LockscreenClockTarget(
+                    clock = clock,
+                    container = container,
+                    timeContent = timeContent,
+                    dateContent = dateContent,
+                    movementRoot = findClockMovementRoot(clock, timeContent, dateContent),
+                )
             }
         }
         return targets.values.toList()
@@ -1818,6 +2024,111 @@ internal class LockscreenWidgetController(
             }
         }
         return null
+    }
+
+    /**
+     * Finds a layer that contains the time glyphs but not the date above them. HyperOS' current
+     * all-in-one clocks expose mTimeGroup; classic and oversized templates expose mTimeView.
+     * Resource-name fallbacks keep this working when those private fields are renamed.
+     */
+    private fun findClockTimeContent(clock: View): View? {
+        val fieldNames = arrayOf("mTimeGroup", "mTimeView", "mTimeContainer")
+        fieldNames.forEach { fieldName ->
+            var type: Class<*>? = clock.javaClass
+            while (type != null) {
+                val value = runCatching {
+                    type.getDeclaredField(fieldName).apply { isAccessible = true }.get(clock) as? View
+                }.getOrNull()
+                if (value != null && value !== clock) return value
+                type = type.superclass
+            }
+        }
+        return findViewByIdName(
+            clock,
+            setOf("time_group", "time_view", "clock_time", "time_container"),
+        )?.takeUnless { it === clock }
+    }
+
+    /** Finds the unscaled date line, including templates that place it beside mClockView. */
+    private fun findClockDateContent(clock: View, container: View): View? {
+        findViewField(clock, arrayOf("mTextArea", "mDateView", "mDateContainer"))?.let {
+            if (it.visibility == View.VISIBLE) return it
+        }
+        val ids = setOf(
+            "text_area",
+            "current_date",
+            "notification_date",
+            "tv_data",
+            "date_and_time",
+        )
+        return sequenceOf(clock, container)
+            .mapNotNull { root -> findVisibleViewByIdName(root, ids) }
+            .firstOrNull()
+    }
+
+    /** OEM root whose descendants include both the date line and the scalable time group. */
+    private fun findClockMovementRoot(clock: View, timeContent: View?, dateContent: View?): View {
+        findViewField(clock, arrayOf("mAnimationContainer"))?.let { return it }
+        findViewByIdName(clock, setOf("clock_animation_container"))?.let { return it }
+        if (timeContent != null && dateContent != null) {
+            lowestCommonViewAncestor(timeContent, dateContent)?.let { ancestor ->
+                if (ancestor.isDescendantOf(clock) || ancestor === clock) return ancestor
+            }
+        }
+        return clock
+    }
+
+    private fun findViewField(root: View, fieldNames: Array<String>): View? {
+        fieldNames.forEach { fieldName ->
+            var type: Class<*>? = root.javaClass
+            while (type != null) {
+                val value = runCatching {
+                    type.getDeclaredField(fieldName).apply { isAccessible = true }.get(root) as? View
+                }.getOrNull()
+                if (value != null) return value
+                type = type.superclass
+            }
+        }
+        return null
+    }
+
+    private fun lowestCommonViewAncestor(first: View, second: View): View? {
+        val firstAncestors = LinkedHashSet<View>()
+        var current: View? = first
+        while (current != null) {
+            firstAncestors.add(current)
+            current = current.parent as? View
+        }
+        current = second
+        while (current != null) {
+            if (current in firstAncestors) return current
+            current = current.parent as? View
+        }
+        return null
+    }
+
+    private fun findVisibleViewByIdName(root: View, names: Set<String>): View? {
+        val entryName = if (root.id != View.NO_ID) {
+            runCatching { root.resources.getResourceEntryName(root.id) }.getOrNull()
+        } else {
+            null
+        }
+        if (entryName in names && root.visibility == View.VISIBLE && root.height > 0) return root
+        if (root is ViewGroup) {
+            for (index in 0 until root.childCount) {
+                findVisibleViewByIdName(root.getChildAt(index), names)?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private fun View.isDescendantOf(ancestor: View): Boolean {
+        var current: android.view.ViewParent? = parent
+        while (current is View) {
+            if (current === ancestor) return true
+            current = current.parent
+        }
+        return false
     }
 
     private fun findViewByClassName(root: View, className: String): View? {
@@ -1850,11 +2161,31 @@ internal class LockscreenWidgetController(
     }.getOrNull()
 
     private fun View.getRenderedClockContentBottom(): Float? = runCatching {
-        (javaClass.getMethod("getMClockViewRect").invoke(this) as? Rect)
+        getRenderedClockContentRect()
             ?.takeIf { !it.isEmpty }
             ?.bottom
             ?.toFloat()
     }.getOrNull()
+
+    private fun View.getRenderedClockContentRect(): Rect? = runCatching {
+        (javaClass.getMethod("getMClockViewRect").invoke(this) as? Rect)
+            ?.takeIf { !it.isEmpty }
+    }.getOrNull()
+
+    private fun LockscreenClockTarget.clockBottomOnScreen(): Float? {
+        val candidateBottoms = buildList {
+            val containerLocation = IntArray(2).also(container::getLocationOnScreen)
+            container.getClockBottomForNotificationAvoidance()?.let { bottom ->
+                add(containerLocation[1] + bottom)
+            }
+            // All-in-one roots can be full-screen; mClockViewRect follows the rendered glyphs.
+            val clockLocation = IntArray(2).also(clock::getLocationOnScreen)
+            clock.getRenderedClockContentBottom()?.let { bottom ->
+                add(clockLocation[1] + bottom)
+            }
+        }
+        return candidateBottoms.maxOrNull()
+    }
 
     private fun dp(value: Float): Int = (value * context.resources.displayMetrics.density + .5f).toInt()
 }

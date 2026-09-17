@@ -151,6 +151,7 @@ internal object LockscreenMediaBridge {
 internal enum class LockscreenMediaPresentation {
     MINI_PLAYER,
     MUSIC_LOCKSCREEN,
+    LYRICS_LOCKSCREEN,
     MUSIC_LOCKSCREEN_STYLE2,
     SYSTEM_MEDIA,
 }
@@ -357,6 +358,10 @@ internal class LockscreenMiniPlayerController(
                 if (!wasShowingMiniPlayer) {
                     player?.let(::animateMiniPlayerIn)
                     lyricsCard?.takeIf { it.visibility == View.VISIBLE }?.let(::animateMiniPlayerIn)
+                    // SystemUI can reposition shortcut containers after the first media-island
+                    // frame without propagating a layout callback to this host. Re-check their
+                    // coordinates while that initial vendor traversal settles.
+                    scheduleInitialIslandPositionCorrections()
                 }
             } else {
                 animateMiniPlayerOut()
@@ -643,6 +648,18 @@ internal class LockscreenMiniPlayerController(
         }
     }
 
+    private fun scheduleInitialIslandPositionCorrections() {
+        INITIAL_ISLAND_POSITION_CORRECTION_DELAYS_MS.forEach { delayMs ->
+            mainHandler.postDelayed({
+                if (LockscreenMediaPresentationBridge.showMiniPlayer &&
+                    player?.isAttachedToWindow == true
+                ) {
+                    schedulePosition()
+                }
+            }, delayMs)
+        }
+    }
+
     private fun position() {
         val view = player ?: return
         if (host.width <= 0 || host.height <= 0) return
@@ -750,6 +767,7 @@ internal class LockscreenMiniPlayerController(
         const val MEDIA_PRESENTATION_ENTER_DURATION_MS = 340L
         const val MEDIA_PRESENTATION_EXIT_DURATION_MS = 300L
         const val LYRICS_PLAYER_GAP_DP = 12f
+        val INITIAL_ISLAND_POSITION_CORRECTION_DELAYS_MS = longArrayOf(80L, 240L, 480L)
     }
 }
 
@@ -1013,7 +1031,7 @@ private class LockscreenMiniPlayerView(context: Context) : FrameLayout(context) 
     private val longPressRunnable = Runnable {
         if (trackingSwipe) {
             longPressTriggered = true
-            onShowMusicLockscreen?.invoke()
+            onShowSystemMediaNotification?.invoke()
         }
     }
 
@@ -1133,7 +1151,7 @@ private class LockscreenMiniPlayerView(context: Context) : FrameLayout(context) 
                 } else if (!longPressTriggered && trackingSwipe &&
                     abs(horizontalDistance) <= touchSlop && abs(verticalDistance) <= touchSlop
                 ) {
-                    onShowSystemMediaNotification?.invoke()
+                    onShowMusicLockscreen?.invoke()
                 }
                 trackingSwipe = false
                 parent?.requestDisallowInterceptTouchEvent(false)

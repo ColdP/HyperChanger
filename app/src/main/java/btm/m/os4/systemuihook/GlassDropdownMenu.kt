@@ -65,6 +65,7 @@ import top.yukonga.miuix.kmp.basic.IconButtonDefaults
 import top.yukonga.miuix.kmp.basic.ListPopupColumn
 import top.yukonga.miuix.kmp.basic.ListPopupDefaults
 import top.yukonga.miuix.kmp.basic.PopupPositionProvider
+import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.rememberListPopupLayoutInfo
 import top.yukonga.miuix.kmp.theme.LocalDismissState
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -84,6 +85,7 @@ fun GlassDropdownPreference(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     backdrop: Backdrop? = null,
+    showValueOnEnd: Boolean = false,
     onSelectedIndexChange: (Int) -> Unit,
 ) {
     val selected = selectedIndex.coerceIn(0, items.lastIndex.coerceAtLeast(0))
@@ -101,6 +103,7 @@ fun GlassDropdownPreference(
         modifier = modifier,
         enabled = enabled,
         backdrop = backdrop,
+        showValueOnEnd = showValueOnEnd,
     )
 }
 
@@ -112,6 +115,7 @@ fun GlassDropdownMenu(
     enabled: Boolean = true,
     backdrop: Backdrop? = null,
     maxHeight: Dp? = null,
+    showValueOnEnd: Boolean = false,
 ) {
     val expanded = remember { mutableStateOf(false) }
     val entries = remember(entry) { listOf(entry) }
@@ -124,8 +128,16 @@ fun GlassDropdownMenu(
             modifier = Modifier.fillMaxWidth(),
             interactionSource = remember { MutableInteractionSource() },
             title = title,
-            summary = selectedSummary,
+            summary = selectedSummary.takeUnless { showValueOnEnd },
             endActions = {
+                if (showValueOnEnd && selectedSummary != null) {
+                    Text(
+                        selectedSummary,
+                        style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier.padding(end = 8.dp),
+                    )
+                }
                 DropdownArrowEndAction(MiuixTheme.colorScheme.onSurfaceVariantActions)
             },
             onClick = { if (available) expanded.value = !expanded.value },

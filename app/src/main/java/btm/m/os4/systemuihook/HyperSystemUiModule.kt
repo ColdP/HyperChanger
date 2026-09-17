@@ -48,8 +48,10 @@ import android.view.ViewParent
 import android.view.ViewTreeObserver
 import android.view.inputmethod.EditorInfo
 import android.widget.FrameLayout
+import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.graphics.PathParser
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 import io.github.libxposed.api.XposedModule
@@ -62,6 +64,7 @@ import java.util.IdentityHashMap
 import java.util.LinkedHashMap
 import java.util.WeakHashMap
 import kotlin.math.roundToInt
+import org.json.JSONObject
 
 private enum class NotificationMaterialType { NORMAL, MEDIA, FOCUS }
 
@@ -344,6 +347,10 @@ class HyperSystemUiModule : XposedModule() {
                         focusIslandWhitelistSystemUiHooksInstalled =
                             installFocusIslandWhitelistSystemUiHooks(param.defaultClassLoader, preferences)
                     }
+                    if (param.packageName == SYSTEM_UI && !notificationRestrictionHooksInstalled) {
+                        installNotificationRestrictionHooks(param.defaultClassLoader, preferences)
+                        notificationRestrictionHooksInstalled = true
+                    }
                     if (!focusIslandWhitelistPluginHooksInstalled) {
                         // The plugin is commonly loaded into SystemUI's class loader and may not
                         // receive a separate package callback.  Try the current loader first;
@@ -489,11 +496,39 @@ class HyperSystemUiModule : XposedModule() {
         hyperMusicCoverGestureBridgeInstalled = true
 
         LockscreenMediaPresentationBridge.onPresentationChanged = { presentation ->
+            if (presentation != LockscreenMediaPresentation.LYRICS_LOCKSCREEN) {
+                setLockscreenLyricsShowing(systemUiApplicationContext, false)
+                syncedHyperMusicLyricsEnabled = null
+            }
             dispatchHyperMusicCoverState(preferences, presentation)
+            syncHyperMusicCoverLyrics(preferences)
+            refreshLockscreenLyricButtons(preferences)
         }
         val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key == KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED) {
-                dispatchHyperMusicCoverState(preferences, LockscreenMediaPresentationBridge.presentation)
+            when (key) {
+                KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED ->
+                    dispatchHyperMusicCoverState(
+                        preferences,
+                        LockscreenMediaPresentationBridge.presentation,
+                    )
+                KEY_LOCKSCREEN_MUSIC_LYRICS_ENABLED,
+                KEY_LOCKSCREEN_MUSIC_LYRICS_HDR_ENABLED,
+                KEY_LOCKSCREEN_MUSIC_LYRICS_KEEP_SCREEN_ON -> {
+                    if (key == KEY_LOCKSCREEN_MUSIC_LYRICS_ENABLED &&
+                        !preferences.getBoolean(KEY_LOCKSCREEN_MUSIC_LYRICS_ENABLED, false)
+                    ) {
+                        setLockscreenLyricsShowing(systemUiApplicationContext, false)
+                        if (LockscreenMediaPresentationBridge.presentation ==
+                            LockscreenMediaPresentation.LYRICS_LOCKSCREEN
+                        ) {
+                            LockscreenMediaPresentationBridge.setPresentation(
+                                LockscreenMediaPresentation.SYSTEM_MEDIA,
+                            )
+                        }
+                    }
+                    syncHyperMusicCoverLyrics(preferences)
+                    refreshLockscreenLyricButtons(preferences)
+                }
             }
         }
         runCatching {
@@ -518,6 +553,7 @@ class HyperSystemUiModule : XposedModule() {
                         systemUiApplicationContext = clock.context.applicationContext
                         activeLockscreenClockContainer = WeakReference(clock)
                         clock.post {
+                            syncHyperMusicCoverLyrics(preferences)
                             dispatchHyperMusicCoverState(
                                 preferences,
                                 LockscreenMediaPresentationBridge.presentation,
@@ -536,13 +572,22 @@ class HyperSystemUiModule : XposedModule() {
         preferences: SharedPreferences,
         presentation: LockscreenMediaPresentation,
     ) {
-        val enabled = preferences.getBoolean(KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED, false)
         val context = systemUiApplicationContext ?: return
         // Music lockscreen is gesture-selected. Letting Main follow the media card would restore
         // a cover behind SYSTEM_MEDIA during process/keyguard startup and create a mixed state.
         sendHyperMusicCoverCommand(context, "auto", false)
-        val musicLockscreen = enabled && presentation == LockscreenMediaPresentation.MUSIC_LOCKSCREEN
-        val musicLockscreenStyle2 = enabled &&
+        val musicLockscreen = preferences.getBoolean(
+            KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED,
+            false,
+        ) && presentation == LockscreenMediaPresentation.MUSIC_LOCKSCREEN
+        val lyricLockscreen = preferences.getBoolean(
+            KEY_LOCKSCREEN_MUSIC_LYRICS_ENABLED,
+            false,
+        ) && presentation == LockscreenMediaPresentation.LYRICS_LOCKSCREEN
+        val musicLockscreenStyle2 = preferences.getBoolean(
+            KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED,
+            false,
+        ) &&
             presentation == LockscreenMediaPresentation.MUSIC_LOCKSCREEN_STYLE2
         if (musicLockscreen) {
             // Main.java owns the card transition. Set its targets before pushart changes
@@ -550,21 +595,40 @@ class HyperSystemUiModule : XposedModule() {
             // translation together.
             sendHyperMusicCoverMediaCardCommand(context, hideArtwork = true, centerText = true)
             sendHyperMusicCoverCommand(context, "style2", false)
+            if (syncedHyperMusicLyricsEnabled != false) {
+                sendHyperMusicCoverCommand(context, "lyrics", false)
+                syncedHyperMusicLyricsEnabled = false
+            }
             sendHyperMusicCoverCommand(context, "pushart", true)
+        } else if (lyricLockscreen) {
+            // Lyrics are an overlay on the native media notification. Keep its artwork and
+            // metadata in the stock positions instead of applying the music-lockscreen card
+            // treatment (hidden artwork/centred text).
+            sendHyperMusicCoverMediaCardCommand(context, hideArtwork = false, centerText = false)
+            sendHyperMusicCoverCommand(context, "style2", false)
+            // Enable the lyric renderer and its cover background in one receiver transaction.
+            sendHyperMusicCoverCommand(context, "lyricsmode", true)
+            syncedHyperMusicLyricsEnabled = true
         } else if (musicLockscreenStyle2) {
+            if (syncedHyperMusicLyricsEnabled != false) {
+                sendHyperMusicCoverCommand(context, "lyrics", false)
+                syncedHyperMusicLyricsEnabled = false
+            }
             sendHyperMusicCoverMediaCardCommand(context, hideArtwork = true, centerText = true)
             sendHyperMusicCoverCommand(context, "style2", true)
         } else {
             // Keep Main's hide/centre targets alive while its exit spring runs. Clearing them
             // first would make the notification snap back before the wallpaper/clock settle.
             sendHyperMusicCoverCommand(context, "style2", false)
-            sendHyperMusicCoverCommand(context, "pushart", false)
+            // Disable the lyric renderer and leave cover mode in the same receiver transaction so
+            // a second press reliably restores the stock lockscreen and media notification.
+            sendHyperMusicCoverCommand(context, "lyricsmode", false)
+            syncedHyperMusicLyricsEnabled = false
             Handler(Looper.getMainLooper()).postDelayed({
                 val current = LockscreenMediaPresentationBridge.presentation
-                val stillOutsideMusic = !preferences.getBoolean(
-                    KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED, false,
-                ) || (current != LockscreenMediaPresentation.MUSIC_LOCKSCREEN &&
-                    current != LockscreenMediaPresentation.MUSIC_LOCKSCREEN_STYLE2)
+                val stillOutsideMusic = current != LockscreenMediaPresentation.MUSIC_LOCKSCREEN &&
+                    current != LockscreenMediaPresentation.LYRICS_LOCKSCREEN &&
+                    current != LockscreenMediaPresentation.MUSIC_LOCKSCREEN_STYLE2
                 if (stillOutsideMusic) {
                     sendHyperMusicCoverMediaCardCommand(
                         context,
@@ -573,6 +637,31 @@ class HyperSystemUiModule : XposedModule() {
                     )
                 }
             }, HYPER_MUSIC_COVER_CARD_RESET_DELAY_MS)
+        }
+    }
+
+    private fun syncHyperMusicCoverLyrics(
+        preferences: SharedPreferences,
+        context: Context? = systemUiApplicationContext,
+    ) {
+        context ?: return
+        val lyrics = preferences.getBoolean(KEY_LOCKSCREEN_MUSIC_LYRICS_ENABLED, false) &&
+            lockscreenLyricsShowing(context) &&
+            LockscreenMediaPresentationBridge.presentation ==
+            LockscreenMediaPresentation.LYRICS_LOCKSCREEN
+        val hdr = preferences.getBoolean(KEY_LOCKSCREEN_MUSIC_LYRICS_HDR_ENABLED, false)
+        val keepOn = preferences.getBoolean(KEY_LOCKSCREEN_MUSIC_LYRICS_KEEP_SCREEN_ON, false)
+        if (syncedHyperMusicLyricsEnabled != lyrics) {
+            sendHyperMusicCoverCommand(context, "lyrics", lyrics)
+            syncedHyperMusicLyricsEnabled = lyrics
+        }
+        if (syncedHyperMusicLyricsHdrEnabled != hdr) {
+            sendHyperMusicCoverCommand(context, "lyrichdr", hdr)
+            syncedHyperMusicLyricsHdrEnabled = hdr
+        }
+        if (syncedHyperMusicLyricsKeepScreenOn != keepOn) {
+            sendHyperMusicCoverCommand(context, "lyrickeep", keepOn)
+            syncedHyperMusicLyricsKeepScreenOn = keepOn
         }
     }
 
@@ -5376,6 +5465,188 @@ class HyperSystemUiModule : XposedModule() {
         }.getOrDefault(false)
     }
 
+    private fun installNotificationRestrictionHooks(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
+        runCatching {
+            val suppressedToasts = Collections.synchronizedMap(WeakHashMap<Any, Boolean>())
+            val makeText = Toast::class.java.getMethod(
+                "makeText",
+                Context::class.java,
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+            )
+            hook(makeText)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("notification-limits:remove-ble-unlock-toast-create")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    if (preferences.getBoolean(KEY_REMOVE_BLE_UNLOCK_TOAST, false)) {
+                        val context = chain.getArg(0) as? Context
+                        val resourceId = chain.getArg(1) as? Int
+                        val resourceName = resourceId?.let { id ->
+                            runCatching { context?.resources?.getResourceEntryName(id) }.getOrNull()
+                        }
+                        if (resourceName == "miui_keyguard_ble_unlock_succeed_msg") {
+                            suppressedToasts[result] = true
+                        }
+                    }
+                    result
+                }
+            hook(Toast::class.java.getMethod("show"))
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("notification-limits:remove-ble-unlock-toast-show")
+                .intercept { chain ->
+                    if (preferences.getBoolean(KEY_REMOVE_BLE_UNLOCK_TOAST, false) &&
+                        suppressedToasts.remove(chain.thisObject) == true
+                    ) null else chain.proceed()
+                }
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install BLE unlock toast hook", error)
+        }
+
+        runCatching {
+            val visibilityProvider = classLoader.loadClass(
+                "com.android.systemui.statusbar.notification.interruption.KeyguardNotificationVisibilityProviderImpl",
+            )
+            visibilityProvider.declaredMethods
+                .filter { it.name == "shouldHideNotification" && it.parameterCount in 1..2 }
+                .forEachIndexed { index, method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("notification-limits:keep:$index")
+                        .intercept { chain ->
+                            if (preferences.getBoolean(KEY_KEEP_NOTIFICATIONS, false)) {
+                                val entry = chain.getArg(0)
+                                val notification = entry?.let { readInstanceField(it, "mSbn") }
+                                notification?.let { target ->
+                                    findDynamicIslandField(target, "mHasShownAfterUnlock")
+                                        ?.setBoolean(target, false)
+                                }
+                            }
+                            chain.proceed()
+                        }
+                }
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install keep-notifications hook", error)
+        }
+
+        runCatching {
+            val expanded = classLoader.loadClass(
+                "com.android.systemui.statusbar.notification.ExpandedNotification",
+            )
+            expanded.declaredMethods
+                .filter { it.name == "canShowOnKeyguard" && it.parameterCount == 0 }
+                .forEachIndexed { index, method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("notification-limits:lockscreen-entry:$index")
+                        .intercept { chain ->
+                            if (preferences.getBoolean(KEY_ALLOW_ALL_NOTIFICATIONS_ON_LOCKSCREEN, false)) {
+                                true
+                            } else chain.proceed()
+                        }
+                }
+            listOf("canFloat", "isEnableFloat").forEach { name ->
+                expanded.declaredMethods
+                    .filter { it.name == name && it.parameterCount == 0 }
+                    .forEachIndexed { index, method ->
+                        hook(method)
+                            .setExceptionMode(ExceptionMode.PROTECTIVE)
+                            .setId("notification-limits:heads-up-entry:$name:$index")
+                            .intercept { chain ->
+                                if (preferences.getBoolean(KEY_FORCE_ALL_NOTIFICATIONS_HEADS_UP, false)) {
+                                    true
+                                } else chain.proceed()
+                            }
+                    }
+            }
+
+            val settings = classLoader.loadClass(SYSTEM_UI_NOTIFICATION_SETTINGS_MANAGER_CLASS)
+            settings.declaredMethods
+                .filter { it.name == "canShowOnKeyguard" && it.parameterCount == 3 }
+                .forEachIndexed { index, method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("notification-limits:lockscreen-settings:$index")
+                        .intercept { chain ->
+                            if (preferences.getBoolean(KEY_ALLOW_ALL_NOTIFICATIONS_ON_LOCKSCREEN, false)) {
+                                true
+                            } else chain.proceed()
+                        }
+                }
+            settings.declaredMethods
+                .filter { it.name == "canFloat" && it.parameterCount == 3 }
+                .forEachIndexed { index, method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("notification-limits:heads-up-settings:$index")
+                        .intercept { chain ->
+                            if (preferences.getBoolean(KEY_FORCE_ALL_NOTIFICATIONS_HEADS_UP, false)) {
+                                true
+                            } else chain.proceed()
+                        }
+                }
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install notification visibility hooks", error)
+        }
+
+        runCatching {
+            val listener = classLoader.loadClass(
+                "com.android.systemui.statusbar.notification.MiuiNotificationListener",
+            )
+            listener.declaredMethods
+                .filter { it.name == "onSilentStatusBarIconsVisibilityChanged" && it.parameterCount == 1 }
+                .forEachIndexed { index, method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("notification-limits:importance-icons:$index")
+                        .intercept { chain ->
+                            if (preferences.getBoolean(KEY_REMOVE_NOTIFICATION_IMPORTANCE_LIMIT, false)) {
+                                chain.proceedWith(chain.thisObject, arrayOf(false))
+                            } else chain.proceed()
+                        }
+                }
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install notification-importance icon hook", error)
+        }
+
+        runCatching {
+            val foldCoordinator = classLoader.loadClass(
+                "com.android.systemui.statusbar.notification.collection.coordinator.FoldCoordinator",
+            )
+            foldCoordinator.declaredMethods
+                .filter { it.name == "attach" && it.parameterCount == 1 }
+                .forEachIndexed { index, method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("notification-limits:disable-fold-coordinator:$index")
+                        .intercept { chain ->
+                            if (preferences.getBoolean(KEY_DISABLE_NOTIFICATION_HISTORY_FOLDING, false)) {
+                                null
+                            } else chain.proceed()
+                        }
+                }
+            val utility = classLoader.loadClass("com.miui.systemui.notification.MiuiBaseNotifUtil")
+            utility.declaredMethods
+                .filter { it.name == "shouldSuppressFold" && it.parameterCount == 0 }
+                .forEachIndexed { index, method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("notification-limits:suppress-fold:$index")
+                        .intercept { chain ->
+                            if (preferences.getBoolean(KEY_DISABLE_NOTIFICATION_HISTORY_FOLDING, false)) {
+                                true
+                            } else chain.proceed()
+                        }
+                }
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install notification-history folding hooks", error)
+        }
+        log(Log.INFO, TAG, "Installed notification restriction-removal hooks")
+    }
+
     private fun applySystemNotificationRowGlass(background: View, source: String): Boolean {
         if (!isNotificationRowBackground(background) || notificationGlassApplying.get() == true) return false
         notificationGlassApplying.set(true)
@@ -5755,6 +6026,82 @@ class HyperSystemUiModule : XposedModule() {
      * injected content while the vendor scene is transitioning.
      */
     private fun installLockscreenWidgetSceneVisibilityHooks(classLoader: ClassLoader) {
+        // Fingerprint fast unlock calls the vendor mediator before KeyguardManager reports the
+        // device unlocked. Hide in that first callback so the widget and its native-clock
+        // avoidance transform cannot survive into launcher frames.
+        runCatching {
+            val mediatorInjector = classLoader.loadClass(
+                "com.android.keyguard.injector.KeyguardViewMediatorInjector",
+            )
+            val goingAwayMethods = mediatorInjector.declaredMethods.filter {
+                it.name == "keyguardGoingAway" && it.parameterCount == 0
+            }
+            check(goingAwayMethods.isNotEmpty()) {
+                "KeyguardViewMediatorInjector.keyguardGoingAway was not found"
+            }
+            goingAwayMethods.forEachIndexed { index, method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("lockscreen-widget:keyguard-going-away-early-$index")
+                    .intercept { chain ->
+                        LockscreenWidgetSceneState.setKeyguardGoingAway(true)
+                        chain.proceed()
+                    }
+            }
+            log(Log.INFO, TAG, "Installed lockscreen-widget early keyguard-exit hook(s)")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install lockscreen-widget early keyguard-exit hooks", error)
+        }
+        runCatching {
+            val updateMonitor = classLoader.loadClass("com.android.keyguard.KeyguardUpdateMonitor")
+            val goingAwayMethods = updateMonitor.declaredMethods.filter {
+                it.name == "setKeyguardGoingAway" && it.parameterCount == 1 &&
+                    it.parameterTypes[0] == Boolean::class.javaPrimitiveType
+            }
+            check(goingAwayMethods.isNotEmpty()) {
+                "KeyguardUpdateMonitor.setKeyguardGoingAway was not found"
+            }
+            goingAwayMethods.forEachIndexed { index, method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("lockscreen-widget:keyguard-going-away-state-$index")
+                    .intercept { chain ->
+                        if (chain.getArg(0) == true) {
+                            LockscreenWidgetSceneState.setKeyguardGoingAway(true)
+                        }
+                        chain.proceed()
+                    }
+            }
+            log(Log.INFO, TAG, "Installed lockscreen-widget keyguard-exit state hook(s)")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install lockscreen-widget keyguard-exit state hooks", error)
+        }
+        runCatching {
+            val stateController = classLoader.loadClass(
+                "com.android.systemui.statusbar.policy.KeyguardStateControllerImpl",
+            )
+            val keyguardStateMethods = stateController.declaredMethods.filter {
+                it.name == "notifyKeyguardState" && it.parameterCount == 2 &&
+                    it.parameterTypes.all { type -> type == Boolean::class.javaPrimitiveType }
+            }
+            check(keyguardStateMethods.isNotEmpty()) {
+                "KeyguardStateControllerImpl.notifyKeyguardState was not found"
+            }
+            keyguardStateMethods.forEachIndexed { index, method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("lockscreen-widget:keyguard-showing-state-$index")
+                    .intercept { chain ->
+                        if (chain.getArg(0) == true) {
+                            LockscreenWidgetSceneState.setKeyguardGoingAway(false)
+                        }
+                        chain.proceed()
+                    }
+            }
+            log(Log.INFO, TAG, "Installed lockscreen-widget keyguard-showing state hook(s)")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install lockscreen-widget keyguard-showing state hooks", error)
+        }
         runCatching {
             val statusBarStateClass = classLoader.loadClass(
                 "com.android.systemui.statusbar.StatusBarStateControllerImpl",
@@ -7303,6 +7650,12 @@ class HyperSystemUiModule : XposedModule() {
             installLockscreenMediaManagerBridgeHooks(classLoader)
             installLockscreenMediaControllerVisibilityHook(classLoader, preferences)
             installLockscreenMediaHeaderHook(classLoader, preferences)
+            installLockscreenLyricButtonHook(classLoader, preferences)
+            runCatching {
+                installLockscreenLyricButtonStatusBarStateHook(classLoader, preferences)
+            }.onFailure { error ->
+                log(Log.WARN, TAG, "Could not install lyric-button status-bar state hook", error)
+            }
             installLockscreenMediaEffectRefreshHook(classLoader)
             installLockscreenCustomizationMenuHook(classLoader)
             installLockscreenMediaVisibilityProviderHooks(classLoader, preferences)
@@ -7535,7 +7888,9 @@ class HyperSystemUiModule : XposedModule() {
                             if (booleanIndex >= 0) {
                                 lockscreenMediaKeyguardShowing = chain.getArg(booleanIndex) as? Boolean ?: false
                             }
-                            chain.proceed()
+                            val result = chain.proceed()
+                            refreshLockscreenLyricButtons(preferences)
+                            result
                         }
                 }
                 log(Log.INFO, TAG, "Installed media keyguard callback hook(s): ${stateMethods.size}")
@@ -7589,9 +7944,11 @@ class HyperSystemUiModule : XposedModule() {
                             lockscreenMediaHeaders += header
                             installLockscreenMediaHeaderGuard(header, preferences)
                             installLockscreenMediaArtworkClick(header, preferences)
+                            bindLockscreenLyricButton(header, preferences)
                             scheduleLockscreenMediaPresentation(header, preferences)
                             header.postDelayed({
                                 installLockscreenMediaArtworkClick(header, preferences)
+                                bindLockscreenLyricButton(header, preferences)
                                 scheduleLockscreenMediaPresentation(header, preferences)
                             }, 120L)
                         }
@@ -7625,13 +7982,16 @@ class HyperSystemUiModule : XposedModule() {
                         lockscreenMediaHeaders += header
                         installLockscreenMediaHeaderGuard(header, preferences)
                         installLockscreenMediaArtworkClick(header, preferences)
+                        bindLockscreenLyricButton(header, preferences)
                         // Some holder children are attached on the next traversal.
                         header.post {
                             installLockscreenMediaArtworkClick(header, preferences)
+                            bindLockscreenLyricButton(header, preferences)
                             scheduleLockscreenMediaPresentation(header, preferences)
                         }
                         header.postDelayed({
                             installLockscreenMediaArtworkClick(header, preferences)
+                            bindLockscreenLyricButton(header, preferences)
                             scheduleLockscreenMediaPresentation(header, preferences)
                         }, 120L)
                     }
@@ -7718,6 +8078,430 @@ class HyperSystemUiModule : XposedModule() {
         }.onFailure { error ->
             log(Log.WARN, TAG, "Could not install lockscreen-island artwork source hook", error)
         }
+    }
+
+    /** Reuses HyperOS' right custom action slot, matching HyperLockMusic's lockscreen-only button. */
+    private fun installLockscreenLyricButtonHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
+        runCatching {
+            val controllerClass = classLoader.loadClass(
+                "com.android.systemui.statusbar.notification.mediacontrol.MiuiMediaViewControllerImpl",
+            )
+            val mediaDataClass = classLoader.loadClass(
+                "com.android.systemui.media.controls.shared.model.MediaData",
+            )
+            val bindMediaData = controllerClass.getMethod("bindMediaData", mediaDataClass)
+            hook(bindMediaData)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("lockscreen-lyrics-button:media-data")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    bindLockscreenLyricButtonForHolder(
+                        readInstanceField(chain.thisObject, "holder"),
+                        preferences,
+                    )
+                    result
+                }
+
+            // On this SystemUI build, attach() is the first callback for a recreated media
+            // card.  It is not guaranteed that bindMediaData() will follow, especially after
+            // playback is paused, so bind the lyric action from both lifecycle points.
+            runCatching {
+                val holderClass = classLoader.loadClass(
+                    "com.android.systemui.statusbar.notification.mediacontrol.MiuiMediaViewHolder",
+                )
+                val attach = controllerClass.getMethod("attach", holderClass)
+                hook(attach)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("lockscreen-lyrics-button:attach")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        bindLockscreenLyricButtonForHolder(chain.getArg(0), preferences)
+                        result
+                    }
+            }.onFailure { error ->
+                log(Log.DEBUG, TAG, "Could not bind lyric button from media attach", error)
+            }
+
+            // access$setTopMediaData() adds holder.player to MiuiMediaHeaderView, attaches the
+            // controller, dispatches header listeners, and then binds the media data.  It is the
+            // first point at which all three objects are present for an initially created card.
+            // bindMediaData() alone is too early on a cold SystemUI start, which was why the
+            // button appeared only after unlocking and locking again.
+            runCatching {
+                val notificationControllerClass = classLoader.loadClass(
+                    "com.android.systemui.statusbar.notification.mediacontrol.MiuiMediaNotificationControllerImpl",
+                )
+                val topMediaChanged = notificationControllerClass.getDeclaredMethod(
+                    "access\$setTopMediaData",
+                    notificationControllerClass,
+                    mediaDataClass,
+                ).apply { isAccessible = true }
+                hook(topMediaChanged)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("lockscreen-lyrics-button:top-media-data")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        bindLockscreenLyricButtonForController(chain.getArg(0), preferences)
+                        result
+                    }
+            }.onFailure { error ->
+                log(Log.WARN, TAG, "Could not bind lyric button after top-media update", error)
+            }
+
+            val mediaActionClass = classLoader.loadClass(
+                "com.android.systemui.media.controls.shared.model.MediaAction",
+            )
+            runCatching {
+                val bindButtonCommon = controllerClass.getDeclaredMethod(
+                    "bindButtonCommon",
+                    ImageButton::class.java,
+                    mediaActionClass,
+                )
+                hook(bindButtonCommon)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("lockscreen-lyrics-button:block-custom")
+                    .intercept { chain ->
+                        val button = chain.getArg(0) as? ImageButton
+                        if (button != null && shouldOwnLockscreenLyricSlot(button, preferences)) {
+                            null
+                        } else {
+                            chain.proceed()
+                        }
+                    }
+            }.onFailure { error ->
+                log(Log.DEBUG, TAG, "Could not guard lyric button bindButtonCommon", error)
+            }
+
+            runCatching {
+                val utilsClass = classLoader.loadClass(
+                    "com.android.systemui.statusbar.notification.mediacontrol.MiuiMediaActionButtonUtils",
+                )
+                val setSemanticButton = utilsClass.getDeclaredMethod(
+                    "setSemanticButton",
+                    ImageButton::class.java,
+                    mediaActionClass,
+                )
+                hook(setSemanticButton)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("lockscreen-lyrics-button:block-semantic")
+                    .intercept { chain ->
+                        val button = chain.getArg(0) as? ImageButton
+                        if (button != null && shouldOwnLockscreenLyricSlot(button, preferences)) {
+                            null
+                        } else {
+                            chain.proceed()
+                        }
+                    }
+            }.onFailure { error ->
+                log(Log.DEBUG, TAG, "Could not guard lyric semantic button binding", error)
+            }
+            log(Log.INFO, TAG, "Installed lockscreen media lyric-button hook")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install lockscreen media lyric-button hook", error)
+        }
+    }
+
+    private fun bindLockscreenLyricButton(
+        header: View,
+        preferences: SharedPreferences,
+        holderOverride: Any? = null,
+    ) {
+        val holder = holderOverride ?: readInstanceField(header, "mediaViewHolder") ?: return
+        val button = readInstanceField(holder, "action4") as? ImageButton ?: return
+        lockscreenLyricButtons += button
+        lockscreenLyricButtonHeaders[button] = header
+        if (!preferences.getBoolean(KEY_LOCKSCREEN_MUSIC_LYRICS_ENABLED, false)) {
+            if (button.getTag(LOCKSCREEN_LYRIC_BUTTON_TAG) == true) {
+                applyEmptyLockscreenMediaButton(button)
+            }
+            return
+        }
+        if (!shouldShowLockscreenLyricButton(header)) {
+            applyEmptyLockscreenMediaButton(button)
+            return
+        }
+
+        button.setTag(LOCKSCREEN_LYRIC_BUTTON_TAG, true)
+        button.visibility = View.VISIBLE
+        button.isEnabled = true
+        val showing = lockscreenLyricsShowing(button.context) &&
+            LockscreenMediaPresentationBridge.presentation ==
+            LockscreenMediaPresentation.LYRICS_LOCKSCREEN
+        val drawable = loadLockscreenLyricButtonDrawable(button.context, showing)
+        button.setImageDrawable(drawable)
+        button.imageTintList = ColorStateList.valueOf(Color.WHITE)
+        button.isSelected = showing
+        button.alpha = 1f
+        button.contentDescription = if (showing) {
+            tr(button.context, "隐藏歌词", "隐藏歌词")
+        } else {
+            tr(button.context, "显示歌词", "显示歌词")
+        }
+        button.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+        button.setTag(LOCKSCREEN_LYRIC_BUTTON_STATE_TAG, showing)
+        button.setTag(LOCKSCREEN_LYRIC_BUTTON_DRAWABLE_TAG, drawable)
+        button.setOnClickListener {
+            if (!preferences.getBoolean(KEY_LOCKSCREEN_MUSIC_LYRICS_ENABLED, false) ||
+                !shouldShowLockscreenLyricButton(header)
+            ) return@setOnClickListener
+            systemUiApplicationContext = it.context.applicationContext
+            val next = LockscreenMediaPresentationBridge.presentation !=
+                LockscreenMediaPresentation.LYRICS_LOCKSCREEN
+            if (next) {
+                // Remember the presentation that lyrics temporarily overlays. A later press
+                // must return to that exact state instead of always forcing SYSTEM_MEDIA.
+                lyricReturnPresentation = when (
+                    LockscreenMediaPresentationBridge.presentation
+                ) {
+                    LockscreenMediaPresentation.MUSIC_LOCKSCREEN,
+                    LockscreenMediaPresentation.MUSIC_LOCKSCREEN_STYLE2 ->
+                        LockscreenMediaPresentationBridge.presentation
+                    else -> LockscreenMediaPresentation.SYSTEM_MEDIA
+                }
+            }
+            setLockscreenLyricsShowing(it.context, next)
+            syncedHyperMusicLyricsEnabled = null
+            val target = if (next) {
+                // The lyric renderer lives in the full music-lockscreen presentation. The
+                // injected system-media button is its entry point, so enter that presentation
+                // in the same click instead of requiring a second artwork tap.
+                LockscreenMediaPresentation.LYRICS_LOCKSCREEN
+            } else {
+                lyricReturnPresentation
+            }
+            if (LockscreenMediaPresentationBridge.presentation == target) {
+                // setPresentation() intentionally ignores equal values. The button still has to
+                // apply a lyric-mode change when another control already selected this layout.
+                dispatchHyperMusicCoverState(preferences, target)
+                syncHyperMusicCoverLyrics(preferences, it.context.applicationContext)
+                refreshLockscreenLyricButtons(preferences)
+            } else {
+                LockscreenMediaPresentationBridge.setPresentation(target)
+            }
+        }
+    }
+
+    private fun bindLockscreenLyricButtonForHolder(holder: Any?, preferences: SharedPreferences) {
+        val player = holder?.let { readInstanceField(it, "player") as? View }
+        val header = findMiuiMediaHeaderAncestor(player)
+            ?: findRegisteredLockscreenMediaHeader(holder)
+            ?: return
+        lockscreenMediaHeaders += header
+        bindLockscreenLyricButton(header, preferences)
+        // The controller can overwrite action4 after attach(), so repeat after the layout pass.
+        header.post { bindLockscreenLyricButton(header, preferences) }
+        header.postDelayed({ bindLockscreenLyricButton(header, preferences) }, 120L)
+    }
+
+    private fun bindLockscreenLyricButtonForController(
+        controller: Any?,
+        preferences: SharedPreferences,
+    ) {
+        controller ?: return
+        val header = readInstanceField(controller, "mediaContainerView") as? View ?: return
+        val holder = readInstanceField(controller, "mediaViewHolder")
+        bindLockscreenLyricButton(header, preferences, holder)
+        // The first card can still receive a delayed vendor action pass after the top-media
+        // transaction, so retain the post-layout repairs for that single creation frame.
+        header.post { bindLockscreenLyricButton(header, preferences, holder) }
+        header.postDelayed({ bindLockscreenLyricButton(header, preferences, holder) }, 120L)
+    }
+
+    private fun findRegisteredLockscreenMediaHeader(holder: Any?): View? {
+        holder ?: return null
+        return synchronized(lockscreenMediaHeaders) {
+            lockscreenMediaHeaders.firstOrNull { header ->
+                readInstanceField(header, "mediaViewHolder") === holder
+            }
+        }
+    }
+
+    private fun applyEmptyLockscreenMediaButton(button: ImageButton) {
+        button.setTag(LOCKSCREEN_LYRIC_BUTTON_TAG, null)
+        button.setTag(LOCKSCREEN_LYRIC_BUTTON_STATE_TAG, null)
+        button.setTag(LOCKSCREEN_LYRIC_BUTTON_DRAWABLE_TAG, null)
+        button.setOnClickListener(null)
+        button.visibility = View.VISIBLE
+        button.isEnabled = false
+        button.isSelected = false
+        button.setImageDrawable(null)
+        button.contentDescription = null
+        button.alpha = 1f
+        button.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+    }
+
+    private fun refreshLockscreenLyricButtons(preferences: SharedPreferences) {
+        val bindings = synchronized(lockscreenLyricButtonHeaders) {
+            lockscreenLyricButtonHeaders.entries.map { it.key to it.value }
+        }
+        bindings.forEach { (button, knownHeader) ->
+            val header = findMiuiMediaHeaderAncestor(button) ?: knownHeader
+            if (header == null || !button.isAttachedToWindow || !header.isAttachedToWindow) {
+                lockscreenLyricButtons.remove(button)
+                lockscreenLyricButtonHeaders.remove(button)
+            } else {
+                bindLockscreenLyricButton(header, preferences)
+            }
+        }
+    }
+
+    private fun maintainLockscreenLyricButton(header: View, preferences: SharedPreferences) {
+        val holder = readInstanceField(header, "mediaViewHolder") ?: return
+        val button = readInstanceField(holder, "action4") as? ImageButton ?: return
+        val featureEnabled = preferences.getBoolean(KEY_LOCKSCREEN_MUSIC_LYRICS_ENABLED, false)
+        if (!featureEnabled || !shouldShowLockscreenLyricButton(header)) {
+            if (button.getTag(LOCKSCREEN_LYRIC_BUTTON_TAG) == true) {
+                applyEmptyLockscreenMediaButton(button)
+            }
+            return
+        }
+        val showing = lockscreenLyricsShowing(button.context) &&
+            LockscreenMediaPresentationBridge.presentation ==
+            LockscreenMediaPresentation.LYRICS_LOCKSCREEN
+        val ownedDrawable = button.getTag(LOCKSCREEN_LYRIC_BUTTON_DRAWABLE_TAG) as? Drawable
+        val needsRepair = button.getTag(LOCKSCREEN_LYRIC_BUTTON_TAG) != true ||
+            button.getTag(LOCKSCREEN_LYRIC_BUTTON_STATE_TAG) != showing ||
+            ownedDrawable == null || button.drawable !== ownedDrawable ||
+            button.visibility != View.VISIBLE || !button.isEnabled
+        if (needsRepair) bindLockscreenLyricButton(header, preferences)
+    }
+
+    /**
+     * Keep this independent from NotificationStackScrollLayout's expanded-height state.
+     * During the first keyguard media transaction HyperOS reports a non-zero expanded height
+     * before it has changed mStatusBarState to KEYGUARD; treating that transient as the shade
+     * is the exact first-card race that hides the lyric icon until a later relock.  The media
+     * header's own Context gives us the stable signal used by HyperLockMusic instead.
+     */
+    private fun shouldShowLockscreenLyricButton(header: View): Boolean =
+        isLockscreenMediaView(header)
+
+    private fun installLockscreenLyricButtonStatusBarStateHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
+        val candidates = listOf(
+            "com.android.systemui.statusbar.StatusBarStateControllerImpl",
+            "com.android.systemui.statusbar.policy.StatusBarStateControllerImpl",
+        )
+        val controllerClass = candidates.firstNotNullOfOrNull { name ->
+            runCatching { classLoader.loadClass(name) }.getOrNull()
+        } ?: run {
+            log(Log.WARN, TAG, "Could not find status-bar state controller for lyric button")
+            return
+        }
+        val methods = generateSequence(controllerClass as Class<*>?) { it.superclass }
+            .flatMap { it.declaredMethods.asSequence() }
+            .filter { method ->
+                method.name == "setState" && method.parameterTypes.firstOrNull() ==
+                    Int::class.javaPrimitiveType
+            }
+            .distinctBy { method -> method.parameterTypes.toList() }
+            .toList()
+        methods.forEachIndexed { index, method ->
+            hook(method)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("lockscreen-lyrics-button:status-bar-state-$index")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    if (chain.getArg(0) is Int) {
+                        refreshLockscreenLyricButtons(preferences)
+                    }
+                    result
+                }
+        }
+        log(Log.INFO, TAG, "Installed lyric-button status-bar state hook(s): ${methods.size}")
+    }
+
+    private fun shouldOwnLockscreenLyricSlot(
+        button: ImageButton,
+        preferences: SharedPreferences,
+    ): Boolean {
+        if (!preferences.getBoolean(KEY_LOCKSCREEN_MUSIC_LYRICS_ENABLED, false)) return false
+        val action4Id = button.resources.getIdentifier("action4", "id", SYSTEM_UI)
+        return action4Id != 0 && button.id == action4Id &&
+            (lockscreenLyricButtons.contains(button) ||
+                lockscreenLyricButtonHeaders.containsKey(button) ||
+                findMiuiMediaHeaderAncestor(button) != null)
+    }
+
+    private fun findMiuiMediaHeaderAncestor(view: View?): View? {
+        var current: ViewParent? = view?.parent
+        while (current != null) {
+            val candidate = current as? View
+            if (candidate != null && isMiuiMediaHeaderView(candidate)) return candidate
+            current = current.parent
+        }
+        return null
+    }
+
+    private fun lockscreenLyricsShowing(context: Context): Boolean =
+        context.getSharedPreferences(LOCKSCREEN_LYRIC_STATE_PREFS, Context.MODE_PRIVATE)
+            .getBoolean(LOCKSCREEN_LYRIC_STATE_SHOWING, false)
+
+    private fun setLockscreenLyricsShowing(context: Context?, showing: Boolean) {
+        context ?: return
+        context.getSharedPreferences(LOCKSCREEN_LYRIC_STATE_PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(LOCKSCREEN_LYRIC_STATE_SHOWING, showing)
+            .apply()
+    }
+
+    private fun loadLockscreenLyricButtonDrawable(
+        systemUiContext: Context,
+        showing: Boolean,
+    ): Drawable? = runCatching {
+        val moduleContext = systemUiContext.createPackageContext(
+            BuildConfig.APPLICATION_ID,
+            Context.CONTEXT_IGNORE_SECURITY,
+        )
+        val resourceName = if (showing) {
+            "ic_lockscreen_media_lyrics_on"
+        } else {
+            "ic_lockscreen_media_lyrics_off"
+        }
+        val resourceId = moduleContext.resources.getIdentifier(
+            resourceName,
+            "drawable",
+            BuildConfig.APPLICATION_ID,
+        )
+        check(resourceId != 0) { "Missing lyric button drawable: $resourceName" }
+        moduleContext.resources.getDrawable(resourceId, null)?.mutate()
+            ?: error("Could not inflate lyric button drawable: $resourceName")
+    }.onFailure { error ->
+        if (!lockscreenLyricDrawableLoadFailureLogged) {
+            lockscreenLyricDrawableLoadFailureLogged = true
+            log(Log.ERROR, TAG, "Could not load lockscreen lyric button drawable", error)
+        }
+    }.getOrNull()
+
+    private fun tr(context: Context, key: String, fallback: String): String {
+        val language = context.resources.configuration.locales.get(0)?.language.orEmpty()
+        if (language != "en" && language != "ja") return fallback
+        val strings = synchronized(systemUiTranslationCache) {
+            systemUiTranslationCache.getOrPut(language) {
+                runCatching {
+                    val moduleContext = context.createPackageContext(
+                        BuildConfig.APPLICATION_ID,
+                        Context.CONTEXT_IGNORE_SECURITY,
+                    )
+                    val json = JSONObject(
+                        moduleContext.assets.open("languages/$language.json")
+                            .bufferedReader()
+                            .use { it.readText() },
+                    ).getJSONObject("strings")
+                    buildMap {
+                        json.keys().forEach { translationKey ->
+                            put(translationKey, json.optString(translationKey))
+                        }
+                    }
+                }.getOrDefault(emptyMap())
+            }
+        }
+        return strings[key].orEmpty().ifEmpty { fallback }
     }
 
     private fun installLockscreenCustomizationMenuHook(classLoader: ClassLoader) {
@@ -8251,6 +9035,7 @@ class HyperSystemUiModule : XposedModule() {
         if (lockscreenMediaHeaderGuards.containsKey(header)) return
         val listener = ViewTreeObserver.OnPreDrawListener {
             if (!header.isAttachedToWindow) return@OnPreDrawListener true
+            maintainLockscreenLyricButton(header, preferences)
             val onKeyguard = mediaHeaderOnActiveKeyguard(header)
             val hidden = shouldHideLockscreenMedia(preferences)
             if (onKeyguard && header.visibility != if (hidden) View.GONE else View.VISIBLE) {
@@ -8300,9 +9085,21 @@ class HyperSystemUiModule : XposedModule() {
                         artwork.setTag(LOCKSCREEN_MEDIA_LONG_PRESS_TRIGGERED_TAG, false)
                         if (!longPressed) {
                             log(Log.DEBUG, TAG, "System media artwork tapped; showing music lockscreen")
-                            LockscreenMediaPresentationBridge.setPresentation(
-                                LockscreenMediaPresentation.MUSIC_LOCKSCREEN,
-                            )
+                            setLockscreenLyricsShowing(artwork.context, false)
+                            syncedHyperMusicLyricsEnabled = null
+                            if (LockscreenMediaPresentationBridge.presentation ==
+                                LockscreenMediaPresentation.MUSIC_LOCKSCREEN
+                            ) {
+                                dispatchHyperMusicCoverState(
+                                    preferences,
+                                    LockscreenMediaPresentation.MUSIC_LOCKSCREEN,
+                                )
+                                refreshLockscreenLyricButtons(preferences)
+                            } else {
+                                LockscreenMediaPresentationBridge.setPresentation(
+                                    LockscreenMediaPresentation.MUSIC_LOCKSCREEN,
+                                )
+                            }
                         }
                     }
                     MotionEvent.ACTION_CANCEL -> {
@@ -10248,6 +11045,11 @@ class HyperSystemUiModule : XposedModule() {
             "com.android.systemui.statusbar.notification.mediacontrol.MiuiMediaHeaderView"
         private const val LOCKSCREEN_MEDIA_LONG_PRESS_TAG = 0x7f0f0abc
         private const val LOCKSCREEN_MEDIA_LONG_PRESS_TRIGGERED_TAG = 0x7f0f0abd
+        private const val LOCKSCREEN_LYRIC_BUTTON_TAG = 0x7f0f0abe
+        private const val LOCKSCREEN_LYRIC_BUTTON_STATE_TAG = 0x7f0f0abf
+        private const val LOCKSCREEN_LYRIC_BUTTON_DRAWABLE_TAG = 0x7f0f0ac0
+        private const val LOCKSCREEN_LYRIC_STATE_PREFS = "hyperchanger_lockscreen_lyrics"
+        private const val LOCKSCREEN_LYRIC_STATE_SHOWING = "showing"
         private const val LOCKSCREEN_MEDIA_PRESENTATION_REAPPLY_SHORT_DELAY_MS = 96L
         private const val LOCKSCREEN_MEDIA_PRESENTATION_REAPPLY_SETTLE_DELAY_MS = 320L
         private const val MI_GLASS_COMPAT_CLASS = "com.miui.systemui.util.MiGlassCompat"
@@ -10577,10 +11379,21 @@ class HyperSystemUiModule : XposedModule() {
         private const val KEY_LOCKSCREEN_SHORTCUT_GLASS_ENABLED = "lockscreen_shortcut_glass_enabled"
         private const val KEY_LOCKSCREEN_MINI_PLAYER_ENABLED = "lockscreen_mini_player_enabled"
         private const val KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED = "lockscreen_music_lockscreen_enabled"
+        private const val KEY_LOCKSCREEN_MUSIC_LYRICS_ENABLED = "lockscreen_music_lyrics_enabled"
+        private const val KEY_LOCKSCREEN_MUSIC_LYRICS_HDR_ENABLED =
+            "lockscreen_music_lyrics_hdr_enabled"
+        private const val KEY_LOCKSCREEN_MUSIC_LYRICS_KEEP_SCREEN_ON =
+            "lockscreen_music_lyrics_keep_screen_on"
         private const val HYPER_MUSIC_COVER_ACTION =
             "btm.m.os4.systemuihook.hypermusiccover.PROBE"
         private const val HYPER_MUSIC_COVER_CARD_RESET_DELAY_MS = 720L
         private const val MUSIC_CLOCK_SCALE = 0.62f
+        /** Presentation to restore when the lyric overlay is closed from its media-card button. */
+        private var lyricReturnPresentation = LockscreenMediaPresentation.SYSTEM_MEDIA
+        private var syncedHyperMusicLyricsEnabled: Boolean? = null
+        private var syncedHyperMusicLyricsHdrEnabled: Boolean? = null
+        private var syncedHyperMusicLyricsKeepScreenOn: Boolean? = null
+        private val systemUiTranslationCache = mutableMapOf<String, Map<String, String>>()
         private const val KEY_LOCKSCREEN_MINI_PLAYER_LYRICS_ENABLED =
             "lockscreen_mini_player_lyrics_enabled"
         private const val KEY_LOCKSCREEN_MINI_PLAYER_HIDE_MEDIA_NOTIFICATION =
@@ -10708,13 +11521,22 @@ private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_d
         private var dynamicIslandClassDiscoveryInstalled = false
         private var focusIslandWhitelistSystemUiHooksInstalled = false
         private var focusIslandWhitelistPluginHooksInstalled = false
+        private var notificationRestrictionHooksInstalled = false
         private val focusIslandWhitelistPluginInstalling = ThreadLocal.withInitial<Boolean> { false }
         @Volatile private var lockscreenMediaKeyguardShowing = false
+        @Volatile private var lockscreenLyricDrawableLoadFailureLogged = false
         private val lockscreenRows = Collections.newSetFromMap(WeakHashMap<View, Boolean>())
         private val lockscreenHiddenRows = Collections.newSetFromMap(WeakHashMap<View, Boolean>())
         private val lockscreenMediaRows = Collections.newSetFromMap(WeakHashMap<View, Boolean>())
         private val lockscreenMediaHeaders = Collections.synchronizedSet(
             Collections.newSetFromMap(WeakHashMap<View, Boolean>()),
+        )
+        private val lockscreenLyricButtons = Collections.synchronizedSet(
+            Collections.newSetFromMap(WeakHashMap<ImageButton, Boolean>()),
+        )
+        /** Action4 -> owning header. The parent hierarchy is unavailable during first-card bind. */
+        private val lockscreenLyricButtonHeaders = Collections.synchronizedMap(
+            WeakHashMap<ImageButton, View>(),
         )
         /** MiuiMediaHeaderView -> its owning controller; both are replaced on a keyguard rebuild. */
         private val lockscreenMediaControllers = Collections.synchronizedMap(
