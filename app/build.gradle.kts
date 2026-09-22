@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 btm_m
 
+import java.time.LocalDate
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -10,6 +12,7 @@ val releaseStoreFile = providers.gradleProperty("releaseStoreFile").orNull
 val releaseStorePassword = providers.gradleProperty("releaseStorePassword").orNull
 val releaseKeyAlias = providers.gradleProperty("releaseKeyAlias").orNull
 val releaseKeyPassword = providers.gradleProperty("releaseKeyPassword").orNull
+val buildDate = LocalDate.now().toString()
 
 android {
     namespace = "btm.m.os4.systemuihook"
@@ -19,8 +22,9 @@ android {
         applicationId = "btm.m.os4.systemuihook"
         minSdk = 33
         targetSdk = 35
-        versionCode = 1010339
-        versionName = "1.1.3"
+        versionCode = 1010341
+        versionName = "1.1.3 OOBE"
+        buildConfigField("String", "BUILD_DATE", "\"$buildDate\"")
 
     }
 

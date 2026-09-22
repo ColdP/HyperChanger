@@ -24,6 +24,7 @@ class TutorialDeviceCardView(
     private val logoSource: SettingsAppearanceSource,
     private val backgroundSource: SettingsAppearanceSource,
     private val updateSource: View?,
+    private val clickSource: View?,
 ) : FrameLayout(context) {
     private val surface = View(context)
     private val bottomSurface = View(context)
@@ -79,6 +80,10 @@ class TutorialDeviceCardView(
             backgroundImage.visibility = if (backgroundHiddenByLongPress) GONE else VISIBLE
             true
         }
+        // The replacement card sits above MiuiVersionCard's original click
+        // target. Forward taps so the stock system-update navigation remains
+        // available while keeping the custom card's visuals independent.
+        setOnClickListener { clickSource?.performClick() }
     }
 
     fun refresh(context: Context, imageScale: Int, cardAuthor: String, logoScale: Int, logoVerticalOffset: Int, imageLogoSpacing: Int, logoTextSpacing: Int, backgroundBlur: Float, backgroundHorizontalOffset: Int, backgroundVerticalOffset: Int, backgroundScale: Int) {

@@ -270,6 +270,7 @@ final class LyricSource {
     /** Portable metadata for the public fallback.  It intentionally has no player-specific keys. */
     private static final class TrackMetadata {
         final String title;
+        final String rawTitle;
         final String artist;
         final String album;
         final long durationSeconds;
@@ -282,6 +283,7 @@ final class LyricSource {
         TrackMetadata(String title, String artist, String album, long durationSeconds,
                       boolean appleMusic) {
             this.title = cleanTitle(title);
+            this.rawTitle = trim(title);
             this.artist = trim(artist);
             this.album = trim(album);
             this.durationSeconds = durationSeconds;
@@ -413,50 +415,71 @@ final class LyricSource {
             return new SourceResult(Collections.<LyricLine>emptyList(), "local library unavailable");
         }
         android.database.Cursor cursor = null;
-        List<LyricLine> best = Collections.emptyList();
-        int bestScore = Integer.MIN_VALUE;
         try {
             android.net.Uri library = android.net.Uri.parse(
                     "content://btm.m.os4.systemuihook.settingsappearance/lyrics");
             cursor = context.getContentResolver().query(library, null, null, null, null);
             if (cursor == null) {
-                return new SourceResult(best, "local library unavailable");
+                return new SourceResult(Collections.<LyricLine>emptyList(), "local library unavailable");
             }
             int idColumn = cursor.getColumnIndex("id");
             int titleColumn = cursor.getColumnIndex("title");
             int artistColumn = cursor.getColumnIndex("artist");
             int aliasesColumn = cursor.getColumnIndex("aliases");
+            final class LocalCandidate {
+                final String id;
+                final int score;
+                LocalCandidate(String id, int score) {
+                    this.id = id;
+                    this.score = score;
+                }
+            }
+            LocalCandidate exactCandidate = null;
+            LocalCandidate fallbackCandidate = null;
+            String wantedTitle = normalize(wanted.rawTitle);
+            String wantedArtist = normalize(wanted.artist);
             while (cursor.moveToNext()) {
                 String id = cursor.getString(idColumn);
                 String artist = normalize(cursor.getString(artistColumn));
-                String wantedArtist = normalize(wanted.artist);
                 if (id == null || artist.isEmpty() || wantedArtist.isEmpty()) continue;
                 int artistMatch = artistMatchLength(artist, wantedArtist);
                 if (artistMatch < requiredArtistMatchLength(artist, wantedArtist)) continue;
 
-                double titleMatch = titleSimilarity(
-                        normalize(cleanTitle(cursor.getString(titleColumn))), normalize(wanted.title));
+                String candidateTitle = normalize(cursor.getString(titleColumn));
+                boolean titleExact = !wantedTitle.isEmpty() && candidateTitle.equals(wantedTitle);
+                double titleMatch = titleSimilarity(candidateTitle, wantedTitle);
                 String aliases = aliasesColumn < 0 ? "" : cursor.getString(aliasesColumn);
                 if (aliases != null && !aliases.trim().isEmpty()) {
                     for (String alias : aliases.split("[,，]")) {
-                        titleMatch = Math.max(titleMatch, titleSimilarity(
-                                normalize(cleanTitle(alias)), normalize(wanted.title)));
+                        String normalizedAlias = normalize(alias);
+                        if (!wantedTitle.isEmpty() && normalizedAlias.equals(wantedTitle)) {
+                            titleExact = true;
+                        }
+                        titleMatch = Math.max(titleMatch, titleSimilarity(normalizedAlias, wantedTitle));
                     }
                 }
                 if (titleMatch < 0.70d) continue;
                 int candidateScore = (int) Math.round(titleMatch * 100)
                         + (artist.equals(wantedArtist) ? 50 : 20 + Math.min(artistMatch, 20));
-                if (candidateScore <= bestScore) continue;
-
-                android.net.Uri file = library.buildUpon().appendPath(id).build();
-                java.io.InputStream input = context.getContentResolver().openInputStream(file);
-                if (input == null) continue;
-                List<LyricLine> parsed = LyricParse.parse(read(input));
-                if (!parsed.isEmpty()) {
-                    best = parsed;
-                    bestScore = candidateScore;
+                LocalCandidate candidate = new LocalCandidate(id, candidateScore);
+                if (titleExact) {
+                    if (exactCandidate == null || candidate.score > exactCandidate.score) {
+                        exactCandidate = candidate;
+                    }
+                } else if (fallbackCandidate == null || candidate.score > fallbackCandidate.score) {
+                    fallbackCandidate = candidate;
                 }
             }
+            LocalCandidate selected = exactCandidate != null ? exactCandidate : fallbackCandidate;
+            if (selected == null) {
+                return new SourceResult(Collections.<LyricLine>emptyList(), "not in local lyric library");
+            }
+            android.net.Uri file = library.buildUpon().appendPath(selected.id).build();
+            java.io.InputStream input = context.getContentResolver().openInputStream(file);
+            if (input == null) {
+                return new SourceResult(Collections.<LyricLine>emptyList(), "not in local lyric library");
+            }
+            List<LyricLine> best = LyricParse.parse(read(input));
             return best.isEmpty()
                     ? new SourceResult(best, "not in local lyric library")
                     : new SourceResult(best, best.size() + " lines from local lyric library");

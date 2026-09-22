@@ -5,6 +5,7 @@ package btm.m.os4.systemuihook
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.database.ContentObserver
 import android.app.KeyguardManager
 import android.content.res.ColorStateList
 import android.content.res.Configuration
@@ -60,6 +61,7 @@ import btm.m.xiaoaihook.SuperXiaoAiInputHook
 import java.util.Collections
 import java.lang.ref.WeakReference
 import java.lang.reflect.Method
+import java.lang.reflect.Proxy
 import java.util.IdentityHashMap
 import java.util.LinkedHashMap
 import java.util.WeakHashMap
@@ -279,6 +281,147 @@ private const val CONTROL_CENTER_POWER_PATH =
 class HyperSystemUiModule : XposedModule() {
     internal fun installHook(member: java.lang.reflect.Executable) = hook(member)
 
+    private var customTileHookInstalled = false
+    private var customPluginTileHookInstalled = false
+    private var customTileRetryScheduled = false
+
+    private fun invokeNoArgResult(target: Any, name: String): Any? = runCatching {
+        target.javaClass.methods.firstOrNull { it.name == name && it.parameterCount == 0 }?.invoke(target)
+    }.getOrNull()
+
+    private fun readContext(target: Any): Context? = runCatching {
+        target.javaClass.methods.firstOrNull { it.name in setOf("getContext", "getMContext") && it.parameterCount == 0 }?.invoke(target) as? Context
+    }.getOrNull() ?: runCatching {
+        generateSequence(target.javaClass as Class<*>?) { it.superclass }
+            .flatMap { it.declaredFields.asSequence() }
+            .firstNotNullOfOrNull { field ->
+                field.isAccessible = true
+                field.get(target) as? Context
+            }
+    }.getOrNull()
+
+    private fun findTileInterface(type: Class<*>): Class<*>? {
+        type.interfaces.forEach { iface ->
+            if (iface.name == "com.android.systemui.plugins.miui.qs.MiuiQSTile") return iface
+            findTileInterface(iface)?.let { return it }
+        }
+        return type.superclass?.let(::findTileInterface)
+    }
+
+    private fun installCustomTileHooks(loader: ClassLoader, prefs: SharedPreferences) {
+        if (customTileHookInstalled) {
+            installPluginTileHook(loader, prefs)
+            return
+        }
+        val factory = runCatching { loader.loadClass("com.android.systemui.qs.tileimpl.MiuiQSFactory") }.getOrNull()
+        if (factory == null) {
+            if (!customTileRetryScheduled) {
+                customTileRetryScheduled = true
+                Handler(Looper.getMainLooper()).postDelayed({
+                    customTileRetryScheduled = false
+                    installCustomTileHooks(loader, prefs)
+                }, 1500L)
+            }
+            return
+        }
+        val create = factory.methods.firstOrNull { it.name == "createTile" && it.parameterTypes.contentEquals(arrayOf(String::class.java)) }
+            ?: return
+        hook(create).setExceptionMode(ExceptionMode.PROTECTIVE).setId("hyperchanger:custom-tiles").intercept { chain ->
+            val spec = chain.getArg(0) as? String
+            if (spec == "custom_5G" || (spec == "custom_GMS" && prefs.getBoolean(KEY_CONTROL_CENTER_GMS_TILE_ENABLED, false))) {
+                injectPluginTile(chain.thisObject, loader, prefs, spec)
+            }
+            chain.proceed()
+        }
+        val pluginInstalled = installPluginTileHook(loader, prefs)
+        hook(Resources::class.java.getMethod("getString", Int::class.javaPrimitiveType))
+            .setExceptionMode(ExceptionMode.PROTECTIVE).setId("hyperchanger:custom-tile-stock").intercept { chain ->
+                val value = chain.proceed()
+                val resources = chain.thisObject as? Resources
+                val id = chain.getArg(0) as? Int
+                val name = runCatching { id?.let { resources?.getResourceEntryName(it) } }.getOrNull()
+                if (value is String && name?.contains("quick_settings_tiles_stock") == true) {
+                    value.split(',').map(String::trim).filter(String::isNotEmpty).toMutableList().apply {
+                        if (prefs.getInt(KEY_CONTROL_CENTER_5G_TILE_MODE, 0) != 0 && "custom_5G" !in this) add("custom_5G")
+                        if (prefs.getBoolean(KEY_CONTROL_CENTER_GMS_TILE_ENABLED, false) && "custom_GMS" !in this) add("custom_GMS")
+                    }.joinToString(",")
+                } else value
+            }
+        customTileHookInstalled = true
+        if (!pluginInstalled && !customTileRetryScheduled) {
+            customTileRetryScheduled = true
+            Handler(Looper.getMainLooper()).postDelayed({
+                customTileRetryScheduled = false
+                installCustomTileHooks(loader, prefs)
+            }, 1500L)
+        }
+    }
+
+    private fun installPluginTileHook(loader: ClassLoader, prefs: SharedPreferences): Boolean {
+        if (customPluginTileHookInstalled) return true
+        return runCatching {
+            val plugin = loader.loadClass("miui.systemui.quicksettings.LocalMiuiQSTilePlugin")
+            val method = plugin.methods.first { it.name == "getAllPluginTiles" && it.parameterCount == 0 }
+            hook(method).setExceptionMode(ExceptionMode.PROTECTIVE).setId("hyperchanger:custom-plugin-tiles").intercept { chain ->
+                val rawMap = chain.proceed()
+                val map = rawMap as? MutableMap<Any?, Any?> ?: return@intercept rawMap
+                val host = map.values.firstOrNull { it != null } ?: return@intercept map
+                val hostLoader = host.javaClass.classLoader ?: loader
+                if (prefs.getInt(KEY_CONTROL_CENTER_5G_TILE_MODE, 0) != 0 && !map.containsKey("custom_5G")) map["custom_5G"] = proxyTile(host, hostLoader, prefs, "custom_5G")
+                if (prefs.getBoolean(KEY_CONTROL_CENTER_GMS_TILE_ENABLED, false) && !map.containsKey("custom_GMS")) map["custom_GMS"] = proxyTile(host, hostLoader, prefs, "custom_GMS")
+                map
+            }
+            customPluginTileHookInstalled = true
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun injectPluginTile(factory: Any?, loader: ClassLoader, prefs: SharedPreferences, spec: String?) = runCatching {
+        val field = generateSequence(factory?.javaClass) { it.superclass }.flatMap { it.declaredFields.asSequence() }.firstOrNull { it.name == "qSTilePluginInteractor" } ?: return@runCatching
+        field.isAccessible = true
+        val interactor = field.get(factory)?.let { invokeNoArgResult(it, "get") } ?: return@runCatching
+        val pluginField = interactor.javaClass.declaredFields.firstOrNull { it.name == "miuiQSTilePlugin" } ?: return@runCatching
+        pluginField.isAccessible = true
+        val map = invokeNoArgResult(pluginField.get(interactor), "getAllPluginTiles") as? MutableMap<Any?, Any?> ?: return@runCatching
+        if (spec == "custom_5G" && !map.containsKey(spec)) map.values.firstOrNull()?.let { map[spec] = proxyTile(it, it.javaClass.classLoader ?: loader, prefs, spec) }
+        if (spec == "custom_GMS" && !map.containsKey(spec)) map.values.firstOrNull()?.let { map[spec] = proxyTile(it, it.javaClass.classLoader ?: loader, prefs, spec) }
+    }
+
+    private fun proxyTile(host: Any, loader: ClassLoader, prefs: SharedPreferences, spec: String): Any {
+        val iface = findTileInterface(host.javaClass) ?: error("MiuiQSTile interface unavailable")
+        val context = readContext(host) ?: systemUiApplicationContext ?: error("tile context unavailable")
+        val state = invokeNoArgResult(host, "getState")?.javaClass?.getDeclaredConstructor()?.apply { isAccessible = true }?.newInstance() ?: error("tile state unavailable")
+        val callbacks = mutableListOf<Any>()
+        fun refresh() {
+            val gms = spec == "custom_GMS"
+            val enabled = if (gms) isGmsEnabled(context) else isUserFiveGEnabled(context)
+            state.javaClass.getField("state").setInt(state, if (enabled) 2 else 1)
+            state.javaClass.getField("label").set(state, if (gms) "Google 服务" else "5G")
+            state.javaClass.getField("contentDescription").set(state, if (gms) "Google 服务" else "5G")
+            val iconClass = runCatching { host.javaClass.classLoader.loadClass("miui.systemui.quicksettings.DrawableIcon") }.getOrElse { loader.loadClass("miui.systemui.quicksettings.DrawableIcon") }
+            val drawable = if (gms) loadTileDrawable(context, R.drawable.ic_control_center_google) else loadTileDrawable(context, when (prefs.getInt(KEY_CONTROL_CENTER_5G_TILE_MODE, 1)) { 2 -> R.drawable.ic_control_center_5g_semibold; 3 -> R.drawable.ic_control_center_5g_black; 4 -> R.drawable.ic_control_center_5g_signal; else -> R.drawable.ic_control_center_5g_regular })
+            state.javaClass.getField("icon").set(state, iconClass.getConstructor(Drawable::class.java).newInstance(drawable))
+            callbacks.toList().forEach { cb -> runCatching { cb.javaClass.methods.firstOrNull { it.name == "onStateChanged" && it.parameterCount == 1 }?.invoke(cb, state) } }
+        }
+        refresh()
+        return Proxy.newProxyInstance(iface.classLoader, arrayOf(iface)) { proxy, method, args -> when (method.name) {
+            "getTileSpec" -> spec; "isAvailable" -> if (spec == "custom_GMS") hasGms(context) else prefs.getInt(KEY_CONTROL_CENTER_5G_TILE_MODE, 0) != 0
+            "getState", "newTileState" -> state; "refreshState" -> { refresh(); null }
+            "addCallback" -> { args?.firstOrNull()?.let { if (it !in callbacks) callbacks += it }; refresh(); null }
+            "removeCallback" -> { args?.firstOrNull()?.let(callbacks::remove); null }
+            "handleClick" -> { if (spec == "custom_GMS") toggleGms(context) else setUserFiveGEnabled(context, !isUserFiveGEnabled(context)); refresh(); null }
+            "getLongClickIntent" -> if (spec == "custom_GMS") Intent().setClassName("com.miui.securitycenter", "com.miui.googlebase.ui.GmsCoreSettings") else Intent().setClassName("com.android.phone", "com.android.phone.settings.MiuiFiveGNetworkSetting")
+            "hashCode" -> System.identityHashCode(proxy); "equals" -> proxy === args?.firstOrNull(); "toString" -> "HyperChanger-$spec"; else -> null
+        } }
+    }
+
+    private fun loadTileDrawable(context: Context, id: Int): Drawable = context.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY).resources.getDrawable(id, null).mutate()
+    private fun hasGms(c: Context) = runCatching { c.packageManager.getPackageInfo("com.google.android.gms", 0); true }.getOrDefault(false)
+    private fun isGmsEnabled(c: Context) = runCatching { c.packageManager.getApplicationEnabledSetting("com.google.android.gms") != android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER }.getOrDefault(false)
+    private fun toggleGms(c: Context) { val next = if (isGmsEnabled(c)) android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER else android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED; listOf("com.google.android.gms", "com.google.android.gsf", "com.android.vending").forEach { runCatching { c.packageManager.setApplicationEnabledSetting(it, next, 0) } } }
+    private fun isUserFiveGEnabled(c: Context) = runCatching { val k = Class.forName("miui.telephony.TelephonyManager"); k.getDeclaredMethod("isUserFiveGEnabled").invoke(k.getDeclaredMethod("getDefault").invoke(null)) as Boolean }.getOrElse { Settings.Global.getInt(c.contentResolver, "fiveg_user_enable", 1) != 0 }
+    private fun setUserFiveGEnabled(c: Context, value: Boolean) { runCatching { val k = Class.forName("miui.telephony.TelephonyManager"); k.getDeclaredMethod("setUserFiveGEnabled", Boolean::class.javaPrimitiveType).invoke(k.getDeclaredMethod("getDefault").invoke(null), value) }.onFailure { Settings.Global.putInt(c.contentResolver, "fiveg_user_enable", if (value) 1 else 0) } }
+
     override fun onPackageLoaded(param: PackageLoadedParam) {
         if (!OsCompatibility.areHooksAllowed()) return
         if (param.packageName == LOCKSCREEN_WALLPAPER) {
@@ -295,6 +438,7 @@ class HyperSystemUiModule : XposedModule() {
             val preferences = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
             when (param.packageName) {
                 SYSTEM_UI, SYSTEM_UI_PLUGIN -> {
+                    installCustomTileHooks(param.defaultClassLoader, preferences)
                     if (param.packageName == SYSTEM_UI) {
                         synchronized(controlCenterButtonsLock) {
                             systemUiClassLoader = param.defaultClassLoader
@@ -334,6 +478,10 @@ class HyperSystemUiModule : XposedModule() {
                     if (param.packageName == SYSTEM_UI_PLUGIN && !dynamicIslandHooksInstalled) {
                         installDynamicIslandHooks(param.defaultClassLoader, preferences)
                         dynamicIslandHooksInstalled = true
+                    }
+                    if (param.packageName == SYSTEM_UI && !mediaSourceIconHooksInstalled) {
+                        installMediaSourceIconHooks(param.defaultClassLoader, preferences)
+                        mediaSourceIconHooksInstalled = true
                     }
                     if (!volumePanelHooksInstalled) {
                         installVolumePanelHooks(param.defaultClassLoader, preferences)
@@ -2749,13 +2897,89 @@ class HyperSystemUiModule : XposedModule() {
     ) {
         installDynamicIslandBackgroundHooks(classLoader, preferences)
         installDynamicIslandLayoutHooks(classLoader, preferences)
+        installDynamicIslandExpandedMaterialHook(classLoader, preferences)
+        installDynamicIslandBottomGlowHook(classLoader, preferences)
         installDynamicIslandSelfBlurHook(classLoader, preferences)
+        installMediaSourceIconHooks(classLoader, preferences)
         installDynamicIslandMiniBarHook(classLoader, preferences)
         if (!focusIslandWhitelistPluginHooksInstalled) {
             focusIslandWhitelistPluginHooksInstalled =
                 installFocusIslandWhitelistPluginHooks(classLoader, preferences)
         }
         log(Log.INFO, TAG, "Installed dynamic-island hooks")
+    }
+
+    private fun installMediaSourceIconHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
+        listOf(
+            Triple(
+                "com.android.systemui.statusbar.notification.mediacontrol.MiuiMediaViewControllerImpl",
+                KEY_HIDE_SYSTEM_MEDIA_SOURCE_ICON,
+                KEY_SYSTEM_MEDIA_INFO_VERTICAL_OFFSET,
+            ),
+            Triple(
+                "com.android.systemui.statusbar.notification.mediaisland.MiuiIslandMediaViewBinderImpl",
+                KEY_HIDE_MEDIA_ISLAND_SOURCE_ICON,
+                KEY_MEDIA_ISLAND_INFO_VERTICAL_OFFSET,
+            ),
+        ).forEach { (className, sourceIconKey, verticalOffsetKey) ->
+            runCatching {
+                val targetClass = classLoader.loadClass(className)
+                val methods = targetClass.declaredMethods.filter {
+                    it.name == "bindMediaData" && it.parameterTypes.size == 1
+                }
+                check(methods.isNotEmpty()) { "$className#bindMediaData not found" }
+                methods.forEachIndexed { index, method ->
+                    method.isAccessible = true
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("media-card-adjustments:$sourceIconKey:$index")
+                        .intercept { chain ->
+                            val result = chain.proceed()
+                            val holder = runCatching {
+                                targetClass.getDeclaredField("holder").apply { isAccessible = true }.get(chain.thisObject)
+                            }.getOrNull()
+                            applyMediaCardAdjustments(holder, sourceIconKey, verticalOffsetKey, preferences)
+                            result
+                        }
+                }
+                log(Log.INFO, TAG, "Installed media source icon hook for $className")
+            }.onFailure { error -> log(Log.WARN, TAG, "Could not install media source icon hook for $className", error) }
+        }
+    }
+
+    private fun applyMediaCardAdjustments(
+        holder: Any?,
+        sourceIconKey: String,
+        verticalOffsetKey: String,
+        preferences: SharedPreferences,
+    ) {
+        if (holder == null) return
+        fun view(fieldName: String): View? = runCatching {
+            holder.javaClass.getDeclaredField(fieldName).apply { isAccessible = true }.get(holder) as? View
+        }.getOrNull()
+
+        if (preferences.getBoolean(sourceIconKey, false)) view("appIcon")?.visibility = View.GONE
+
+        val density = view("player")?.resources?.displayMetrics?.density ?: return
+        val vertical = -preferences.getInt(verticalOffsetKey, 0).coerceIn(-50, 50) * density
+        val spacing = preferences.getInt(KEY_MEDIA_TITLE_ARTIST_SPACING, 0).coerceIn(-30, 30) * density
+        view("titleText")?.translationY = vertical - spacing / 2f
+        view("artistText")?.translationY = vertical + spacing / 2f
+
+        val cornerOffset = preferences.getInt(KEY_MEDIA_COVER_CORNER_RADIUS_OFFSET, 0).coerceIn(-30, 30)
+        if (cornerOffset != 0) {
+            view("albumView")?.let { album ->
+                val baseId = album.resources.getIdentifier("album_art_bg_radius", "dimen", SYSTEM_UI)
+                val baseRadius = if (baseId != 0) album.resources.getDimension(baseId) else 0f
+                val radius = (baseRadius + cornerOffset * density).coerceAtLeast(0f)
+                album.outlineProvider = object : ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: Outline) {
+                        outline.setRoundRect(0, 0, view.width, view.height, radius)
+                    }
+                }
+                album.clipToOutline = true
+                album.invalidateOutline()
+            }
+        }
     }
 
     /**
@@ -3207,16 +3431,7 @@ class HyperSystemUiModule : XposedModule() {
                     .setId("dynamic-island-background-$name")
                     .intercept { chain ->
                         val result = chain.proceed()
-                        runCatching {
-                            if (name == "setDrawable") {
-                                (chain.thisObject as? View)?.let(expandedIslandMaterialSettings::remove)
-                            }
-                            applyExpandedIslandBackground(
-                                chain.thisObject as? View,
-                                preferences,
-                                classLoader,
-                            )
-                        }
+                        runCatching { if (name == "setDrawable") (chain.thisObject as? View)?.let(expandedIslandMaterialSettings::remove) }
                         result
                     }
             }
@@ -3244,11 +3459,6 @@ class HyperSystemUiModule : XposedModule() {
                         .intercept { chain ->
                             val result = chain.proceed()
                             val source = chain.thisObject as? View
-                            applyExpandedIslandBackground(
-                                source?.let(::findDynamicIslandBackground),
-                                preferences,
-                                classLoader,
-                            )
                             result
                         }
                 }
@@ -3273,8 +3483,7 @@ class HyperSystemUiModule : XposedModule() {
                     if (view != null && isDynamicIslandView(view) &&
                         preferences.getBoolean(KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED, false)
                     ) {
-                        val radius = preferences.getInt(KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS, 0)
-                            .coerceIn(0, 200)
+                        val radius = expandedIslandBlurRadius(preferences)
                         chain.proceedWith(chain.thisObject, arrayOf(view, radius, chain.getArg(2)))
                     } else {
                         chain.proceed()
@@ -3286,57 +3495,71 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
+    private fun installDynamicIslandExpandedMaterialHook(classLoader: ClassLoader, preferences: SharedPreferences) {
+        runCatching {
+            val baseClass = classLoader.loadClass(DYNAMIC_ISLAND_BASE_CONTENT_CLASS)
+            val method = baseClass.getDeclaredMethod("updateBackgroundBg", View::class.java, Boolean::class.javaPrimitiveType).apply { isAccessible = true }
+            val tokenField = baseClass.getDeclaredField("EXPANDED_GLASS_TOKEN").apply { isAccessible = true }
+            hook(method).setExceptionMode(ExceptionMode.PROTECTIVE).setId("dynamic-island-expanded-native-material").intercept { chain ->
+                val result = chain.proceed()
+                applyExpandedIslandNativeMaterial(chain.getArg(0) as? View, tokenField.get(null), preferences, classLoader)
+                result
+            }
+            log(Log.INFO, TAG, "Installed 18.3 expanded-island material hook")
+        }.onFailure { log(Log.WARN, TAG, "Could not install 18.3 expanded-island material hook", it) }
+    }
+
+    private fun applyExpandedIslandNativeMaterial(view: View?, token: Any?, preferences: SharedPreferences, classLoader: ClassLoader) {
+        if (view == null || token == null || !preferences.getBoolean(KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED, false)) return
+        val blur = expandedIslandBlurRadius(preferences)
+        val opacity = preferences.getInt(KEY_EXPANDED_ISLAND_BACKGROUND_OPACITY, 97).coerceIn(0, 100)
+        val reflection = preferences.getInt(KEY_EXPANDED_ISLAND_GLASS_REFLECTION, 0).coerceIn(0, 100)
+        val highlight = preferences.getBoolean(KEY_EXPANDED_ISLAND_SHOW_HIGHLIGHT, false)
+        runCatching {
+            val style = classLoader.loadClass(MI_BACKGROUND_STYLE_CLASS)
+            val params = token.javaClass.getMethod("getToBionicsParams").invoke(token) as? FloatArray
+            if (params != null && params.size >= MIN_GLASS_PARAMS_SIZE) {
+                val tuned = params.clone()
+                tuned[GLASS_ALPHA_INDEX] = opacity / 100f
+                view.javaClass.getMethod("setMiGlass", FloatArray::class.java).invoke(view, tuned)
+            }
+            runCatching { view.javaClass.getMethod("setMiBackgroundBlurRadius", Int::class.javaPrimitiveType).invoke(view, blur) }
+            classLoader.loadClass(MIUI_BLUR_UTILS_CLASS).getMethod("setMiGlassBlurRadius", View::class.java, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+                .invoke(null, view, blur, (blur * 10).coerceIn(0, 1200))
+            if (reflection > 0 || highlight) {
+                val bloom = (style.getDeclaredField("defaultBloomStrokeParams").apply { isAccessible = true }.get(null) as FloatArray).clone()
+                if (bloom.size > 1) bloom[1] *= if (reflection > 0) reflection / 100f else 1f
+                style.getMethod("setMiBloomStrokeCompat", View::class.java, FloatArray::class.java).invoke(null, view, bloom)
+            }
+            view.invalidate()
+        }.onFailure { log(Log.DEBUG, TAG, "Could not tune 18.3 expanded-island material", it) }
+    }
+
+    private fun expandedIslandBlurRadius(preferences: SharedPreferences): Int = preferences.getInt(
+        KEY_EXPANDED_ISLAND_BACKGROUND_BLUR_RADIUS,
+        maxOf(preferences.getInt(KEY_EXPANDED_ISLAND_GLASS_BLUR_RADIUS, 40), preferences.getInt(KEY_EXPANDED_ISLAND_GLASS_LARGE_BLUR_RADIUS, 40), preferences.getInt(KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS, 0)),
+    ).coerceIn(0, 120)
+
+    private fun installDynamicIslandBottomGlowHook(classLoader: ClassLoader, preferences: SharedPreferences) {
+        runCatching {
+            val glowClass = classLoader.loadClass(DYNAMIC_ISLAND_GLOW_EFFECT_CLASS)
+            glowClass.declaredMethods.filter { it.name == "startGlowEffect\$miui_dynamicisland_release" || it.name == "setAlphaOfGlowEffect\$miui_dynamicisland_release" }.forEachIndexed { index, method ->
+                hook(method).setExceptionMode(ExceptionMode.PROTECTIVE).setId("dynamic-island-bottom-glow:$index").intercept { chain ->
+                    val result = chain.proceed()
+                    if (preferences.getBoolean(KEY_DISABLE_MEDIA_ISLAND_BOTTOM_GLOW, false) && chain.thisObject?.javaClass?.name == DYNAMIC_ISLAND_EXPANDED_VIEW_CLASS) {
+                        runCatching { chain.thisObject?.javaClass?.getMethod("getMGlowEffectBottomView")?.invoke(chain.thisObject) }.getOrNull()?.let { (it as? View)?.alpha = 0f }
+                    }
+                    result
+                }
+            }
+        }.onFailure { log(Log.WARN, TAG, "Could not install media-island bottom glow hooks", it) }
+    }
+
     private fun applyExpandedIslandBackground(view: View?, preferences: SharedPreferences, classLoader: ClassLoader) {
         if (view == null || !preferences.getBoolean(KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED, false)) return
         if (view.javaClass.name != DYNAMIC_ISLAND_BACKGROUND_CLASS) return
-        val opacity = preferences.getInt(KEY_EXPANDED_ISLAND_BACKGROUND_OPACITY, 35).coerceIn(0, 100)
-        val smallBlur = preferences.getInt(KEY_EXPANDED_ISLAND_GLASS_BLUR_RADIUS, 10).coerceIn(0, 40)
-        val largeBlur = preferences.getInt(KEY_EXPANDED_ISLAND_GLASS_LARGE_BLUR_RADIUS, 10).coerceIn(0, 40)
-        val selfBlur = preferences.getInt(KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS, 0).coerceIn(0, 40)
-        val highlight = preferences.getBoolean(KEY_EXPANDED_ISLAND_SHOW_HIGHLIGHT, false)
-        val configuration = listOf(opacity, smallBlur, largeBlur, selfBlur, highlight).hashCode()
-        if (expandedIslandMaterialSettings[view] == configuration) return
-        val drawable = runCatching {
-            view.javaClass.getMethod("getDrawable").invoke(view) as? Drawable
-        }.getOrNull() ?: view.background
-        drawable?.mutate()?.let { drawableValue ->
-            drawableValue.alpha = opacity * 255 / 100
-        }
-        runCatching {
-            val style = classLoader.loadClass(MI_BACKGROUND_STYLE_CLASS)
-            val instance = style.getField("INSTANCE").get(null)
-            val glassToken = style.getMethod("getDEFAULT_GLASS_TOKEN").invoke(instance)
-            // This public entry point applies the material type and registers the view with
-            // HyperOS's Glass renderer before the lower-level radius parameters are changed.
-            style.methods
-                .first { it.name == "setMiBackgroundStyle" && it.parameterCount == 3 }
-                .invoke(null, view, null, glassToken)
-
-            val blurUtils = classLoader.loadClass(MIUI_BLUR_UTILS_CLASS)
-            blurUtils.getMethod(
-                "setMiGlassBlurRadius",
-                View::class.java,
-                Int::class.javaPrimitiveType,
-                Int::class.javaPrimitiveType,
-            ).invoke(
-                null,
-                view,
-                smallBlur,
-                largeBlur,
-            )
-
-            if (highlight) {
-                val params = style.getDeclaredField("defaultBloomStrokeParams").apply { isAccessible = true }
-                    .get(null) as FloatArray
-                style.getMethod("setMiBloomStrokeCompat", View::class.java, FloatArray::class.java)
-                    .invoke(null, view, params.clone())
-            }
-            view.invalidate()
-            expandedIslandMaterialSettings[view] = configuration
-            log(Log.DEBUG, TAG, "Applied expanded island glass: opacity=$opacity")
-        }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not apply expanded island glass", error)
-        }
+        // alphaAnimation()/scheduleUpdate() owns this drawable's alpha. Expanded Glass is
+        // tuned on DynamicIslandExpandedView so the stock black-to-glass transition survives.
     }
 
     private fun findDynamicIslandBackground(view: View): View? {
@@ -10804,6 +11027,10 @@ class HyperSystemUiModule : XposedModule() {
             (preferences.getInt(KEY_VOLUME_PANEL_GLASS_STRENGTH, 50).coerceIn(0, 100) * 1.2f)
         "big_island_min_width" -> preferences.takeIf { it.getBoolean(KEY_ISLAND_ENABLED, false) }
             ?.getInt(KEY_ISLAND_WIDTH, 108)?.coerceIn(108, 190)?.toFloat()
+        "notification_item_bg_radius" -> preferences.getInt(KEY_NOTIFICATION_CORNER_RADIUS_OFFSET, 0)
+            .coerceIn(-30, 30)
+            .takeIf { it != 0 }
+            ?.let { (originalDp + it).coerceAtLeast(0f) }
         "status_bar_clock_size_new" -> preferences.takeIf { it.getBoolean(KEY_CLOCK_ENABLED, false) }
             ?.getFloat(KEY_CLOCK_SIZE, 14.8f)?.coerceIn(10f, 24f)
         "status_bar_padding_end" -> preferences.takeIf { it.getBoolean(KEY_PADDING_END_ENABLED, false) }
@@ -11200,6 +11427,10 @@ class HyperSystemUiModule : XposedModule() {
         private const val CLOCK_EFFECT_OVERLAY = 2
         private const val CLOCK_EFFECT_GLASS = 5
         private const val DYNAMIC_ISLAND_BACKGROUND_CLASS = "miui.systemui.dynamicisland.DynamicIslandBackgroundView"
+        private const val DYNAMIC_ISLAND_GLOW_EFFECT_CLASS =
+            "miui.systemui.dynamicisland.view.DynamicGlowEffectView"
+        private const val DYNAMIC_ISLAND_EXPANDED_VIEW_CLASS =
+            "miui.systemui.dynamicisland.view.DynamicIslandExpandedView"
         private const val DYNAMIC_ISLAND_BASE_CONTENT_CLASS =
             "miui.systemui.dynamicisland.window.content.DynamicIslandBaseContentView"
         private const val DYNAMIC_ISLAND_CONTENT_CLASS =
@@ -11301,10 +11532,20 @@ class HyperSystemUiModule : XposedModule() {
             "remove_dynamic_island_media_mini_bar_whitelist_limit"
         private const val KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED = "expanded_island_background_enabled"
         private const val KEY_EXPANDED_ISLAND_BACKGROUND_OPACITY = "expanded_island_background_opacity"
+        private const val KEY_EXPANDED_ISLAND_BACKGROUND_BLUR_RADIUS = "expanded_island_background_blur_radius"
+        private const val KEY_EXPANDED_ISLAND_GLASS_REFLECTION = "expanded_island_glass_reflection"
         private const val KEY_EXPANDED_ISLAND_GLASS_BLUR_RADIUS = "expanded_island_glass_blur_radius"
         private const val KEY_EXPANDED_ISLAND_GLASS_LARGE_BLUR_RADIUS = "expanded_island_glass_large_blur_radius"
         private const val KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS = "expanded_island_self_blur_radius"
         private const val KEY_EXPANDED_ISLAND_SHOW_HIGHLIGHT = "expanded_island_show_highlight"
+        private const val KEY_DISABLE_MEDIA_ISLAND_BOTTOM_GLOW = "disable_media_island_bottom_glow"
+        private const val KEY_HIDE_SYSTEM_MEDIA_SOURCE_ICON = "hide_system_media_source_icon"
+        private const val KEY_HIDE_MEDIA_ISLAND_SOURCE_ICON = "hide_media_island_source_icon"
+        private const val KEY_SYSTEM_MEDIA_INFO_VERTICAL_OFFSET = "system_media_info_vertical_offset"
+        private const val KEY_MEDIA_ISLAND_INFO_VERTICAL_OFFSET = "media_island_info_vertical_offset"
+        private const val KEY_MEDIA_TITLE_ARTIST_SPACING = "media_title_artist_spacing"
+        private const val KEY_MEDIA_COVER_CORNER_RADIUS_OFFSET = "media_cover_corner_radius_offset"
+        private const val KEY_NOTIFICATION_CORNER_RADIUS_OFFSET = "notification_corner_radius_offset"
         private const val KEY_NOTIFICATION_CONTEXT_UNIFIED = "notification_context_unified"
         private const val KEY_UNIFY_NOTIFICATION_MATERIAL = "unify_notification_material"
         private const val KEY_NOTIFICATION_ELEMENTS_MATERIAL = "shade_notification_elements_material_v2"
@@ -11518,6 +11759,7 @@ private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_d
         @Volatile private var themeOverrideReady = false
         private var themeActivationScheduled = false
         private var dynamicIslandHooksInstalled = false
+        private var mediaSourceIconHooksInstalled = false
         private var dynamicIslandClassDiscoveryInstalled = false
         private var focusIslandWhitelistSystemUiHooksInstalled = false
         private var focusIslandWhitelistPluginHooksInstalled = false

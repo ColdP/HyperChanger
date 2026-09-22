@@ -121,10 +121,20 @@ data class HookSettings(
     val islandWidth: Int = 108,
     val expandedIslandBackgroundEnabled: Boolean = false,
     val expandedIslandBackgroundOpacity: Int = 97,
+    val expandedIslandBackgroundBlurRadius: Int = 40,
+    val expandedIslandGlassReflection: Int = 0,
     val expandedIslandGlassBlurRadius: Int = 110,
     val expandedIslandGlassLargeBlurRadius: Int = 110,
     val expandedIslandSelfBlurRadius: Int = 0,
     val expandedIslandShowHighlight: Boolean = false,
+    val disableMediaIslandBottomGlow: Boolean = false,
+    val hideSystemMediaSourceIcon: Boolean = false,
+    val hideMediaIslandSourceIcon: Boolean = false,
+    val systemMediaInfoVerticalOffset: Int = 0,
+    val mediaIslandInfoVerticalOffset: Int = 0,
+    val mediaTitleArtistSpacing: Int = 0,
+    val mediaCoverCornerRadiusOffset: Int = 0,
+    val notificationCornerRadiusOffset: Int = 0,
     val keepNotifications: Boolean = false,
     val allowAllNotificationsOnLockscreen: Boolean = false,
     val forceAllNotificationsHeadsUp: Boolean = false,
@@ -269,6 +279,8 @@ data class HookSettings(
     val hideStatusBarClockText: Boolean = false,
     val hideStatusBarNetworkActivity: Boolean = false,
     val hideControlCenterEditButton: Boolean = false,
+    val controlCenter5GTileMode: Int = 0,
+    val controlCenterGmsTileEnabled: Boolean = false,
     val addControlCenterTopButtons: Boolean = false,
     val showControlCenterTopButtonsInLandscape: Boolean = false,
     val controlCenterTopButtonsIconScale: Float = 1f,
@@ -422,10 +434,20 @@ private const val KEY_ISLAND_ENABLED = "island_enabled"
 private const val KEY_ISLAND_WIDTH = "island_width"
 private const val KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED = "expanded_island_background_enabled"
 private const val KEY_EXPANDED_ISLAND_BACKGROUND_OPACITY = "expanded_island_background_opacity"
+private const val KEY_EXPANDED_ISLAND_BACKGROUND_BLUR_RADIUS = "expanded_island_background_blur_radius"
+private const val KEY_EXPANDED_ISLAND_GLASS_REFLECTION = "expanded_island_glass_reflection"
 private const val KEY_EXPANDED_ISLAND_GLASS_BLUR_RADIUS = "expanded_island_glass_blur_radius"
 private const val KEY_EXPANDED_ISLAND_GLASS_LARGE_BLUR_RADIUS = "expanded_island_glass_large_blur_radius"
 private const val KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS = "expanded_island_self_blur_radius"
 private const val KEY_EXPANDED_ISLAND_SHOW_HIGHLIGHT = "expanded_island_show_highlight"
+private const val KEY_DISABLE_MEDIA_ISLAND_BOTTOM_GLOW = "disable_media_island_bottom_glow"
+private const val KEY_HIDE_SYSTEM_MEDIA_SOURCE_ICON = "hide_system_media_source_icon"
+private const val KEY_HIDE_MEDIA_ISLAND_SOURCE_ICON = "hide_media_island_source_icon"
+private const val KEY_SYSTEM_MEDIA_INFO_VERTICAL_OFFSET = "system_media_info_vertical_offset"
+private const val KEY_MEDIA_ISLAND_INFO_VERTICAL_OFFSET = "media_island_info_vertical_offset"
+private const val KEY_MEDIA_TITLE_ARTIST_SPACING = "media_title_artist_spacing"
+private const val KEY_MEDIA_COVER_CORNER_RADIUS_OFFSET = "media_cover_corner_radius_offset"
+private const val KEY_NOTIFICATION_CORNER_RADIUS_OFFSET = "notification_corner_radius_offset"
 internal const val KEY_KEEP_NOTIFICATIONS = "keep_notifications"
 internal const val KEY_ALLOW_ALL_NOTIFICATIONS_ON_LOCKSCREEN = "allow_all_notifications_on_lockscreen"
 internal const val KEY_FORCE_ALL_NOTIFICATIONS_HEADS_UP = "force_all_notifications_heads_up"
@@ -639,6 +661,8 @@ private const val KEY_ADD_CONTROL_CENTER_TOP_BUTTONS = "add_control_center_top_b
 private const val KEY_SHOW_CONTROL_CENTER_TOP_BUTTONS_IN_LANDSCAPE =
     "show_control_center_top_buttons_in_landscape"
 private const val KEY_CONTROL_CENTER_TOP_BUTTONS_ICON_SCALE = "control_center_top_buttons_icon_scale"
+internal const val KEY_CONTROL_CENTER_5G_TILE_MODE = "control_center_5g_tile_mode"
+internal const val KEY_CONTROL_CENTER_GMS_TILE_ENABLED = "control_center_gms_tile_enabled"
 private const val KEY_CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_MODE =
     "control_center_top_buttons_background_mode"
 private const val KEY_CONTROL_CENTER_TOP_BUTTONS_PURE_COLOR =
@@ -850,11 +874,28 @@ private fun SharedPreferences.toSettings(): HookSettings {
     islandEnabled = getBoolean(KEY_ISLAND_ENABLED, false),
     islandWidth = getInt(KEY_ISLAND_WIDTH, 108).coerceIn(108, 190),
     expandedIslandBackgroundEnabled = getBoolean(KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED, false),
-    expandedIslandBackgroundOpacity = getInt(KEY_EXPANDED_ISLAND_BACKGROUND_OPACITY, 35).coerceIn(0, 100),
-    expandedIslandGlassBlurRadius = getInt(KEY_EXPANDED_ISLAND_GLASS_BLUR_RADIUS, 10).coerceIn(0, 40),
-    expandedIslandGlassLargeBlurRadius = getInt(KEY_EXPANDED_ISLAND_GLASS_LARGE_BLUR_RADIUS, 10).coerceIn(0, 40),
-    expandedIslandSelfBlurRadius = getInt(KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS, 0).coerceIn(0, 40),
+    expandedIslandBackgroundOpacity = getInt(KEY_EXPANDED_ISLAND_BACKGROUND_OPACITY, 97).coerceIn(0, 100),
+    expandedIslandBackgroundBlurRadius = getInt(
+        KEY_EXPANDED_ISLAND_BACKGROUND_BLUR_RADIUS,
+        maxOf(
+            getInt(KEY_EXPANDED_ISLAND_GLASS_BLUR_RADIUS, 40),
+            getInt(KEY_EXPANDED_ISLAND_GLASS_LARGE_BLUR_RADIUS, 40),
+            getInt(KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS, 0),
+        ),
+    ).coerceIn(0, 120),
+    expandedIslandGlassReflection = getInt(KEY_EXPANDED_ISLAND_GLASS_REFLECTION, 0).coerceIn(0, 100),
+    expandedIslandGlassBlurRadius = getInt(KEY_EXPANDED_ISLAND_GLASS_BLUR_RADIUS, 40).coerceIn(0, 120),
+    expandedIslandGlassLargeBlurRadius = getInt(KEY_EXPANDED_ISLAND_GLASS_LARGE_BLUR_RADIUS, 40).coerceIn(0, 120),
+    expandedIslandSelfBlurRadius = getInt(KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS, 0).coerceIn(0, 120),
     expandedIslandShowHighlight = getBoolean(KEY_EXPANDED_ISLAND_SHOW_HIGHLIGHT, false),
+    disableMediaIslandBottomGlow = getBoolean(KEY_DISABLE_MEDIA_ISLAND_BOTTOM_GLOW, false),
+    hideSystemMediaSourceIcon = getBoolean(KEY_HIDE_SYSTEM_MEDIA_SOURCE_ICON, false),
+    hideMediaIslandSourceIcon = getBoolean(KEY_HIDE_MEDIA_ISLAND_SOURCE_ICON, false),
+    systemMediaInfoVerticalOffset = getInt(KEY_SYSTEM_MEDIA_INFO_VERTICAL_OFFSET, 0).coerceIn(-50, 50),
+    mediaIslandInfoVerticalOffset = getInt(KEY_MEDIA_ISLAND_INFO_VERTICAL_OFFSET, 0).coerceIn(-50, 50),
+    mediaTitleArtistSpacing = getInt(KEY_MEDIA_TITLE_ARTIST_SPACING, 0).coerceIn(-30, 30),
+    mediaCoverCornerRadiusOffset = getInt(KEY_MEDIA_COVER_CORNER_RADIUS_OFFSET, 0).coerceIn(-30, 30),
+    notificationCornerRadiusOffset = getInt(KEY_NOTIFICATION_CORNER_RADIUS_OFFSET, 0).coerceIn(-30, 30),
     keepNotifications = getBoolean(KEY_KEEP_NOTIFICATIONS, false),
     allowAllNotificationsOnLockscreen = getBoolean(KEY_ALLOW_ALL_NOTIFICATIONS_ON_LOCKSCREEN, false),
     forceAllNotificationsHeadsUp = getBoolean(KEY_FORCE_ALL_NOTIFICATIONS_HEADS_UP, false),
@@ -1135,6 +1176,8 @@ private fun SharedPreferences.toSettings(): HookSettings {
     hideStatusBarClockText = getBoolean(KEY_HIDE_STATUS_BAR_CLOCK_TEXT, false),
     hideStatusBarNetworkActivity = getBoolean(KEY_HIDE_STATUS_BAR_NETWORK_ACTIVITY, false),
     hideControlCenterEditButton = getBoolean(KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON, false),
+    controlCenter5GTileMode = getInt(KEY_CONTROL_CENTER_5G_TILE_MODE, 0).coerceIn(0, 4),
+    controlCenterGmsTileEnabled = getBoolean(KEY_CONTROL_CENTER_GMS_TILE_ENABLED, false),
     addControlCenterTopButtons = getBoolean(KEY_ADD_CONTROL_CENTER_TOP_BUTTONS, false),
     showControlCenterTopButtonsInLandscape = getBoolean(
         KEY_SHOW_CONTROL_CENTER_TOP_BUTTONS_IN_LANDSCAPE,
@@ -1410,10 +1453,20 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putInt(KEY_ISLAND_WIDTH, value.islandWidth)
         .putBoolean(KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED, value.expandedIslandBackgroundEnabled)
         .putInt(KEY_EXPANDED_ISLAND_BACKGROUND_OPACITY, value.expandedIslandBackgroundOpacity)
+        .putInt(KEY_EXPANDED_ISLAND_BACKGROUND_BLUR_RADIUS, value.expandedIslandBackgroundBlurRadius)
+        .putInt(KEY_EXPANDED_ISLAND_GLASS_REFLECTION, value.expandedIslandGlassReflection)
         .putInt(KEY_EXPANDED_ISLAND_GLASS_BLUR_RADIUS, value.expandedIslandGlassBlurRadius)
         .putInt(KEY_EXPANDED_ISLAND_GLASS_LARGE_BLUR_RADIUS, value.expandedIslandGlassLargeBlurRadius)
         .putInt(KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS, value.expandedIslandSelfBlurRadius)
         .putBoolean(KEY_EXPANDED_ISLAND_SHOW_HIGHLIGHT, value.expandedIslandShowHighlight)
+        .putBoolean(KEY_DISABLE_MEDIA_ISLAND_BOTTOM_GLOW, value.disableMediaIslandBottomGlow)
+        .putBoolean(KEY_HIDE_SYSTEM_MEDIA_SOURCE_ICON, value.hideSystemMediaSourceIcon)
+        .putBoolean(KEY_HIDE_MEDIA_ISLAND_SOURCE_ICON, value.hideMediaIslandSourceIcon)
+        .putInt(KEY_SYSTEM_MEDIA_INFO_VERTICAL_OFFSET, value.systemMediaInfoVerticalOffset.coerceIn(-50, 50))
+        .putInt(KEY_MEDIA_ISLAND_INFO_VERTICAL_OFFSET, value.mediaIslandInfoVerticalOffset.coerceIn(-50, 50))
+        .putInt(KEY_MEDIA_TITLE_ARTIST_SPACING, value.mediaTitleArtistSpacing.coerceIn(-30, 30))
+        .putInt(KEY_MEDIA_COVER_CORNER_RADIUS_OFFSET, value.mediaCoverCornerRadiusOffset.coerceIn(-30, 30))
+        .putInt(KEY_NOTIFICATION_CORNER_RADIUS_OFFSET, value.notificationCornerRadiusOffset.coerceIn(-30, 30))
         .putBoolean(KEY_KEEP_NOTIFICATIONS, value.keepNotifications)
         .putBoolean(KEY_ALLOW_ALL_NOTIFICATIONS_ON_LOCKSCREEN, value.allowAllNotificationsOnLockscreen)
         .putBoolean(KEY_FORCE_ALL_NOTIFICATIONS_HEADS_UP, value.forceAllNotificationsHeadsUp)
@@ -1658,6 +1711,8 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putBoolean(KEY_HIDE_STATUS_BAR_CLOCK_TEXT, value.hideStatusBarClockText)
         .putBoolean(KEY_HIDE_STATUS_BAR_NETWORK_ACTIVITY, value.hideStatusBarNetworkActivity)
         .putBoolean(KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON, value.hideControlCenterEditButton)
+        .putInt(KEY_CONTROL_CENTER_5G_TILE_MODE, value.controlCenter5GTileMode.coerceIn(0, 4))
+        .putBoolean(KEY_CONTROL_CENTER_GMS_TILE_ENABLED, value.controlCenterGmsTileEnabled)
         .putBoolean(KEY_ADD_CONTROL_CENTER_TOP_BUTTONS, value.addControlCenterTopButtons)
         .putBoolean(
             KEY_SHOW_CONTROL_CENTER_TOP_BUTTONS_IN_LANDSCAPE,

@@ -183,7 +183,14 @@ object SettingsAppearanceApplier {
                         old.view.refresh(context, source.tutorialCardImageScale, source.tutorialCardAuthor, source.tutorialCardLogoScale, source.tutorialCardLogoVerticalOffset, source.tutorialCardImageLogoSpacing, source.tutorialCardTextSpacing, source.tutorialCardBackgroundBlur, source.tutorialCardBackgroundHorizontalOffset, source.tutorialCardBackgroundVerticalOffset, source.tutorialCardBackgroundScale)
                     } else {
                         old?.remove()
-                        val card = TutorialDeviceCardView(context, source, logo, background, root.findViewById<View>(context.resources.getIdentifier("miui_version_text", "id", context.packageName)))
+                        val card = TutorialDeviceCardView(
+                            context,
+                            source,
+                            logo,
+                            background,
+                            root.findViewById<View>(context.resources.getIdentifier("miui_version_text", "id", context.packageName)),
+                            spacer ?: target,
+                        )
                         target.addView(card, tutorialCardLayoutParams(context))
                         val session = TutorialCardSession(target, spacer, spacer?.layoutParams, animationSource, card, key)
                         session.enforceTutorialLayout(context)

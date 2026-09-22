@@ -339,7 +339,13 @@ public class Main extends XposedModule {
      *  hidden flag and bring the old wallpaper's subject back over the album cover. Cover mode
      *  is a property of the phone, not of this process, so it has to outlive the process. */
     private static Context sAppCtx;
-    private static final String STATE_FILE = "mc_cover_state";
+    /**
+     * HyperChanger has to keep its state separate from the standalone HyperMusicCover module.
+     * Both modules run in SystemUI, so a filename alone is otherwise a shared global resource.
+     */
+    private static final String STATE_FILE = "hyperchanger_mc_cover_state";
+    /** The pre-namespace file used by older HyperChanger builds. Never write this file again. */
+    private static final String LEGACY_STATE_FILE = "mc_cover_state";
 
     static Context appContext() {
         return sAppCtx;
@@ -446,6 +452,12 @@ public class Main extends XposedModule {
      * dismissing the card by hand still feels immediate.
      */
     private static final long CARD_GONE_MS = 600L;
+    /**
+     * A media app can briefly expose an empty session list while handing a track to another
+     * player. Confirm the list is still empty before resetting an explicitly selected music
+     * presentation, otherwise that transition would flash the lockscreen back to stock.
+     */
+    private static final long SESSIONS_GONE_MS = 700L;
     /** What the pushed wallpaper currently shows, so a metadata storm pushes it only once. */
     private static volatile String sTrackKey = "";
     private static MediaSessionManager sMsm;
@@ -1519,6 +1531,17 @@ public class Main extends XposedModule {
     private static void loadState() {
         if (sAppCtx == null) return;
         java.io.File f = new java.io.File(sAppCtx.getFilesDir(), STATE_FILE);
+        boolean migratingLegacy = false;
+        if (!f.exists()) {
+            // Preserve settings from versions that shared mc_cover_state with HyperMusicCover.
+            // Read it once, then save only to the namespaced file. The legacy file belongs to
+            // the other module now and must not be deleted or rewritten during an upgrade.
+            java.io.File legacy = new java.io.File(sAppCtx.getFilesDir(), LEGACY_STATE_FILE);
+            if (legacy.exists()) {
+                f = legacy;
+                migratingLegacy = true;
+            }
+        }
         if (!f.exists()) {
             resetMusicPresentation("process start without state", false);
             return;
@@ -1600,6 +1623,12 @@ public class Main extends XposedModule {
         // Always start from the single normal-lockscreen baseline and invalidate any delayed art
         // push left over from restoring the state file.
         resetMusicPresentation("process start", false);
+        if (migratingLegacy) {
+            // Complete the one-way migration after parsing. This writes the exact settings that
+            // HyperChanger understands to its private file and leaves HyperMusicCover's legacy
+            // file untouched for its own upgrade path.
+            saveState();
+        }
     }
 
     private static synchronized void registerReceiver(Context ctx) {
@@ -1755,6 +1784,11 @@ public class Main extends XposedModule {
                         // it first guarantees the stock lockscreen is restored with no lyric view
                         // surviving the cover exit.
                         boolean on = i.getBooleanExtra("on", true);
+                        // Lyrics mode deliberately keeps automatic cover entry disabled, but it
+                        // still needs the active-session listener: a player can be force-closed
+                        // without sending the media-card removal callback, and the empty session
+                        // list is then the only reliable signal that its wallpaper must be cleared.
+                        if (on) startSessionWatch();
                         MediaController lyricController = on ? pickController(c) : sWatched;
                         if (on) sTrackKey = trackKey(lyricController);
                         LockLyrics.setEnabled(on, sTrackKey, lyricController);
@@ -9928,6 +9962,14 @@ public class Main extends XposedModule {
         }
         Xp.log(TAG + "media card " + (showing ? "-> " + sCardKey : "gone"));
         main().removeCallbacks(sCardGone);
+        if (showing) {
+            main().removeCallbacks(sSessionsGone);
+        } else if (!sAuto) {
+            // Some MIUI builds update the media card before notifying
+            // MediaSessionManager. Give the session list the same short grace period so a
+            // genuine app close is still handled even when that listener is late or absent.
+            main().postDelayed(sSessionsGone, CARD_GONE_MS);
+        }
         if (!sAuto) {
             sCardShowing = showing;
             // Automatic mode is intentionally disabled by the gesture bridge, but an explicit
@@ -9956,6 +9998,20 @@ public class Main extends XposedModule {
         public void run() {
             sCardShowing = false;
             applyCardState();
+        }
+    };
+
+    private static final Runnable sSessionsGone = new Runnable() {
+        @Override
+        public void run() {
+            if (!sCoverMode && !sStyle2Mode) return;
+            List<MediaController> sessions = activeSessions();
+            if (sessions != null && sessions.isEmpty()) {
+                // The card callback is not guaranteed when the owning app is force-closed.
+                // Resetting through this funnel also sends the wallpaper-side "off" command
+                // and returns the lyric presentation bridge to the stock media state.
+                resetMusicPresentation("media sessions gone", true);
+            }
         }
     };
 
@@ -10049,6 +10105,12 @@ public class Main extends XposedModule {
                 sSessionsCb = new MediaSessionManager.OnActiveSessionsChangedListener() {
                     @Override
                     public void onActiveSessionsChanged(List<MediaController> controllers) {
+                        if (controllers == null || controllers.isEmpty()) {
+                            main().removeCallbacks(sSessionsGone);
+                            main().postDelayed(sSessionsGone, SESSIONS_GONE_MS);
+                        } else {
+                            main().removeCallbacks(sSessionsGone);
+                        }
                         // The one moment the list is handed over for free, and the only evidence
                         // there is while the card hook has still not fired in this process. The
                         // last session ending is what the card going away looks like from here.

@@ -62,6 +62,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -93,6 +94,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.viewinterop.AndroidView
@@ -199,7 +201,7 @@ private val LocalLanguageChanged = compositionLocalOf<() -> Unit> { {} }
 val LocalDialogBackdrop = compositionLocalOf<Backdrop?> { null }
 private var activeLanguageStrings by mutableStateOf<Map<String, String>>(emptyMap())
 
-private fun tr(key: String, fallback: String): String =
+internal fun tr(key: String, fallback: String): String =
     activeLanguageStrings[key] ?: activeLanguageStrings[fallback] ?: fallback
 
 private fun systemLanguage(context: android.content.Context): String = runCatching {
@@ -281,6 +283,10 @@ private fun Root(
     var languageRevision by remember { mutableIntStateOf(0) }
     var userPresets by remember { mutableStateOf(hooks.userShadePresets()) }
     val context = LocalContext.current
+    val oobePreferences = remember { context.getSharedPreferences("oobe", Context.MODE_PRIVATE) }
+    var showOobe by remember {
+        mutableStateOf(oobePreferences.getLong("completed_version", -1L) != BuildConfig.VERSION_CODE.toLong())
+    }
     val musicStore = remember(context) { MusicControlSettingsStore(context) }
     var musicWhitelist by remember { mutableStateOf(musicStore.apps) }
     fun importAppearance(slot: String, uri: Uri?) {
@@ -500,6 +506,30 @@ private fun Root(
         CompositionLocalProvider(
             LocalLanguageChanged provides { languageRevision++ },
         ) {
+        AnimatedContent(
+            targetState = showOobe,
+            transitionSpec = {
+                if (targetState) {
+                    (slideInHorizontally(tween(520, easing = FastOutSlowInEasing)) { -it / 3 } + fadeIn(tween(380)) + scaleIn(tween(520), initialScale = .975f)) togetherWith
+                        (slideOutHorizontally(tween(420, easing = FastOutSlowInEasing)) { it / 7 } + fadeOut(tween(320)) + scaleOut(tween(420), targetScale = .985f))
+                } else {
+                    (slideInHorizontally(tween(560, easing = FastOutSlowInEasing)) { it / 7 } + fadeIn(tween(420)) + scaleIn(tween(560), initialScale = .985f)) togetherWith
+                        (slideOutHorizontally(tween(460, easing = FastOutSlowInEasing)) { -it / 3 } + fadeOut(tween(360)) + scaleOut(tween(460), targetScale = .975f))
+                }
+            },
+            label = "oobeRootTransition",
+            modifier = Modifier.fillMaxSize().background(MiuixTheme.colorScheme.surface),
+        ) { oobeVisible ->
+        if (oobeVisible) {
+            OobeFlow(
+                serviceConnected = service != null,
+                onLanguageChanged = { languageRevision++ },
+                onFinished = {
+                    oobePreferences.edit().putLong("completed_version", BuildConfig.VERSION_CODE.toLong()).apply()
+                    showOobe = false
+                },
+            )
+        } else {
         Shell(
             settings, cameraSettings, deviceProfile, appearance, musicWhitelist, service,
             update = { transform -> hooks.update(service, transform); settings = hooks.settings },
@@ -595,6 +625,7 @@ private fun Root(
                     requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
                 }
             },
+            onEnterOobe = { showOobe = true },
         )
         qrShareRequest?.let { request ->
             QrShareDialog(
@@ -605,6 +636,8 @@ private fun Root(
                     saveQrPreset.launch("${request.name}.png")
                 },
             )
+        }
+        }
         }
     }
 }
@@ -663,6 +696,7 @@ private fun Shell(
     onPickAppearanceLogo: () -> Unit,
     onClearAppearanceLogo: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
+    onEnterOobe: () -> Unit,
 ) {
     val context = LocalContext.current
     var tab by rememberSaveable { mutableStateOf(Tab.CATEGORY) }
@@ -736,7 +770,17 @@ private fun Shell(
         // The backdrop must only record page content. Recording the navigation that consumes it
         // creates a RenderNode cycle and crashes HyperOS's RenderThread.
         Box(Modifier.fillMaxSize().layerBackdrop(backdrop)) {
-            when (tab) {
+            AnimatedContent(
+                targetState = tab,
+                transitionSpec = {
+                    val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
+                    (slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { direction * it / 7 } + fadeIn(tween(210)) + scaleIn(tween(280), initialScale = .985f)) togetherWith
+                        (slideOutHorizontally(tween(230, easing = FastOutSlowInEasing)) { -direction * it / 3 } + fadeOut(tween(180)) + scaleOut(tween(230), targetScale = .975f))
+                },
+                label = "mainTabNavigation",
+                modifier = Modifier.fillMaxSize().background(MiuixTheme.colorScheme.surface),
+            ) { currentTab ->
+            when (currentTab) {
                 Tab.CATEGORY -> CategoryHome(
                     connected = service != null,
                     open = openRootPage,
@@ -750,6 +794,7 @@ private fun Shell(
                     onExportModulePreset,
                 )
             }
+        }
         }
         BottomBar(tab, { tab = it }, settings, backdrop, Modifier.align(Alignment.BottomCenter))
         AnimatedVisibility(
@@ -827,6 +872,7 @@ private fun Shell(
                 onDismiss = { showDebug = false },
                 onNonHyperOs4 = { showDebug = false; debugPreview = "non4" },
                 onNonHyperOs = { showDebug = false; debugPreview = "empty" },
+                onEnterOobe = { showDebug = false; onEnterOobe() },
             )
         }
     }
@@ -3664,16 +3710,6 @@ private fun Island(
                         update { it.copy(removeFocusAndIslandWhitelistLimit = value) }
                     },
                 )
-                SwitchPreference(
-                    title = tr(
-                        "removeDynamicIslandMediaMiniBarWhitelistLimit",
-                        "\u53bb\u9664\u5a92\u4f53\u63a7\u4ef6\u4e0b\u62c9\u6761\u767d\u540d\u5355\u9650\u5236",
-                    ),
-                    checked = s.removeDynamicIslandMediaMiniBarWhitelistLimit,
-                    onCheckedChange = { value ->
-                        update { it.copy(removeDynamicIslandMediaMiniBarWhitelistLimit = value) }
-                    },
-                )
                 SwitchPreference(title = tr("\u81ea\u5b9a\u4e49\u8d85\u7ea7\u5c9b\u957f\u5ea6", "\u81ea\u5b9a\u4e49\u8d85\u7ea7\u5c9b\u957f\u5ea6"), checked = s.islandEnabled, onCheckedChange = { v -> update { it.copy(islandEnabled = v) } })
                 if (s.islandEnabled) IntSlide(tr("\u6700\u5c0f\u5bbd\u5ea6", "\u6700\u5c0f\u5bbd\u5ea6"), s.islandWidth, 108..190, defaultValue = 108) { v -> update { it.copy(islandWidth = v) } }
             }
@@ -3710,14 +3746,11 @@ private fun Island(
                         ParameterIntSlide(tr("\u80cc\u666f\u4e0d\u900f\u660e\u5ea6", "\u80cc\u666f\u4e0d\u900f\u660e\u5ea6"), s.expandedIslandBackgroundOpacity, 0..100, "%", defaultValue = 97) { value ->
                             update { it.copy(expandedIslandBackgroundOpacity = value) }
                         }
-                        ParameterIntSlide(tr("Glass \u5c0f\u6a21\u7cca\u534a\u5f84", "Glass \u5c0f\u6a21\u7cca\u534a\u5f84"), s.expandedIslandGlassBlurRadius, 0..40, " px", defaultValue = 40) { value ->
-                            update { it.copy(expandedIslandGlassBlurRadius = value) }
+                        ParameterIntSlide(tr("\u80cc\u666f\u6a21\u7cca\u5ea6", "\u80cc\u666f\u6a21\u7cca\u5ea6"), s.expandedIslandBackgroundBlurRadius, 0..120, " px", defaultValue = 40) { value ->
+                            update { it.copy(expandedIslandBackgroundBlurRadius = value) }
                         }
-                        ParameterIntSlide(tr("Glass \u5927\u6a21\u7cca\u534a\u5f84", "Glass \u5927\u6a21\u7cca\u534a\u5f84"), s.expandedIslandGlassLargeBlurRadius, 0..40, " px", defaultValue = 40) { value ->
-                            update { it.copy(expandedIslandGlassLargeBlurRadius = value) }
-                        }
-                        ParameterIntSlide(tr("\u81ea\u6a21\u7cca\u5f3a\u5ea6", "\u81ea\u6a21\u7cca\u5f3a\u5ea6"), s.expandedIslandSelfBlurRadius, 0..40, " px", defaultValue = 0) { value ->
-                            update { it.copy(expandedIslandSelfBlurRadius = value) }
+                        ParameterIntSlide(tr("\u73bb\u7483\u53cd\u5c04\u5f3a\u5ea6", "\u73bb\u7483\u53cd\u5c04\u5f3a\u5ea6"), s.expandedIslandGlassReflection, 0..100, "%", defaultValue = 0) { value ->
+                            update { it.copy(expandedIslandGlassReflection = value) }
                         }
                         SwitchPreference(
                             title = tr("\u663e\u793a\u9ad8\u5149", "\u663e\u793a\u9ad8\u5149"),
@@ -3729,7 +3762,7 @@ private fun Island(
             }
         }
         item {
-            Group(tr("\u901a\u77e5\u80cc\u666f\u6750\u8d28", "\u901a\u77e5\u80cc\u666f\u6750\u8d28")) {
+            Group(tr("notification_background_adjustments", "通知背景调整")) {
                 SwitchPreference(
                     title = tr("\u7edf\u4e00\u901a\u77e5\u80cc\u666f\u6750\u8d28", "\u7edf\u4e00\u901a\u77e5\u80cc\u666f\u6750\u8d28"),
                     checked = s.unifyNotificationMaterial,
@@ -3744,6 +3777,9 @@ private fun Island(
                         update { it.copy(headsUpNotificationSoftGlass = enabled) }
                     },
                 )
+                IntSlide(tr("notification_corner_radius_offset", "调整通知圆角大小"), s.notificationCornerRadiusOffset, -30..30, defaultValue = 0) { value ->
+                    update { it.copy(notificationCornerRadiusOffset = value) }
+                }
             }
         }
         item {
@@ -3777,6 +3813,42 @@ private fun Island(
                     title = tr("\u7981\u6b62\u6298\u53e0\u4e3a\u5386\u53f2\u901a\u77e5", "\u7981\u6b62\u6298\u53e0\u4e3a\u5386\u53f2\u901a\u77e5"),
                     checked = s.disableNotificationHistoryFolding,
                     onCheckedChange = { value -> update { it.copy(disableNotificationHistoryFolding = value) } },
+                )
+            }
+        }
+        item {
+            Group(tr("media_card_adjustments", "媒体卡片调整")) {
+                SwitchPreference(
+                    title = tr("removeDynamicIslandMediaMiniBarWhitelistLimit", "去除媒体控件下拉条白名单限制"),
+                    checked = s.removeDynamicIslandMediaMiniBarWhitelistLimit,
+                    onCheckedChange = { value -> update { it.copy(removeDynamicIslandMediaMiniBarWhitelistLimit = value) } },
+                )
+                SwitchPreference(
+                    title = tr("hide_system_media_source_icon", "隐藏系统媒体通知来源图标"),
+                    checked = s.hideSystemMediaSourceIcon,
+                    onCheckedChange = { value -> update { it.copy(hideSystemMediaSourceIcon = value) } },
+                )
+                SwitchPreference(
+                    title = tr("hide_media_island_source_icon", "隐藏媒体超级岛来源图标"),
+                    checked = s.hideMediaIslandSourceIcon,
+                    onCheckedChange = { value -> update { it.copy(hideMediaIslandSourceIcon = value) } },
+                )
+                IntSlide(tr("system_media_info_vertical_offset", "调整系统媒体通知歌曲信息行垂直定位"), s.systemMediaInfoVerticalOffset, -50..50, defaultValue = 0) { value ->
+                    update { it.copy(systemMediaInfoVerticalOffset = value) }
+                }
+                IntSlide(tr("media_island_info_vertical_offset", "调整超级岛歌曲信息行垂直定位"), s.mediaIslandInfoVerticalOffset, -50..50, defaultValue = 0) { value ->
+                    update { it.copy(mediaIslandInfoVerticalOffset = value) }
+                }
+                IntSlide(tr("media_title_artist_spacing", "媒体标题与艺术家行间距"), s.mediaTitleArtistSpacing, -30..30, defaultValue = 0) { value ->
+                    update { it.copy(mediaTitleArtistSpacing = value) }
+                }
+                IntSlide(tr("media_cover_corner_radius_offset", "调整媒体封面圆角大小"), s.mediaCoverCornerRadiusOffset, -30..30, defaultValue = 0) { value ->
+                    update { it.copy(mediaCoverCornerRadiusOffset = value) }
+                }
+                SwitchPreference(
+                    title = tr("关闭媒体超级岛底部的氛围光感", "关闭媒体超级岛底部的氛围光感"),
+                    checked = s.disableMediaIslandBottomGlow,
+                    onCheckedChange = { value -> update { it.copy(disableMediaIslandBottomGlow = value) } },
                 )
             }
         }
@@ -3828,6 +3900,23 @@ private fun Status(
         }
         item {
             Group(tr("\u63a7\u5236\u4e2d\u5fc3", "\u63a7\u5236\u4e2d\u5fc3")) {
+                OverlayDropdownPreference(
+                    title = tr("控制中心 5G 开关磁贴", "控制中心 5G 开关磁贴"),
+                    items = listOf(
+                        tr("隐藏", "隐藏"),
+                        tr("字重 Regular", "字重 Regular"),
+                        tr("字重 Semi Bold", "字重 Semi Bold"),
+                        tr("字重 Black", "字重 Black"),
+                        tr("图形", "图形"),
+                    ),
+                    selectedIndex = s.controlCenter5GTileMode.coerceIn(0, 4),
+                    onSelectedIndexChange = { value -> update { it.copy(controlCenter5GTileMode = value) } },
+                )
+                SwitchPreference(
+                    title = tr("控制中心添加 Google 服务磁贴", "控制中心添加 Google 服务磁贴"),
+                    checked = s.controlCenterGmsTileEnabled,
+                    onCheckedChange = { value -> update { it.copy(controlCenterGmsTileEnabled = value) } },
+                )
                 SwitchPreference(
                     title = tr("\u63a7\u5236\u4e2d\u5fc3\u9690\u85cf\u5e95\u90e8\u7f16\u8f91\u6309\u94ae", "\u63a7\u5236\u4e2d\u5fc3\u9690\u85cf\u5e95\u90e8\u7f16\u8f91\u6309\u94ae"),
                     checked = s.hideControlCenterEditButton,
@@ -7103,7 +7192,7 @@ private fun installDownloadedApk(context: Context, downloadId: Long): Boolean = 
 }.getOrDefault(false)
 
 @Composable
-private fun UpdateToolbarButton(
+internal fun UpdateToolbarButton(
     onClick: () -> Unit,
     text: String,
     modifier: Modifier = Modifier,
@@ -7128,7 +7217,7 @@ private fun UpdateToolbarButton(
         InteractiveHighlight(animationScope) { size, offset -> Offset(offset.x.coerceIn(0f, size.width), offset.y.coerceIn(0f, size.height)) }
     }
     val shape = RoundedCornerShape(50.dp)
-    val tint = if (primary) ComposeColor(0xFF1976D2).copy(alpha = .88f) else MiuixTheme.colorScheme.surfaceContainer.copy(alpha = .82f)
+    val tint = if (primary) ComposeColor(0xFF0088FF).copy(alpha = .92f) else MiuixTheme.colorScheme.surfaceContainer.copy(alpha = .82f)
     Box(
         modifier.height(48.dp)
             .then(if (enabled) highlight.gestureModifier else Modifier)
@@ -7244,24 +7333,25 @@ private fun UpdateLog(back: () -> Unit) {
 }
 
 @Composable
-private fun About(back: () -> Unit, openPage: (PageId) -> Unit, onDebugMode: () -> Unit) = AppPage(tr("\u5173\u4e8e", "\u5173\u4e8e"), back) { padding, scroll ->
+private fun aboutCardColors() = CardDefaults.defaultColors(
+    MiuixTheme.colorScheme.surfaceContainer.copy(
+        alpha = if (MiuixTheme.colorScheme.surface.luminance() < .5f) .60f else .65f,
+    ),
+)
+
+@Composable
+private fun About(back: () -> Unit, openPage: (PageId) -> Unit, onDebugMode: () -> Unit) = AppPage(tr("\u5173\u4e8e", "\u5173\u4e8e"), back, showLargeTitle = false, pageBackground = { AboutMaterialBackground(Modifier.matchParentSize()) }) { padding, scroll ->
     val context = LocalContext.current
     var iconTaps by remember { mutableIntStateOf(0) }
-    AppList(padding, scroll, 28) {
+    val listState = rememberLazyListState()
+    val fadeDistancePx = with(LocalDensity.current) { 520.dp.toPx() }
+    val fade by remember { derivedStateOf { (listState.firstVisibleItemScrollOffset / fadeDistancePx).coerceIn(0f, 1f) } }
+    LazyColumn(Modifier.fillMaxSize().nestedScroll(scroll.nestedScrollConnection), state = listState, contentPadding = PaddingValues(16.dp, padding.calculateTopPadding() + 4.dp, 16.dp, padding.calculateBottomPadding() + 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(18.dp)) {
-                Image(painterResource(R.drawable.ic_hyperchanger_full), "HyperChanger", Modifier.size(72.dp).clickable {
-                    iconTaps++
-                    if (iconTaps >= 10) { iconTaps = 0; onDebugMode() }
-                }, contentScale = ContentScale.Fit)
-                Text("HyperChanger", style = MiuixTheme.textStyles.title1, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 14.dp))
-                Text(tr("\u4e00\u4e2a\u4e34\u65f6\u7528\u4e8e\u89e3\u9501\u5c0f\u7c73\u6f8e\u6e43 OS 4 Beta \u7248\u9650\u5236\u7684\u6a21\u5757\u3002", "\u4e00\u4e2a\u4e34\u65f6\u7528\u4e8e\u89e3\u9501\u5c0f\u7c73\u6f8e\u6e43 OS 4 Beta \u7248\u9650\u5236\u7684\u6a21\u5757\u3002"), style = MiuixTheme.textStyles.body1, modifier = Modifier.padding(top = 6.dp))
-                Box(Modifier.fillMaxWidth().padding(vertical = 14.dp).height(1.dp).background(MiuixTheme.colorScheme.outline.copy(alpha = .22f)))
-                Text(BuildConfig.VERSION_NAME, style = MiuixTheme.textStyles.body2)
-            }
+            AboutAdvancedMaterialHeader { iconTaps++; if (iconTaps >= 10) { iconTaps = 0; onDebugMode() } }
         }
         item {
-            Group(tr("\u5f00\u53d1\u8005", "\u5f00\u53d1\u8005")) {
+            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, colors = aboutCardColors()) {
                 Row(Modifier.fillMaxWidth().clickable { openUrl(context, "https://btm-m.site") }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                     Image(painterResource(R.drawable.btm_m_avatar), "btm_m", Modifier.size(52.dp).clip(androidx.compose.foundation.shape.CircleShape), contentScale = ContentScale.Crop)
                     Column(Modifier.padding(start = 14.dp).weight(1f)) {
@@ -7273,7 +7363,7 @@ private fun About(back: () -> Unit, openPage: (PageId) -> Unit, onDebugMode: () 
             }
         }
         item {
-            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, colors = aboutCardColors()) {
                 ArrowPreference(title = tr("license", "LICENSE"), summary = "Apache License 2.0", onClick = { openPage(PageId.LICENSE) })
                 ArrowPreference(title = tr("githubRepository", "GitHub Repository"), summary = "github.com/ColdP/HyperChanger", onClick = { openUrl(context, "https://github.com/ColdP/HyperChanger") })
                 ArrowPreference(title = tr("telegramGroup", "Telegram 群组"), summary = "t.me/HyperChanger", onClick = { openUrl(context, "https://t.me/HyperChanger") })
@@ -7316,10 +7406,12 @@ private fun DebugModeDialog(
     onDismiss: () -> Unit,
     onNonHyperOs4: () -> Unit,
     onNonHyperOs: () -> Unit,
+    onEnterOobe: () -> Unit,
 ) {
     WindowDialog(show = true, onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("调试模式", style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
+            GlassDialogButton(onClick = onEnterOobe, modifier = Modifier.fillMaxWidth()) { Text(tr("进入 OOBE", "进入 OOBE")) }
             GlassDialogButton(onClick = onNonHyperOs4, modifier = Modifier.fillMaxWidth()) { Text("非 HyperOS 4 弹窗") }
             GlassDialogButton(onClick = onNonHyperOs, modifier = Modifier.fillMaxWidth()) { Text("非 HyperOS 弹窗") }
             GlassDialogButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("取消") }
@@ -7444,10 +7536,14 @@ private fun ContributorCard(contributor: Contributor) {
         value = withContext(Dispatchers.IO) { loadContributorAvatar(contributor.avatarUrl) }
     }
     val description = contributorDescription(context, contributor.descriptions)
-    val cardModifier = Modifier.fillMaxWidth().then(
-        if (contributor.githubLink.isNotBlank()) Modifier.clickable { openUrl(context, contributor.githubLink) } else Modifier
-    )
-    Card(cardModifier, cornerRadius = 22.5.dp, insideMargin = PaddingValues(14.dp)) {
+    val clickable = contributor.githubLink.isNotBlank()
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        cornerRadius = 22.5.dp,
+        insideMargin = PaddingValues(14.dp),
+        onClick = if (clickable) ({ openUrl(context, contributor.githubLink) }) else null,
+        showIndication = clickable,
+    ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier.size(52.dp).clip(CircleShape).background(MiuixTheme.colorScheme.surfaceVariant),
@@ -7522,12 +7618,30 @@ private fun OpenSource(back: () -> Unit) = AppPage(tr("\u5f00\u6e90\u4ee3\u7801\
     AppList(padding, scroll, 28) {
         item { Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(16.dp)) { Text(tr("HyperChanger \u4f7f\u7528\u4e86\u4ee5\u4e0b\u5f00\u6e90\u9879\u76ee\u3002\u611f\u8c22\u6240\u6709\u9879\u76ee\u4f5c\u8005\u4e0e\u8d21\u732e\u8005\u3002", "HyperChanger \u4f7f\u7528\u4e86\u4ee5\u4e0b\u5f00\u6e90\u9879\u76ee\u3002\u611f\u8c22\u6240\u6709\u9879\u76ee\u4f5c\u8005\u4e0e\u8d21\u732e\u8005\u3002"), style = MiuixTheme.textStyles.body1) } }
         item { SmallTitle(tr("\u754c\u9762\u3001\u529f\u80fd\u4e0e\u5e73\u53f0", "\u754c\u9762\u3001\u529f\u80fd\u4e0e\u5e73\u53f0"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp)) }
-        items(projects.size) { i -> val item = projects[i]; Card(Modifier.fillMaxWidth().clickable { openUrl(context, item.url) }, cornerRadius = 22.5.dp, insideMargin = PaddingValues(16.dp)) { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(item.name, style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold); Text("${item.version} \u00b7 Apache License 2.0", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 3.dp)); Text(item.description, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 6.dp)) }; Image(MiuixIcons.Regular.ChevronForward, null, Modifier.padding(start = 12.dp).size(22.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary)) } } }
+        items(projects.size) { i ->
+            val item = projects[i]
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 22.5.dp,
+                insideMargin = PaddingValues(16.dp),
+                onClick = { openUrl(context, item.url) },
+                showIndication = true,
+            ) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(item.name, style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold)
+                        Text("${item.version} \u00b7 Apache License 2.0", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 3.dp))
+                        Text(item.description, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 6.dp))
+                    }
+                    Image(MiuixIcons.Regular.ChevronForward, null, Modifier.padding(start = 12.dp).size(22.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary))
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun AppPage(
+internal fun AppPage(
     title: String,
     onBack: (() -> Unit)? = null,
     navigationIcon: (@Composable () -> Unit)? = null,
@@ -7537,6 +7651,8 @@ private fun AppPage(
     actions: @Composable RowScope.() -> Unit = {},
     floatingToolbarPosition: ToolbarPosition = ToolbarPosition.BottomCenter,
     floatingToolbar: @Composable () -> Unit = {},
+    showLargeTitle: Boolean = true,
+    pageBackground: (@Composable BoxScope.() -> Unit)? = null,
     content: @Composable (PaddingValues, ScrollBehavior) -> Unit,
 ) {
     val context = LocalContext.current
@@ -7550,12 +7666,17 @@ private fun AppPage(
         LocalToolbarCollapsed provides collapsedFraction,
         LocalDialogBackdrop provides backdrop,
     ) {
+    Box(Modifier.fillMaxSize().background(surface)) {
+    pageBackground?.let { Box(Modifier.fillMaxSize().layerBackdrop(backdrop)) { it() } }
     Scaffold(
+        containerColor = ComposeColor.Transparent,
         floatingToolbar = floatingToolbar,
         floatingToolbarPosition = floatingToolbarPosition,
         topBar = {
             Box {
-                if (isRuntimeShaderSupported()) {
+                if (pageBackground != null) {
+                    ProgressiveBlurLayer(backdrop, collapsedFraction)
+                } else if (isRuntimeShaderSupported()) {
                     Box(
                         Modifier.matchParentSize()
                             .graphicsLayer { alpha = 1f - collapsedFraction }
@@ -7591,7 +7712,7 @@ private fun AppPage(
                 } else {
                     TopAppBar(
                         title = "",
-                        largeTitle = title,
+                        largeTitle = if (showLargeTitle) title else "",
                         color = ComposeColor.Transparent,
                         scrollBehavior = scroll,
                         navigationIcon = {
@@ -7635,6 +7756,22 @@ private fun AppPage(
             availableTargets = restartScopes,
         )
     }
+    }
+    }
+}
+
+@Composable
+private fun AboutAdvancedMaterialHeader(onLogoClick: () -> Unit) {
+    val density = LocalDensity.current
+    val dark = MiuixTheme.colorScheme.surface.luminance() < .5f
+    val versionColor = MiuixTheme.colorScheme.onSurface.copy(alpha = .78f).toArgb()
+    BoxWithConstraints(Modifier.fillMaxWidth().height(310.dp).padding(horizontal = 18.dp), contentAlignment = Alignment.Center) {
+        val width = maxWidth - 18.dp
+        val logoSize = width * (.94f / 3.91f) * 2.78f * .8f * .95f
+        val textWidth = width * (2.97f / 3.91f)
+        AndroidView(factory = { HyperCeilerBrandView(it) }, update = { view ->
+            view.configure(with(density) { logoSize.roundToPx() }, with(density) { textWidth.roundToPx() }, "${BuildConfig.VERSION_NAME} | ${BuildConfig.BUILD_DATE}", versionColor, dark, onLogoClick)
+        }, modifier = Modifier.fillMaxSize())
     }
 }
 
@@ -8101,11 +8238,11 @@ private fun BoxScope.ProgressiveBlurLayer(backdrop: LayerBackdrop, collapsedFrac
 }
 
 private const val TOOLBAR_GLASS_SURFACE_ALPHA = .80f
-private val TOOLBAR_GLASS_BLUR_RADIUS = 2.dp
+internal val TOOLBAR_GLASS_BLUR_RADIUS = 2.dp
 private val TOOLBAR_GLASS_LENS_HEIGHT = 16.dp
 private val TOOLBAR_GLASS_LENS_AMOUNT = 32.dp
 
-private fun BackdropEffectScope.toolbarGlassLens(progress: Float = 0f) {
+internal fun BackdropEffectScope.toolbarGlassLens(progress: Float = 0f) {
     val clampedProgress = progress.coerceIn(0f, 1f)
     lens(
         (TOOLBAR_GLASS_LENS_HEIGHT + 4.dp * clampedProgress).toPx(),
@@ -8115,7 +8252,7 @@ private fun BackdropEffectScope.toolbarGlassLens(progress: Float = 0f) {
     )
 }
 
-private fun toolbarGlassHighlight(progress: Float = 0f): Highlight {
+internal fun toolbarGlassHighlight(progress: Float = 0f): Highlight {
     val clampedProgress = progress.coerceIn(0f, 1f)
     return Highlight.Default.copy(
         width = .75.dp,
@@ -8215,7 +8352,7 @@ val LocalToolbarBackdrop = compositionLocalOf<LayerBackdrop?> { null }
 private val LocalToolbarCollapsed = compositionLocalOf { 1f }
 
 @Composable
-private fun OverlayDropdownPreference(
+internal fun OverlayDropdownPreference(
     title: String,
     items: List<String>,
     selectedIndex: Int,
@@ -8327,7 +8464,7 @@ private fun Modifier.expandDrawHeight(factor: Float) = layout { measurable, cons
 }
 
 @Composable
-private fun AppList(padding: PaddingValues, scroll: ScrollBehavior, bottom: Int = 112, items: LazyListScope.() -> Unit) {
+internal fun AppList(padding: PaddingValues, scroll: ScrollBehavior, bottom: Int = 112, items: LazyListScope.() -> Unit) {
     LazyColumn(
         Modifier.fillMaxSize().background(MiuixTheme.colorScheme.surface).nestedScroll(scroll.nestedScrollConnection),
         contentPadding = PaddingValues(16.dp, padding.calculateTopPadding() + 4.dp, 16.dp, padding.calculateBottomPadding() + bottom.dp),
