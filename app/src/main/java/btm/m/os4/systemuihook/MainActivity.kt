@@ -118,6 +118,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.sp
+import java.util.UUID
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.lazy.items
 import androidx.core.view.WindowCompat
@@ -1116,6 +1117,39 @@ private fun runRootPackageList(): Set<String> = runCatching {
         .toSet()
 }.getOrDefault(emptySet())
 
+private fun importCustomRearScreenApp(context: Context, uri: Uri): Result<String> = runCatching {
+    val token = UUID.randomUUID().toString()
+    val staged = File(context.cacheDir, "rear-screen-$token.mtz")
+    context.contentResolver.openInputStream(uri)?.use { input ->
+        FileOutputStream(staged).use { output -> input.copyTo(output) }
+    } ?: error("无法读取所选文件")
+    val productId = token
+    val escaped = staged.absolutePath.replace("'", "'\\''")
+    // ThemeManager's actual AI-app storage path (documented in bbb.txt) is shared
+    // external storage, not the theme_magic runtime directory.
+    val aiAppRoot = "/storage/emulated/0/Android/data/com.android.thememanager/files/MIUI/.ai_app"
+    val command = "destination=\"$aiAppRoot/${productId}_extracted\"; runtime=/data/system/theme_magic/users/0/rearScreenAiApp_Theme/$productId; " +
+        "mkdir -p \"\$destination/app\" \"\$destination/preview\"; " +
+        "if unzip -l '$escaped' 2>/dev/null | grep -q 'description.xml'; then unzip -o '$escaped' -d \"\$destination\" >/dev/null; " +
+        "elif unzip -l '$escaped' 2>/dev/null | grep -q 'manifest.xml'; then cp '$escaped' \"\$destination/rearscreen\"; " +
+        "else cp '$escaped' \"\$destination/rearscreen\"; fi; " +
+        "found=\$(find \"\$destination\" -type f -name rearscreen -print -quit); " +
+        "if [ -n \"\$found\" ] && [ \"\$found\" != \"\$destination/rearscreen\" ]; then cp -a \"\$(dirname \"\$found\")\"/. \"\$destination\"/; fi; " +
+        "mkdir -p \"\$runtime\"; cp \"\$destination/rearscreen\" \"\$runtime/rearScreen.mrc\"; " +
+        "[ -f \"\$destination/app/app_icon.png\" ] && cp \"\$destination/app/app_icon.png\" \"\$runtime/app_icon.png\"; " +
+        "preview=\$(find \"\$destination/preview\" -type f -print -quit); [ -n \"\$preview\" ] && cp \"\$preview\" \"\$runtime/preview.png\"; " +
+        "find \"\$destination\" \"\$runtime\" -type d -exec chmod 755 {} \\; ; find \"\$destination\" \"\$runtime\" -type f -exec chmod 644 {} \\; ; " +
+        "am broadcast -a com.android.thememanager.action.REAR_SCREEN_AI_APP_CHANGED >/dev/null 2>&1 || true"
+    val process = ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()
+    val output = process.inputStream.bufferedReader().use { it.readText() }
+    if (!process.waitFor(15, java.util.concurrent.TimeUnit.SECONDS) || process.exitValue() != 0) {
+        process.destroyForcibly()
+        error("需要 root 权限或系统目录不可写")
+    }
+    staged.delete()
+    productId
+}.onFailure { stagedError -> Log.w("HyperChanger", "Custom rear-screen import failed", stagedError) }
+
 @Composable
 private fun RearScreen(
     settings: HookSettings,
@@ -1129,6 +1163,16 @@ private fun RearScreen(
     ScopeApplication.THEME_MANAGER,
     ScopeApplication.PERSONAL_ASSISTANT,
 )) { padding, scroll ->
+    val context = LocalContext.current
+    var showImportConfirm by rememberSaveable { mutableStateOf(false) }
+    var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
+    var importMessage by rememberSaveable { mutableStateOf<String?>(null) }
+    val pickRearScreenApp = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            pendingImportUri = uri
+            showImportConfirm = true
+        }
+    }
     val apps = rememberRearApps()
     AppList(padding, scroll, 28) {
         item {
@@ -1138,6 +1182,17 @@ private fun RearScreen(
                     summary = tr("需要同时勾选并重启“背屏”、“主题壁纸”和“智能助理”三个作用域。", "需要同时勾选并重启“背屏”、“主题壁纸”和“智能助理”三个作用域。"),
                     checked = settings.unlockXiaomi18RearScreenAi,
                     onCheckedChange = { enabled -> update { it.copy(unlockXiaomi18RearScreenAi = enabled) } },
+                )
+                SwitchPreference(
+                    title = tr("去除自定义背屏限制和校验", "去除自定义背屏限制和校验"),
+                    summary = tr("放宽 ThemeManager 与 SubScreenCenter 对自定义 AI 背屏应用的限制。", "放宽 ThemeManager 与 SubScreenCenter 对自定义 AI 背屏应用的限制。"),
+                    checked = settings.removeCustomRearScreenRestrictions,
+                    onCheckedChange = { enabled -> update { it.copy(removeCustomRearScreenRestrictions = enabled) } },
+                )
+                ArrowPreference(
+                    title = tr("导入自定义背屏应用", "导入自定义背屏应用"),
+                    summary = importMessage ?: tr("选择 MTZ、ZIP、rearscreen 或其他文件，导入后重启相关作用域。", "选择 MTZ、ZIP、rearscreen 或其他文件，导入后重启相关作用域。"),
+                    onClick = { pickRearScreenApp.launch(arrayOf("*/*")) },
                 )
             }
         }
@@ -1171,6 +1226,30 @@ private fun RearScreen(
                     }
                 }
             }
+        }
+    }
+    WindowDialog(show = showImportConfirm, onDismissRequest = { showImportConfirm = false }) {
+        Text(
+            tr("确认导入自定义背屏应用？文件会复制到 ThemeManager 的 AI 背屏资源目录。", "确认导入自定义背屏应用？文件会复制到 ThemeManager 的 AI 背屏资源目录。"),
+            style = MiuixTheme.textStyles.body1,
+            modifier = Modifier.padding(bottom = 16.dp),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+            GlassDialogButton(onClick = { showImportConfirm = false }, modifier = Modifier.weight(1f)) { Text(tr("取消", "取消")) }
+            GlassDialogButton(
+                onClick = {
+                    val uri = pendingImportUri
+                    showImportConfirm = false
+                    if (uri != null) {
+                        importMessage = importCustomRearScreenApp(context, uri).fold(
+                            onSuccess = { tr("导入成功，请重启背屏、主题壁纸和智能助理作用域。", "导入成功，请重启背屏、主题壁纸和智能助理作用域。") },
+                            onFailure = { error -> tr("导入失败：", "导入失败：") + (error.message ?: tr("未知错误", "未知错误")) },
+                        )
+                    }
+                },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColorsPrimary(),
+            ) { Text(tr("确认导入", "确认导入")) }
         }
     }
 }

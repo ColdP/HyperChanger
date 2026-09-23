@@ -772,5 +772,14 @@
   "字重 Semi Bold": "Semi Bold weight",
   "字重 Black": "Black weight",
   "图形": "Graphic",
-  "控制中心添加 Google 服务磁贴": "Add Google services tile to Control Center"
+  "控制中心添加 Google 服务磁贴": "Add Google services tile to Control Center",
+  "去除自定义背屏限制和校验": "Remove custom rear-screen restrictions and validation",
+  "放宽 ThemeManager 与 SubScreenCenter 对自定义 AI 背屏应用的限制。": "Relax ThemeManager and SubScreenCenter restrictions for custom AI rear-screen apps.",
+  "导入自定义背屏应用": "Import custom rear-screen app",
+  "选择 MTZ、ZIP、rearscreen 或其他文件，导入后重启相关作用域。": "Choose an MTZ, ZIP, rearscreen, or other file, then restart the related scopes after importing.",
+  "确认导入自定义背屏应用？文件会复制到 ThemeManager 的 AI 背屏资源目录。": "Import this custom rear-screen app? The file will be copied to ThemeManager's AI rear-screen resource directory.",
+  "确认导入": "Import",
+  "导入成功，请重启背屏、主题壁纸和智能助理作用域。": "Imported successfully. Restart the Back screen, Themes, and Personal Assistant scopes.",
+  "导入失败：": "Import failed:",
+  "未知错误": "Unknown error"
 }

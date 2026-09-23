@@ -287,6 +287,7 @@ class HyperSystemUiModule : XposedModule() {
     private var customTileHookInstalled = false
     private var customPluginTileHookInstalled = false
     private var customTileRetryScheduled = false
+    private var customRearScreenWidgetRegistrationInstalled = false
 
     private fun invokeNoArgResult(target: Any, name: String): Any? = runCatching {
         target.javaClass.methods.firstOrNull { it.name == name && it.parameterCount == 0 }?.invoke(target)
@@ -744,14 +745,20 @@ class HyperSystemUiModule : XposedModule() {
                     }
                 }
                 SUBSCREEN_CENTER -> {
-                    if (preferences.getBoolean("unlock_xiaomi_18_rear_screen_ai", false)) {
+                    if (preferences.getBoolean("unlock_xiaomi_18_rear_screen_ai", false) || preferences.getBoolean("remove_custom_rear_screen_restrictions", false)) {
                         installRearScreenAppWidgetUnlockHooks(param.defaultClassLoader)
                     }
                     installMusicControlWhitelistHook(param.defaultClassLoader, preferences)
                 }
-                PERSONAL_ASSISTANT, THEME_MANAGER -> {
-                    if (preferences.getBoolean("unlock_xiaomi_18_rear_screen_ai", false)) {
+                PERSONAL_ASSISTANT -> {
+                    if (preferences.getBoolean("unlock_xiaomi_18_rear_screen_ai", false) || preferences.getBoolean("remove_custom_rear_screen_restrictions", false)) {
                         installRearScreenAppWidgetUnlockHooks(param.defaultClassLoader)
+                    }
+                }
+                THEME_MANAGER -> {
+                    if (preferences.getBoolean("unlock_xiaomi_18_rear_screen_ai", false) || preferences.getBoolean("remove_custom_rear_screen_restrictions", false)) {
+                        installRearScreenAppWidgetUnlockHooks(param.defaultClassLoader)
+                        installCustomRearScreenWidgetRegistration(param.defaultClassLoader)
                     }
                 }
                 else -> return
@@ -2402,6 +2409,59 @@ class HyperSystemUiModule : XposedModule() {
         }.onFailure { error ->
             log(Log.WARN, TAG, "Could not enable rear-screen app-widget gates", error)
         }
+    }
+
+    /**
+     * The AI package directory is only the resource cache. ThemeManager normally creates the
+     * database row and then calls WidgetBridge.insertAiAppWidget(), which in turn calls
+     * SubScreen.g(context).x2(widget). Merely copying `rearscreen` therefore never creates a
+     * visible card. Register every imported UUID folder through the same SDK call after the
+     * ThemeManager process has started.
+     */
+    private fun installCustomRearScreenWidgetRegistration(classLoader: ClassLoader) {
+        if (customRearScreenWidgetRegistrationInstalled) return
+        customRearScreenWidgetRegistrationInstalled = true
+        Handler(Looper.getMainLooper()).postDelayed({
+            runCatching {
+                val contextManager = classLoader.loadClass("com.android.thememanager.basemodule.context.AppContextManager")
+                val context = contextManager.getMethod("q").invoke(null) as? Context ?: return@runCatching
+                val widgetClass = classLoader.loadClass("com.xiaomi.subscreencenter.service.Widget")
+                val subScreenClass = classLoader.loadClass("com.xiaomi.subscreencenter.service.SubScreen")
+                val widgetFactory = widgetClass.methods.firstOrNull { it.name == "q" && it.parameterTypes.size == 7 }
+                    ?: return@runCatching
+                val subScreen = subScreenClass.getMethod("g", Context::class.java).invoke(null, context)
+                val insert = subScreen.javaClass.methods.firstOrNull { it.name == "x2" && it.parameterTypes.size == 1 }
+                    ?: return@runCatching
+                val root = java.io.File("/storage/emulated/0/Android/data/com.android.thememanager/files/MIUI/.ai_app")
+                val runtimeRoot = java.io.File("/data/system/theme_magic/users/0/rearScreenAiApp_Theme")
+                root.listFiles()?.filter { it.isDirectory && it.name.endsWith("_extracted") }?.forEach { folder ->
+                    val productId = folder.name.removeSuffix("_extracted")
+                    val appName = runCatching {
+                        val xml = java.io.File(folder, "description.xml").readText()
+                        Regex("<appName>\\s*(.*?)\\s*</appName>", RegexOption.DOT_MATCHES_ALL)
+                            .find(xml)?.groupValues?.getOrNull(1)?.trim()
+                            ?.replace("&amp;", "&")?.replace("&lt;", "<")?.replace("&gt;", ">")
+                    }.getOrNull().takeUnless { it.isNullOrBlank() } ?: productId
+                    val runtime = java.io.File(runtimeRoot, productId)
+                    val resource = java.io.File(runtime, "rearScreen.mrc").takeIf { it.isFile }
+                        ?: java.io.File(folder, "rearscreen")
+                    if (!resource.isFile) return@forEach
+                    val icon = java.io.File(runtime, "app_icon.png").takeIf { it.isFile }
+                        ?: java.io.File(folder, "app/app_icon.png")
+                    val preview = java.io.File(runtime, "preview.png").takeIf { it.isFile }
+                        ?: folder.resolve("preview").listFiles()?.firstOrNull { it.isFile }
+                    val bundle = android.os.Bundle().apply {
+                        putBoolean("isGame", false)
+                        putString("previewImagePath", preview?.absolutePath ?: "")
+                    }
+                    val widget = widgetFactory.invoke(null, productId, appName, 2, resource.absolutePath, icon.absolutePath, preview?.absolutePath ?: "", bundle)
+                    val result = insert.invoke(subScreen, widget)
+                    android.util.Log.i(TAG, "Registered imported rear-screen AI widget $productId: $result")
+                }
+            }.onFailure { error ->
+                android.util.Log.w(TAG, "Could not register imported rear-screen AI widgets", error)
+            }
+        }, 2500L)
     }
 
     /** Keep the stock bionic/soft-glass pipeline active when a global theme is applied. */
@@ -9004,19 +9064,16 @@ class HyperSystemUiModule : XposedModule() {
             BuildConfig.APPLICATION_ID,
             Context.CONTEXT_IGNORE_SECURITY,
         )
-        val resourceName = if (showing) {
-            "ic_lockscreen_media_lyrics_on"
+        // Use generated resource constants instead of a string-only lookup. R8/resource
+        // shrinking cannot reliably prove getIdentifier() calls are reachable in a release APK,
+        // while these direct references keep both selectors and their normal/pressed children.
+        val resourceId = if (showing) {
+            R.drawable.ic_lockscreen_media_lyrics_on
         } else {
-            "ic_lockscreen_media_lyrics_off"
+            R.drawable.ic_lockscreen_media_lyrics_off
         }
-        val resourceId = moduleContext.resources.getIdentifier(
-            resourceName,
-            "drawable",
-            BuildConfig.APPLICATION_ID,
-        )
-        check(resourceId != 0) { "Missing lyric button drawable: $resourceName" }
-        moduleContext.resources.getDrawable(resourceId, null)?.mutate()
-            ?: error("Could not inflate lyric button drawable: $resourceName")
+        moduleContext.getDrawable(resourceId)?.mutate()
+            ?: error("Could not inflate lockscreen lyric button drawable: $resourceId")
     }.onFailure { error ->
         if (!lockscreenLyricDrawableLoadFailureLogged) {
             lockscreenLyricDrawableLoadFailureLogged = true
@@ -9596,57 +9653,10 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun installLockscreenMediaArtworkClick(header: View, preferences: SharedPreferences) {
-        val holder = readInstanceField(header, "mediaViewHolder") ?: return
-        val artworkViews = listOfNotNull(
-            readInstanceField(holder, "albumImageView") as? View,
-            readInstanceField(holder, "albumView") as? View,
-        )
-        artworkViews.forEach { artwork ->
-            var artworkDownTime = 0L
-            artwork.setOnTouchListener { _, event ->
-                if (lockscreenMediaNotificationMode(preferences) != LOCKSCREEN_MEDIA_NOTIFICATION_DYNAMIC &&
-                    !preferences.getBoolean(KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED, false)
-                ) {
-                    return@setOnTouchListener false
-                }
-                when (event.actionMasked) {
-                    MotionEvent.ACTION_DOWN -> {
-                        artworkDownTime = event.eventTime
-                    }
-                    MotionEvent.ACTION_UP -> {
-                        val held = event.eventTime - artworkDownTime
-                        artworkDownTime = 0L
-                        // Main.swallowArtTap is the only long-press owner for the system card.
-                        // This child listener handles short taps only; an Android long-press
-                        // duration must never race it by switching presentation independently.
-                        if (held in 0 until ViewConfiguration.getLongPressTimeout()) {
-                            log(Log.DEBUG, TAG, "System media artwork tapped; showing music lockscreen")
-                            setLockscreenLyricsShowing(artwork.context, false)
-                            syncedHyperMusicLyricsEnabled = null
-                            if (LockscreenMediaPresentationBridge.presentation ==
-                                LockscreenMediaPresentation.MUSIC_LOCKSCREEN
-                            ) {
-                                dispatchHyperMusicCoverState(
-                                    preferences,
-                                    LockscreenMediaPresentation.MUSIC_LOCKSCREEN,
-                                )
-                                refreshLockscreenLyricButtons(preferences)
-                            } else {
-                                LockscreenMediaPresentationBridge.setPresentation(
-                                    LockscreenMediaPresentation.MUSIC_LOCKSCREEN,
-                                )
-                            }
-                        }
-                    }
-                    MotionEvent.ACTION_CANCEL -> {
-                        artworkDownTime = 0L
-                    }
-                }
-                // Consume the complete gesture so the vendor click listener cannot replace the
-                // presentation change after the artwork tap.
-                true
-            }
-        }
+        // The imported Java Main module owns the window-level artwork gesture, including the
+        // long-press transition into MINI_PLAYER. Installing a second child listener here can
+        // consume ACTION_DOWN/ACTION_UP before Main sees them; that race is especially visible
+        // in minified release builds. Keep this method as a compatibility no-op.
     }
 
     private fun findLockscreenMediaHeader(player: View?, headerClass: Class<*>): View? {

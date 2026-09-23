@@ -613,8 +613,18 @@ public class Main extends XposedModule {
     private static boolean sArtSwallow;
     private static long sArtDownAt;
     private static boolean sArtLongPressed;
+    private static float sArtDownX;
+    private static float sArtDownY;
     /** Match Android's native long-press recognition; the OEM listener is swallowed upstream. */
     private static final long ART_LONG_PRESS_MS = android.view.ViewConfiguration.getLongPressTimeout();
+    private static final Runnable sArtLongPressRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!sArtSwallow || sArtLongPressed || !screenOn() || !keyguardShowing()) return;
+            if (!wantsArtTap()) return;
+            triggerArtworkLongPress();
+        }
+    };
     /** Px of forgiveness around the thumbnail. The card slides; fingers are not pixels. */
     private static final int ART_TAP_SLOP = 24;
 
@@ -9363,7 +9373,11 @@ public class Main extends XposedModule {
             sArtSwallow = onCard && artRectContains(ev.getRawX(), ev.getRawY());
             if (sArtSwallow) {
                 sArtDownAt = android.os.SystemClock.uptimeMillis();
+                sArtDownX = ev.getRawX();
+                sArtDownY = ev.getRawY();
                 sArtLongPressed = false;
+                main().removeCallbacks(sArtLongPressRunnable);
+                main().postDelayed(sArtLongPressRunnable, ART_LONG_PRESS_MS);
             } else if (onCard && sVerbose) {
                 // For telling "the rectangle is wrong" from "the state is wrong" without
                 // guessing, which is how the mirror above was found.
@@ -9375,6 +9389,7 @@ public class Main extends XposedModule {
         if (!sArtSwallow) return false;
         if (action == MotionEvent.ACTION_UP) {
             sArtSwallow = false;
+            main().removeCallbacks(sArtLongPressRunnable);
             long held = android.os.SystemClock.uptimeMillis() - sArtDownAt;
             sArtLongPressed = held >= ART_LONG_PRESS_MS;
             if (sArtLongPressed && screenOn() && keyguardShowing()) triggerArtworkLongPress();
@@ -9394,6 +9409,7 @@ public class Main extends XposedModule {
             sArtLongPressed = false;
         } else if (action == MotionEvent.ACTION_CANCEL) {
             sArtSwallow = false;
+            main().removeCallbacks(sArtLongPressRunnable);
             long held = android.os.SystemClock.uptimeMillis() - sArtDownAt;
             if (held >= ART_LONG_PRESS_MS && screenOn() && keyguardShowing()) triggerArtworkLongPress();
             sArtLongPressed = false;
