@@ -612,8 +612,9 @@ public class Main extends XposedModule {
     /** Set for the length of one gesture that started on the card's artwork and is ours. */
     private static boolean sArtSwallow;
     private static long sArtDownAt;
-    /** Longer than a tap is a press, a drag or a scroll, and none of those mean expand. */
-    private static final long ART_TAP_MS = 500L;
+    private static boolean sArtLongPressed;
+    /** Match Android's native long-press recognition; the OEM listener is swallowed upstream. */
+    private static final long ART_LONG_PRESS_MS = android.view.ViewConfiguration.getLongPressTimeout();
     /** Px of forgiveness around the thumbnail. The card slides; fingers are not pixels. */
     private static final int ART_TAP_SLOP = 24;
 
@@ -9362,6 +9363,7 @@ public class Main extends XposedModule {
             sArtSwallow = onCard && artRectContains(ev.getRawX(), ev.getRawY());
             if (sArtSwallow) {
                 sArtDownAt = android.os.SystemClock.uptimeMillis();
+                sArtLongPressed = false;
             } else if (onCard && sVerbose) {
                 // For telling "the rectangle is wrong" from "the state is wrong" without
                 // guessing, which is how the mirror above was found.
@@ -9374,27 +9376,37 @@ public class Main extends XposedModule {
         if (action == MotionEvent.ACTION_UP) {
             sArtSwallow = false;
             long held = android.os.SystemClock.uptimeMillis() - sArtDownAt;
+            sArtLongPressed = held >= ART_LONG_PRESS_MS;
+            if (sArtLongPressed && screenOn() && keyguardShowing()) triggerArtworkLongPress();
             if (artRectContains(ev.getRawX(), ev.getRawY())) {
                 // The same rectangle is both the way in and the way out, and which one it is
                 // is read at UP rather than at DOWN: a cover that came up under the finger
                 // during the gesture (the OEM can re-lay the card out at any point) would
                 // otherwise send the tap the wrong way.
-                if (held >= ART_TAP_MS) {
-                    // System-media long press always selects the compact lockscreen island.
-                    // A music-lockscreen cover tap takes the SYSTEM_MEDIA route below instead.
-                    sTapSuppressed = true;
-                    Xp.log(TAG + "artwork long-pressed: showing mini player");
-                    if (!notifyPresentation("MINI_PLAYER")) setCoverEnabled(false, true);
+                if (sArtLongPressed) {
+                    // The mini player was already selected as soon as the hold threshold elapsed.
                 } else if (sCoverMode) {
                     exitFromTap("artwork tapped");
                 } else {
                     enterFromTap("artwork tapped");
                 }
             }
+            sArtLongPressed = false;
         } else if (action == MotionEvent.ACTION_CANCEL) {
             sArtSwallow = false;
+            long held = android.os.SystemClock.uptimeMillis() - sArtDownAt;
+            if (held >= ART_LONG_PRESS_MS && screenOn() && keyguardShowing()) triggerArtworkLongPress();
+            sArtLongPressed = false;
         }
         return true;
+    }
+
+    private static void triggerArtworkLongPress() {
+        if (sArtLongPressed) return;
+        sArtLongPressed = true;
+        sTapSuppressed = true;
+        Xp.log(TAG + "artwork held 3.5s: showing mini player");
+        if (!notifyPresentation("MINI_PLAYER")) setCoverEnabled(false, true);
     }
 
     /** The artwork's rectangle as this code sees it, for the log line above. */

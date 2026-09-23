@@ -19,7 +19,8 @@
 <p align="center">
   <img src="https://img.shields.io/github/v/release/ColdP/HyperChanger?style=flat-square" alt="发布版本">
   <img src="https://img.shields.io/badge/Platform-Android-green?style=flat-square&logo=android" alt="平台">
-  <img src="https://img.shields.io/badge/minSdk-33-blue?style=flat-square" alt="最低 SDK">
+  <img src="https://img.shields.io/badge/minSdk-35-blue?style=flat-square" alt="最低 SDK">
+  <img src="https://img.shields.io/badge/targetSdk-37-blue?style=flat-square" alt="目标 SDK">
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow?style=flat-square" alt="许可证">
 </p>
 
@@ -80,7 +81,8 @@ HyperChanger 是一个实验性的社区开发 LSPosed 模块，与小米无任�
 
 | 要求 | 说明 |
 | --- | --- |
-| Android | Android 13（API 33）或更高版本 |
+| Android | Android 15（API 35）或更高版本 |
+| 目标 SDK | API 37 |
 | 系统 | 兼容的小米 HyperOS 4 Beta 系统 |
 | Root 框架 | Root 权限与 LSPosed API 101 或更高版本 |
 | 架构 | Release APK 为通用包；实际兼容性取决于目标 HyperOS 构建版本 |
@@ -140,7 +142,7 @@ HyperChanger 依赖小米系统包的实现细节。测试新的系统构建版�
 - Android Studio Narwhal（2025.1）或更高版本
 - JDK 17 或更高版本
 - Android SDK 37
-- 用于安装测试的 Android 13（API 33）或更高版本设备
+- 用于安装测试的 Android 15（API 35）或更高版本设备
 
 ```bash
 git clone https://github.com/ColdP/HyperChanger.git

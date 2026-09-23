@@ -14,17 +14,22 @@ import android.os.Bundle
 import android.os.Build
 import android.util.Log
 import android.view.View
+import android.view.ViewGroup
 import android.graphics.drawable.Drawable
+import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
+import org.json.JSONObject
 import java.lang.reflect.Proxy
 
 /** Hooks only Settings' presentation models; no system property is written. */
 class SettingsDeviceModule : XposedModule() {
     private var settingsApplicationContext: Context? = null
+    private var activeWifiPassword: String? = null
+    private val wifiTranslations = mutableMapOf<String, Map<String, String>>()
 
     override fun onPackageLoaded(param: PackageLoadedParam) {
         if (!OsCompatibility.areHooksAllowed()) return
@@ -39,6 +44,9 @@ class SettingsDeviceModule : XposedModule() {
             }
             if (hookPreferences.getBoolean(KEY_SHOW_GOOGLE_SERVICE_ENTRY, false)) {
                 installGoogleServiceEntryHook(param.defaultClassLoader)
+            }
+            if (hookPreferences.getBoolean(KEY_SHOW_SAVED_WIFI_PASSWORDS, false)) {
+                installSavedWifiPasswordHooks(param.defaultClassLoader)
             }
             if (hookPreferences.getBoolean(KEY_REMOVE_NOTIFICATION_IMPORTANCE_LIMIT, false)) {
                 installNotificationImportanceHooks(param.defaultClassLoader)
@@ -809,6 +817,249 @@ class SettingsDeviceModule : XposedModule() {
         }.getOrNull()?.also { settingsApplicationContext = it }
     }
 
+    private fun installSavedWifiPasswordHooks(classLoader: ClassLoader) {
+        runCatching {
+            val preferenceClass = classLoader.loadClass("com.android.settings.wifi.SavedAccessPointPreference")
+            preferenceClass.declaredMethods.filter { it.name == "onBindViewHolder" }.forEachIndexed { index, method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("settings-saved-wifi-password:button-$index")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        runCatching {
+                            val preference = chain.thisObject
+                            val view = readField(preference, "mView") as? View
+                            val context = callNoArg(preference, "getContext") as? Context ?: view?.context
+                            if (view != null && context != null) {
+                                val buttonId = context.resources.getIdentifier("btn_delete", "id", SETTINGS_PACKAGE)
+                                val deleteButton = if (buttonId != 0) view.findViewById<View>(buttonId) as? Button else null
+                                if (deleteButton != null && (deleteButton.parent as? ViewGroup)?.let { row ->
+                                        (0 until row.childCount).any { row.getChildAt(it).tag == SAVED_WIFI_VIEW_BUTTON_TAG }
+                                    } != true) {
+                                    val parent = deleteButton.parent as? ViewGroup
+                                    if (parent != null) {
+                                        val viewButton = Button(context)
+                                        viewButton.text = wifiTranslated(context, "查看", "查看")
+                                        viewButton.textSize = deleteButton.textSize / context.resources.displayMetrics.scaledDensity
+                                        viewButton.typeface = deleteButton.typeface
+                                        viewButton.setTextColor(0xFF0088FF.toInt())
+                                        viewButton.background = deleteButton.background?.constantState?.newDrawable(context.resources)?.mutate()
+                                            ?: deleteButton.background
+                                        viewButton.setPadding(
+                                            deleteButton.paddingLeft, deleteButton.paddingTop,
+                                            deleteButton.paddingRight, deleteButton.paddingBottom,
+                                        )
+                                        viewButton.minHeight = deleteButton.minimumHeight
+                                        viewButton.minWidth = deleteButton.minimumWidth
+                                        viewButton.gravity = deleteButton.gravity
+                                        viewButton.isAllCaps = deleteButton.isAllCaps
+                                        viewButton.contentDescription = viewButton.text
+                                        viewButton.tag = SAVED_WIFI_VIEW_BUTTON_TAG
+                                        viewButton.layoutParams = copyLayoutParams(deleteButton.layoutParams).also { params ->
+                                            if (params is ViewGroup.MarginLayoutParams) {
+                                                val gap = (8 * context.resources.displayMetrics.density).toInt()
+                                                params.setMarginEnd(params.marginEnd + gap)
+                                            }
+                                        }
+                                        val index = parent.indexOfChild(deleteButton).coerceAtLeast(0)
+                                        parent.addView(viewButton, index)
+                                        viewButton.setOnClickListener {
+                                            val entry = callNoArg(preference, "getWifiEntry")
+                                            val password = entry?.let { readSavedWifiPassword(classLoader, preference, it, context) }
+                                            val title = wifiTranslated(context, "Wi-Fi详情", "Wi-Fi详情")
+                                            val message = if (password.isNullOrBlank()) {
+                                                wifiTranslated(context, "无法读取密码", "无法读取密码")
+                                            } else {
+                                                "${wifiTranslated(context, "密码", "密码")}: $password"
+                                            }
+                                            android.app.AlertDialog.Builder(context)
+                                                .setTitle(title)
+                                                .setMessage(message)
+                                                .setPositiveButton(android.R.string.ok, null)
+                                                .show()
+                                                .findViewById<TextView>(android.R.id.message)
+                                                ?.setTextIsSelectable(true)
+                                        }
+                                    }
+                                }
+                            }
+                        }.onFailure { error -> log(Log.WARN, TAG, "Could not relabel saved Wi-Fi action", error) }
+                        result
+                    }
+            }
+
+            preferenceClass.declaredMethods.filter {
+                it.name == "setActionMode" && it.parameterTypes.contentEquals(arrayOf(Boolean::class.javaPrimitiveType))
+            }.forEachIndexed { index, method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("settings-saved-wifi-password:action-mode-$index")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        runCatching {
+                            val view = readField(chain.thisObject, "mView") as? View ?: return@runCatching
+                            val parent = view.findViewWithTag<View>(SAVED_WIFI_VIEW_BUTTON_TAG) ?: return@runCatching
+                            val inActionMode = chain.getArg(0) as? Boolean ?: false
+                            parent.visibility = if (inActionMode) View.GONE else View.VISIBLE
+                        }
+                        result
+                    }
+            }
+
+            val builderClass = classLoader.loadClass("miuix.appcompat.app.AlertDialog\$Builder")
+            (builderClass.declaredMethods + builderClass.methods).distinctBy { it.toGenericString() }
+                .firstOrNull { it.name == "setTitle" && it.parameterTypes.contentEquals(arrayOf(Int::class.javaPrimitiveType)) }
+                ?.let { method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("settings-saved-wifi-password:dialog-title")
+                        .intercept { chain ->
+                            val password = activeWifiPassword ?: return@intercept chain.proceed()
+                            val builder = chain.thisObject
+                            val context = readField(builder, "mContext") as? Context
+                                ?: return@intercept chain.proceed()
+                            val replacement = wifiTranslated(context, "Wi-Fi详情", "Wi-Fi详情")
+                            val overload = (builder.javaClass.declaredMethods + builder.javaClass.methods)
+                                .firstOrNull { it.name == "setTitle" && it.parameterTypes.contentEquals(arrayOf(CharSequence::class.java)) }
+                            if (overload == null) return@intercept chain.proceed()
+                            overload.isAccessible = true
+                            overload.invoke(builder, replacement)
+                            builder
+                        }
+                }
+
+            builderClass.declaredMethods.filter {
+                it.name == "setMessage" && it.parameterTypes.contentEquals(arrayOf(CharSequence::class.java))
+            }.forEachIndexed { index, method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("settings-saved-wifi-password:dialog-message-$index")
+                    .intercept { chain ->
+                        val password = activeWifiPassword ?: return@intercept chain.proceed()
+                        val context = readField(chain.thisObject, "mContext") as? Context
+                            ?: return@intercept chain.proceed()
+                        val original = chain.getArg(0) as? CharSequence ?: return@intercept chain.proceed()
+                        val passwordLabel = wifiTranslated(context, "密码", "密码")
+                        if (!original.contains(password)) {
+                            chain.args[0] = "$original\n$passwordLabel: $password"
+                        }
+                        chain.proceed()
+                    }
+            }
+
+            runCatching { classLoader.loadClass("miuix.appcompat.app.AlertDialog") }.getOrNull()
+                ?.declaredMethods?.filter { it.name == "onCreate" }?.forEachIndexed { index, method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("settings-saved-wifi-password:selectable-message-$index")
+                        .intercept { chain ->
+                            val result = chain.proceed()
+                            if (activeWifiPassword != null) {
+                                (callNoArg(chain.thisObject, "getMessageView") as? TextView)
+                                    ?.setTextIsSelectable(true)
+                            }
+                            result
+                        }
+                }
+
+            val savedSettings = classLoader.loadClass("com.android.settings.wifi.MiuiSavedAccessPointsWifiSettings")
+            savedSettings.declaredMethods.filter { it.name == "showDeleteDialog" }.forEachIndexed { index, method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("settings-saved-wifi-password:read-password-$index")
+                    .intercept { chain ->
+                        val entry = chain.args.firstOrNull()
+                        val context = callNoArg(chain.thisObject, "getContext") as? Context
+                        val password = if (entry != null && context != null) {
+                            readSavedWifiPassword(
+                                classLoader,
+                                chain.thisObject,
+                                entry,
+                                context,
+                            )
+                        } else null
+                        activeWifiPassword = password
+                        try {
+                            chain.proceed()
+                        } finally {
+                            activeWifiPassword = null
+                        }
+                    }
+            }
+            log(Log.INFO, TAG, "Installed saved Wi-Fi password hooks")
+        }.onFailure { error -> log(Log.WARN, TAG, "Could not install saved Wi-Fi password hooks", error) }
+    }
+
+    private fun readSavedWifiPassword(
+        classLoader: ClassLoader,
+        settings: Any,
+        wifiEntry: Any,
+        context: Context? = callNoArg(settings, "getContext") as? Context,
+    ): String? = runCatching {
+        val canShare = callNoArg(wifiEntry, "canShare") as? Boolean ?: false
+        if (!canShare) return null
+        val wifiManager = readField(settings, "mWifiManager") ?: context?.applicationContext
+            ?.getSystemService(Context.WIFI_SERVICE) ?: return null
+        val wifiConfiguration = callNoArg(wifiEntry, "getWifiConfiguration") ?: return null
+        val dppUtils = classLoader.loadClass("com.android.settings.wifi.dpp.WifiDppUtils")
+        val getPresharedKey = dppUtils.declaredMethods.firstOrNull {
+            it.name == "getPresharedKey" && it.parameterCount == 2
+        } ?: return null
+        getPresharedKey.isAccessible = true
+        val sharedKey = getPresharedKey.invoke(null, wifiManager, wifiConfiguration) as? String ?: return null
+        val unquoted = dppUtils.declaredMethods.firstOrNull {
+            it.name == "removeFirstAndLastDoubleQuotes" && it.parameterCount == 1
+        }?.let { method ->
+            method.isAccessible = true
+            method.invoke(null, sharedKey) as? String
+        } ?: sharedKey.removeSurrounding("\"")
+        unquoted.takeIf { it.isNotBlank() }
+    }.onFailure { error -> log(Log.WARN, TAG, "Could not read saved Wi-Fi password", error) }.getOrNull()
+
+    private fun copyLayoutParams(params: ViewGroup.LayoutParams): ViewGroup.LayoutParams = runCatching {
+        params.javaClass.constructors
+            .filter { it.parameterCount == 1 && it.parameterTypes[0].isAssignableFrom(params.javaClass) }
+            .minByOrNull { it.parameterTypes[0].isAssignableFrom(ViewGroup.LayoutParams::class.java) }
+            ?.newInstance(params) as? ViewGroup.LayoutParams
+            ?: ViewGroup.LayoutParams(params)
+    }.getOrElse { ViewGroup.LayoutParams(params) }
+
+    private fun callNoArg(target: Any, name: String): Any? {
+        var type: Class<*>? = target.javaClass
+        while (type != null) {
+            val method = type.declaredMethods.firstOrNull { it.name == name && it.parameterCount == 0 }
+            if (method != null) {
+                method.isAccessible = true
+                return method.invoke(target)
+            }
+            type = type.superclass
+        }
+        return null
+    }
+
+    private fun wifiTranslated(context: Context, key: String, fallback: String): String {
+        val language = context.resources.configuration.locales.get(0)?.language.orEmpty()
+        if (language != "en" && language != "ja") return fallback
+        val strings = synchronized(wifiTranslations) {
+            wifiTranslations.getOrPut(language) {
+                runCatching {
+                    val moduleContext = context.createPackageContext(
+                        BuildConfig.APPLICATION_ID,
+                        Context.CONTEXT_IGNORE_SECURITY,
+                    )
+                    val json = JSONObject(
+                        moduleContext.assets.open("languages/$language.json")
+                            .bufferedReader().use { it.readText() },
+                    ).getJSONObject("strings")
+                    buildMap {
+                        json.keys().forEach { translationKey -> put(translationKey, json.optString(translationKey)) }
+                    }
+                }.getOrDefault(emptyMap())
+            }
+        }
+        return strings[key].orEmpty().ifBlank { fallback }
+    }
+
     private fun installAppearanceHooks(classLoader: ClassLoader, homeEnabled: Boolean, deviceEnabled: Boolean) {
         installActivityAppearanceHooks(classLoader, homeEnabled, deviceEnabled)
         if (homeEnabled) runCatching {
@@ -1149,6 +1400,7 @@ class SettingsDeviceModule : XposedModule() {
     }
 
     private companion object {
+        const val SAVED_WIFI_VIEW_BUTTON_TAG = "hyperchanger_saved_wifi_view_button"
         const val TAG = "HyperChangerSettings"
         const val SETTINGS_PACKAGE = "com.android.settings"
         const val DEVICE_INFO_ADAPTER = "com.android.settings.device.DeviceInfoAdapter"

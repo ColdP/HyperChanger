@@ -258,7 +258,7 @@ private enum class PageId {
     ISLAND, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
-    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_MUSIC_APPS, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION,
+    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_MUSIC_APPS, OTHER, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION,
 }
 
 private data class ShadePresetActions(
@@ -294,6 +294,8 @@ private fun Root(
     }
     val musicStore = remember(context) { MusicControlSettingsStore(context) }
     var musicWhitelist by remember { mutableStateOf(musicStore.apps) }
+    val screenRecorderStore = remember(context) { ScreenRecorderSettingsStore(context) }
+    var screenRecorder by remember { mutableStateOf(screenRecorderStore.settings) }
     fun importAppearance(slot: String, uri: Uri?) {
         if (uri == null) return
         runCatching {
@@ -536,7 +538,7 @@ private fun Root(
             )
         } else {
         Shell(
-            settings, cameraSettings, deviceProfile, appearance, musicWhitelist, service,
+            settings, cameraSettings, deviceProfile, appearance, musicWhitelist, screenRecorder, service,
             update = { transform -> hooks.update(service, transform); settings = hooks.settings },
             updateCamera = { transform -> cameras.update(service, transform); cameraSettings = cameras.settings },
             updateDeviceProfile = { transform ->
@@ -550,6 +552,10 @@ private fun Root(
             updateMusicWhitelist = { next ->
                 musicStore.update(service, next)
                 musicWhitelist = musicStore.apps
+            },
+            updateScreenRecorder = { transform ->
+                screenRecorderStore.update(service, transform(screenRecorderStore.settings))
+                screenRecorder = screenRecorderStore.settings
             },
             onImportModulePreset = { importModulePreset.launch(arrayOf("application/json", "text/json", "text/plain")) },
             onExportModulePreset = {
@@ -671,12 +677,14 @@ private fun Shell(
     deviceProfile: DeviceProfileSettings,
     appearance: SettingsAppearanceSettings,
     musicWhitelist: Set<String>,
+    screenRecorder: ScreenRecorderSettings,
     service: XposedService?,
     update: ((HookSettings) -> HookSettings) -> Unit,
     updateCamera: ((CameraSettings) -> CameraSettings) -> Unit,
     updateDeviceProfile: ((DeviceProfileSettings) -> DeviceProfileSettings) -> Unit,
     updateAppearance: ((SettingsAppearanceSettings) -> SettingsAppearanceSettings) -> Unit,
     updateMusicWhitelist: (Set<String>) -> Unit,
+    updateScreenRecorder: (((ScreenRecorderSettings) -> ScreenRecorderSettings) -> Unit),
     onImportModulePreset: () -> Unit,
     onExportModulePreset: () -> Unit,
     presetActions: ShadePresetActions,
@@ -794,8 +802,10 @@ private fun Shell(
                 onPickCustomDeviceLogo = onPickCustomDeviceLogo, onClearCustomDeviceLogo = onClearCustomDeviceLogo,
                 onPickStyle2DeviceLogo = onPickStyle2DeviceLogo, onClearStyle2DeviceLogo = onClearStyle2DeviceLogo,
                 onPickAppearanceLogo = onPickAppearanceLogo, onClearAppearanceLogo = onClearAppearanceLogo,
-                onRequestNotificationPermission = onRequestNotificationPermission,
-            )
+            onRequestNotificationPermission = onRequestNotificationPermission,
+            screenRecorder = screenRecorder,
+            updateScreenRecorder = updateScreenRecorder,
+        )
         }
     }
 
@@ -975,8 +985,86 @@ private fun CategoryHome(
         item { Entry(tr("\u7cfb\u7edf\u66f4\u65b0", "\u7cfb\u7edf\u66f4\u65b0"), enabled = connected) { open(PageId.SYSTEM_UPDATE) } }
         item { Entry(tr("\u7cfb\u7edf\u8bbe\u7f6e", "\u7cfb\u7edf\u8bbe\u7f6e"), enabled = connected) { open(PageId.SYSTEM_SETTINGS) } }
         item { Entry(tr("\u80cc\u5c4f", "\u80cc\u5c4f"), enabled = connected) { open(PageId.REAR_SCREEN) } }
+        item { Entry(tr("\u5176\u4ed6", "\u5176\u4ed6"), enabled = connected) { open(PageId.OTHER) } }
     }
 }
+
+@Composable
+private fun OtherPage(
+    screenRecorder: ScreenRecorderSettings,
+    update: (((ScreenRecorderSettings) -> ScreenRecorderSettings) -> Unit),
+    back: () -> Unit,
+) = AppPage(
+    tr("其他", "其他"),
+    back,
+    restartScopes = setOf(ScopeApplication.SCREEN_RECORDER),
+) { padding, scroll ->
+    var showSavePathDialog by remember { mutableStateOf(false) }
+    var pathDraft by remember(screenRecorder.savePath) { mutableStateOf(screenRecorder.savePath) }
+    val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        documentTreePath(uri)?.let { pathDraft = it }
+    }
+    AppList(padding, scroll, 28) {
+        item {
+            SmallTitle(tr("屏幕录制", "屏幕录制"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp))
+            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                SwitchPreference(
+                    title = tr("添加更多帧率选项", "添加更多帧率选项"),
+                    checked = screenRecorder.moreFrameRates,
+                    onCheckedChange = { value -> update { it.copy(moreFrameRates = value) } },
+                )
+                SwitchPreference(
+                    title = tr("添加更多码率选项", "添加更多码率选项"),
+                    checked = screenRecorder.moreBitRates,
+                    onCheckedChange = { value -> update { it.copy(moreBitRates = value) } },
+                )
+                ArrowPreference(
+                    title = tr("自定义保存位置", "自定义保存位置"),
+                    summary = screenRecorder.savePath.ifBlank { tr("使用系统默认位置", "使用系统默认位置") },
+                    onClick = { pathDraft = screenRecorder.savePath; showSavePathDialog = true },
+                )
+            }
+        }
+    }
+    WindowDialog(show = showSavePathDialog, onDismissRequest = { showSavePathDialog = false }) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(tr("自定义保存位置", "自定义保存位置"), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
+            Text(
+                tr("录制的视频将保存到指定文件夹。需要重启屏幕录制应用后生效。", "录制的视频将保存到指定文件夹。需要重启屏幕录制应用后生效。"),
+                style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+            TextField(
+                value = pathDraft,
+                onValueChange = { pathDraft = it.take(512) },
+                label = tr("文件路径", "文件路径"),
+                useLabelAsPlaceholder = true,
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            GlassDialogButton(onClick = { pickFolder.launch(null) }, modifier = Modifier.fillMaxWidth()) {
+                Text(tr("选择文件夹", "选择文件夹"))
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GlassDialogButton(onClick = { showSavePathDialog = false }, modifier = Modifier.weight(1f)) { Text(tr("取消", "取消")) }
+                GlassDialogButton(
+                    onClick = { update { it.copy(savePath = pathDraft.trim()) }; showSavePathDialog = false },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColorsPrimary(),
+                ) { Text(tr("保存", "保存")) }
+            }
+        }
+    }
+}
+
+private fun documentTreePath(uri: Uri): String? = runCatching {
+    val documentId = android.provider.DocumentsContract.getTreeDocumentId(uri) ?: return@runCatching null
+    val split = documentId.split(':', limit = 2)
+    if (split.size == 1) null else if (split[0].equals("primary", true)) {
+        File(Environment.getExternalStorageDirectory(), split[1]).absolutePath
+    } else null
+}.getOrNull()
 
 private data class RearApp(
     val info: ApplicationInfo,
@@ -1475,6 +1563,11 @@ private fun SystemSettings(
                     title = tr("显示 Google 服务入口", "显示 Google 服务入口"),
                     checked = settings.showGoogleServiceEntry,
                     onCheckedChange = { enabled -> updateSettings { it.copy(showGoogleServiceEntry = enabled) } },
+                )
+                SwitchPreference(
+                    title = tr("显示已保存 WiFi 的密码", "显示已保存 WiFi 的密码"),
+                    checked = settings.showSavedWifiPasswords,
+                    onCheckedChange = { enabled -> updateSettings { it.copy(showSavedWifiPasswords = enabled) } },
                 )
             }
         }
@@ -2320,6 +2413,8 @@ private fun Detail(
     onPickAppearanceLogo: () -> Unit,
     onClearAppearanceLogo: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
+    screenRecorder: ScreenRecorderSettings,
+    updateScreenRecorder: (((ScreenRecorderSettings) -> ScreenRecorderSettings) -> Unit),
     openPage: (PageId) -> Unit,
     back: () -> Unit
 ) {
@@ -2387,6 +2482,7 @@ private fun Detail(
         PageId.CONTRIBUTORS -> Contributors(back)
         PageId.REAR_SCREEN -> RearScreen(musicWhitelist, updateMusicWhitelist, openPage, back)
         PageId.REAR_MUSIC_APPS -> RearMusicApps(musicWhitelist, updateMusicWhitelist, back)
+        PageId.OTHER -> OtherPage(screenRecorder, updateScreenRecorder, back)
         PageId.SIMULATE_MEDIA_NOTIFICATION -> SimulateMediaNotificationPage(
             musicWhitelist,
             updateMusicWhitelist,
@@ -4410,13 +4506,25 @@ private fun Lock(
             }
         }
         item {
-            Group(tr("\u9501\u5c4f\u5927\u65f6\u949f", "\u9501\u5c4f\u5927\u65f6\u949f")) {
+            Group(tr("\u65f6\u949f\u4e0e\u72b6\u6001\u680f", "\u65f6\u949f\u4e0e\u72b6\u6001\u680f")) {
                 SwitchPreference(
                     title = tr("\u9501\u5c4f\u5927\u65f6\u949f\u5f3a\u5236\u663e\u793a\u5192\u53f7", "\u9501\u5c4f\u5927\u65f6\u949f\u5f3a\u5236\u663e\u793a\u5192\u53f7"),
                     checked = s.lockscreenClockColonForceVisible,
                     onCheckedChange = { value ->
                         update { it.copy(lockscreenClockColonForceVisible = value) }
                     },
+                )
+                OverlayDropdownPreference(
+                    title = tr("\u9690\u85cf\u9501\u5c4f\u8fd0\u8425\u5546", "\u9690\u85cf\u9501\u5c4f\u8fd0\u8425\u5546"),
+                    items = listOf(
+                        tr("\u4e0d\u9690\u85cf", "\u4e0d\u9690\u85cf"),
+                        tr("\u9690\u85cf\u53611", "\u9690\u85cf\u53611"),
+                        tr("\u9690\u85cf\u53612", "\u9690\u85cf\u53612"),
+                        tr("\u9690\u85cf\u975e\u4e0a\u7f51\u5361", "\u9690\u85cf\u975e\u4e0a\u7f51\u5361"),
+                        tr("\u9690\u85cf\u4e0a\u7f51\u5361", "\u9690\u85cf\u4e0a\u7f51\u5361"),
+                    ),
+                    selectedIndex = s.lockscreenCarrierHideMode.coerceIn(0, 4),
+                    onSelectedIndexChange = { value -> update { it.copy(lockscreenCarrierHideMode = value) } },
                 )
             }
         }

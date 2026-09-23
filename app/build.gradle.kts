@@ -17,11 +17,12 @@ val buildDate = LocalDate.now().toString()
 android {
     namespace = "btm.m.os4.systemuihook"
     compileSdk = 37
+    ndkPath = rootProject.file(".build-tmp/android-ndk-r28c").absolutePath
 
     defaultConfig {
         applicationId = "btm.m.os4.systemuihook"
-        minSdk = 33
-        targetSdk = 35
+        minSdk = 35
+        targetSdk = 37
         versionCode = 1010341
         versionName = "1.1.3 OOBE"
         buildConfigField("String", "BUILD_DATE", "\"$buildDate\"")
@@ -79,6 +80,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("com.google.zxing:core:3.5.3")
+    implementation("org.luckypray:dexkit:2.2.0")
     implementation("io.github.proify.lyricon:subscriber:0.1.70")
     implementation("com.mocharealm.accompanist:lyrics-core:0.4.7")
 

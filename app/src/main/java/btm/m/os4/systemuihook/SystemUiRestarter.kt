@@ -104,4 +104,5 @@ enum class ScopeApplication(val title: String, val packageName: String) {
     SUPER_XIAOAI_IME("\u8d85\u7ea7\u5c0f\u7231\u8f93\u5165\u6cd5", "com.xiaomi.type"),
     SETTINGS("\u8bbe\u7f6e", "com.android.settings"),
     SYSTEM_UPDATE("\u7cfb\u7edf\u66f4\u65b0", "com.android.updater"),
+    SCREEN_RECORDER("\u5c4f\u5e55\u5f55\u5236", "com.miui.screenrecorder"),
 }

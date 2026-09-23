@@ -19,7 +19,8 @@
 <p align="center">
   <img src="https://img.shields.io/github/v/release/ColdP/HyperChanger?style=flat-square" alt="Release">
   <img src="https://img.shields.io/badge/Platform-Android-green?style=flat-square&logo=android" alt="Platform">
-  <img src="https://img.shields.io/badge/minSdk-33-blue?style=flat-square" alt="minSdk">
+  <img src="https://img.shields.io/badge/minSdk-35-blue?style=flat-square" alt="minSdk">
+  <img src="https://img.shields.io/badge/targetSdk-37-blue?style=flat-square" alt="targetSdk">
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow?style=flat-square" alt="License">
 </p>
 
@@ -80,7 +81,8 @@ HyperChanger is an experimental, community-developed LSPosed module and is not a
 
 | Requirement | Details |
 | --- | --- |
-| Android | Android 13 (API 33) or later |
+| Android | Android 15 (API 35) or later |
+| Target SDK | API 37 |
 | System | Compatible Xiaomi HyperOS 4 Beta build |
 | Root framework | Root access and LSPosed API 101 or later |
 | Architecture | The release APK is universal; device compatibility is determined by the target HyperOS build |
@@ -140,7 +142,7 @@ When reporting an issue, include the device model, Android and HyperOS versions,
 - Android Studio Narwhal (2025.1) or later
 - JDK 17 or later
 - Android SDK 37
-- A device running Android 13 (API 33) or later for installation testing
+- A device running Android 15 (API 35) or later for installation testing
 
 ```bash
 git clone https://github.com/ColdP/HyperChanger.git

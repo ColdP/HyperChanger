@@ -625,6 +625,12 @@ class HyperSystemUiModule : XposedModule() {
                         installLockscreenClockColonHook(param.defaultClassLoader, preferences, "systemui")
                         systemUiLockscreenClockColonHookInstalled = true
                     }
+                    if (!lockscreenCarrierHideHookInstalled) {
+                        lockscreenCarrierHideHookInstalled = installLockscreenCarrierHideHook(
+                            param.defaultClassLoader,
+                            preferences,
+                        )
+                    }
                     // HyperMusicCover hooks TimeView itself and applies its original clock
                     // response/collapse path. Do not stack the former Kotlin size interceptor.
                     systemUiNativeClockScalerHookInstalled = true
@@ -3972,6 +3978,97 @@ class HyperSystemUiModule : XposedModule() {
         }.onFailure { error ->
             log(Log.WARN, TAG, "Could not install lockscreen clock colon hook for $scope", error)
         }
+    }
+
+    private fun installLockscreenCarrierHideHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ): Boolean = runCatching {
+        val carrierClass = classLoader.loadClass("com.android.systemui.controlcenter.shade.ControlCenterCarrierText")
+        val method = carrierClass.getDeclaredMethod("shouldShow").apply { isAccessible = true }
+        hook(method)
+            .setExceptionMode(ExceptionMode.PROTECTIVE)
+            .setId("lockscreen-carrier-hide")
+            .intercept { chain ->
+                val original = chain.proceed() as? Boolean ?: false
+                val mode = preferences.getInt(KEY_LOCKSCREEN_CARRIER_HIDE_MODE, LOCKSCREEN_CARRIER_HIDE_NONE)
+                if (!original && mode == LOCKSCREEN_CARRIER_HIDE_NONE) {
+                    return@intercept original
+                }
+                val carrier = chain.thisObject
+                val keyguard = runCatching {
+                    carrier.javaClass.getField("isKeyguardLayout").getBoolean(carrier)
+                }.getOrDefault(false)
+                if (!keyguard) return@intercept original
+                val slot = runCatching { carrier.javaClass.getMethod("getSlotId").invoke(carrier) as Int }
+                    .getOrDefault(-1)
+                if (slot !in 0..1) return@intercept original
+                val hide = when (mode) {
+                    LOCKSCREEN_CARRIER_HIDE_SIM1 -> slot == 0
+                    LOCKSCREEN_CARRIER_HIDE_SIM2 -> slot == 1
+                    LOCKSCREEN_CARRIER_HIDE_NON_DATA,
+                    LOCKSCREEN_CARRIER_HIDE_DATA -> {
+                        val dataSubId = SubscriptionManager.getActiveDataSubscriptionId().takeIf {
+                            SubscriptionManager.isValidSubscriptionId(it)
+                        } ?: SubscriptionManager.getDefaultDataSubscriptionId()
+                        if (!SubscriptionManager.isValidSubscriptionId(dataSubId)) return@intercept original
+                        val dataSlot = SubscriptionManager.getSlotIndex(dataSubId)
+                        if (dataSlot !in 0..1) return@intercept original
+                        if (mode == LOCKSCREEN_CARRIER_HIDE_DATA) slot == dataSlot else slot != dataSlot
+                    }
+                    else -> false
+                }
+                if (hide) false else original
+            }
+        val layoutClass = classLoader.loadClass("com.android.systemui.controlcenter.shade.MiuiCarrierTextLayout")
+        val onMeasure = layoutClass.getDeclaredMethod("onMeasure", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+            .apply { isAccessible = true }
+        hook(onMeasure)
+            .setExceptionMode(ExceptionMode.PROTECTIVE)
+            .setId("lockscreen-carrier-hide-layout")
+            .intercept { chain ->
+                val layout = chain.thisObject
+                val mode = preferences.getInt(KEY_LOCKSCREEN_CARRIER_HIDE_MODE, LOCKSCREEN_CARRIER_HIDE_NONE)
+                val keyguard = runCatching {
+                    layout.javaClass.getDeclaredMethod("getKeyguardHeaderLayout").apply { isAccessible = true }
+                        .invoke(layout) as Boolean
+                }.getOrDefault(false)
+                val children = listOf("leftCarrierTextView", "rightCarrierTextView").mapNotNull { name ->
+                    runCatching { layout.javaClass.getField(name).get(layout) as? View }.getOrNull()
+                }
+                // Restore views before the vendor measure pass; otherwise a previous GONE state
+                // would make the vendor shouldShow() permanently return false after the setting
+                // is changed back to "Do not hide".
+                if (keyguard) children.forEach { it.visibility = View.VISIBLE }
+                chain.proceed()
+                if (keyguard && mode != LOCKSCREEN_CARRIER_HIDE_NONE) {
+                    children.forEach { child ->
+                        val slot = runCatching { child.javaClass.getMethod("getSlotId").invoke(child) as Int }
+                            .getOrDefault(-1)
+                        if (slot !in 0..1) return@forEach
+                        val hide = when (mode) {
+                            LOCKSCREEN_CARRIER_HIDE_SIM1 -> slot == 0
+                            LOCKSCREEN_CARRIER_HIDE_SIM2 -> slot == 1
+                            LOCKSCREEN_CARRIER_HIDE_NON_DATA,
+                            LOCKSCREEN_CARRIER_HIDE_DATA -> {
+                                val dataSubId = SubscriptionManager.getActiveDataSubscriptionId().takeIf {
+                                    SubscriptionManager.isValidSubscriptionId(it)
+                                } ?: SubscriptionManager.getDefaultDataSubscriptionId()
+                                val dataSlot = SubscriptionManager.getSlotIndex(dataSubId)
+                                dataSlot in 0..1 && if (mode == LOCKSCREEN_CARRIER_HIDE_DATA) slot == dataSlot else slot != dataSlot
+                            }
+                            else -> false
+                        }
+                        if (hide) child.visibility = View.GONE
+                    }
+                    (layout as? View)?.requestLayout()
+                }
+            }
+        log(Log.INFO, TAG, "Installed lockscreen carrier visibility hook")
+        true
+    }.getOrElse { error ->
+        log(Log.WARN, TAG, "Could not install lockscreen carrier visibility hook", error)
+        false
     }
 
     /**
@@ -9378,16 +9475,7 @@ class HyperSystemUiModule : XposedModule() {
             readInstanceField(holder, "albumView") as? View,
         )
         artworkViews.forEach { artwork ->
-            val longPressRunnable = Runnable {
-                if (artwork.getTag(LOCKSCREEN_MEDIA_LONG_PRESS_TAG) == true) {
-                    artwork.setTag(LOCKSCREEN_MEDIA_LONG_PRESS_TAG, false)
-                    artwork.setTag(LOCKSCREEN_MEDIA_LONG_PRESS_TRIGGERED_TAG, true)
-                    log(Log.DEBUG, TAG, "System media artwork long-pressed; showing mini player")
-                    LockscreenMediaPresentationBridge.setPresentation(
-                        LockscreenMediaPresentation.MINI_PLAYER,
-                    )
-                }
-            }
+            var artworkDownTime = 0L
             artwork.setOnTouchListener { _, event ->
                 if (lockscreenMediaNotificationMode(preferences) != LOCKSCREEN_MEDIA_NOTIFICATION_DYNAMIC &&
                     !preferences.getBoolean(KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED, false)
@@ -9396,16 +9484,15 @@ class HyperSystemUiModule : XposedModule() {
                 }
                 when (event.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
-                        artwork.setTag(LOCKSCREEN_MEDIA_LONG_PRESS_TAG, true)
-                        artwork.setTag(LOCKSCREEN_MEDIA_LONG_PRESS_TRIGGERED_TAG, false)
-                        artwork.postDelayed(longPressRunnable, ViewConfiguration.getLongPressTimeout().toLong())
+                        artworkDownTime = event.eventTime
                     }
                     MotionEvent.ACTION_UP -> {
-                        artwork.removeCallbacks(longPressRunnable)
-                        val longPressed = artwork.getTag(LOCKSCREEN_MEDIA_LONG_PRESS_TRIGGERED_TAG) == true
-                        artwork.setTag(LOCKSCREEN_MEDIA_LONG_PRESS_TAG, false)
-                        artwork.setTag(LOCKSCREEN_MEDIA_LONG_PRESS_TRIGGERED_TAG, false)
-                        if (!longPressed) {
+                        val held = event.eventTime - artworkDownTime
+                        artworkDownTime = 0L
+                        // Main.swallowArtTap is the only long-press owner for the system card.
+                        // This child listener handles short taps only; an Android long-press
+                        // duration must never race it by switching presentation independently.
+                        if (held in 0 until ViewConfiguration.getLongPressTimeout()) {
                             log(Log.DEBUG, TAG, "System media artwork tapped; showing music lockscreen")
                             setLockscreenLyricsShowing(artwork.context, false)
                             syncedHyperMusicLyricsEnabled = null
@@ -9425,9 +9512,7 @@ class HyperSystemUiModule : XposedModule() {
                         }
                     }
                     MotionEvent.ACTION_CANCEL -> {
-                        artwork.removeCallbacks(longPressRunnable)
-                        artwork.setTag(LOCKSCREEN_MEDIA_LONG_PRESS_TAG, false)
-                        artwork.setTag(LOCKSCREEN_MEDIA_LONG_PRESS_TRIGGERED_TAG, false)
+                        artworkDownTime = 0L
                     }
                 }
                 // Consume the complete gesture so the vendor click listener cannot replace the
@@ -11374,8 +11459,6 @@ class HyperSystemUiModule : XposedModule() {
             "com.android.systemui.statusbar.notification.row.ExpandableNotificationRowInjector"
         private const val MIUI_MEDIA_HEADER_VIEW_CLASS =
             "com.android.systemui.statusbar.notification.mediacontrol.MiuiMediaHeaderView"
-        private const val LOCKSCREEN_MEDIA_LONG_PRESS_TAG = 0x7f0f0abc
-        private const val LOCKSCREEN_MEDIA_LONG_PRESS_TRIGGERED_TAG = 0x7f0f0abd
         private const val LOCKSCREEN_LYRIC_BUTTON_TAG = 0x7f0f0abe
         private const val LOCKSCREEN_LYRIC_BUTTON_STATE_TAG = 0x7f0f0abf
         private const val LOCKSCREEN_LYRIC_BUTTON_DRAWABLE_TAG = 0x7f0f0ac0
@@ -11839,6 +11922,7 @@ private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_d
         private var lockscreenClockDateFollowHookInstalled = false
         private var systemUiNativeClockScalerHookInstalled = false
         private var systemUiLockscreenClockColonHookInstalled = false
+        private var lockscreenCarrierHideHookInstalled = false
         private var fingerprintIconHookInstalled = false
         private var systemUiDepthHookInstalled = false
         private var lockscreenChargingHookInstalled = false

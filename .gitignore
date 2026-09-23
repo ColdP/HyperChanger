@@ -85,3 +85,5 @@ hyperos4-glass-blur-main/
 /.build-tmp/
 /.reverse-tmp/
 /.build-runtime/
+/.gradle-user-home/
+/build-tmp/

@@ -15,6 +15,7 @@ internal const val KEY_SYSTEM_UPDATE_VERSION = "system_update_version"
 internal const val KEY_SYSTEM_UPDATE_SOTA_VERSION = "system_update_sota_version"
 internal const val KEY_UNLOCK_NEVER_SCREEN_TIMEOUT = "unlock_never_screen_timeout"
 internal const val KEY_SHOW_GOOGLE_SERVICE_ENTRY = "show_google_service_entry"
+internal const val KEY_SHOW_SAVED_WIFI_PASSWORDS = "show_saved_wifi_passwords"
 internal const val KEY_STACKED_MOBILE_SIGNAL_ENABLED = "stacked_mobile_signal_enabled"
 internal const val KEY_STACKED_MOBILE_SIGNAL_SCALE = "stacked_mobile_signal_scale"
 internal const val KEY_STACKED_MOBILE_SIGNAL_VERTICAL_OFFSET = "stacked_mobile_signal_vertical_offset"
@@ -27,6 +28,7 @@ internal const val KEY_MOBILE_NETWORK_TYPE_LEFT_MARGIN = "mobile_network_type_le
 internal const val KEY_MOBILE_NETWORK_TYPE_RIGHT_MARGIN = "mobile_network_type_right_margin"
 internal const val KEY_LOCKSCREEN_CLOCK_COLON_FORCE_VISIBLE =
     "lockscreen_clock_colon_force_visible"
+internal const val KEY_LOCKSCREEN_CARRIER_HIDE_MODE = "lockscreen_carrier_hide_mode"
 internal const val KEY_LOCKSCREEN_TEMPLATE_LIMIT_MODE = "lockscreen_template_limit_mode"
 internal const val KEY_LOCKSCREEN_TEMPLATE_LIMIT_CUSTOM = "lockscreen_template_limit_custom"
 
@@ -36,6 +38,11 @@ internal const val LOCKSCREEN_TEMPLATE_LIMIT_60 = 2
 internal const val LOCKSCREEN_TEMPLATE_LIMIT_80 = 3
 internal const val LOCKSCREEN_TEMPLATE_LIMIT_100 = 4
 internal const val LOCKSCREEN_TEMPLATE_LIMIT_CUSTOM = 5
+internal const val LOCKSCREEN_CARRIER_HIDE_NONE = 0
+internal const val LOCKSCREEN_CARRIER_HIDE_SIM1 = 1
+internal const val LOCKSCREEN_CARRIER_HIDE_SIM2 = 2
+internal const val LOCKSCREEN_CARRIER_HIDE_NON_DATA = 3
+internal const val LOCKSCREEN_CARRIER_HIDE_DATA = 4
 private const val KEY_STATUS_BAR_SCALE_ADJUSTMENT_MIGRATED =
     "status_bar_scale_adjustment_migrated"
 private const val KEY_STATUS_BAR_SCALE_ABSOLUTE_MIGRATED =
@@ -190,6 +197,7 @@ data class HookSettings(
     val notificationFodPositionLimitRemoved: Boolean = false,
     val fingerprintHideMode: Int = 0,
     val lockscreenClockColonForceVisible: Boolean = false,
+    val lockscreenCarrierHideMode: Int = LOCKSCREEN_CARRIER_HIDE_NONE,
     val lockscreenTemplateLimitMode: Int = LOCKSCREEN_TEMPLATE_LIMIT_SYSTEM_DEFAULT,
     val lockscreenTemplateLimitCustom: Int = 50,
     /** Bit mask: charging=1, do-not-disturb=2, notification count=4. */
@@ -325,6 +333,7 @@ data class HookSettings(
     val systemUpdateSotaVersion: String = "",
     val unlockNeverScreenTimeout: Boolean = false,
     val showGoogleServiceEntry: Boolean = false,
+    val showSavedWifiPasswords: Boolean = false,
     val themeMode: String = "system",
     val navigationStyle: String = "hyper_os",
     val navigationLabelMode: String = "icon_and_text",
@@ -988,6 +997,8 @@ private fun SharedPreferences.toSettings(): HookSettings {
         KEY_LOCKSCREEN_CLOCK_COLON_FORCE_VISIBLE,
         false,
     ),
+    lockscreenCarrierHideMode = getInt(KEY_LOCKSCREEN_CARRIER_HIDE_MODE, LOCKSCREEN_CARRIER_HIDE_NONE)
+        .coerceIn(LOCKSCREEN_CARRIER_HIDE_NONE, LOCKSCREEN_CARRIER_HIDE_DATA),
     lockscreenTemplateLimitMode = getInt(
         KEY_LOCKSCREEN_TEMPLATE_LIMIT_MODE,
         LOCKSCREEN_TEMPLATE_LIMIT_SYSTEM_DEFAULT,
@@ -1283,6 +1294,7 @@ private fun SharedPreferences.toSettings(): HookSettings {
     systemUpdateSotaVersion = getString(KEY_SYSTEM_UPDATE_SOTA_VERSION, "").orEmpty().take(128),
     unlockNeverScreenTimeout = getBoolean(KEY_UNLOCK_NEVER_SCREEN_TIMEOUT, false),
     showGoogleServiceEntry = getBoolean(KEY_SHOW_GOOGLE_SERVICE_ENTRY, false),
+    showSavedWifiPasswords = getBoolean(KEY_SHOW_SAVED_WIFI_PASSWORDS, false),
     themeMode = getString(KEY_THEME_MODE, "system").orEmpty().ifBlank { "system" },
     navigationStyle = getString(KEY_NAVIGATION_STYLE, "hyper_os").orEmpty().ifBlank { "hyper_os" },
     navigationLabelMode = getString(KEY_NAVIGATION_LABEL_MODE, "icon_and_text").orEmpty().ifBlank { "icon_and_text" },
@@ -1542,6 +1554,10 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putBoolean(
             KEY_LOCKSCREEN_CLOCK_COLON_FORCE_VISIBLE,
             value.lockscreenClockColonForceVisible,
+        )
+        .putInt(
+            KEY_LOCKSCREEN_CARRIER_HIDE_MODE,
+            value.lockscreenCarrierHideMode.coerceIn(LOCKSCREEN_CARRIER_HIDE_NONE, LOCKSCREEN_CARRIER_HIDE_DATA),
         )
         .putInt(
             KEY_LOCKSCREEN_TEMPLATE_LIMIT_MODE,
@@ -1826,6 +1842,7 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putString(KEY_SYSTEM_UPDATE_SOTA_VERSION, value.systemUpdateSotaVersion.take(128))
         .putBoolean(KEY_UNLOCK_NEVER_SCREEN_TIMEOUT, value.unlockNeverScreenTimeout)
         .putBoolean(KEY_SHOW_GOOGLE_SERVICE_ENTRY, value.showGoogleServiceEntry)
+        .putBoolean(KEY_SHOW_SAVED_WIFI_PASSWORDS, value.showSavedWifiPasswords)
         .putString(KEY_THEME_MODE, value.themeMode)
         .putString(KEY_NAVIGATION_STYLE, value.navigationStyle)
         .putString(KEY_NAVIGATION_LABEL_MODE, value.navigationLabelMode)
