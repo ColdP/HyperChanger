@@ -401,17 +401,34 @@ class HyperSystemUiModule : XposedModule() {
             state.javaClass.getField("state").setInt(state, if (enabled) 2 else 1)
             state.javaClass.getField("label").set(state, if (gms) "Google 服务" else "5G")
             state.javaClass.getField("contentDescription").set(state, if (gms) "Google 服务" else "5G")
-            val iconClass = runCatching { host.javaClass.classLoader.loadClass("miui.systemui.quicksettings.DrawableIcon") }.getOrElse { loader.loadClass("miui.systemui.quicksettings.DrawableIcon") }
+            // DrawableIcon moved from quicksettings to controlcenter.qs in 18.3.x.
+            // Resolve both names because the plugin and SystemUI can use different
+            // class loaders during a SystemUI/plugin upgrade.
+            val iconClass = sequenceOf(
+                "miui.systemui.controlcenter.qs.DrawableIcon",
+                "miui.systemui.quicksettings.DrawableIcon"
+            ).mapNotNull { name ->
+                runCatching { host.javaClass.classLoader.loadClass(name) }.getOrNull()
+                    ?: runCatching { loader.loadClass(name) }.getOrNull()
+            }.firstOrNull() ?: error("DrawableIcon unavailable")
             val drawable = if (gms) loadTileDrawable(context, R.drawable.ic_control_center_google) else loadTileDrawable(context, when (prefs.getInt(KEY_CONTROL_CENTER_5G_TILE_MODE, 1)) { 2 -> R.drawable.ic_control_center_5g_semibold; 3 -> R.drawable.ic_control_center_5g_black; 4 -> R.drawable.ic_control_center_5g_signal; else -> R.drawable.ic_control_center_5g_regular })
             state.javaClass.getField("icon").set(state, iconClass.getConstructor(Drawable::class.java).newInstance(drawable))
             callbacks.toList().forEach { cb -> runCatching { cb.javaClass.methods.firstOrNull { it.name == "onStateChanged" && it.parameterCount == 1 }?.invoke(cb, state) } }
         }
         refresh()
         return Proxy.newProxyInstance(iface.classLoader, arrayOf(iface)) { proxy, method, args -> when (method.name) {
-            "getTileSpec" -> spec; "isAvailable" -> if (spec == "custom_GMS") hasGms(context) else prefs.getInt(KEY_CONTROL_CENTER_5G_TILE_MODE, 0) != 0
-            "getState", "newTileState" -> state; "refreshState" -> { refresh(); null }
+            "getTileSpec" -> spec
+            "isAvailable" -> if (spec == "custom_GMS") hasGms(context) else prefs.getInt(KEY_CONTROL_CENTER_5G_TILE_MODE, 0) != 0
+            "getState" -> state
+            // PluginTile calls this on every update and expects a fresh State.
+            "newTileState" -> state.javaClass.getDeclaredConstructor().apply { isAccessible = true }.newInstance()
+            "refreshState" -> { refresh(); null }
             "addCallback" -> { args?.firstOrNull()?.let { if (it !in callbacks) callbacks += it }; refresh(); null }
             "removeCallback" -> { args?.firstOrNull()?.let(callbacks::remove); null }
+            "setListening" -> null
+            "composeChangeAnnouncement" -> spec
+            // This value is unboxed by PluginTile; returning null here crashes SystemUI.
+            "getMetricsCategory" -> 0
             "handleClick" -> { if (spec == "custom_GMS") toggleGms(context) else setUserFiveGEnabled(context, !isUserFiveGEnabled(context)); refresh(); null }
             "getLongClickIntent" -> if (spec == "custom_GMS") Intent().setClassName("com.miui.securitycenter", "com.miui.googlebase.ui.GmsCoreSettings") else Intent().setClassName("com.android.phone", "com.android.phone.settings.MiuiFiveGNetworkSetting")
             "hashCode" -> System.identityHashCode(proxy); "equals" -> proxy === args?.firstOrNull(); "toString" -> "HyperChanger-$spec"; else -> null
