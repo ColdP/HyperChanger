@@ -190,6 +190,7 @@ data class HookSettings(
     val deviceCenterRadiusEnabled: Boolean = false,
     val deviceCenterRadius: Float = 24f,
     val removeDepthImageLimit: Boolean = false,
+    val unlockXiaomi18RearScreenAi: Boolean = false,
     val rasterWallpaperEnabled: Boolean = false,
     val rasterWallpaperUris: String = "[]",
     val rasterWallpaperSensitivityPreset: Int = 1,
@@ -513,6 +514,7 @@ private const val KEY_VOLUME_PANEL_MATERIAL_ENABLED = "volume_panel_material_ena
 private const val KEY_DEVICE_CENTER_RADIUS_ENABLED = "device_center_radius_enabled"
 private const val KEY_DEVICE_CENTER_RADIUS = "device_center_radius"
 private const val KEY_REMOVE_DEPTH_IMAGE_LIMIT = "remove_depth_image_limit"
+private const val KEY_UNLOCK_XIAOMI_18_REAR_SCREEN_AI = "unlock_xiaomi_18_rear_screen_ai"
 private const val KEY_RASTER_WALLPAPER_ENABLED = "raster_wallpaper_enabled"
 private const val KEY_RASTER_WALLPAPER_URIS = "raster_wallpaper_uris"
 private const val KEY_RASTER_WALLPAPER_SENSITIVITY_PRESET = "raster_wallpaper_sensitivity_preset"
@@ -977,6 +979,7 @@ private fun SharedPreferences.toSettings(): HookSettings {
     deviceCenterRadiusEnabled = getBoolean(KEY_DEVICE_CENTER_RADIUS_ENABLED, false),
     deviceCenterRadius = getFloat(KEY_DEVICE_CENTER_RADIUS, 24f).coerceIn(0f, 60f),
     removeDepthImageLimit = getBoolean(KEY_REMOVE_DEPTH_IMAGE_LIMIT, false),
+    unlockXiaomi18RearScreenAi = getBoolean(KEY_UNLOCK_XIAOMI_18_REAR_SCREEN_AI, false),
     rasterWallpaperEnabled = getBoolean(KEY_RASTER_WALLPAPER_ENABLED, false),
     rasterWallpaperUris = getString(KEY_RASTER_WALLPAPER_URIS, "[]").orEmpty(),
     rasterWallpaperSensitivityPreset = getInt(KEY_RASTER_WALLPAPER_SENSITIVITY_PRESET, 1).coerceIn(0, 4),
@@ -1545,6 +1548,7 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putBoolean(KEY_DEVICE_CENTER_RADIUS_ENABLED, value.deviceCenterRadiusEnabled)
         .putFloat(KEY_DEVICE_CENTER_RADIUS, value.deviceCenterRadius)
         .putBoolean(KEY_REMOVE_DEPTH_IMAGE_LIMIT, value.removeDepthImageLimit)
+        .putBoolean(KEY_UNLOCK_XIAOMI_18_REAR_SCREEN_AI, value.unlockXiaomi18RearScreenAi)
         .putBoolean(KEY_RASTER_WALLPAPER_ENABLED, value.rasterWallpaperEnabled)
         .putString(KEY_RASTER_WALLPAPER_URIS, value.rasterWallpaperUris)
         .putInt(KEY_RASTER_WALLPAPER_SENSITIVITY_PRESET, value.rasterWallpaperSensitivityPreset)

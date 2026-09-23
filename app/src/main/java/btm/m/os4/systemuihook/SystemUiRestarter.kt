@@ -98,6 +98,8 @@ enum class ScopeApplication(val title: String, val packageName: String) {
     WALLPAPER("\u58c1\u7eb8", "com.miui.miwallpaper"),
     AOD("\u606f\u5c4f\u4e0e\u9501\u5c4f\u7f16\u8f91", "com.miui.aod"),
     SUBSCREEN_CENTER("\u80cc\u5c4f", "com.xiaomi.subscreencenter"),
+    THEME_MANAGER("\u4e3b\u9898\u58c1\u7eb8", "com.android.thememanager"),
+    PERSONAL_ASSISTANT("\u667a\u80fd\u52a9\u7406", "com.miui.personalassistant"),
     GALLERY("\u76f8\u518c", "com.miui.gallery"),
     CAMERA("\u76f8\u673a", "com.android.camera"),
     MEDIA_EDITOR("\u5c0f\u7c73\u76f8\u518c-\u7f16\u8f91", "com.miui.mediaeditor"),

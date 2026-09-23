@@ -726,7 +726,17 @@ class HyperSystemUiModule : XposedModule() {
                         aodLockscreenTemplateLimitHookInstalled = true
                     }
                 }
-                SUBSCREEN_CENTER -> installMusicControlWhitelistHook(param.defaultClassLoader, preferences)
+                SUBSCREEN_CENTER -> {
+                    if (preferences.getBoolean("unlock_xiaomi_18_rear_screen_ai", false)) {
+                        installRearScreenAppWidgetUnlockHooks(param.defaultClassLoader)
+                    }
+                    installMusicControlWhitelistHook(param.defaultClassLoader, preferences)
+                }
+                PERSONAL_ASSISTANT, THEME_MANAGER -> {
+                    if (preferences.getBoolean("unlock_xiaomi_18_rear_screen_ai", false)) {
+                        installRearScreenAppWidgetUnlockHooks(param.defaultClassLoader)
+                    }
+                }
                 else -> return
             }
             log(Log.INFO, TAG, "Installed hooks for ${param.packageName}")
@@ -2274,6 +2284,106 @@ class HyperSystemUiModule : XposedModule() {
             log(Log.INFO, TAG, "Installed rear music whitelist hooks (${whitelist.size} app(s), ${configClass.name})")
         }.onFailure { error ->
             log(Log.WARN, TAG, "Could not update rear music control whitelist", error)
+        }
+    }
+
+    /** Virtually enables the same two gates as the root script, scoped to the three target apps. */
+    private fun installRearScreenAppWidgetUnlockHooks(classLoader: ClassLoader) {
+        runCatching {
+            val properties = Class.forName("android.os.SystemProperties", false, null)
+            properties.declaredMethods
+                .filter { method ->
+                    java.lang.reflect.Modifier.isStatic(method.modifiers) &&
+                        method.name in setOf("get", "getBoolean", "getInt", "getLong") &&
+                        method.parameterTypes.firstOrNull() == String::class.java
+                }
+                .forEach { method ->
+                    method.isAccessible = true
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-app-widget:property:${method.name}:${method.parameterTypes.size}")
+                        .intercept { chain ->
+                            if (chain.getArg(0) != REAR_SCREEN_APP_WIDGET_PROPERTY) {
+                                return@intercept chain.proceed()
+                            }
+                            when (method.name) {
+                                "get" -> "true"
+                                "getBoolean" -> true
+                                "getInt" -> 1
+                                "getLong" -> 1L
+                                else -> chain.proceed()
+                            }
+                        }
+                }
+            val miuiProperties = runCatching {
+                Class.forName("miuix.os.SystemProperties", false, null)
+            }.getOrNull()
+            miuiProperties?.declaredMethods
+                ?.filter { method ->
+                    java.lang.reflect.Modifier.isStatic(method.modifiers) &&
+                        method.name in setOf("get", "getBoolean", "getInt", "toq", "zy", "k") &&
+                        method.parameterTypes.firstOrNull() == String::class.java
+                }
+                ?.forEach { method ->
+                    method.isAccessible = true
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-app-widget:miui-property:${method.name}:${method.parameterTypes.size}")
+                        .intercept { chain ->
+                            if (chain.getArg(0) != REAR_SCREEN_APP_WIDGET_PROPERTY) {
+                                return@intercept chain.proceed()
+                            }
+                            when (method.returnType) {
+                                String::class.java -> "true"
+                                Boolean::class.javaPrimitiveType, Boolean::class.javaObjectType -> true
+                                Int::class.javaPrimitiveType, Int::class.javaObjectType -> 1
+                                else -> chain.proceed()
+                            }
+                        }
+                }
+
+            val secure = android.provider.Settings.Secure::class.java
+            secure.declaredMethods
+                .filter { method ->
+                    java.lang.reflect.Modifier.isStatic(method.modifiers) &&
+                        method.name in setOf("getInt", "getString") &&
+                        method.parameterTypes.getOrNull(1) == String::class.java
+                }
+                .forEach { method ->
+                    method.isAccessible = true
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-app-widget:secure:${method.name}:${method.parameterTypes.size}")
+                        .intercept { chain ->
+                            if (chain.getArg(1) != REAR_SCREEN_APP_WIDGET_SETTING) {
+                                return@intercept chain.proceed()
+                            }
+                            if (method.name == "getString") "1" else 1
+                        }
+                }
+
+            val repositoryClass = runCatching {
+                classLoader.loadClass("com.personalizedEditor.helper.settings.SettingRepository")
+            }.getOrNull()
+            repositoryClass?.declaredMethods?.firstOrNull { method ->
+                method.name == "zy" && method.parameterTypes.size == 1 && method.returnType == Boolean::class.javaPrimitiveType
+            }?.let { method ->
+                method.isAccessible = true
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("rear-screen-app-widget:theme-manager-setting-repository")
+                    .intercept { chain ->
+                        val settingKey = chain.getArg(0)
+                        val key = settingKey?.javaClass?.methods
+                            ?.firstOrNull { it.name in setOf("getKey", "k") && it.parameterTypes.isEmpty() }
+                            ?.let { runCatching { it.invoke(settingKey) as? String }.getOrNull() }
+                        if (key == REAR_SCREEN_APP_WIDGET_PROPERTY || key == REAR_SCREEN_APP_WIDGET_SETTING) true
+                        else chain.proceed()
+                    }
+            }
+            log(Log.INFO, TAG, "Rear-screen app-widget gates enabled in this process")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not enable rear-screen app-widget gates", error)
         }
     }
 
@@ -11392,7 +11502,11 @@ class HyperSystemUiModule : XposedModule() {
         private const val SUPER_XIAOAI_IME = "com.xiaomi.type"
         private const val SUPER_XIAOAI_PHRASE = "com.miui.phrase"
         private const val SUBSCREEN_CENTER = "com.xiaomi.subscreencenter"
-        private val SYSTEM_UI_TARGETS = setOf(SYSTEM_UI, SYSTEM_UI_PLUGIN, AOD, SUPER_XIAOAI_IME, SUPER_XIAOAI_PHRASE, SUBSCREEN_CENTER)
+        private const val PERSONAL_ASSISTANT = "com.miui.personalassistant"
+        private const val THEME_MANAGER = "com.android.thememanager"
+        private const val REAR_SCREEN_APP_WIDGET_PROPERTY = "persist.sys.app.widget.enable"
+        private const val REAR_SCREEN_APP_WIDGET_SETTING = "subscreen_app_widget_enable"
+        private val SYSTEM_UI_TARGETS = setOf(SYSTEM_UI, SYSTEM_UI_PLUGIN, AOD, SUPER_XIAOAI_IME, SUPER_XIAOAI_PHRASE, SUBSCREEN_CENTER, PERSONAL_ASSISTANT, THEME_MANAGER)
         private const val DEPTH_EVALUATOR_CLASS =
             "com.miui.clock.utils.avoid.DepthAvoidEvaluator"
         private const val DEPTH_THRESHOLD_CLASS =

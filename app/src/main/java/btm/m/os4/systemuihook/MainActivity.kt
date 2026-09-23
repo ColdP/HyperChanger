@@ -1118,13 +1118,29 @@ private fun runRootPackageList(): Set<String> = runCatching {
 
 @Composable
 private fun RearScreen(
+    settings: HookSettings,
+    update: ((HookSettings) -> HookSettings) -> Unit,
     selectedPackages: Set<String>,
     onSelectedPackagesChange: (Set<String>) -> Unit,
     open: (PageId) -> Unit,
     back: () -> Unit,
-) = AppPage(tr("\u80cc\u5c4f", "\u80cc\u5c4f"), back, restartScopes = setOf(ScopeApplication.SUBSCREEN_CENTER)) { padding, scroll ->
+) = AppPage(tr("\u80cc\u5c4f", "\u80cc\u5c4f"), back, restartScopes = setOf(
+    ScopeApplication.SUBSCREEN_CENTER,
+    ScopeApplication.THEME_MANAGER,
+    ScopeApplication.PERSONAL_ASSISTANT,
+)) { padding, scroll ->
     val apps = rememberRearApps()
     AppList(padding, scroll, 28) {
+        item {
+            Group(tr("解锁 AI 功能", "解锁 AI 功能")) {
+                SwitchPreference(
+                    title = tr("解锁 Xiaomi 18 Pro 系列 AI 背屏功能", "解锁 Xiaomi 18 Pro 系列 AI 背屏功能"),
+                    summary = tr("需要同时勾选并重启“背屏”、“主题壁纸”和“智能助理”三个作用域。", "需要同时勾选并重启“背屏”、“主题壁纸”和“智能助理”三个作用域。"),
+                    checked = settings.unlockXiaomi18RearScreenAi,
+                    onCheckedChange = { enabled -> update { it.copy(unlockXiaomi18RearScreenAi = enabled) } },
+                )
+            }
+        }
         item {
             Group(tr("\u80cc\u5c4f\u97f3\u4e50\u63a7\u4ef6", "\u80cc\u5c4f\u97f3\u4e50\u63a7\u4ef6")) {
                 ArrowPreference(
@@ -2480,7 +2496,7 @@ private fun Detail(
         PageId.DONATE -> Donate(back)
         PageId.OPEN -> OpenSource(back)
         PageId.CONTRIBUTORS -> Contributors(back)
-        PageId.REAR_SCREEN -> RearScreen(musicWhitelist, updateMusicWhitelist, openPage, back)
+        PageId.REAR_SCREEN -> RearScreen(settings, update, musicWhitelist, updateMusicWhitelist, openPage, back)
         PageId.REAR_MUSIC_APPS -> RearMusicApps(musicWhitelist, updateMusicWhitelist, back)
         PageId.OTHER -> OtherPage(screenRecorder, updateScreenRecorder, back)
         PageId.SIMULATE_MEDIA_NOTIFICATION -> SimulateMediaNotificationPage(
