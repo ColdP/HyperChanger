@@ -7,6 +7,7 @@ import android.app.DownloadManager
 import android.app.WallpaperManager
 import android.Manifest
 import android.content.Context
+import android.content.ComponentName
 import android.content.Intent
 import android.content.res.Resources
 import android.content.res.ColorStateList
@@ -39,8 +40,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -253,6 +257,7 @@ private enum class PageId {
     SHADE_CONTROL_CENTER_BACKGROUND,
     ISLAND, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
+    LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
     SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_MUSIC_APPS, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION,
 }
 
@@ -764,6 +769,36 @@ private fun Shell(
     BackHandler(enabled = page != null && !settings.predictiveBackEnabled && !suppressPageBack, onBack = dismissPage)
     val backdrop = rememberLayerBackdrop()
 
+    // Keep the page immediately below the top page composed. Predictive back moves the
+    // top page away before the stack is popped, so the underlying page must already be
+    // available instead of revealing the home screen during the gesture. Keeping it
+    // composed also preserves its scroll state when returning from a nested page.
+    val renderDetail: @Composable (PageId, Boolean) -> Unit = { detailPage, isTop ->
+        CompositionLocalProvider(
+            LocalPageBackSuppressed provides if (isTop) ({ value -> suppressPageBack = value }) else ({ }),
+        ) {
+            Detail(
+                detailPage, settings, cameras, deviceProfile, appearance, musicWhitelist, update, updateCamera,
+                updateDeviceProfile, updateAppearance, updateMusicWhitelist, presetActions,
+                openPage = openNestedPage, back = dismissPage,
+                onDebugMode = { showDebug = true }, captcha = captcha,
+                onPickRasterImages = onPickRasterImages, onApplyRasterWallpaper = onApplyRasterWallpaper,
+                onPickAppearanceHome = onPickAppearanceHome, onPickAppearanceDevice = onPickAppearanceDevice,
+                onClearAppearanceHome = onClearAppearanceHome, onClearAppearanceDevice = onClearAppearanceDevice,
+                onPickTutorialDeviceImage = onPickTutorialDeviceImage, onClearTutorialDeviceImage = onClearTutorialDeviceImage,
+                onPickStyle1UpdateBackground = onPickStyle1UpdateBackground,
+                onClearStyle1UpdateBackground = onClearStyle1UpdateBackground,
+                onPickStyle2DeviceImage = onPickStyle2DeviceImage, onClearStyle2DeviceImage = onClearStyle2DeviceImage,
+                onPickStyle2UpdateBackground = onPickStyle2UpdateBackground,
+                onClearStyle2UpdateBackground = onClearStyle2UpdateBackground,
+                onPickCustomDeviceLogo = onPickCustomDeviceLogo, onClearCustomDeviceLogo = onClearCustomDeviceLogo,
+                onPickStyle2DeviceLogo = onPickStyle2DeviceLogo, onClearStyle2DeviceLogo = onClearStyle2DeviceLogo,
+                onPickAppearanceLogo = onPickAppearanceLogo, onClearAppearanceLogo = onClearAppearanceLogo,
+                onRequestNotificationPermission = onRequestNotificationPermission,
+            )
+        }
+    }
+
     CompositionLocalProvider(LocalDialogBackdrop provides backdrop) {
     Scaffold(containerColor = ComposeColor.Transparent) {
     Box(Modifier.fillMaxSize()) {
@@ -799,52 +834,53 @@ private fun Shell(
         BottomBar(tab, { tab = it }, settings, backdrop, Modifier.align(Alignment.BottomCenter))
         AnimatedVisibility(
             visible = page != null,
-            enter = slideInHorizontally(tween(320, easing = FastOutSlowInEasing)) { it / 5 } + fadeIn(tween(260)) + scaleIn(tween(300), initialScale = .97f),
-            exit = slideOutHorizontally(tween(260)) { it / 8 } + fadeOut(tween(220)) + scaleOut(tween(260), targetScale = .985f)
+            enter = slideInHorizontally(
+                animationSpec = tween(252, easing = FastOutSlowInEasing),
+                initialOffsetX = { it / 7 },
+            ) + fadeIn(tween(189)) + scaleIn(
+                animationSpec = tween(252, easing = FastOutSlowInEasing),
+                initialScale = .985f,
+            ),
+            exit = slideOutHorizontally(
+                animationSpec = tween(207, easing = FastOutSlowInEasing),
+                targetOffsetX = { -it / 3 },
+            ) + fadeOut(tween(162)) + scaleOut(
+                animationSpec = tween(207, easing = FastOutSlowInEasing),
+                targetScale = .975f,
+            ),
         ) {
-            Box(Modifier.fillMaxSize().momentumBackTransform(backState)) {
-                AnimatedContent(
-                    targetState = page ?: retainedPage,
-                    transitionSpec = {
-                        if (navigatingForward) {
-                            (slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { it / 6 } + fadeIn(tween(220))) togetherWith
-                                (slideOutHorizontally(tween(220)) { -it / 10 } + fadeOut(tween(180)))
-                        } else {
-                            (slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) { -it / 10 } + fadeIn(tween(200))) togetherWith
-                                (slideOutHorizontally(tween(240)) { it / 6 } + fadeOut(tween(180)))
+            Box(Modifier.fillMaxSize()) {
+                // Keep every page in the stack composed. The top page is an overlay,
+                // while the page below remains the exact instance revealed by the
+                // predictive-back gesture, preserving its scroll position.
+                pageStack.forEachIndexed { index, stackPage ->
+                    key(index, stackPage) {
+                        val isTop = index == pageStack.lastIndex
+                        val pageVisibility = remember(stackPage) {
+                            MutableTransitionState(false).apply { targetState = true }
                         }
-                    },
-                    label = "detailPageNavigation",
-                ) { detailPage ->
-                    detailPage?.let {
-                        CompositionLocalProvider(LocalPageBackSuppressed provides { suppressPageBack = it }) {
-                        Detail(
-                            it, settings, cameras, deviceProfile, appearance, musicWhitelist, update, updateCamera, updateDeviceProfile, updateAppearance, updateMusicWhitelist, presetActions,
-                            openPage = openNestedPage, back = dismissPage,
-                            onDebugMode = { showDebug = true },
-                            captcha = captcha,
-                            onPickRasterImages = onPickRasterImages,
-                            onApplyRasterWallpaper = onApplyRasterWallpaper,
-                            onPickAppearanceHome = onPickAppearanceHome,
-                            onPickAppearanceDevice = onPickAppearanceDevice,
-                            onClearAppearanceHome = onClearAppearanceHome,
-                            onClearAppearanceDevice = onClearAppearanceDevice,
-                            onPickTutorialDeviceImage = onPickTutorialDeviceImage,
-                            onClearTutorialDeviceImage = onClearTutorialDeviceImage,
-                            onPickStyle1UpdateBackground = onPickStyle1UpdateBackground,
-                            onClearStyle1UpdateBackground = onClearStyle1UpdateBackground,
-                            onPickStyle2DeviceImage = onPickStyle2DeviceImage,
-                            onClearStyle2DeviceImage = onClearStyle2DeviceImage,
-                            onPickStyle2UpdateBackground = onPickStyle2UpdateBackground,
-                            onClearStyle2UpdateBackground = onClearStyle2UpdateBackground,
-                            onPickCustomDeviceLogo = onPickCustomDeviceLogo,
-                            onClearCustomDeviceLogo = onClearCustomDeviceLogo,
-                            onPickStyle2DeviceLogo = onPickStyle2DeviceLogo,
-                            onClearStyle2DeviceLogo = onClearStyle2DeviceLogo,
-                            onPickAppearanceLogo = onPickAppearanceLogo,
-                            onClearAppearanceLogo = onClearAppearanceLogo,
-                            onRequestNotificationPermission = onRequestNotificationPermission,
-                        )
+                        AnimatedVisibility(
+                            visibleState = pageVisibility,
+                            enter = if (index > 0) {
+                                slideInHorizontally(
+                                    animationSpec = tween(252, easing = FastOutSlowInEasing),
+                                    initialOffsetX = { it / 7 },
+                                ) + fadeIn(tween(189)) + scaleIn(
+                                    animationSpec = tween(252, easing = FastOutSlowInEasing),
+                                    initialScale = .985f,
+                                )
+                            } else EnterTransition.None,
+                            exit = ExitTransition.None,
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            Box(
+                                Modifier
+                                    .fillMaxSize()
+                                    .then(if (isTop) Modifier.momentumBackTransform(backState) else Modifier),
+                            ) {
+                                renderDetail(stackPage, isTop)
+                            }
+                        }
                     }
                 }
             }
@@ -879,7 +915,6 @@ private fun Shell(
     }
     }
     }
-}
 
 @Composable
 private fun BottomBar(
@@ -1233,7 +1268,29 @@ private fun SettingsHome(
                     else -> loadLanguagePacks(languagePrefs).firstOrNull { it.name == selectedLanguage }?.name ?: selectedLanguage
                 }
                 ArrowPreference(title = tr("language", "语言"), summary = selectedLanguageSummary, onClick = { open(PageId.LANGUAGE) })
-OverlayDropdownPreference(
+                SwitchPreference(
+                    title = tr("隐藏桌面图标", "隐藏桌面图标"),
+                    checked = settings.hideAppIcon,
+                    onCheckedChange = { value ->
+                        update { it.copy(hideAppIcon = value) }
+                        setLauncherIconVisible(context, !value)
+                    },
+                )
+                OverlayDropdownPreference(
+                    title = tr("系统设置内模块应用入口", "系统设置内模块应用入口"),
+                    items = listOf(
+                        tr("禁用", "禁用"),
+                        tr("顶部", "顶部"),
+                        tr("中部", "中部"),
+                        tr("底部", "底部"),
+                    ),
+                    selectedIndex = settings.settingsAppEntryPosition.coerceIn(0, 3).let { position ->
+                        if (settings.hideAppIcon && position == 0) 1 else position
+                    },
+                    disabledIndices = if (settings.hideAppIcon) setOf(0) else emptySet(),
+                    onSelectedIndexChange = { index -> update { it.copy(settingsAppEntryPosition = index) } },
+                )
+                OverlayDropdownPreference(
                     title = tr("theme_mode", tr("\u4e3b\u9898\u6a21\u5f0f", "\u4e3b\u9898\u6a21\u5f0f")),
                     items = listOf(tr("followSystem", tr("\u8ddf\u968f\u7cfb\u7edf", "\u8ddf\u968f\u7cfb\u7edf")), tr("light_mode", tr("\u6d45\u8272\u6a21\u5f0f", "\u6d45\u8272\u6a21\u5f0f")), tr("dark_mode", tr("\u6df1\u8272\u6a21\u5f0f", "\u6df1\u8272\u6a21\u5f0f"))),
                     selectedIndex = listOf("system", "light", "dark").indexOf(settings.themeMode).coerceAtLeast(0),
@@ -1287,9 +1344,6 @@ OverlayDropdownPreference(
                 ArrowPreference(title = tr("\u5173\u4e8e", "\u5173\u4e8e"), onClick = { open(PageId.ABOUT) })
                 ArrowPreference(title = tr("\u8f6f\u4ef6\u66f4\u65b0", "\u8f6f\u4ef6\u66f4\u65b0"), onClick = { open(PageId.SOFTWARE_UPDATE) })
                 ArrowPreference(title = tr("\u6350\u8d60", "\u6350\u8d60"), onClick = { open(PageId.DONATE) })
-                ArrowPreference(title = tr("\u5f00\u6e90\u4ee3\u7801\u58f0\u660e", "\u5f00\u6e90\u4ee3\u7801\u58f0\u660e"), onClick = { open(PageId.OPEN) })
-                ArrowPreference(title = tr("contributors", "\u8d21\u732e\u8005"), onClick = { open(PageId.CONTRIBUTORS) })
-                ArrowPreference(title = tr("\u672c\u9879\u76ee\u57fa\u4e8e MIUIX \u6784\u5efa", "\u672c\u9879\u76ee\u57fa\u4e8e MIUIX \u6784\u5efa"), onClick = { openUrl(context, "https://compose-miuix-ui.github.io/miuix/") })
             }
         }
     }
@@ -2320,6 +2374,9 @@ private fun Detail(
         PageId.SETTINGS_APPEARANCE_DEVICE -> SettingsAppearancePage(APPEARANCE_SLOT_DEVICE, appearance, updateAppearance, onPickAppearanceDevice, onClearAppearanceDevice, back)
             PageId.TUTORIAL_DEVICE_CARD -> TutorialDeviceCardSettings(appearance, updateAppearance, onPickAppearanceLogo, onClearAppearanceLogo, onPickTutorialDeviceImage, onClearTutorialDeviceImage, onPickCustomDeviceLogo, onClearCustomDeviceLogo, onPickStyle1UpdateBackground, onClearStyle1UpdateBackground, onPickStyle2DeviceImage, onClearStyle2DeviceImage, onPickStyle2DeviceLogo, onClearStyle2DeviceLogo, onPickStyle2UpdateBackground, onClearStyle2UpdateBackground, back)
         PageId.ABOUT -> About(back, openPage, onDebugMode)
+        PageId.LEGAL_DISCLAIMER -> LegalDocument(PageId.LEGAL_DISCLAIMER, back)
+        PageId.LEGAL_PRIVACY -> LegalDocument(PageId.LEGAL_PRIVACY, back)
+        PageId.LEGAL_USER_AGREEMENT -> LegalDocument(PageId.LEGAL_USER_AGREEMENT, back)
         PageId.SOFTWARE_UPDATE -> SoftwareUpdate(openPage, back)
         PageId.UPDATE_LOG -> UpdateLog(back)
         PageId.DISCLAIMER -> Disclaimer(back, captcha)
@@ -7339,16 +7396,108 @@ private fun aboutCardColors() = CardDefaults.defaultColors(
     ),
 )
 
+private fun legalLanguage(context: Context): String {
+    val prefs = context.getSharedPreferences("languages", Context.MODE_PRIVATE)
+    val selected = prefs.getString("selected", "system") ?: "system"
+    return when {
+        selected == "en" || selected == "ja" || selected == "zh" -> selected
+        selected == "system" -> when (systemLanguage(context)) {
+            "en" -> "en"
+            "ja" -> "ja"
+            else -> "zh"
+        }
+        else -> "zh"
+    }
+}
+
+private fun setLauncherIconVisible(context: Context, visible: Boolean) {
+    runCatching {
+        context.packageManager.setComponentEnabledSetting(
+            ComponentName(context, "${BuildConfig.APPLICATION_ID}.LauncherActivity"),
+            if (visible) PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+            else PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+            PackageManager.DONT_KILL_APP,
+        )
+    }
+}
+
+private fun legalAssetName(page: PageId): String = when (page) {
+    PageId.LEGAL_PRIVACY -> "privacy.txt"
+    PageId.LEGAL_USER_AGREEMENT -> "user_agreement.txt"
+    else -> "disclaimer.txt"
+}
+
+@Composable
+private fun LegalDocument(page: PageId, back: () -> Unit) {
+    val context = LocalContext.current
+    val language = legalLanguage(context)
+    val title = when (page) {
+        PageId.LEGAL_PRIVACY -> tr("隐私政策", "隐私政策")
+        PageId.LEGAL_USER_AGREEMENT -> tr("用户协议", "用户协议")
+        else -> tr("免责声明", "免责声明")
+    }
+    val content = remember(page, language) {
+        val file = legalAssetName(page)
+        runCatching {
+            context.assets.open("legal/$language/$file").bufferedReader().use { it.readText() }
+        }.getOrElse {
+            context.assets.open("legal/zh/$file").bufferedReader().use { it.readText() }
+        }
+    }
+    AppPage(title, back) { padding, scroll ->
+        AppList(padding, scroll, 28) {
+            item {
+                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(18.dp)) {
+                    Text(content, style = MiuixTheme.textStyles.body1)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeviceInfoItem(title: String, summary: String) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Text(title, style = MiuixTheme.textStyles.body1)
+        Text(
+            summary,
+            style = MiuixTheme.textStyles.body2,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            modifier = Modifier.padding(top = 3.dp),
+        )
+    }
+}
+
 @Composable
 private fun About(back: () -> Unit, openPage: (PageId) -> Unit, onDebugMode: () -> Unit) = AppPage(tr("\u5173\u4e8e", "\u5173\u4e8e"), back, showLargeTitle = false, pageBackground = { AboutMaterialBackground(Modifier.matchParentSize()) }) { padding, scroll ->
     val context = LocalContext.current
+    val unavailable = tr("未检测到", "未检测到")
+    val marketName = remember { OsCompatibility.systemProperty("ro.product.marketname").ifBlank { unavailable } }
+    val systemVersion = remember {
+        OsCompatibility.systemProperty("ro.mi.os.version.incremental")
+            .removePrefix("OS")
+            .ifBlank { unavailable }
+    }
+    val androidVersion = remember { "${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})" }
     var iconTaps by remember { mutableIntStateOf(0) }
+    var versionTaps by remember { mutableIntStateOf(0) }
+    var confettiKey by remember { mutableIntStateOf(0) }
     val listState = rememberLazyListState()
     val fadeDistancePx = with(LocalDensity.current) { 520.dp.toPx() }
     val fade by remember { derivedStateOf { (listState.firstVisibleItemScrollOffset / fadeDistancePx).coerceIn(0f, 1f) } }
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(Modifier.fillMaxSize().nestedScroll(scroll.nestedScrollConnection), state = listState, contentPadding = PaddingValues(16.dp, padding.calculateTopPadding() + 4.dp, 16.dp, padding.calculateBottomPadding() + 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            AboutAdvancedMaterialHeader { iconTaps++; if (iconTaps >= 10) { iconTaps = 0; onDebugMode() } }
+            AboutAdvancedMaterialHeader(
+                onLogoClick = { iconTaps++; if (iconTaps >= 10) { iconTaps = 0; onDebugMode() } },
+                onVersionClick = {
+                    versionTaps++
+                    if (versionTaps >= 5) {
+                        versionTaps = 0
+                        confettiKey++
+                    }
+                },
+            )
         }
         item {
             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, colors = aboutCardColors()) {
@@ -7364,13 +7513,43 @@ private fun About(back: () -> Unit, openPage: (PageId) -> Unit, onDebugMode: () 
         }
         item {
             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, colors = aboutCardColors()) {
+                Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                    DeviceInfoItem(marketName, tr("设备型号", "设备型号"))
+                    DeviceInfoItem(androidVersion, tr("Android 版本", "Android 版本"))
+                    DeviceInfoItem(systemVersion, tr("HyperOS 版本", "HyperOS 版本"))
+                    DeviceInfoItem("HyperOS 4 (Android 17)", tr("HyperChanger 适配版本", "HyperChanger 适配版本"))
+                }
+            }
+        }
+        item {
+            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, colors = aboutCardColors()) {
                 ArrowPreference(title = tr("license", "LICENSE"), summary = "Apache License 2.0", onClick = { openPage(PageId.LICENSE) })
                 ArrowPreference(title = tr("githubRepository", "GitHub Repository"), summary = "github.com/ColdP/HyperChanger", onClick = { openUrl(context, "https://github.com/ColdP/HyperChanger") })
                 ArrowPreference(title = tr("telegramGroup", "Telegram 群组"), summary = "t.me/HyperChanger", onClick = { openUrl(context, "https://t.me/HyperChanger") })
                 ArrowPreference(title = tr("qqGroup", "QQ 群"), summary = tr("qqGroupNumber", "群号: 429188055"), onClick = { openUrl(context, "https://qm.qq.com/q/rQhbQbiYLe") })
             }
         }
+        item {
+            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, colors = aboutCardColors()) {
+                ArrowPreference(title = tr("用户协议", "用户协议"), onClick = { openPage(PageId.LEGAL_USER_AGREEMENT) })
+                ArrowPreference(title = tr("免责声明", "免责声明"), onClick = { openPage(PageId.LEGAL_DISCLAIMER) })
+                ArrowPreference(title = tr("隐私政策", "隐私政策"), onClick = { openPage(PageId.LEGAL_PRIVACY) })
+                ArrowPreference(title = tr("\u672c\u9879\u76ee\u57fa\u4e8e MIUIX \u6784\u5efa", "\u672c\u9879\u76ee\u57fa\u4e8e MIUIX \u6784\u5efa"), onClick = { openUrl(context, "https://compose-miuix-ui.github.io/miuix/") })
+                ArrowPreference(title = tr("\u5f00\u6e90\u4ee3\u7801\u58f0\u660e", "\u5f00\u6e90\u4ee3\u7801\u58f0\u660e"), onClick = { openPage(PageId.OPEN) })
+                ArrowPreference(title = tr("contributors", "\u8d21\u732e\u8005"), onClick = { openPage(PageId.CONTRIBUTORS) })
+            }
+        }
         item { Text("\u00a9 ${Year.now().value} btm_m", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = .56f), modifier = Modifier.padding(start = 12.dp)) }
+    }
+    if (confettiKey > 0) {
+        CompletionConfetti(
+            playKey = confettiKey,
+            modifier = Modifier.fillMaxSize(),
+            pieceCount = 200,
+            restingCountRange = 3..7,
+            durationMillis = 7_000,
+        )
+    }
     }
 }
 
@@ -7761,7 +7940,7 @@ internal fun AppPage(
 }
 
 @Composable
-private fun AboutAdvancedMaterialHeader(onLogoClick: () -> Unit) {
+private fun AboutAdvancedMaterialHeader(onLogoClick: () -> Unit, onVersionClick: () -> Unit) {
     val density = LocalDensity.current
     val dark = MiuixTheme.colorScheme.surface.luminance() < .5f
     val versionColor = MiuixTheme.colorScheme.onSurface.copy(alpha = .78f).toArgb()
@@ -7770,7 +7949,7 @@ private fun AboutAdvancedMaterialHeader(onLogoClick: () -> Unit) {
         val logoSize = width * (.94f / 3.91f) * 2.78f * .8f * .95f
         val textWidth = width * (2.97f / 3.91f)
         AndroidView(factory = { HyperCeilerBrandView(it) }, update = { view ->
-            view.configure(with(density) { logoSize.roundToPx() }, with(density) { textWidth.roundToPx() }, "${BuildConfig.VERSION_NAME} | ${BuildConfig.BUILD_DATE}", versionColor, dark, onLogoClick)
+            view.configure(with(density) { logoSize.roundToPx() }, with(density) { textWidth.roundToPx() }, "${BuildConfig.VERSION_NAME} | ${BuildConfig.BUILD_DATE}", versionColor, dark, onLogoClick, onVersionClick)
         }, modifier = Modifier.fillMaxSize())
     }
 }
@@ -8359,6 +8538,7 @@ internal fun OverlayDropdownPreference(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     showValueOnEnd: Boolean = false,
+    disabledIndices: Set<Int> = emptySet(),
     onSelectedIndexChange: (Int) -> Unit,
 ) {
     val hapticFeedback = LocalHapticFeedback.current
@@ -8371,6 +8551,7 @@ internal fun OverlayDropdownPreference(
         modifier = modifier,
         backdrop = LocalToolbarBackdrop.current,
         showValueOnEnd = showValueOnEnd,
+        disabledIndices = disabledIndices,
         onSelectedIndexChange = { selected ->
             hapticFeedback.performHapticFeedback(HapticFeedbackType.Confirm)
             onSelectedIndexChange(selected)

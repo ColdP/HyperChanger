@@ -6,10 +6,13 @@ object OsCompatibility {
     private const val PROPERTY = "ro.mi.os.version.code"
 
     @JvmStatic
-    fun versionCode(): String = runCatching {
+    fun systemProperty(key: String): String = runCatching {
         val type = Class.forName("android.os.SystemProperties")
-        type.getMethod("get", String::class.java).invoke(null, PROPERTY) as? String ?: ""
+        type.getMethod("get", String::class.java).invoke(null, key) as? String ?: ""
     }.getOrDefault("").trim()
+
+    @JvmStatic
+    fun versionCode(): String = systemProperty(PROPERTY)
 
     @JvmStatic
     fun areHooksAllowed(): Boolean = versionCode().isNotEmpty()

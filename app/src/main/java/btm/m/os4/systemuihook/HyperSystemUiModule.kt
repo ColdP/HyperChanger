@@ -10,6 +10,8 @@ import android.app.KeyguardManager
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.content.res.Resources
+import android.content.res.loader.ResourcesLoader
+import android.content.res.loader.ResourcesProvider
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -32,6 +34,7 @@ import android.graphics.drawable.RippleDrawable
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.os.ParcelFileDescriptor
 import android.provider.Settings
 import android.telephony.SubscriptionManager
 import android.text.SpannableString
@@ -422,8 +425,104 @@ class HyperSystemUiModule : XposedModule() {
     private fun isUserFiveGEnabled(c: Context) = runCatching { val k = Class.forName("miui.telephony.TelephonyManager"); k.getDeclaredMethod("isUserFiveGEnabled").invoke(k.getDeclaredMethod("getDefault").invoke(null)) as Boolean }.getOrElse { Settings.Global.getInt(c.contentResolver, "fiveg_user_enable", 1) != 0 }
     private fun setUserFiveGEnabled(c: Context, value: Boolean) { runCatching { val k = Class.forName("miui.telephony.TelephonyManager"); k.getDeclaredMethod("setUserFiveGEnabled", Boolean::class.javaPrimitiveType).invoke(k.getDeclaredMethod("getDefault").invoke(null), value) }.onFailure { Settings.Global.putInt(c.contentResolver, "fiveg_user_enable", if (value) 1 else 0) } }
 
+    private fun settingsField(target: Any, name: String): java.lang.reflect.Field? = generateSequence(target.javaClass) { it.superclass }
+        .mapNotNull { type -> runCatching { type.getDeclaredField(name).apply { isAccessible = true } }.getOrNull() }
+        .firstOrNull()
+
+    private fun getLongField(target: Any, name: String): Long = settingsField(target, name)?.get(target).let { value ->
+        when (value) { is Number -> value.toLong(); else -> 0L }
+    }
+
+    private fun getIntField(target: Any, name: String): Int = settingsField(target, name)?.get(target).let { value ->
+        when (value) { is Number -> value.toInt(); else -> 0 }
+    }
+
+    private fun setLongField(target: Any, name: String, value: Long) { settingsField(target, name)?.set(target, value) }
+    private fun setIntField(target: Any, name: String, value: Int) { settingsField(target, name)?.set(target, value) }
+    private fun setObjectField(target: Any, name: String, value: Any?) { settingsField(target, name)?.set(target, value) }
+
+    private fun attachModuleResources(context: Context): Boolean = runCatching {
+        if (android.os.Build.VERSION.SDK_INT < 30) return false
+        val loader = synchronized(HyperSystemUiModule::class.java) {
+            settingsModuleResourcesLoader ?: run {
+                val apk = context.packageManager.getApplicationInfo(BuildConfig.APPLICATION_ID, 0).sourceDir
+                val provider = ParcelFileDescriptor.open(java.io.File(apk), ParcelFileDescriptor.MODE_READ_ONLY).use {
+                    ResourcesProvider.loadFromApk(it)
+                }
+                ResourcesLoader().apply { addProvider(provider) }.also { settingsModuleResourcesLoader = it }
+            }
+        }
+        runCatching { context.resources.addLoaders(loader) }
+        true
+    }.getOrDefault(false)
+
+    private fun installSettingsAppEntryHook(loader: ClassLoader, prefs: SharedPreferences) {
+        val settingsClass = runCatching { loader.loadClass("com.android.settings.MiuiSettings") }.getOrNull() ?: return
+        val update = settingsClass.methods.firstOrNull {
+            it.name == "updateHeaderList" && it.parameterTypes.size == 1 && java.util.List::class.java.isAssignableFrom(it.parameterTypes[0])
+        } ?: return
+        hook(update).setExceptionMode(ExceptionMode.PROTECTIVE).setId("hyperchanger:settings-app-entry").intercept { chain ->
+            val result = chain.proceed()
+            val headers = chain.getArg(0) as? MutableList<Any?> ?: return@intercept result
+            // Read on every rebuild so changing the dropdown takes effect without restarting Settings.
+            headers.removeAll { header -> runCatching { getLongField(header!!, "id") == SETTINGS_HEADER_ID }.getOrDefault(false) }
+            val savedPosition = prefs.getInt(KEY_SETTINGS_APP_ENTRY_POSITION, 0).coerceIn(0, 3)
+            val position = if (savedPosition == 0 && prefs.getBoolean(KEY_HIDE_APP_ICON, false)) 1 else savedPosition
+            if (position == 0) {
+                return@intercept result
+            }
+            val settingsContext = (chain.thisObject as? android.app.Activity)?.baseContext ?: return@intercept result
+            val headerClass = runCatching {
+                loader.loadClass("com.android.settingslib.miuisettings.preference.PreferenceActivity\$Header")
+            }.getOrNull() ?: return@intercept result
+            val header = runCatching { headerClass.getDeclaredConstructor().apply { isAccessible = true }.newInstance() }.getOrNull()
+                ?: return@intercept result
+            setLongField(header, "id", SETTINGS_HEADER_ID)
+            val moduleContext = runCatching {
+                settingsContext.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY)
+            }.getOrNull()
+            attachModuleResources(settingsContext)
+            val settingsIcon = moduleContext?.resources?.getIdentifier(
+                "ic_hyperchanger_settings_entry",
+                "drawable",
+                BuildConfig.APPLICATION_ID,
+            )?.takeIf { it != 0 } ?: android.R.drawable.ic_menu_manage
+            setIntField(header, "iconRes", settingsIcon)
+            val label = runCatching {
+                (moduleContext ?: settingsContext).applicationInfo.loadLabel(settingsContext.packageManager).toString()
+            }.getOrDefault("HyperChanger")
+            setObjectField(header, "title", label)
+            setObjectField(header, "intent", Intent().setClassName(BuildConfig.APPLICATION_ID, "${BuildConfig.APPLICATION_ID}.MainActivity").apply {
+                putExtra("isDisplayHomeAsUpEnabled", true)
+            })
+            val deviceId = settingsContext.resources.getIdentifier("my_device", "id", settingsContext.packageName)
+            val launcherId = settingsContext.resources.getIdentifier("launcher_settings", "id", settingsContext.packageName)
+            val specialId = settingsContext.resources.getIdentifier("other_special_feature_settings", "id", settingsContext.packageName)
+            val timerId = settingsContext.resources.getIdentifier("app_timer", "id", settingsContext.packageName)
+            val anchor = when (position) {
+                1 -> deviceId
+                2 -> launcherId
+                else -> if (android.os.Build.VERSION.SDK_INT >= 35) timerId else specialId
+            }
+            val index = headers.indexOfFirst { item -> runCatching { getLongField(item!!, "id").toInt() == anchor }.getOrDefault(false) }
+            val insertAt = if (index >= 0) index + 1 else headers.size.coerceAtMost(25)
+            if (headers.isNotEmpty()) {
+                val groupSource = headers[(insertAt - 1).coerceIn(0, headers.lastIndex)]
+                setIntField(header, "groupId", getIntField(groupSource!!, "groupId"))
+            }
+            headers.add(insertAt.coerceIn(0, headers.size), header)
+            result
+        }
+    }
+
     override fun onPackageLoaded(param: PackageLoadedParam) {
         if (!OsCompatibility.areHooksAllowed()) return
+        if (param.packageName == SETTINGS_PACKAGE) {
+            runCatching {
+                installSettingsAppEntryHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install Settings app entry hook", error) }
+            return
+        }
         if (param.packageName == LOCKSCREEN_WALLPAPER) {
             // HyperMusicCover's original Java WallpaperProbe is registered separately through
             // java_init.list and owns this process's GL upload hook.
@@ -11195,6 +11294,11 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     companion object {
+        private const val SETTINGS_PACKAGE = "com.android.settings"
+        private const val SETTINGS_HEADER_ID = 0x4843_0001L
+        private const val KEY_SETTINGS_APP_ENTRY_POSITION = "settings_app_entry_position"
+        private const val KEY_HIDE_APP_ICON = "hide_app_icon"
+        @Volatile private var settingsModuleResourcesLoader: ResourcesLoader? = null
         private const val TAG = "HyperSystemUIHook"
         private const val SYSTEM_UI = "com.android.systemui"
         private const val LOCKSCREEN_WALLPAPER = "com.miui.miwallpaper"

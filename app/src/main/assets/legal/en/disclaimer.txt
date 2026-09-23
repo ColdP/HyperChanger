@@ -1,0 +1,34 @@
+HyperChanger Legal Disclaimer
+
+Effective date: September 19, 2026
+Last revised: September 19, 2026
+
+Please read this notice before installing or enabling HyperChanger. It is an independent, experimental, open-source community project. It is not made, maintained, endorsed, sponsored, or authorized by Xiaomi Corporation or any Xiaomi affiliate.
+
+1. Supported environment
+
+HyperChanger is designed only for the specific Xiaomi HyperOS 4 builds for which the project is released, including selected beta or developer builds. It is not intended for MIUI, HyperOS 1, 2, or 3, other manufacturers' systems, AOSP, or third-party ROMs. Private classes, methods, resources, and process behavior can change between builds. Running the module outside the supported environment may cause crashes, boot loops, an unusable System UI, or a device that cannot boot.
+
+2. Root and framework risks
+
+The module requires an unlocked bootloader, root access, and a compatible LSPosed/Xposed environment. System-level hooks can cause repeated System UI crashes, a black or unresponsive lock screen, broken notifications, launcher failure, excessive battery use, overheating, or loss of other module functionality. Unlocking the bootloader or obtaining root may reduce device security, prevent banking applications from working, and affect the manufacturer's warranty.
+
+3. Data and hardware risk
+
+You are responsible for maintaining complete, independent backups before installation or configuration. Recovery, reflashing, formatting, storage failure, or a software fault may permanently destroy photos, documents, contacts, messages, keys, and other data. Unusual rendering or always-on features may increase heat, power consumption, display wear, or battery wear. Do not use this software on a device whose failure could endanger people or critical operations.
+
+4. No warranty; limitation of liability
+
+The software and documentation are provided AS IS and AS AVAILABLE, without warranties of any kind, express, implied, or statutory, including fitness for a particular purpose, merchantability, accuracy, availability, security, or error-free operation. To the maximum extent permitted by law, the maintainers and contributors are not liable for any direct, indirect, incidental, special, punitive, or consequential loss, including device damage, property damage, business interruption, data loss, or loss of access, arising from use, misuse, or inability to use the software.
+
+5. Third-party services
+
+Optional lyric lookup services, update checks, GitHub, LRCLIB, AMLL TTML, and other third-party interfaces are controlled by their respective providers. The maintainers do not guarantee their availability, accuracy, legality, continuity, or content, and are not responsible for disputes or losses arising from them.
+
+6. Support and reports
+
+The project does not promise one-to-one remote recovery or repair. A useful issue report should include a redacted Logcat, device model, exact HyperOS build, module version, enabled scope, and reproducible steps. Remove personal data, tokens, notification text, and account information before publishing logs. Reports from unsupported systems or reports without enough evidence may be closed.
+
+7. Acceptance
+
+By installing, activating, configuring, or otherwise using HyperChanger, you acknowledge these risks and accept responsibility for your device, data, and use of the software. If you do not accept them, do not install or enable the module.

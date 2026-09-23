@@ -112,6 +112,7 @@ class HyperCeilerBrandView(context: Context) : FrameLayout(context) {
         textColor: Int,
         dark: Boolean,
         onLogoClick: () -> Unit,
+        onVersionClick: () -> Unit = {},
     ) {
         enableRootBlur()
         content.translationY = -dp(40).toFloat()
@@ -131,6 +132,7 @@ class HyperCeilerBrandView(context: Context) : FrameLayout(context) {
         ).apply { topMargin = dp(18) }
         version.text = versionText
         version.setTextColor(textColor)
+        version.setOnClickListener { onVersionClick() }
         content.requestLayout()
     }
 

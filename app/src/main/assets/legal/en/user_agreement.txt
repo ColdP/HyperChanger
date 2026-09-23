@@ -1,0 +1,38 @@
+HyperChanger User Agreement
+
+Effective date: September 19, 2026
+Last revised: September 19, 2026
+
+This agreement governs your use of HyperChanger, an open-source LSPosed system-modification module for Android. Installing, activating, configuring, or running the software means that you have read and accepted this agreement. If you do not agree, do not use the software and remove it from your device.
+
+1. Eligibility and prerequisites
+
+You must use a compatible Xiaomi HyperOS 4 build, an unlocked bootloader, root access, and a compatible LSPosed/Xposed framework. You are responsible for understanding bootloader unlocking, root, module scopes, Fastboot, Recovery, backups, and how to disable or remove a module if Android cannot boot. Do not use this software if you cannot recover your device independently.
+
+2. Supported system and safe use
+
+The module is not licensed or intended for MIUI, HyperOS 1-3, other manufacturers' systems, AOSP, or unsupported custom ROMs. Select only the scopes required for the features you use. Do not enable every system package indiscriminately. Review changes after system updates and disable the module before troubleshooting a crash.
+
+3. License and intellectual property
+
+The project is distributed under Apache License 2.0. Your rights to copy, modify, and redistribute the code are subject to that license and its notices. Components from other open-source projects retain their original licenses and copyrights. Xiaomi, HyperOS, MIUI, and other marks belong to their respective owners and are referenced only to describe compatibility; no endorsement or affiliation is implied.
+
+4. Prohibited conduct
+
+You must not use the module to violate law or another person's rights, obtain unauthorized data, interfere with communications or network security, or distribute harmful content. You must not repackage the software with malware, spyware, forced advertising, or unrelated plugins. You must not misrepresent this free open-source project as an official Xiaomi product or sell it as a proprietary paid product.
+
+5. Third-party content and services
+
+Optional lyric providers, GitHub, update servers, and other external services have their own terms and privacy policies. You are responsible for lawful use of content returned by them, including copyright compliance. The maintainers do not control or guarantee third-party services.
+
+6. Availability and changes
+
+This is a volunteer project. The maintainers do not promise continuous availability, compatibility with every device, support for future builds, or one-to-one technical assistance. They may modify, remove, suspend, or discontinue features or the project when technical, safety, resource, or legal circumstances require it.
+
+7. Disclaimer and governing law
+
+The separate Legal Disclaimer and Privacy Policy form part of the information governing use of the software. The software is provided AS IS. This agreement is governed by the laws of the People's Republic of China, without limiting any mandatory consumer rights that cannot lawfully be waived. If one provision is invalid, the remaining provisions remain effective.
+
+8. Acceptance
+
+By continuing to use HyperChanger, you confirm that you understand the technical risks, have made appropriate backups, and accept this agreement.

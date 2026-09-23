@@ -86,6 +86,7 @@ fun GlassDropdownPreference(
     enabled: Boolean = true,
     backdrop: Backdrop? = null,
     showValueOnEnd: Boolean = false,
+    disabledIndices: Set<Int> = emptySet(),
     onSelectedIndexChange: (Int) -> Unit,
 ) {
     val selected = selectedIndex.coerceIn(0, items.lastIndex.coerceAtLeast(0))
@@ -95,6 +96,7 @@ fun GlassDropdownPreference(
                 DropdownItem(
                     text = text,
                     selected = index == selected,
+                    enabled = index !in disabledIndices,
                     onClick = { onSelectedIndexChange(index) },
                 )
             },

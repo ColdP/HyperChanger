@@ -330,6 +330,9 @@ data class HookSettings(
     val navigationLabelMode: String = "icon_and_text",
     val predictiveBackEnabled: Boolean = true,
     val predictiveBackProgress: Int = 90,
+    val hideAppIcon: Boolean = false,
+    /** 0 = disabled, 1 = top, 2 = middle, 3 = bottom in Android Settings. */
+    val settingsAppEntryPosition: Int = 0,
 )
 
 class HookSettingsStore(context: Context) {
@@ -391,6 +394,8 @@ class HookSettingsStore(context: Context) {
 
 private const val KEY_INITIALIZED = "initialized"
 private const val KEY_USER_SHADE_PRESETS = "user_shade_presets_v1"
+private const val KEY_HIDE_APP_ICON = "hide_app_icon"
+private const val KEY_SETTINGS_APP_ENTRY_POSITION = "settings_app_entry_position"
 private const val MAX_PRESET_NAME_LENGTH = 40
 private const val KEY_NOTIFICATION_ELEMENTS_MATERIAL = "shade_notification_elements_material_v2"
 private const val KEY_CONTROL_CENTER_ELEMENTS_MATERIAL = "shade_control_center_elements_material_v2"
@@ -1283,6 +1288,8 @@ private fun SharedPreferences.toSettings(): HookSettings {
     navigationLabelMode = getString(KEY_NAVIGATION_LABEL_MODE, "icon_and_text").orEmpty().ifBlank { "icon_and_text" },
     predictiveBackEnabled = getBoolean(KEY_PREDICTIVE_BACK_ENABLED, true),
     predictiveBackProgress = getInt(KEY_PREDICTIVE_BACK_PROGRESS, 90).coerceIn(10, 100),
+    hideAppIcon = getBoolean(KEY_HIDE_APP_ICON, false),
+    settingsAppEntryPosition = getInt(KEY_SETTINGS_APP_ENTRY_POSITION, 0).coerceIn(0, 3),
 )
 }
 
@@ -1824,5 +1831,7 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putString(KEY_NAVIGATION_LABEL_MODE, value.navigationLabelMode)
         .putBoolean(KEY_PREDICTIVE_BACK_ENABLED, value.predictiveBackEnabled)
         .putInt(KEY_PREDICTIVE_BACK_PROGRESS, value.predictiveBackProgress)
+        .putBoolean(KEY_HIDE_APP_ICON, value.hideAppIcon)
+        .putInt(KEY_SETTINGS_APP_ENTRY_POSITION, value.settingsAppEntryPosition.coerceIn(0, 3))
         .apply()
 }

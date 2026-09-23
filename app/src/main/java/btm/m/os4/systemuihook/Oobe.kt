@@ -593,12 +593,21 @@ private data class ConfettiPiece(
 )
 
 @Composable
-private fun CompletionConfetti(playKey: Int, modifier: Modifier = Modifier) {
+internal fun CompletionConfetti(
+    playKey: Int,
+    modifier: Modifier = Modifier,
+    pieceCount: Int = 54,
+    restingCountRange: IntRange = 1..3,
+    durationMillis: Int = 3_800,
+) {
     val progress = remember { Animatable(0f) }
     val pieces = remember(playKey) {
         val random = Random(System.nanoTime())
-        val count = 54
-        val restingCount = random.nextInt(1, 4)
+        val count = pieceCount.coerceAtLeast(1)
+        val restingCount = random.nextInt(
+            restingCountRange.first.coerceAtLeast(0),
+            restingCountRange.last.coerceAtLeast(restingCountRange.first) + 1,
+        ).coerceAtMost(count)
         val palette = listOf(
             Color(0xFFFF3B30),
             Color(0xFFFFCC00),
@@ -626,7 +635,7 @@ private fun CompletionConfetti(playKey: Int, modifier: Modifier = Modifier) {
     }
     LaunchedEffect(playKey) {
         progress.snapTo(0f)
-        progress.animateTo(1f, tween(3_800, easing = LinearEasing))
+        progress.animateTo(1f, tween(durationMillis, easing = LinearEasing))
     }
     Canvas(modifier) {
         val timeline = progress.value
