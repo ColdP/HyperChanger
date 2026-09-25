@@ -765,6 +765,7 @@ class HyperSystemUiModule : XposedModule() {
                     if (!depthEffectHookInstalled) {
                         installDepthEffectHook(param.defaultClassLoader, preferences)
                         installAodThirdPartyWallpaperDepthHook(param.defaultClassLoader, preferences)
+                        installVideoWallpaperGlassSupportHook(param.defaultClassLoader)
                         depthEffectHookInstalled = true
                     }
                     if (!aodClockMaterialLimitHookInstalled) {
@@ -800,6 +801,12 @@ class HyperSystemUiModule : XposedModule() {
                     // Catalog merge/sanitizer hooks are harmless when the feature toggle is
                     // off and must be installed before ThemeManager initializes its ViewModel.
                     installThemeManagerRearScreenFeatureGuards(param.defaultClassLoader)
+                    if (!themeManagerClockMaterialLimitHookInstalled) {
+                        installThemeManagerClockMaterialLimitHook(param.defaultClassLoader, preferences)
+                        themeManagerClockMaterialLimitHookInstalled = true
+                    }
+                    installAodLockscreenTemplateLimitHook(param.defaultClassLoader, preferences)
+                    installVideoWallpaperGlassSupportHook(param.defaultClassLoader)
                     if (preferences.getBoolean("unlock_xiaomi_18_rear_screen_ai", false) || preferences.getBoolean("remove_custom_rear_screen_restrictions", false)) {
                         installCustomRearScreenWidgetRegistration(param.defaultClassLoader)
                     }
@@ -4076,7 +4083,17 @@ class HyperSystemUiModule : XposedModule() {
                     if (!preferences.getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false)) {
                         return@intercept chain.proceed()
                     }
-                    val bean = chain.getArg(2)
+                    // SystemUI uses (preset, context, bean), while the DEV AOD build uses
+                    // (bean, context, preset). Locate the bean by its accessor instead of
+                    // relying on an argument position.
+                    val bean = (0 until applyMethod.parameterCount)
+                        .asSequence()
+                        .mapNotNull { index -> chain.getArg(index) }
+                        .firstOrNull { candidate ->
+                            runCatching {
+                                candidate.javaClass.getMethod("getClockEffect")
+                            }.isSuccess
+                        }
                     val originalEffect = runCatching {
                         bean?.javaClass?.getMethod("getClockEffect")?.invoke(bean) as? Int
                     }.getOrNull()
@@ -5288,6 +5305,55 @@ class HyperSystemUiModule : XposedModule() {
             log(Log.INFO, TAG, "Installed notification mini-window bar hide hook")
         }.onFailure { error ->
             log(Log.WARN, TAG, "Could not install notification mini-window bar hide hook", error)
+        }
+    }
+
+    /**
+     * ThemeManager deliberately downgrades overlay/glass clocks while applying a dynamic or
+     * super wallpaper (TemplateApiImpl.exv8). Restore the user's effect after that conversion
+     * so the value reaches SystemUI/AOD unchanged.
+     */
+    private fun installThemeManagerClockMaterialLimitHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
+        runCatching {
+            val templateApi = classLoader.loadClass(THEME_MANAGER_TEMPLATE_API_CLASS)
+            val applyWallpaperType = templateApi.declaredMethods.firstOrNull {
+                it.name == THEME_MANAGER_TEMPLATE_API_METHOD && it.parameterCount == 3
+            } ?: error("$THEME_MANAGER_TEMPLATE_API_METHOD was not found")
+            applyWallpaperType.isAccessible = true
+            hook(applyWallpaperType)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("theme-manager-clock-material-limit")
+                .intercept { chain ->
+                    if (!preferences.getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false)) {
+                        return@intercept chain.proceed()
+                    }
+                    val templateConfig = chain.getArg(2)
+                    val clockInfo = runCatching {
+                        templateConfig?.javaClass?.getMethod("getLockscreenInfo")?.invoke(templateConfig)
+                            ?.let { it.javaClass.getMethod("getClockInfo").invoke(it) }
+                    }.getOrNull()
+                    val originalEffect = runCatching {
+                        clockInfo?.javaClass?.getMethod("getClockEffect")?.invoke(clockInfo) as? Int
+                    }.getOrNull()
+                    val result = chain.proceed()
+                    if (originalEffect == CLOCK_EFFECT_GLASS || originalEffect == CLOCK_EFFECT_OVERLAY) {
+                        runCatching {
+                            clockInfo?.javaClass?.getMethod(
+                                "setClockEffect",
+                                Int::class.javaPrimitiveType,
+                            )?.invoke(clockInfo, originalEffect)
+                        }.onFailure { error ->
+                            log(Log.WARN, TAG, "Could not restore ThemeManager clock material effect", error)
+                        }
+                    }
+                    result
+                }
+            log(Log.INFO, TAG, "Installed ThemeManager clock material-limit bypass")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install ThemeManager clock material-limit bypass", error)
         }
     }
 
@@ -11898,6 +11964,39 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
+    /**
+     * The editor disables the glass filter for video/sensor/linkage wallpapers unless the
+     * separate MiWallpaper metadata flag is enabled.  That flag is a stock capability gate,
+     * not a renderer requirement on this device, so force the capability query on in both the
+     * AOD editor and the ThemeManager copy of the editor.
+     */
+    private fun installVideoWallpaperGlassSupportHook(classLoader: ClassLoader) {
+        runCatching {
+            val companionClass = classLoader.loadClass(
+                "com.miui.keyguard.editor.utils.Wallpaper\$Companion",
+            )
+            val contextClass = Context::class.java
+            val methods = companionClass.declaredMethods.filter { method ->
+                method.parameterTypes.contentEquals(arrayOf(contextClass)) &&
+                    method.returnType == Boolean::class.javaPrimitiveType &&
+                    (method.name == "isVideoSupportGlassFilter" || method.name == "kja0")
+            }
+            if (methods.isEmpty()) {
+                error("Wallpaper glass-capability method not found")
+            }
+            methods.forEach { method ->
+                method.isAccessible = true
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("editor-video-wallpaper-glass-support-${method.name}")
+                    .intercept { true }
+            }
+            log(Log.INFO, TAG, "Installed video-wallpaper glass support hook")
+        }.onFailure { error ->
+            log(Log.DEBUG, TAG, "Video-wallpaper glass support hook unavailable", error)
+        }
+    }
+
     private fun installAodLockscreenTemplateLimitHook(
         classLoader: ClassLoader,
         preferences: SharedPreferences,
@@ -11918,12 +12017,38 @@ class HyperSystemUiModule : XposedModule() {
             else -> return
         }
         runCatching {
+            // The editor's visible model field is only used by some builds.  The actual
+            // persistence limit in DEV-2446 is enforced in TemplateApiImpl.insertHistoryConfig:
+            // once the history count reaches 20 it asks the DAO for the oldest entries and
+            // deletes them.  Hook that DAO query as well, otherwise changing the model field
+            // appears to work in the UI but newly saved combinations are still trimmed to 20.
+            val historyDaoClass = classLoader.loadClass(
+                "com.miui.keyguard.editor.data.db.TemplateHistoryDao_Impl",
+            )
+            val oldestHistoryMethod = historyDaoClass.getMethod("getOldestHistory", Int::class.javaPrimitiveType)
+            hook(oldestHistoryMethod)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("aod-lockscreen-template-history-limit")
+                .intercept { chain ->
+                    val requested = (chain.getArg(0) as? Number)?.toInt() ?: 0
+                    val adjusted = requested + 20 - limit
+                    if (adjusted <= 0) {
+                        emptyList<Any>()
+                    } else {
+                        chain.proceedWith(chain.thisObject, arrayOf(adjusted))
+                    }
+                }
+
             val modelClass = classLoader.loadClass(
                 "com.miui.keyguard.editor.homepage.model.CrossListDataModel",
             )
-            val limitField = modelClass.getDeclaredField("_maxTemplateCount").apply {
-                isAccessible = true
-            }
+            // AOD DEV builds expose the Kotlin property as _maxTemplateCount, while the
+            // ThemeManager 11.5.2 build keeps the R8-mapped field name f53460qrj.
+            val limitField = sequenceOf("_maxTemplateCount", "f53460qrj")
+                .mapNotNull { name -> runCatching { modelClass.getDeclaredField(name) }.getOrNull() }
+                .firstOrNull()
+                ?.apply { isAccessible = true }
+                ?: error("CrossListDataModel template limit field not found")
             modelClass.declaredConstructors.forEachIndexed { index, constructor ->
                 constructor.isAccessible = true
                 hook(constructor)
@@ -12990,6 +13115,9 @@ class HyperSystemUiModule : XposedModule() {
             "miui.systemui.controlcenter.windowview.MiuiDefaultThemeControllerImpl"
         private const val CLOCK_UTILITY_CLASS = "com.miui.clock.allInOne.AllInOneUtil"
         private const val CLOCK_UTILITY_METHOD = "applyOtaClockParams"
+        private const val THEME_MANAGER_TEMPLATE_API_CLASS =
+            "com.miui.keyguard.editor.data.template.TemplateApiImpl"
+        private const val THEME_MANAGER_TEMPLATE_API_METHOD = "exv8"
         private const val CLOCK_BEAN_CLASS = "com.miui.clock.module.ClockBean"
         private const val CLOCK_BEAN_IS_COLON_SHOW_METHOD = "isColonShow"
         private const val CLOCK_EFFECT_OVERLAY = 2
@@ -13319,6 +13447,7 @@ private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_d
         private var softGlassThemeSystemUiHookInstalled = false
         private var systemUiClockMaterialLimitHookInstalled = false
         private var aodClockMaterialLimitHookInstalled = false
+        private var themeManagerClockMaterialLimitHookInstalled = false
         private var aodLockscreenClockColonHookInstalled = false
         private var aodLockscreenTemplateLimitHookInstalled = false
         private var statusBarVisibilityHookInstalled = false
