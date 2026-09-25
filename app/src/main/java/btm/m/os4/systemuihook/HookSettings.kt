@@ -124,6 +124,7 @@ data class HookSettings(
     val controlCenterSlider: GlassTuning = GlassTuning(),
     val removeFocusAndIslandWhitelistLimit: Boolean = false,
     val removeDynamicIslandMediaMiniBarWhitelistLimit: Boolean = false,
+    val hideNotificationMiniWindowBar: Boolean = false,
     val islandEnabled: Boolean = false,
     val islandWidth: Int = 108,
     val expandedIslandBackgroundEnabled: Boolean = false,
@@ -448,6 +449,7 @@ private const val KEY_REMOVE_FOCUS_AND_ISLAND_WHITELIST_LIMIT =
     "remove_focus_and_island_whitelist_limit"
 private const val KEY_REMOVE_DYNAMIC_ISLAND_MEDIA_MINI_BAR_WHITELIST_LIMIT =
     "remove_dynamic_island_media_mini_bar_whitelist_limit"
+private const val KEY_HIDE_NOTIFICATION_MINI_WINDOW_BAR = "hide_notification_mini_window_bar"
 private const val KEY_ISLAND_ENABLED = "island_enabled"
 private const val KEY_ISLAND_WIDTH = "island_width"
 private const val KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED = "expanded_island_background_enabled"
@@ -892,6 +894,7 @@ private fun SharedPreferences.toSettings(): HookSettings {
         KEY_REMOVE_DYNAMIC_ISLAND_MEDIA_MINI_BAR_WHITELIST_LIMIT,
         false,
     ),
+    hideNotificationMiniWindowBar = getBoolean(KEY_HIDE_NOTIFICATION_MINI_WINDOW_BAR, false),
     islandEnabled = getBoolean(KEY_ISLAND_ENABLED, false),
     islandWidth = getInt(KEY_ISLAND_WIDTH, 108).coerceIn(108, 190),
     expandedIslandBackgroundEnabled = getBoolean(KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED, false),
@@ -1478,6 +1481,7 @@ private fun SharedPreferences.write(value: HookSettings) {
             KEY_REMOVE_DYNAMIC_ISLAND_MEDIA_MINI_BAR_WHITELIST_LIMIT,
             value.removeDynamicIslandMediaMiniBarWhitelistLimit,
         )
+        .putBoolean(KEY_HIDE_NOTIFICATION_MINI_WINDOW_BAR, value.hideNotificationMiniWindowBar)
         .putBoolean(KEY_ISLAND_ENABLED, value.islandEnabled)
         .putInt(KEY_ISLAND_WIDTH, value.islandWidth)
         .putBoolean(KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED, value.expandedIslandBackgroundEnabled)

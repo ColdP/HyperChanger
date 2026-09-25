@@ -645,6 +645,7 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     if (param.packageName == SYSTEM_UI && !notificationRestrictionHooksInstalled) {
                         installNotificationRestrictionHooks(param.defaultClassLoader, preferences)
+                        installNotificationMiniWindowBarHook(param.defaultClassLoader, preferences)
                         notificationRestrictionHooksInstalled = true
                     }
                     if (!focusIslandWhitelistPluginHooksInstalled) {
@@ -3644,6 +3645,8 @@ class HyperSystemUiModule : XposedModule() {
                         shouldHideSystemMobileSignal(view, preferences.getInt(KEY_MOBILE_SIGNAL_HIDE_MODE, 0))
                     val forcedHidden =
                         hideSecondaryMobileRoot || hideOriginalDualSignal ||
+                        (resourceName == "mini_window_bar" &&
+                            preferences.getBoolean(KEY_HIDE_NOTIFICATION_MINI_WINDOW_BAR, false)) ||
                         ((resourceName == "mobile_type" || resourceName == "mobile_type_single" ||
                             resourceName == "mobile_special_5G") &&
                             mobileNetworkTypeMode != 0 &&
@@ -5256,6 +5259,38 @@ class HyperSystemUiModule : XposedModule() {
         }.onFailure { error -> log(Log.WARN, TAG, "Status bar icon left-position hook unavailable", error) }
     }
 
+    private fun installNotificationMiniWindowBarHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
+        runCatching {
+            val injectorClass = classLoader.loadClass(EXPANDABLE_NOTIFICATION_ROW_INJECTOR_CLASS)
+            val methods = injectorClass.declaredMethods.filter {
+                it.name == "updateMiniWindowBar" && it.parameterCount == 0
+            }
+            check(methods.isNotEmpty()) { "$EXPANDABLE_NOTIFICATION_ROW_INJECTOR_CLASS#updateMiniWindowBar not found" }
+            methods.forEachIndexed { index, method ->
+                method.isAccessible = true
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("notification-mini-window-bar-hide:$index")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        if (preferences.getBoolean(KEY_HIDE_NOTIFICATION_MINI_WINDOW_BAR, false)) {
+                            runCatching {
+                                val getMiniBar = injectorClass.getDeclaredMethod("getMiniBar").apply { isAccessible = true }
+                                (getMiniBar.invoke(chain.thisObject) as? View)?.visibility = View.GONE
+                            }
+                        }
+                        result
+                    }
+            }
+            log(Log.INFO, TAG, "Installed notification mini-window bar hide hook")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install notification mini-window bar hide hook", error)
+        }
+    }
+
     private fun applyStatusBarIconsLeft(
         rawView: Any?,
         classLoader: ClassLoader,
@@ -6720,6 +6755,21 @@ class HyperSystemUiModule : XposedModule() {
                             row != null && context != null && isFocusNotificationRow(row)
                         ) {
                             applyNormalNotificationRowEffect(row, context, classLoader, effectClass.simpleName)
+                            // Some keyguard transitions finish their effect transaction after
+                            // apply() returns. Re-apply on the next frame so that the focus
+                            // effect cannot leave its darker keyguard glass behind.
+                            row.post {
+                                if (preferences.getBoolean(KEY_UNIFY_NOTIFICATION_MATERIAL, false) &&
+                                    isFocusNotificationRow(row)
+                                ) {
+                                    applyNormalNotificationRowEffect(
+                                        row,
+                                        context,
+                                        classLoader,
+                                        "${effectClass.simpleName}-post",
+                                    )
+                                }
+                            }
                         }
                         result
                     }
@@ -6757,7 +6807,85 @@ class HyperSystemUiModule : XposedModule() {
             log(Log.DEBUG, TAG, "Focus Full-AOD material hook unavailable", error)
         }
 
+        // Media headers use a separate effect family. In particular, the keyguard variant
+        // installs notification_glass_params_on_keyguard and keyguard-only blend colors, so
+        // the row-material enforcement above cannot affect it.
+        MEDIA_NOTIFICATION_EFFECT_CLASSES.forEach { className ->
+            runCatching {
+                val effectClass = classLoader.loadClass(className)
+                val applyMethod = effectClass.declaredMethods.firstOrNull {
+                    it.name == "apply" && it.parameterCount == 2 &&
+                        Context::class.java.isAssignableFrom(it.parameterTypes[1])
+                } ?: return@runCatching
+                hook(applyMethod)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("media-notification-normal-material:${effectClass.simpleName}")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        if (mediaMaterialApplying.get() != true &&
+                            preferences.getBoolean(KEY_UNIFY_NOTIFICATION_MATERIAL, false)
+                        ) {
+                            val header = chain.getArg(0) as? View
+                            val context = chain.getArg(1) as? Context
+                            if (header != null && context != null && isMediaNotificationView(header)) {
+                                applyNormalMediaNotificationEffect(
+                                    header,
+                                    context,
+                                    classLoader,
+                                    effectClass.simpleName,
+                                )
+                                header.post {
+                                    if (preferences.getBoolean(KEY_UNIFY_NOTIFICATION_MATERIAL, false) &&
+                                        isMediaNotificationView(header)
+                                    ) {
+                                        applyNormalMediaNotificationEffect(
+                                            header,
+                                            context,
+                                            classLoader,
+                                            "${effectClass.simpleName}-post",
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        result
+                    }
+            }.onFailure { error ->
+                log(Log.DEBUG, TAG, "Media effect hook unavailable for $className", error)
+            }
+        }
+
         log(Log.INFO, TAG, "Installed focus notification normal-material enforcement ($effectHookCount effects)")
+    }
+
+    private fun applyNormalMediaNotificationEffect(
+        header: View,
+        context: Context,
+        classLoader: ClassLoader,
+        source: String,
+    ) {
+        if (mediaMaterialApplying.get() == true) return
+        mediaMaterialApplying.set(true)
+        runCatching {
+            val effectClass = classLoader.loadClass(MEDIA_NOTIFICATION_GLASS_EFFECT_CLASS)
+            val instance = effectClass.fields.firstOrNull { it.name == "INSTANCE" }?.get(null)
+                ?: effectClass.declaredFields.firstOrNull { it.name == "INSTANCE" }
+                    ?.apply { isAccessible = true }
+                    ?.get(null)
+                ?: return@runCatching
+            val apply = effectClass.methods.firstOrNull {
+                it.name == "apply" && it.parameterCount == 2
+            } ?: return@runCatching
+            apply.invoke(instance, header, context)
+            val hit = "$source:${header.javaClass.name}"
+            if (focusMaterialEnforcementHits.add("media:$hit")) {
+                log(Log.INFO, TAG, "Re-applied normal media notification glass ($source)")
+            }
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not re-apply normal media notification glass", error)
+        }.also {
+            mediaMaterialApplying.remove()
+        }
     }
 
     private fun applyNormalNotificationRowEffect(
@@ -7014,11 +7142,11 @@ class HyperSystemUiModule : XposedModule() {
 
     private fun normalNotificationGlassParams(view: View): FloatArray? {
         val resources = view.resources
-        val resourceName = if (notificationOnKeyguard(view)) {
-            "notification_glass_params_on_keyguard"
-        } else {
-            NORMAL_NOTIFICATION_GLASS_PARAMS_ARRAY
-        }
+        // NotificationRowGlassEffect uses notification_glass_params_normal on both the
+        // notification shade and keyguard.  The keyguard-specific array belongs to the
+        // separate focus effect; using it here makes a unified focus row darker than a
+        // normal row while the device is locked.
+        val resourceName = NORMAL_NOTIFICATION_GLASS_PARAMS_ARRAY
         synchronized(normalNotificationGlassParamsCache) {
             normalNotificationGlassParamsCache[resources]?.get(resourceName)?.let { return it.copyOf() }
         }
@@ -7049,8 +7177,10 @@ class HyperSystemUiModule : XposedModule() {
         // points; replacing them here can apply the blend layer a second time and make the row
         // appear intermittently over-bright.
         if (notificationTypeFor(view) == NotificationMaterialType.NORMAL) return null
-        val keyguard = notificationOnKeyguard(view)
-        val suffix = if (keyguard) "keyguard" else "shade"
+        // NotificationRowBlurEffect always seeds the normal row with the shade blend points,
+        // including when the row is rendered on keyguard.  Keep unified focus/media rows on
+        // that same recipe instead of switching to the darker keyguard blend colors.
+        val suffix = "shade"
         return runCatching {
             val resources = view.resources
             intArrayOf(
@@ -12799,6 +12929,8 @@ class HyperSystemUiModule : XposedModule() {
             "com.android.systemui.statusbar.notification.row.NotificationBackgroundView"
         private const val NOTIFICATION_ROW_GLASS_EFFECT_CLASS =
             "com.android.systemui.statusbar.notification.style.vieweffect.NotificationRowGlassEffect"
+        private const val MEDIA_NOTIFICATION_GLASS_EFFECT_CLASS =
+            "com.android.systemui.statusbar.notification.style.vieweffect.MediaViewGlassEffect"
         private val FOCUS_NOTIFICATION_EFFECT_CLASSES = listOf(
             "com.android.systemui.statusbar.notification.style.vieweffect.FocusNotificationNormalEffect",
             "com.android.systemui.statusbar.notification.style.vieweffect.FocusNotificationNormalCustomBgEffect",
@@ -12809,6 +12941,15 @@ class HyperSystemUiModule : XposedModule() {
             "com.android.systemui.statusbar.notification.style.vieweffect.FocusNotificationGlassOnKeyguardEffect",
             "com.android.systemui.statusbar.notification.style.vieweffect.FocusNotificationGlassOnKeyguardLightWallPaperEffect",
             "com.android.systemui.statusbar.notification.style.vieweffect.FocusNotificationGlassFullAodEffect",
+        )
+        private val MEDIA_NOTIFICATION_EFFECT_CLASSES = listOf(
+            "com.android.systemui.statusbar.notification.style.vieweffect.MediaViewNormalEffect",
+            "com.android.systemui.statusbar.notification.style.vieweffect.MediaViewBlurEffect",
+            "com.android.systemui.statusbar.notification.style.vieweffect.MediaViewBlurOnKeyguardEffect",
+            "com.android.systemui.statusbar.notification.style.vieweffect.MediaViewGlassEffect",
+            "com.android.systemui.statusbar.notification.style.vieweffect.MediaViewGlassOnKeyguardEffect",
+            "com.android.systemui.statusbar.notification.style.vieweffect.MediaViewGlassOnKeyguardLightWallPaperEffect",
+            "com.android.systemui.statusbar.notification.style.vieweffect.MediaViewGlassFullAodEffect",
         )
         private const val MEDIA_PANEL_CLASS =
             "miui.systemui.controlcenter.panel.main.media.MediaPlayerPanel"
@@ -12957,6 +13098,7 @@ class HyperSystemUiModule : XposedModule() {
             "remove_focus_and_island_whitelist_limit"
         private const val KEY_REMOVE_DYNAMIC_ISLAND_MEDIA_MINI_BAR_WHITELIST_LIMIT =
             "remove_dynamic_island_media_mini_bar_whitelist_limit"
+        private const val KEY_HIDE_NOTIFICATION_MINI_WINDOW_BAR = "hide_notification_mini_window_bar"
         private const val KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED = "expanded_island_background_enabled"
         private const val KEY_EXPANDED_ISLAND_BACKGROUND_OPACITY = "expanded_island_background_opacity"
         private const val KEY_EXPANDED_ISLAND_BACKGROUND_BLUR_RADIUS = "expanded_island_background_blur_radius"
@@ -13265,6 +13407,7 @@ private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_d
         private val notificationGlassAppliedViews =
             Collections.newSetFromMap(WeakHashMap<View, Boolean>())
         private val notificationGlassApplying = ThreadLocal<Boolean>()
+        private val mediaMaterialApplying = ThreadLocal<Boolean>()
         private val normalNotificationGlassParamsCache =
             WeakHashMap<Resources, MutableMap<String, FloatArray>>()
         private val controlCenterMaterialHits = Collections.synchronizedSet(mutableSetOf<String>())

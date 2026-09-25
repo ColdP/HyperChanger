@@ -302,6 +302,7 @@
     "取消": "キャンセル",
     "去除焦点通知与超级岛白名单限制": "フォーカス通知とスーパーアイランドホワイトリストの制限を削除する",
     "去除媒体控件下拉条白名单限制": "メディアコントロールのミニバーのホワイトリスト制限を削除する",
+    "hide_notification_mini_window_bar": "通知下部のミニウィンドウプルダウンヒントバーを非表示",
     "removeDynamicIslandMediaMiniBarWhitelistLimit": "メディアコントロールのミニバーのホワイトリスト制限を削除する",
     "hide_system_media_source_icon": "システムメディア通知のソースアイコンを非表示",
     "hide_media_island_source_icon": "メディアスーパーアイランドのソースアイコンを非表示",

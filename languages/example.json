@@ -302,6 +302,7 @@
     "取消": "’s decline",
     "去除焦点通知与超级岛白名单限制": "Remove focus notifications and super island whitelist restrictions",
     "去除媒体控件下拉条白名单限制": "Remove media control mini-bar whitelist restriction",
+    "hide_notification_mini_window_bar": "Hide the mini-window pull-down hint bar at the bottom of notifications",
     "removeDynamicIslandMediaMiniBarWhitelistLimit": "Remove media control mini-bar whitelist restriction",
     "hide_system_media_source_icon": "Hide system media notification source icon",
     "hide_media_island_source_icon": "Hide media island source icon",

@@ -4232,6 +4232,11 @@ private fun Island(
         item {
                 Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
                 SwitchPreference(
+                    title = tr("hide_notification_mini_window_bar", "隐藏通知底部的小窗下拉提示线"),
+                    checked = s.hideNotificationMiniWindowBar,
+                    onCheckedChange = { value -> update { it.copy(hideNotificationMiniWindowBar = value) } },
+                )
+                SwitchPreference(
                     title = tr("\u53bb\u9664\u7126\u70b9\u901a\u77e5\u4e0e\u8d85\u7ea7\u5c9b\u767d\u540d\u5355\u9650\u5236", "\u53bb\u9664\u7126\u70b9\u901a\u77e5\u4e0e\u8d85\u7ea7\u5c9b\u767d\u540d\u5355\u9650\u5236"),
                     checked = s.removeFocusAndIslandWhitelistLimit,
                     onCheckedChange = { value ->
