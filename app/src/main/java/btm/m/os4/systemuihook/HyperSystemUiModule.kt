@@ -513,8 +513,7 @@ class HyperSystemUiModule : XposedModule() {
             // Read on every rebuild so changing the dropdown takes effect without restarting Settings.
             headers.removeAll { header -> runCatching { getLongField(header!!, "id") == SETTINGS_HEADER_ID }.getOrDefault(false) }
             val savedPosition = prefs.getInt(KEY_SETTINGS_APP_ENTRY_POSITION, 0).coerceIn(0, 3)
-            val position = if (savedPosition == 0 && prefs.getBoolean(KEY_HIDE_APP_ICON, false)) 1 else savedPosition
-            if (position == 0) {
+            if (savedPosition == 0) {
                 return@intercept result
             }
             val settingsContext = (chain.thisObject as? android.app.Activity)?.baseContext ?: return@intercept result
@@ -545,7 +544,7 @@ class HyperSystemUiModule : XposedModule() {
             val launcherId = settingsContext.resources.getIdentifier("launcher_settings", "id", settingsContext.packageName)
             val specialId = settingsContext.resources.getIdentifier("other_special_feature_settings", "id", settingsContext.packageName)
             val timerId = settingsContext.resources.getIdentifier("app_timer", "id", settingsContext.packageName)
-            val anchor = when (position) {
+            val anchor = when (savedPosition) {
                 1 -> deviceId
                 2 -> launcherId
                 else -> if (android.os.Build.VERSION.SDK_INT >= 35) timerId else specialId

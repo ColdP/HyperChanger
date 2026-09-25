@@ -1743,10 +1743,7 @@ private fun SettingsHome(
                         tr("中部", "中部"),
                         tr("底部", "底部"),
                     ),
-                    selectedIndex = settings.settingsAppEntryPosition.coerceIn(0, 3).let { position ->
-                        if (settings.hideAppIcon && position == 0) 1 else position
-                    },
-                    disabledIndices = if (settings.hideAppIcon) setOf(0) else emptySet(),
+                    selectedIndex = settings.settingsAppEntryPosition.coerceIn(0, 3),
                     onSelectedIndexChange = { index -> update { it.copy(settingsAppEntryPosition = index) } },
                 )
                 OverlayDropdownPreference(
