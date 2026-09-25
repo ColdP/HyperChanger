@@ -308,7 +308,12 @@ private fun Root(
     val context = LocalContext.current
     val oobePreferences = remember { context.getSharedPreferences("oobe", Context.MODE_PRIVATE) }
     var showOobe by remember {
-        mutableStateOf(oobePreferences.getLong("completed_version", -1L) != BuildConfig.VERSION_CODE.toLong())
+        // OOBE is a one-time acknowledgement. Keep recognizing the legacy
+        // version-based marker so upgrades do not show OOBE again.
+        mutableStateOf(
+            !oobePreferences.getBoolean("completed", false) &&
+                !oobePreferences.contains("completed_version"),
+        )
     }
     val musicStore = remember(context) { MusicControlSettingsStore(context) }
     var musicWhitelist by remember { mutableStateOf(musicStore.apps) }
@@ -576,7 +581,7 @@ private fun Root(
                 serviceConnected = service != null,
                 onLanguageChanged = { languageRevision++ },
                 onFinished = {
-                    oobePreferences.edit().putLong("completed_version", BuildConfig.VERSION_CODE.toLong()).apply()
+                    oobePreferences.edit().putBoolean("completed", true).apply()
                     showOobe = false
                 },
             )

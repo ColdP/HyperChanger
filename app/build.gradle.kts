@@ -23,7 +23,7 @@ android {
         applicationId = "btm.m.os4.systemuihook"
         minSdk = 35
         targetSdk = 37
-        versionCode = 1010403
+        versionCode = 1010404
         versionName = "1.1.4 RC3"
         buildConfigField("String", "BUILD_DATE", "\"$buildDate\"")
 
