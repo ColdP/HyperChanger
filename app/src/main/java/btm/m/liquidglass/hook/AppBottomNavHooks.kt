@@ -708,6 +708,7 @@ object AppBottomNavHooks {
                                 navigationStyle = navigationStyle,
                                 advancedMaterial = advancedMaterial,
                                 colorMode = colorMode,
+                                adaptiveFloatingWidth = true,
                                 liquidBottomSpacingDp = if (config === xiaomiWallet) -8 else 8,
                                 concealHostBottomBar = config.concealHostBottomBar ||
                                     config === xiaomiWallet,

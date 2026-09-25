@@ -169,6 +169,7 @@ fun CustomNavigation(
     liquidBottomSpacingDp: Int = 8,
     concealHostBottomBar: Boolean = false,
     forceFloatingGlass: Boolean = false,
+    adaptiveFloatingWidth: Boolean = false,
     accentColorOverride: Color? = null,
     redrawNativeText: Boolean = false,
     onHostPreDraw: () -> Unit,
@@ -207,6 +208,7 @@ fun CustomNavigation(
                 advancedMaterial = advancedMaterial,
                 hostIsDarkTheme = hostIsDarkTheme,
                 accentColorOverride = accentColorOverride,
+                adaptiveFloatingWidth = adaptiveFloatingWidth,
                 tabImageVector = tabImageVector,
                 tabIconContent = tabIconContent
             )
@@ -724,6 +726,7 @@ private fun HyperNavigation(
     advancedMaterial: Boolean,
     hostIsDarkTheme: Boolean,
     accentColorOverride: Color? = null,
+    adaptiveFloatingWidth: Boolean = false,
     tabImageVector: ((Int) -> ImageVector)? = null,
     tabIconContent: (@Composable (Int, Color) -> Unit)? = null
 ) {
@@ -752,6 +755,7 @@ private fun HyperNavigation(
                     advancedMaterial = useAdvancedMaterial,
                     isDarkTheme = isDarkTheme,
                     accentColorOverride = accentColorOverride,
+                    adaptiveFloatingWidth = adaptiveFloatingWidth,
                     tabImageVector = tabImageVector,
                     tabIconContent = tabIconContent,
                     onTabSelected = { index ->
@@ -853,6 +857,7 @@ private fun HyperFloatingNavigationBar(
     advancedMaterial: Boolean,
     isDarkTheme: Boolean,
     accentColorOverride: Color?,
+    adaptiveFloatingWidth: Boolean,
     tabImageVector: ((Int) -> ImageVector)?,
     tabIconContent: (@Composable (Int, Color) -> Unit)?,
     onTabSelected: (Int) -> Unit,
@@ -915,7 +920,11 @@ private fun HyperFloatingNavigationBar(
     val capsule = Capsule()
     val shadowColor = Color.Black.copy(alpha = 0.35f)
 
-    val widthFraction = (0.25f + tabCount * 0.135f).coerceIn(0.53f, 0.92f)
+    val widthFraction = if (adaptiveFloatingWidth) {
+        (0.25f + tabCount * 0.135f).coerceIn(0.53f, 0.92f)
+    } else {
+        0.53f * floatingScale
+    }
     BoxWithConstraints(
         Modifier
             .fillMaxWidth(widthFraction)
