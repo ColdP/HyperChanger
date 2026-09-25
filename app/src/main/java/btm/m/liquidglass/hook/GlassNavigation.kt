@@ -915,9 +915,10 @@ private fun HyperFloatingNavigationBar(
     val capsule = Capsule()
     val shadowColor = Color.Black.copy(alpha = 0.35f)
 
+    val widthFraction = (0.25f + tabCount * 0.135f).coerceIn(0.53f, 0.92f)
     BoxWithConstraints(
         Modifier
-            .fillMaxWidth(0.53f * floatingScale)
+            .fillMaxWidth(widthFraction)
             .navigationBarsPadding()
             .padding(bottom = 8.dp * floatingScale)
             .height(72.dp * floatingScale),

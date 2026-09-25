@@ -9,6 +9,7 @@ import android.database.MatrixCursor
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.provider.CalendarContract
+import android.content.res.Configuration
 import java.io.File
 
 class SettingsAppearanceProvider : ContentProvider() {
@@ -168,7 +169,11 @@ class SettingsAppearanceProvider : ContentProvider() {
         if (slot == LOCKSCREEN_WIDGET_SIGNATURE_SLOT) {
             return File(File(requireContext().filesDir, "lockscreen_widget"), "signature.bin")
         }
-        return File(File(requireContext().filesDir, "settings_appearance"), "$slot.bin")
+        val prefs = requireContext().getSharedPreferences(SETTINGS_APPEARANCE_PREFERENCES, 0)
+        val effective = if (prefs.getBoolean("color_mode_assets_enabled", false) && slot in COLOR_MODE_ASSET_SLOTS) {
+            colorModeAssetKey(slot, isNight())
+        } else slot
+        return File(File(requireContext().filesDir, "settings_appearance"), "$effective.bin")
     }
 
     private fun enabled(prefs: android.content.SharedPreferences, slot: String) = when (slot) {
@@ -226,7 +231,12 @@ class SettingsAppearanceProvider : ContentProvider() {
         return prefs.getInt("style2_text_${axis}_offset_$suffix", prefs.getInt(legacyKey, 0))
     }
 
-    private fun mimeKey(slot: String) = when (slot) {
+    private fun mimeKey(slot: String): String {
+        val prefs = requireContext().getSharedPreferences(SETTINGS_APPEARANCE_PREFERENCES, 0)
+        if (prefs.getBoolean("color_mode_assets_enabled", false) && slot in COLOR_MODE_ASSET_SLOTS) {
+            return "${colorModeAssetKey(slot, isNight())}_mime"
+        }
+        return when (slot) {
         APPEARANCE_SLOT_HOME -> "home_mime"
         APPEARANCE_SLOT_DEVICE -> "device_mime"
         APPEARANCE_SLOT_LOGO -> "logo_mime"
@@ -236,8 +246,11 @@ class SettingsAppearanceProvider : ContentProvider() {
         APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE -> "style2_image_mime"
         APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO -> "style2_logo_mime"
         APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND -> "style2_background_mime"
-        else -> ""
+            else -> ""
+        }
     }
+
+    private fun isNight(): Boolean = requireContext().resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
 
     companion object {
         const val COLUMN_MIME = "mime_type"

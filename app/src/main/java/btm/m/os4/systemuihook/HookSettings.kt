@@ -288,6 +288,8 @@ data class HookSettings(
     val hideStatusBarWifiStandard: Boolean = false,
     val hideStatusBarClockText: Boolean = false,
     val hideStatusBarNetworkActivity: Boolean = false,
+    /** Bit mask: network speed=1, alarm=2, sound profile=4, do-not-disturb=8. */
+    val statusBarIconsLeftMask: Int = 0,
     val hideControlCenterEditButton: Boolean = false,
     val controlCenter5GTileMode: Int = 0,
     val controlCenterGmsTileEnabled: Boolean = false,
@@ -674,6 +676,7 @@ private const val KEY_REMOVE_CLOCK_MATERIAL_LIMIT = "remove_clock_material_limit
 private const val KEY_HIDE_STATUS_BAR_WIFI_STANDARD = "hide_status_bar_wifi_standard"
 private const val KEY_HIDE_STATUS_BAR_CLOCK_TEXT = "hide_status_bar_clock_text"
 private const val KEY_HIDE_STATUS_BAR_NETWORK_ACTIVITY = "hide_status_bar_network_activity"
+internal const val KEY_STATUS_BAR_ICONS_LEFT_MASK = "status_bar_icons_left_mask"
 private const val KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON = "hide_control_center_edit_button"
 private const val KEY_ADD_CONTROL_CENTER_TOP_BUTTONS = "add_control_center_top_buttons"
 private const val KEY_SHOW_CONTROL_CENTER_TOP_BUTTONS_IN_LANDSCAPE =
@@ -1197,6 +1200,7 @@ private fun SharedPreferences.toSettings(): HookSettings {
     hideStatusBarWifiStandard = getBoolean(KEY_HIDE_STATUS_BAR_WIFI_STANDARD, false),
     hideStatusBarClockText = getBoolean(KEY_HIDE_STATUS_BAR_CLOCK_TEXT, false),
     hideStatusBarNetworkActivity = getBoolean(KEY_HIDE_STATUS_BAR_NETWORK_ACTIVITY, false),
+    statusBarIconsLeftMask = getInt(KEY_STATUS_BAR_ICONS_LEFT_MASK, 0).coerceIn(0, 15),
     hideControlCenterEditButton = getBoolean(KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON, false),
     controlCenter5GTileMode = getInt(KEY_CONTROL_CENTER_5G_TILE_MODE, 0).coerceIn(0, 4),
     controlCenterGmsTileEnabled = getBoolean(KEY_CONTROL_CENTER_GMS_TILE_ENABLED, false),
@@ -1741,6 +1745,7 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putBoolean(KEY_HIDE_STATUS_BAR_WIFI_STANDARD, value.hideStatusBarWifiStandard)
         .putBoolean(KEY_HIDE_STATUS_BAR_CLOCK_TEXT, value.hideStatusBarClockText)
         .putBoolean(KEY_HIDE_STATUS_BAR_NETWORK_ACTIVITY, value.hideStatusBarNetworkActivity)
+        .putInt(KEY_STATUS_BAR_ICONS_LEFT_MASK, value.statusBarIconsLeftMask.coerceIn(0, 15))
         .putBoolean(KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON, value.hideControlCenterEditButton)
         .putInt(KEY_CONTROL_CENTER_5G_TILE_MODE, value.controlCenter5GTileMode.coerceIn(0, 4))
         .putBoolean(KEY_CONTROL_CENTER_GMS_TILE_ENABLED, value.controlCenterGmsTileEnabled)

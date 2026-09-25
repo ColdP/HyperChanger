@@ -18,6 +18,13 @@ const val APPEARANCE_SLOT_STYLE1_UPDATE_BACKGROUND = "style1_update_background"
 const val APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE = "style2_device_image"
 const val APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO = "style2_custom_device_logo"
 const val APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND = "style2_update_background"
+const val COLOR_MODE_LIGHT = "light"
+const val COLOR_MODE_DARK = "dark"
+val COLOR_MODE_ASSET_SLOTS = listOf(
+    APPEARANCE_SLOT_DEVICE_IMAGE, APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO, APPEARANCE_SLOT_STYLE1_UPDATE_BACKGROUND,
+    APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE, APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO, APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND,
+)
+fun colorModeAssetKey(slot: String, dark: Boolean) = "$slot:${if (dark) COLOR_MODE_DARK else COLOR_MODE_LIGHT}"
 
 const val DEVICE_INTERFACE_STYLE_SYSTEM = 0
 const val DEVICE_INTERFACE_STYLE_ONE = 1
@@ -66,6 +73,7 @@ private const val KEY_TUTORIAL_CARD_BACKGROUND_VERTICAL_OFFSET = "tutorial_card_
 private const val KEY_TUTORIAL_CARD_BACKGROUND_HORIZONTAL_OFFSET = "tutorial_card_background_horizontal_offset"
 private const val KEY_TUTORIAL_CARD_BACKGROUND_SCALE = "tutorial_card_background_scale"
 private const val KEY_DEVICE_INTERFACE_STYLE = "device_interface_style"
+private const val KEY_COLOR_MODE_ASSETS_ENABLED = "color_mode_assets_enabled"
 private const val KEY_STYLE2_IMAGE_MIME = "style2_image_mime"
 private const val KEY_STYLE2_IMAGE_VERSION = "style2_image_version"
 private const val KEY_STYLE2_LOGO_MIME = "style2_logo_mime"
@@ -147,6 +155,9 @@ data class SettingsAppearanceSettings(
     val tutorialCardBackgroundHorizontalOffset: Int = 0,
     val tutorialCardBackgroundScale: Int = 100,
     val deviceInterfaceStyle: Int = DEVICE_INTERFACE_STYLE_SYSTEM,
+    val colorModeAssetsEnabled: Boolean = false,
+    val colorModeAssetMimes: Map<String, String> = emptyMap(),
+    val colorModeAssetVersions: Map<String, Long> = emptyMap(),
     val style2ImageMime: String = "",
     val style2ImageVersion: Long = 0L,
     val style2LogoMime: String = "",
@@ -252,6 +263,9 @@ internal fun SharedPreferences.toSettingsAppearance() = SettingsAppearanceSettin
     tutorialCardBackgroundHorizontalOffset = getInt(KEY_TUTORIAL_CARD_BACKGROUND_HORIZONTAL_OFFSET, 0),
     tutorialCardBackgroundScale = getInt(KEY_TUTORIAL_CARD_BACKGROUND_SCALE, 100),
     deviceInterfaceStyle = getInt(KEY_DEVICE_INTERFACE_STYLE, if (getBoolean(KEY_TUTORIAL_CARD_ENABLED, false)) DEVICE_INTERFACE_STYLE_ONE else DEVICE_INTERFACE_STYLE_SYSTEM),
+    colorModeAssetsEnabled = getBoolean(KEY_COLOR_MODE_ASSETS_ENABLED, false),
+    colorModeAssetMimes = COLOR_MODE_ASSET_SLOTS.flatMap { slot -> listOf(false, true).map { dark -> colorModeAssetKey(slot, dark) } }.associateWith { key -> getString("${key}_mime", "").orEmpty() },
+    colorModeAssetVersions = COLOR_MODE_ASSET_SLOTS.flatMap { slot -> listOf(false, true).map { dark -> colorModeAssetKey(slot, dark) } }.associateWith { key -> getLong("${key}_version", 0L) },
     style2ImageMime = getString(KEY_STYLE2_IMAGE_MIME, "").orEmpty(),
     style2ImageVersion = getLong(KEY_STYLE2_IMAGE_VERSION, 0L),
     style2LogoMime = getString(KEY_STYLE2_LOGO_MIME, "").orEmpty(),
@@ -390,6 +404,7 @@ private fun SharedPreferences.writeSettingsAppearance(value: SettingsAppearanceS
         .putInt(KEY_TUTORIAL_CARD_BACKGROUND_HORIZONTAL_OFFSET, value.tutorialCardBackgroundHorizontalOffset)
         .putInt(KEY_TUTORIAL_CARD_BACKGROUND_SCALE, value.tutorialCardBackgroundScale)
         .putInt(KEY_DEVICE_INTERFACE_STYLE, value.deviceInterfaceStyle)
+        .putBoolean(KEY_COLOR_MODE_ASSETS_ENABLED, value.colorModeAssetsEnabled)
         .putString(KEY_STYLE2_IMAGE_MIME, value.style2ImageMime)
         .putLong(KEY_STYLE2_IMAGE_VERSION, value.style2ImageVersion)
         .putString(KEY_STYLE2_LOGO_MIME, value.style2LogoMime)
@@ -431,7 +446,16 @@ private fun SharedPreferences.writeSettingsAppearance(value: SettingsAppearanceS
         .putInt(KEY_STYLE2_BACKGROUND_VERTICAL_OFFSET, value.style2BackgroundVerticalOffset)
         .putInt(KEY_STYLE2_BACKGROUND_HORIZONTAL_OFFSET, value.style2BackgroundHorizontalOffset)
         .putInt(KEY_STYLE2_BACKGROUND_SCALE, value.style2BackgroundScale)
-        .apply()
+        .apply {
+            COLOR_MODE_ASSET_SLOTS.forEach { slot ->
+                listOf(false, true).forEach { dark ->
+                    val key = colorModeAssetKey(slot, dark)
+                    putString("${key}_mime", value.colorModeAssetMimes[key].orEmpty())
+                    putLong("${key}_version", value.colorModeAssetVersions[key] ?: 0L)
+                }
+            }
+            apply()
+        }
 }
 
 private fun SharedPreferences.getFloatCompat(key: String, default: Float): Float =

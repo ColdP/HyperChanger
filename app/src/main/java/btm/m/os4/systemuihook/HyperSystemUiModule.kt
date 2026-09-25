@@ -54,6 +54,7 @@ import android.view.inputmethod.EditorInfo
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.graphics.PathParser
@@ -61,6 +62,11 @@ import io.github.libxposed.api.XposedInterface.ExceptionMode
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import btm.m.xiaoaihook.SuperXiaoAiInputHook
+import btm.m.liquidglass.AppColorMode
+import btm.m.liquidglass.LabelMode
+import btm.m.liquidglass.NavigationStyle
+import btm.m.liquidglass.ScopedSettings
+import btm.m.liquidglass.hook.AppBottomNavHooks
 import java.util.Collections
 import java.lang.ref.WeakReference
 import java.lang.reflect.Method
@@ -288,6 +294,28 @@ class HyperSystemUiModule : XposedModule() {
     private var customPluginTileHookInstalled = false
     private var customTileRetryScheduled = false
     private var customRearScreenWidgetRegistrationInstalled = false
+
+    private fun installXiaomiAppNavigation(param: PackageLoadedParam) {
+        val packageName = param.packageName
+        if (packageName != "com.xiaomi.shop" && packageName != "com.mipay.wallet") return
+        if (!runCatching { android.app.Application.getProcessName() == packageName }.getOrDefault(false)) return
+        runCatching {
+            val prefs = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
+            if (!ScopedSettings.getBoolean(prefs, packageName, ScopedSettings.KEY_MODULE_ENABLED, true) ||
+                !ScopedSettings.getBoolean(prefs, packageName, ScopedSettings.KEY_ENABLED, true)) return
+            val style = ScopedSettings.getString(prefs, packageName, NavigationStyle.PREFERENCE_KEY, NavigationStyle.DEFAULT_VALUE)
+            val label = ScopedSettings.getLabelMode(prefs, packageName, LabelMode.DEFAULT_VALUE)
+            val color = ScopedSettings.getString(prefs, packageName, ScopedSettings.KEY_COLOR_MODE, AppColorMode.DEFAULT_VALUE)
+            val blur = ScopedSettings.getBlurRadius(prefs, packageName, style, 18)
+            val advanced = ScopedSettings.getBoolean(prefs, packageName, ScopedSettings.KEY_ADVANCED_MATERIAL, true)
+            if (packageName == "com.xiaomi.shop") {
+                AppBottomNavHooks.installXiaomiStore(this, param.defaultClassLoader, blur, label, style, advanced, color)
+            } else {
+                AppBottomNavHooks.installXiaomiWallet(this, param.defaultClassLoader, blur, label, style, advanced, color, ScopedSettings.getWalletVisibleTabs(prefs))
+            }
+            log(Log.INFO, TAG, "Installed Xiaomi app navigation hooks for $packageName")
+        }.onFailure { error -> log(Log.ERROR, TAG, "Could not install Xiaomi app navigation hooks for $packageName", error) }
+    }
 
     private fun invokeNoArgResult(target: Any, name: String): Any? = runCatching {
         target.javaClass.methods.firstOrNull { it.name == name && it.parameterCount == 0 }?.invoke(target)
@@ -535,6 +563,10 @@ class HyperSystemUiModule : XposedModule() {
 
     override fun onPackageLoaded(param: PackageLoadedParam) {
         if (!OsCompatibility.areHooksAllowed()) return
+        if (param.packageName == "com.xiaomi.shop" || param.packageName == "com.mipay.wallet") {
+            installXiaomiAppNavigation(param)
+            return
+        }
         if (param.packageName == SETTINGS_PACKAGE) {
             runCatching {
                 installSettingsAppEntryHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
@@ -716,6 +748,10 @@ class HyperSystemUiModule : XposedModule() {
                         installStackedMobileSignalHook(param.defaultClassLoader, preferences)
                         stackedMobileSignalHookInstalled = true
                     }
+                    if (param.packageName == SYSTEM_UI && !statusBarIconsLeftHookInstalled) {
+                        installStatusBarIconsLeftHook(param.defaultClassLoader, preferences)
+                        statusBarIconsLeftHookInstalled = true
+                    }
                     if (param.packageName == SYSTEM_UI && !systemUiClockMaterialLimitHookInstalled) {
                         installClockMaterialLimitHook(param.defaultClassLoader, preferences)
                         systemUiClockMaterialLimitHookInstalled = true
@@ -745,19 +781,26 @@ class HyperSystemUiModule : XposedModule() {
                     }
                 }
                 SUBSCREEN_CENTER -> {
+                    installRearScreenAppWidgetUnlockHooks(param.defaultClassLoader)
                     if (preferences.getBoolean("unlock_xiaomi_18_rear_screen_ai", false) || preferences.getBoolean("remove_custom_rear_screen_restrictions", false)) {
-                        installRearScreenAppWidgetUnlockHooks(param.defaultClassLoader)
+                        installSubScreenCenterAppWidgetState(param.defaultClassLoader)
                     }
                     installMusicControlWhitelistHook(param.defaultClassLoader, preferences)
                 }
                 PERSONAL_ASSISTANT -> {
+                    // The app-card store and its catalog filters are process-local data
+                    // preparation, not an optional visual tweak. Install them even when an
+                    // older preference key was not migrated; otherwise none of the catalog
+                    // hooks can run and the UI silently remains unchanged.
+                    installPersonalAssistantRearScreenAppCardHooks(param.defaultClassLoader)
                     if (preferences.getBoolean("unlock_xiaomi_18_rear_screen_ai", false) || preferences.getBoolean("remove_custom_rear_screen_restrictions", false)) {
-                        installRearScreenAppWidgetUnlockHooks(param.defaultClassLoader)
                     }
                 }
                 THEME_MANAGER -> {
+                    // Catalog merge/sanitizer hooks are harmless when the feature toggle is
+                    // off and must be installed before ThemeManager initializes its ViewModel.
+                    installThemeManagerRearScreenFeatureGuards(param.defaultClassLoader)
                     if (preferences.getBoolean("unlock_xiaomi_18_rear_screen_ai", false) || preferences.getBoolean("remove_custom_rear_screen_restrictions", false)) {
-                        installRearScreenAppWidgetUnlockHooks(param.defaultClassLoader)
                         installCustomRearScreenWidgetRegistration(param.defaultClassLoader)
                     }
                 }
@@ -2314,6 +2357,85 @@ class HyperSystemUiModule : XposedModule() {
     /** Virtually enables the same two gates as the root script, scoped to the three target apps. */
     private fun installRearScreenAppWidgetUnlockHooks(classLoader: ClassLoader) {
         runCatching {
+            // ThemeManager's RearScreenSettingModule gates the entire app-card catalog on
+            // DeviceUtils.a() (DeviceHelper.toq()).  On the 18 Pro/Pro Max rear-screen builds
+            // this probe is false even though the SubScreen service is present, so only the
+            // custom property/settings hooks still leave the catalog partially hidden.
+            runCatching {
+                val deviceUtils = classLoader.loadClass("com.android.thememanager.basemodule.utils.DeviceUtils")
+                deviceUtils.methods.filter {
+                    it.name == "a" && it.parameterTypes.isEmpty() && it.returnType == Boolean::class.javaPrimitiveType
+                }.forEach { method ->
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-app-widget:device-capability")
+                        .intercept { true }
+                }
+            }
+            runCatching {
+                val deviceHelper = classLoader.loadClass("miuix.os.DeviceHelper")
+                deviceHelper.methods.filter {
+                    it.name == "toq" && it.parameterTypes.isEmpty() && it.returnType == Boolean::class.javaPrimitiveType
+                }.forEach { method ->
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-app-widget:device-helper-capability")
+                        .intercept { true }
+                }
+            }
+            // ThemeManager's rear-screen personalization has a second, independent
+            // capability gate.  In this release RearScreenFunction.q() is hard-coded false
+            // and toq() depends on a server preset count, so the 18 Pro catalog never exposes
+            // the newer personalization/video entries even when SubScreen is available.
+            runCatching {
+                val rearFunction = classLoader.loadClass("com.rearScreen.manager.RearScreenFunction")
+                rearFunction.declaredMethods.filter { method ->
+                    method.parameterTypes.isEmpty() && method.returnType == Boolean::class.javaPrimitiveType &&
+                        method.name in setOf("q", "toq")
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-app-widget:theme-rear-function:${method.name}")
+                        .intercept { true }
+                }
+            }
+            runCatching {
+                val supportGuard = classLoader.loadClass("com.rearScreen.miclaw.appfunction.common.DeviceSupportGuard")
+                supportGuard.declaredMethods.filter { method ->
+                    method.name == "isSupported" && method.parameterTypes.isEmpty() &&
+                        method.returnType == Boolean::class.javaPrimitiveType
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-app-widget:theme-device-support-guard")
+                        .intercept { true }
+                }
+            }
+            // SubScreenCenter parses /system/media/rearscreen/appcard/default/rearScreen.json
+            // and consults AbstractC0666c.g() before adding migrated cards.  The stock
+            // implementation only enables three packages (car, Security Center and stock
+            // assistant), so hongkong-exclusive migrated cards are discarded even when the
+            // JSON is present. Mark every returned package switch enabled; this is scoped to
+            // the SubScreen process and does not alter notification/settings state elsewhere.
+            runCatching {
+                val localSettingUtils = classLoader.loadClass("o2.AbstractC0666c")
+                localSettingUtils.declaredMethods.filter { method ->
+                    java.lang.reflect.Modifier.isStatic(method.modifiers) &&
+                        method.name == "g" && method.parameterTypes.contentEquals(arrayOf(Context::class.java)) &&
+                        java.util.HashMap::class.java.isAssignableFrom(method.returnType)
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-app-widget:subscreen-migrated-card-switches")
+                        .intercept { chain ->
+                            @Suppress("UNCHECKED_CAST")
+                            val switches = (chain.proceed() as? MutableMap<Any?, Any?>)
+                                ?: java.util.HashMap<Any?, Any?>()
+                            switches.keys.toList().forEach { key -> switches[key] = true }
+                            switches["com.miui.personalassistant"] = true
+                            switches["com.miui.personalassistant_stock"] = true
+                            switches
+                        }
+                }
+            }
             val properties = Class.forName("android.os.SystemProperties", false, null)
             properties.declaredMethods
                 .filter { method ->
@@ -2327,15 +2449,34 @@ class HyperSystemUiModule : XposedModule() {
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-app-widget:property:${method.name}:${method.parameterTypes.size}")
                         .intercept { chain ->
-                            if (chain.getArg(0) != REAR_SCREEN_APP_WIDGET_PROPERTY) {
-                                return@intercept chain.proceed()
+                            val key = chain.getArg(0) as? String
+                            val spoofed = when (key) {
+                                "ro.product.model" -> "M610BB"
+                                "ro.product.device", "ro.product.name", "ro.build.product" -> "hongkong"
+                                "ro.product.brand", "ro.product.manufacturer" -> "Xiaomi"
+                                "ro.mi.os.version.code" -> "4"
+                                "persist.sys.muiltdisplay_type", "persist.sys.multi_display_type" -> "2"
+                                "system.xiaomi.subscreen.dou", "persist.sys.replacement" -> "true"
+                                else -> null
                             }
-                            when (method.name) {
-                                "get" -> "true"
-                                "getBoolean" -> true
-                                "getInt" -> 1
-                                "getLong" -> 1L
-                                else -> chain.proceed()
+                            if (spoofed != null) {
+                                when (method.name) {
+                                    "get" -> spoofed
+                                    "getBoolean" -> spoofed == "true"
+                                    "getInt" -> spoofed.toIntOrNull() ?: 0
+                                    "getLong" -> spoofed.toLongOrNull() ?: 0L
+                                    else -> chain.proceed()
+                                }
+                            } else if (key != REAR_SCREEN_APP_WIDGET_PROPERTY) {
+                                return@intercept chain.proceed()
+                            } else {
+                                when (method.name) {
+                                    "get" -> "true"
+                                    "getBoolean" -> true
+                                    "getInt" -> 1
+                                    "getLong" -> 1L
+                                    else -> chain.proceed()
+                                }
                             }
                         }
                 }
@@ -2354,14 +2495,33 @@ class HyperSystemUiModule : XposedModule() {
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-app-widget:miui-property:${method.name}:${method.parameterTypes.size}")
                         .intercept { chain ->
-                            if (chain.getArg(0) != REAR_SCREEN_APP_WIDGET_PROPERTY) {
-                                return@intercept chain.proceed()
+                            val key = chain.getArg(0) as? String
+                            val spoofed = when (key) {
+                                "ro.product.model" -> "M610BB"
+                                "ro.product.device", "ro.product.name", "ro.build.product" -> "hongkong"
+                                "ro.product.brand", "ro.product.manufacturer" -> "Xiaomi"
+                                "ro.mi.os.version.code" -> "4"
+                                "persist.sys.muiltdisplay_type", "persist.sys.multi_display_type" -> "2"
+                                "system.xiaomi.subscreen.dou", "persist.sys.replacement" -> "true"
+                                else -> null
                             }
-                            when (method.returnType) {
-                                String::class.java -> "true"
-                                Boolean::class.javaPrimitiveType, Boolean::class.javaObjectType -> true
-                                Int::class.javaPrimitiveType, Int::class.javaObjectType -> 1
-                                else -> chain.proceed()
+                            if (spoofed != null) {
+                                when (method.returnType) {
+                                    String::class.java -> spoofed
+                                    Boolean::class.javaPrimitiveType, Boolean::class.javaObjectType -> spoofed == "true"
+                                    Int::class.javaPrimitiveType, Int::class.javaObjectType -> spoofed.toIntOrNull() ?: 0
+                                    Long::class.javaPrimitiveType, Long::class.javaObjectType -> spoofed.toLongOrNull() ?: 0L
+                                    else -> chain.proceed()
+                                }
+                            } else if (key != REAR_SCREEN_APP_WIDGET_PROPERTY) {
+                                return@intercept chain.proceed()
+                            } else {
+                                when (method.returnType) {
+                                    String::class.java -> "true"
+                                    Boolean::class.javaPrimitiveType, Boolean::class.javaObjectType -> true
+                                    Int::class.javaPrimitiveType, Int::class.javaObjectType -> 1
+                                    else -> chain.proceed()
+                                }
                             }
                         }
                 }
@@ -2379,7 +2539,14 @@ class HyperSystemUiModule : XposedModule() {
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-app-widget:secure:${method.name}:${method.parameterTypes.size}")
                         .intercept { chain ->
-                            if (chain.getArg(1) != REAR_SCREEN_APP_WIDGET_SETTING) {
+                            val settingKey = chain.getArg(1) as? String
+                            if (settingKey !in setOf(
+                                    REAR_SCREEN_APP_WIDGET_SETTING,
+                                    REAR_SCREEN_THEME_WIDGET_SETTING,
+                                    REAR_SCREEN_AOD_SETTING,
+                                    REAR_SCREEN_AOD_MODE_SETTING,
+                                    REAR_SCREEN_STOCK_REMINDER_SETTING,
+                                )) {
                                 return@intercept chain.proceed()
                             }
                             if (method.name == "getString") "1" else 1
@@ -2401,13 +2568,757 @@ class HyperSystemUiModule : XposedModule() {
                         val key = settingKey?.javaClass?.methods
                             ?.firstOrNull { it.name in setOf("getKey", "k") && it.parameterTypes.isEmpty() }
                             ?.let { runCatching { it.invoke(settingKey) as? String }.getOrNull() }
-                        if (key == REAR_SCREEN_APP_WIDGET_PROPERTY || key == REAR_SCREEN_APP_WIDGET_SETTING) true
+                        if (key == REAR_SCREEN_APP_WIDGET_PROPERTY || key == REAR_SCREEN_APP_WIDGET_SETTING || key == REAR_SCREEN_THEME_WIDGET_SETTING || key == REAR_SCREEN_AOD_SETTING || key == REAR_SCREEN_AOD_MODE_SETTING || key == REAR_SCREEN_STOCK_REMINDER_SETTING) true
                         else chain.proceed()
                     }
             }
             log(Log.INFO, TAG, "Rear-screen app-widget gates enabled in this process")
         }.onFailure { error ->
             log(Log.WARN, TAG, "Could not enable rear-screen app-widget gates", error)
+        }
+    }
+
+    /**
+     * PersonalAssistant owns the app-card store UI. Its OS-version gate reads
+     * ro.mi.os.version.code (which can be absent on newer builds), and its cached-card
+     * refresh removes every card whose bindApp package is not installed. Keep the complete
+     * preset catalog visible without changing package checks elsewhere in the app.
+     */
+    private fun installPersonalAssistantRearScreenAppCardHooks(classLoader: ClassLoader) {
+        runCatching {
+            runCatching {
+                val wrapper = classLoader.loadClass("c8.d\$c")
+                wrapper.declaredMethods.filter { method ->
+                    method.name == "a" && method.parameterTypes.size == 1 &&
+                        method.returnType.name == "okhttp3.v"
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-app-card:request-scope")
+                        .intercept { chain ->
+                            val matched = containsRearScreenRequestUrl(chain.getArg(0))
+                            if (matched) personalAssistantRearScreenRequest.set(true)
+                            try {
+                                chain.proceed()
+                            } finally {
+                                if (matched) personalAssistantRearScreenRequest.remove()
+                            }
+                        }
+                }
+            }
+
+            runCatching {
+                val commonParams = classLoader.loadClass("com.miui.personalassistant.network.util.a")
+                commonParams.declaredMethods.filter { method ->
+                    java.lang.reflect.Modifier.isStatic(method.modifiers) &&
+                        method.name == "a" &&
+                        method.parameterTypes.contentEquals(arrayOf(Context::class.java, String::class.java)) &&
+                        method.returnType == JSONObject::class.java
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-app-card:environment-signal")
+                        .intercept { chain ->
+                            val original = chain.proceed()
+                            val json = original as? JSONObject ?: return@intercept original
+                            if (personalAssistantRearScreenRequest.get() == true) {
+                                json.put("phoneModel", "M610BB")
+                                json.put("phoneDevice", "hongkong")
+                                val incremental = json.optString("os")
+                                val parts = incremental.split('.').toMutableList()
+                                if (parts.size > 2) {
+                                    parts[2] = "499"
+                                    json.put("os", parts.joinToString("."))
+                                }
+                            }
+                            json
+                        }
+                }
+            }
+
+            runCatching {
+                JSONObject::class.java.declaredMethods.filter { method ->
+                    java.lang.reflect.Modifier.isPublic(method.modifiers) &&
+                        method.name == "put" &&
+                        method.parameterTypes.contentEquals(arrayOf(String::class.java, Any::class.java)) &&
+                        method.returnType == JSONObject::class.java
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-app-card:json-device-fields")
+                        .intercept { chain ->
+                            if (personalAssistantRearScreenRequest.get() == true) {
+                                val key = chain.getArg(0) as? String
+                                val value = when (key) {
+                                    "phoneModel", "model" -> "M610BB"
+                                    "phoneDevice", "device", "product" -> "hongkong"
+                                    "os" -> {
+                                        val original = chain.getArg(1)?.toString().orEmpty()
+                                        val parts = original.split('.').toMutableList()
+                                        if (parts.size > 2) {
+                                            parts[2] = "499"
+                                            parts.joinToString(".")
+                                        } else original
+                                    }
+                                    else -> null
+                                }
+                                if (value != null) {
+                                    return@intercept chain.proceedWith(
+                                        chain.thisObject,
+                                        arrayOf(chain.getArg(0), value),
+                                    )
+                                }
+                            }
+                            chain.proceed()
+                        }
+                }
+            }
+
+            runCatching {
+                val deviceInfo = classLoader.loadClass(
+                    "com.miui.personalassistant.maml.expand.device.DeviceInfoRepository\$Companion",
+                )
+                deviceInfo.declaredMethods.filter { method ->
+                    java.lang.reflect.Modifier.isStatic(method.modifiers) &&
+                        method.name == "b" && method.parameterTypes.isEmpty() &&
+                        method.returnType.name == "okhttp3.o"
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-app-card:device-form")
+                        .intercept { chain ->
+                            val original = chain.proceed()
+                            val fields = generateSequence(original?.javaClass) { it.superclass }
+                                .flatMap { it.declaredFields.asSequence() }
+                                .filter { field ->
+                                    !java.lang.reflect.Modifier.isStatic(field.modifiers) &&
+                                        List::class.java.isAssignableFrom(field.type)
+                                }.toList()
+                            val lists = fields.mapNotNull { field ->
+                                runCatching {
+                                    field.isAccessible = true
+                                    field.get(original) as? List<*>
+                                }.getOrNull()
+                            }
+                            val names = lists.firstOrNull { list ->
+                                list.any { it == "product" } && list.any { it == "model" } && list.any { it == "device" }
+                            }
+                            val values = lists.firstOrNull { it !== names && it?.size == names?.size }
+                            if (names == null || values == null) return@intercept original
+                            val rewritten = ArrayList(values.map { it?.toString().orEmpty() })
+                            names.forEachIndexed { index, name ->
+                                when (name) {
+                                    "model" -> rewritten[index] = "M610BB"
+                                    "device", "product" -> rewritten[index] = "hongkong"
+                                }
+                            }
+                            val constructor = original?.javaClass?.declaredConstructors?.firstOrNull { constructor ->
+                                constructor.parameterTypes.size == 2 && constructor.parameterTypes.all {
+                                    it.isAssignableFrom(ArrayList::class.java)
+                                }
+                            } ?: return@intercept original
+                            runCatching {
+                                constructor.isAccessible = true
+                                constructor.newInstance(ArrayList(names.map { it?.toString().orEmpty() }), rewritten)
+                            }.getOrDefault(original)
+                        }
+                }
+            }
+
+            runCatching {
+                val systemInfo = classLoader.loadClass("com.miui.personalassistant.utils.z1")
+                systemInfo.declaredMethods
+                    .filter { method ->
+                        java.lang.reflect.Modifier.isStatic(method.modifiers) &&
+                            method.name == "b" && method.parameterTypes.isEmpty() &&
+                            method.returnType == Int::class.javaPrimitiveType
+                    }
+                    .forEach { method ->
+                        method.isAccessible = true
+                        hook(method)
+                            .setExceptionMode(ExceptionMode.PROTECTIVE)
+                            .setId("rear-screen-app-card:personal-assistant-os-version")
+                            .intercept { 4 }
+                    }
+            }
+
+            runCatching {
+                val storeViewModel = classLoader.loadClass(
+                    "com.miui.personalassistant.backscreen.store.viewmodel.BackScreenStoreViewModel",
+                )
+                storeViewModel.declaredMethods
+                    .filter { method ->
+                        java.lang.reflect.Modifier.isStatic(method.modifiers) &&
+                        method.name == "a" && method.parameterTypes.size == 2 &&
+                            method.parameterTypes[1] == List::class.java &&
+                            List::class.java.isAssignableFrom(method.returnType)
+                    }
+                    .forEach { method ->
+                        method.isAccessible = true
+                        hook(method)
+                            .setExceptionMode(ExceptionMode.PROTECTIVE)
+                            .setId("rear-screen-app-card:personal-assistant-catalog-filter")
+                            .intercept { chain ->
+                                val categories = chain.getArg(1) as? List<*>
+                                if (categories != null) {
+                                    // This helper is the last installed-package filter.  Keep
+                                    // the original category/item objects so cloud and preset
+                                    // entries are both passed to the UI; m1.i() is bypassed by
+                                    // the dedicated hook below.
+                                    java.util.ArrayList(categories)
+                                } else chain.proceed()
+                            }
+                    }
+            }
+
+            // The backPage service filters app-bound cards using the compressed installed
+            // package list (n0.b()), before the response ever reaches BackScreenStoreRepository.
+            // On regional builds the optional Weather/Calendar and Mi Home providers can be
+            // absent from that list even when their packages are present. Augment the source
+            // list at n0.d(), so the app list is compressed by the stock encoder and remains
+            // a valid request payload (rather than fabricating compressed bytes).
+            runCatching {
+                val installedCache = classLoader.loadClass("com.miui.personalassistant.utils.n0")
+                installedCache.declaredMethods.filter { method ->
+                    java.lang.reflect.Modifier.isStatic(method.modifiers) &&
+                        method.name == "d" && method.parameterTypes.isEmpty()
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-app-card:augment-installed-package-list")
+                        .intercept { chain ->
+                            val result = chain.proceed()
+                            val list = result as? MutableList<Any?>
+                            if (list != null) {
+                                val appBaseInfo = classLoader.loadClass("com.miui.personalassistant.utils.AppBaseInfo")
+                                val wanted = listOf(
+                                    "com.miui.weather2",
+                                    "com.android.calendar",
+                                    "com.xiaomi.calendar",
+                                    "com.xiaomi.smarthome",
+                                    "com.mi.car.mobile",
+                                )
+                                wanted.forEach { packageName ->
+                                    if (list.none { item ->
+                                            runCatching {
+                                                item?.javaClass?.getField("packageName")?.get(item) == packageName
+                                            }.getOrDefault(false)
+                                        }) {
+                                        val info = appBaseInfo.getConstructor(String::class.java).newInstance(packageName)
+                                        list.add(info)
+                                    }
+                                }
+                            }
+                            result
+                        }
+                }
+                installedCache.declaredMethods.filter { method ->
+                    java.lang.reflect.Modifier.isStatic(method.modifiers) &&
+                        method.name == "b" && method.parameterTypes.isEmpty() &&
+                        method.returnType == String::class.java
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-app-card:refresh-installed-package-cache")
+                        .intercept { chain ->
+                            // Force n0.b() to rebuild its compressed payload through the
+                            // augmented d() result on every store request.
+                            runCatching { setStaticFieldValue(installedCache, "f15559d", true) }
+                            chain.proceed()
+                        }
+                }
+            }
+            // The ViewModel's installed filter delegates to m1.i(Context,String),
+            // which performs a PackageManager lookup and drops every preset bound
+            // to an optional companion app. The store is intended to show those
+            // cards before installation (the detail page handles installation),
+            // so bypass only this exact two-argument helper in PersonalAssistant.
+            runCatching {
+                val packageUtils = classLoader.loadClass("com.miui.personalassistant.utils.m1")
+                packageUtils.declaredMethods.filter { method ->
+                    java.lang.reflect.Modifier.isStatic(method.modifiers) &&
+                        method.name == "i" && method.parameterTypes.contentEquals(
+                            arrayOf(Context::class.java, String::class.java),
+                        ) && method.returnType == Boolean::class.javaPrimitiveType
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-app-card:personal-assistant-bound-app-installed")
+                        .intercept { true }
+                }
+            }
+            // The bundled default_config.json contains weather, agenda/calendar and MiJia
+            // cards, but DefaultConfig.c() applies DefaultWidgetFilter.DEFAULT_OFF_WIDGET
+            // (which includes miot_device) before the store/home model sees them. Open only
+            // these rear-screen service keys; unrelated homepage defaults keep their stock
+            // behavior.
+            runCatching {
+                val defaultConfig = classLoader.loadClass(
+                    "com.miui.personalassistant.homepage.cell.utils.DefaultConfig",
+                )
+                defaultConfig.declaredMethods.filter { method ->
+                    java.lang.reflect.Modifier.isStatic(method.modifiers) &&
+                        method.name == "c" && method.parameterTypes.size == 2 &&
+                        method.returnType == Boolean::class.javaPrimitiveType
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-app-card:default-service-filter")
+                        .intercept { chain ->
+                            val widget = chain.getArg(0)
+                            val serviceKey = widget?.javaClass?.methods
+                                ?.firstOrNull { it.name == "getServiceKey" && it.parameterTypes.isEmpty() }
+                                ?.invoke(widget) as? String
+                            if (serviceKey in setOf("weather", "agenda", "calendar", "miot_device")) false
+                            else chain.proceed()
+                        }
+                }
+            }
+            log(Log.INFO, TAG, "PersonalAssistant rear-screen app-card catalog filters bypassed")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not unlock PersonalAssistant rear-screen app-card catalog", error)
+        }
+    }
+
+    private fun containsRearScreenRequestUrl(root: Any?): Boolean {
+        val visited = Collections.newSetFromMap(IdentityHashMap<Any, Boolean>())
+        val endpoints = arrayOf(
+            "component/store/backPage",
+            "component/store/impl/tail",
+            "component/store/updateInfo/backScreen",
+        )
+
+        fun visit(value: Any?, depth: Int): Boolean {
+            if (value == null || depth > 3 || !visited.add(value)) return false
+            val text = runCatching { value.toString() }.getOrDefault("")
+            if (endpoints.any(text::contains)) return true
+            if (value is String || value is Number || value is Boolean || value is Enum<*>) return false
+            generateSequence(value.javaClass) { it.superclass }.forEach { type ->
+                type.declaredFields.forEach { field ->
+                    if (java.lang.reflect.Modifier.isStatic(field.modifiers) || field.isSynthetic) return@forEach
+                    val nested = runCatching {
+                        field.isAccessible = true
+                        field.get(value)
+                    }.getOrNull()
+                    if (visit(nested, depth + 1)) return true
+                }
+            }
+            return false
+        }
+
+        return visit(root, 0)
+    }
+
+    /** Make PersonalAssistant use the Xiaomi 18 Pro (hongkong) product identity. */
+    private fun installPersonalAssistantHongkongBuildProfile() {
+        runCatching {
+            val values = mapOf(
+                "DEVICE" to "hongkong",
+                "PRODUCT" to "hongkong",
+                "MODEL" to "M610BB",
+                "BRAND" to "Xiaomi",
+                "MANUFACTURER" to "Xiaomi",
+            )
+            values.forEach { (name, value) ->
+                val field = android.os.Build::class.java.getDeclaredField(name).apply { isAccessible = true }
+                runCatching { field.set(null, value) }.getOrElse {
+                    runCatching {
+                        val unsafeClass = Class.forName("sun.misc.Unsafe")
+                        val singleton = unsafeClass.getDeclaredField("theUnsafe").apply { isAccessible = true }
+                        val unsafe = singleton.get(null)
+                        val base = unsafeClass.getMethod("staticFieldBase", java.lang.reflect.Field::class.java).invoke(unsafe, field)
+                        val offset = unsafeClass.getMethod("staticFieldOffset", java.lang.reflect.Field::class.java).invoke(unsafe, field) as Long
+                        unsafeClass.getMethod("putObject", Any::class.java, Long::class.javaPrimitiveType, Any::class.java)
+                            .invoke(unsafe, base, offset, value)
+                    }
+                }
+            }
+            // ThemeManager's network ParamInterceptor and RearScreenUtil import
+            // miui.os.Build rather than android.os.Build. Keep both profiles aligned;
+            // otherwise the remote rear-screen endpoint still receives the original
+            // device code and omits the hongkong-only AI categories.
+            runCatching {
+                val miuiBuild = Class.forName("miui.os.Build")
+                values.forEach { (name, value) ->
+                    runCatching {
+                        val field = miuiBuild.getDeclaredField(name).apply { isAccessible = true }
+                        runCatching { field.set(null, value) }.getOrElse {
+                            val unsafeClass = Class.forName("sun.misc.Unsafe")
+                            val singleton = unsafeClass.getDeclaredField("theUnsafe").apply { isAccessible = true }
+                            val unsafe = singleton.get(null)
+                            val base = unsafeClass.getMethod("staticFieldBase", java.lang.reflect.Field::class.java).invoke(unsafe, field)
+                            val offset = unsafeClass.getMethod("staticFieldOffset", java.lang.reflect.Field::class.java).invoke(unsafe, field) as Long
+                            unsafeClass.getMethod("putObject", Any::class.java, Long::class.javaPrimitiveType, Any::class.java)
+                                .invoke(unsafe, base, offset, value)
+                        }
+                    }
+                }
+            }
+            log(Log.INFO, TAG, "PersonalAssistant build profile applied: Xiaomi 18 Pro / hongkong (M610BB)")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not apply PersonalAssistant hongkong build profile", error)
+        }
+    }
+
+    /**
+     * SubScreenCenter snapshots these values into o2.C0673j static finals during class
+     * initialization, so changing SystemProperties afterwards is insufficient. The decompiled
+     * gate is exactly: ro.mi.os.version.code >= 4 && persist.sys.app.widget.enable.
+     */
+    private fun installSubScreenCenterAppWidgetState(classLoader: ClassLoader) {
+        runCatching {
+            val config = classLoader.loadClass("o2.C0673j")
+            setStaticFieldValue(config, "f10018p", 4)
+            setStaticFieldValue(config, "f10019q", true)
+            log(Log.INFO, TAG, "SubScreenCenter app-card state forced: osVersion=4, appWidget=true")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not force SubScreenCenter app-card state", error)
+        }
+    }
+
+    /** Exact guards used by the ThemeManager rear-screen personalization/AI flows. */
+    private fun installThemeManagerRearScreenFeatureGuards(classLoader: ClassLoader) {
+        runCatching {
+            runCatching {
+                val addDao = classLoader.loadClass("com.rearScreen.aiapp.db.RearScreenAiAddDao_Impl")
+                addDao.declaredMethods.filter { method ->
+                    method.name == "zy" && method.parameterTypes.size == 2 &&
+                        method.parameterTypes[0] == String::class.java
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-feature:remove-imported-ai-app-files")
+                        .intercept { chain ->
+                            val productId = chain.getArg(0) as? String
+                            val result = chain.proceed()
+                            if (!productId.isNullOrBlank()) {
+                                runCatching {
+                                    val importedRoot = java.io.File(
+                                        "/storage/emulated/0/Android/data/com.android.thememanager/files/MIUI/.ai_app",
+                                    )
+                                    val importedFolder = java.io.File(importedRoot, "${productId}_extracted")
+                                    java.io.File(importedRoot, "$productId.removed").writeText("removed")
+                                    if (importedFolder.isDirectory) importedFolder.deleteRecursively()
+                                    val runtimeFolder = java.io.File(
+                                        "/data/system/theme_magic/users/0/rearScreenAiApp_Theme",
+                                        productId,
+                                    )
+                                    if (runtimeFolder.isDirectory) runtimeFolder.deleteRecursively()
+                                }
+                            }
+                            result
+                        }
+                }
+            }
+            runCatching {
+                val appliedRepository = classLoader.loadClass("com.rearScreen.aiapp.repository.AiAppAppliedRepository")
+                appliedRepository.declaredMethods.filter { method ->
+                    method.name == "zy" && method.parameterTypes.size == 2 &&
+                        method.parameterTypes[0] == String::class.java
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-feature:remove-applied-ai-app-files")
+                        .intercept { chain ->
+                            val productId = chain.getArg(0) as? String
+                            val result = chain.proceed()
+                            if (!productId.isNullOrBlank()) {
+                                runCatching {
+                                    val importedFolder = java.io.File(
+                                        "/storage/emulated/0/Android/data/com.android.thememanager/files/MIUI/.ai_app/${productId}_extracted",
+                                    )
+                                    java.io.File(importedFolder.parentFile, "$productId.removed").writeText("removed")
+                                    importedFolder.deleteRecursively()
+                                    java.io.File(
+                                        "/data/system/theme_magic/users/0/rearScreenAiApp_Theme/$productId",
+                                    ).deleteRecursively()
+                                }
+                            }
+                            result
+                        }
+                }
+            }
+            fun forceBooleanMethod(className: String, methodName: String, id: String) {
+                val type = classLoader.loadClass(className)
+                type.declaredMethods.filter { method ->
+                    method.name == methodName && method.returnType == Boolean::class.javaPrimitiveType
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE).setId(id).intercept { false }
+                }
+            }
+            // Demo-device checks hide locally generated rear-screen items and personalization.
+            forceBooleanMethod(
+                "com.android.thememanager.util.ai.AiUsageRepository",
+                "isDemoDevice",
+                "rear-screen-feature:theme-ai-demo-device",
+            )
+            forceBooleanMethod(
+                "com.rearScreen.aiapp.repository.AiAppGenerateRepository",
+                "h",
+                "rear-screen-feature:ai-app-demo-device",
+            )
+            runCatching {
+                val usage = classLoader.loadClass("com.android.thememanager.util.ai.AiUsageRepository")
+                usage.declaredMethods.filter { method ->
+                    method.name == "isDeviceTrusted" && method.parameterTypes.size == 1 &&
+                        method.returnType == Any::class.java
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-feature:theme-ai-device-trust-direct")
+                        .intercept { true }
+                }
+            }
+
+            // These suspend guards return their result directly when intercepted; true means
+            // trusted and null means no BlockReason, matching the callers' coroutine contract.
+            runCatching {
+                val guard = classLoader.loadClass("com.rearScreen.aiapp.manager.RearScreenAiAppGenerateGuard")
+                guard.declaredMethods.filter { method ->
+                    method.name == "q" && method.parameterTypes.size == 1 &&
+                        method.returnType == Any::class.java
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-feature:ai-app-device-trust")
+                        .intercept { true }
+                }
+                guard.declaredMethods.filter { method ->
+                    method.name == "zy" && method.parameterTypes.size == 1 &&
+                        method.returnType == Any::class.java
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-feature:ai-app-block-reason")
+                        .intercept { null }
+                }
+            }
+            runCatching {
+                val router = classLoader.loadClass("com.android.thememanager.activity.ai.viewmodel.AiRouterVM")
+                router.declaredMethods.filter { method ->
+                    method.name == "zsr0" && method.parameterTypes.size == 1 && method.returnType == Any::class.java
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-feature:theme-ai-device-trust")
+                        .intercept { true }
+                }
+            }
+            // RearScreenPresetRepository.cdj() removes every preset whose resType is
+            // "ai" when MiuiUtils.zurt() is true. Its decompiled condition is
+            // AppUtils.toq() < 10278 (ThemeManager versionCode), which strips the
+            // AI Companion and AI Group Photo entries from the personalization list.
+            runCatching {
+                val appUtils = classLoader.loadClass("com.android.thememanager.library.util.app.AppUtils")
+                appUtils.declaredMethods.filter { method ->
+                    java.lang.reflect.Modifier.isStatic(method.modifiers) &&
+                        method.name == "toq" && method.parameterTypes.isEmpty() &&
+                        method.returnType == Int::class.javaPrimitiveType
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-feature:theme-version-for-ai-preset-filter")
+                        .intercept { 10278 }
+                }
+            }
+            // Also force the helper result in case MiuiUtils was initialized before
+            // AppUtils.toq() was intercepted.
+            runCatching {
+                val miuiUtils = classLoader.loadClass("com.android.thememanager.basemodule.utils.MiuiUtils")
+                miuiUtils.declaredMethods.filter { method ->
+                    java.lang.reflect.Modifier.isStatic(method.modifiers) &&
+                        method.name == "zurt" && method.parameterTypes.isEmpty() &&
+                        method.returnType == Boolean::class.javaPrimitiveType
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-feature:theme-ai-preset-filter")
+                        .intercept { false }
+                }
+            }
+            // RearScreenPresetRepository.cdj(ArrayList) is the final local preset
+            // sanitizer.  On non-target products MiuiUtils.zurt() makes it remove
+            // every item whose resType is "ai" (including the 18 Pro companion and
+            // group-photo presets) before the list reaches the ViewModel.  Returning
+            // without invoking this private method preserves the complete preset
+            // catalog; the later detail/install checks remain unchanged.
+            runCatching {
+                val presetRepository = classLoader.loadClass("com.rearScreen.repository.RearScreenPresetRepository")
+                presetRepository.declaredMethods.filter { method ->
+                    method.name == "cdj" && method.parameterTypes.size == 1 &&
+                        java.util.ArrayList::class.java.isAssignableFrom(method.parameterTypes[0]) &&
+                        method.returnType == Void.TYPE
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-feature:theme-ai-preset-sanitizer")
+                        .intercept { }
+                }
+            }
+            // RearScreenSettingModule.k() has an independent MiuiVersion.toq(4)
+            // check. MiuiVersion snapshots ro.mi.os.version.code into a static final
+            // field, so property hooks alone are too late; force this exact predicate.
+            runCatching {
+                val miuiVersion = classLoader.loadClass("com.android.thememanager.basemodule.utils.MiuiUtils\$MiuiVersion")
+                miuiVersion.declaredMethods.filter { method ->
+                    java.lang.reflect.Modifier.isStatic(method.modifiers) &&
+                        method.name == "toq" && method.parameterTypes.contentEquals(arrayOf(Int::class.javaPrimitiveType)) &&
+                        method.returnType == Boolean::class.javaPrimitiveType
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-feature:miui-version-capability")
+                        .intercept { true }
+                }
+            }
+            // This is the final entry gate used by the ThemeManager settings page.
+            runCatching {
+                val settingModule = classLoader.loadClass("com.personalizedEditor.helper.settings.RearScreenSettingModule\$Companion")
+                settingModule.declaredMethods.filter { method ->
+                    method.name == "k" && method.parameterTypes.isEmpty() &&
+                        method.returnType == Boolean::class.javaPrimitiveType
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-feature:setting-module-entry")
+                        .intercept { true }
+                    }
+            }
+            runCatching {
+                val interceptor = classLoader.loadClass(
+                    "com.android.thememanager.basemodule.network.theme.interceptors.ParamInterceptor",
+                )
+                interceptor.declaredMethods.filter { method ->
+                    method.parameterTypes.size == 3 &&
+                        method.parameterTypes[0].name == "okhttp3.Request" &&
+                        LinkedHashMap::class.java.isAssignableFrom(method.parameterTypes[1]) &&
+                        method.parameterTypes[2] == String::class.java &&
+                        method.returnType.name == "okhttp3.Request"
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-feature:theme-final-network-profile")
+                        .intercept { chain ->
+                            val requestText = runCatching { chain.getArg(0)?.toString().orEmpty() }.getOrDefault("")
+                            val related = requestText.contains("/page/v3/REAR_SCREEN_SETTING") ||
+                                requestText.contains("/native/page/v3/AI_GENERATED_APP") ||
+                                requestText.contains("/native/page/v3/subjects/") ||
+                                requestText.contains("/ai/") ||
+                                requestText.contains("/checkupdate/hashpair")
+                            if (related) {
+                                @Suppress("UNCHECKED_CAST")
+                                val params = chain.getArg(1) as? MutableMap<Any?, Any?>
+                                params?.set("device", "hongkong")
+                                if (params?.containsKey("product") == true) params["product"] = "hongkong"
+                                if (params?.containsKey("model") == true) params["model"] = "M610BB"
+                                val version = params?.get("version")?.toString()
+                                if (!version.isNullOrEmpty()) {
+                                    val parts = version.split('.').toMutableList()
+                                    if (parts.size > 2) {
+                                        parts[2] = "499"
+                                        params["version"] = parts.joinToString(".")
+                                    }
+                                }
+                            }
+                            chain.proceed()
+                        }
+                }
+            }
+            // RearScreenListViewModel.wo() merges the remote page into the preset
+            // categories. A remote card with isShield=1 removes the matching preset
+            // category entirely. The new rear-screen AI categories are delivered this
+            // way on older regional endpoints, so clear the shield bit before merge.
+            runCatching {
+                val listVm = classLoader.loadClass("com.rearScreen.viewModel.RearScreenListViewModel")
+                // The merge routine removes categories again through the private gbni
+                // predicate when their item list is empty. Keep the category object alive;
+                // remote data may populate it asynchronously on the next refresh.
+                listVm.declaredMethods.filter { method ->
+                    java.lang.reflect.Modifier.isStatic(method.modifiers) &&
+                        method.name == "gbni" && method.parameterTypes.size == 1 &&
+                        method.returnType == Boolean::class.javaPrimitiveType
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-feature:keep-ai-categories")
+                        .intercept { false }
+                }
+                listVm.declaredMethods.filter { method ->
+                    method.name == "wo" && method.parameterTypes.size == 2 &&
+                        method.returnType == Void.TYPE
+                }.forEach { method ->
+                    method.isAccessible = true
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("rear-screen-feature:unshield-ai-categories")
+                        .intercept { chain ->
+                            val incoming = chain.getArg(1) as? Iterable<*>
+                            incoming?.forEach { category ->
+                                runCatching {
+                                    val type = category?.javaClass?.methods
+                                        ?.firstOrNull { it.name == "getCategoryType" && it.parameterTypes.isEmpty() }
+                                        ?.invoke(category) as? String
+                                    if (type in setOf("ai", "aiGroupPhoto", "groupPhoto", "companionPreset", "companionCustom", "ai-mate", "aiApp")) {
+                                        val categoryMethods = category?.javaClass?.methods
+                                        categoryMethods
+                                            ?.firstOrNull { it.name == "setShield" && it.parameterTypes.contentEquals(arrayOf(Boolean::class.javaPrimitiveType)) }
+                                            ?.invoke(category, false)
+                                        val itemList = categoryMethods
+                                            ?.firstOrNull { it.name == "getItemList" && it.parameterTypes.isEmpty() }
+                                            ?.invoke(category) as? Iterable<*>
+                                        itemList?.forEach { item ->
+                                            val itemMethods = item?.javaClass?.methods ?: return@forEach
+                                            val tags = (itemMethods.firstOrNull {
+                                                it.name == "getInnerTags" && it.parameterTypes.isEmpty()
+                                            }?.invoke(item) as? Iterable<*>)?.mapNotNull { it as? String }
+                                            if (tags != null) {
+                                                // sourceCode: removes a matching local resId;
+                                                // isShield:1 keeps the item out of the merge.
+                                                val cleaned = tags.filterNot {
+                                                    it == "isShield:1" || it.startsWith("sourceCode:")
+                                                }
+                                                itemMethods.firstOrNull {
+                                                    it.name == "setInnerTags" && it.parameterTypes.size == 1
+                                                }?.invoke(item, cleaned)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            chain.proceed()
+                        }
+                }
+            }
+            log(Log.INFO, TAG, "ThemeManager rear-screen personalization guards bypassed")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not bypass ThemeManager rear-screen personalization guards", error)
+        }
+    }
+
+    private fun setStaticFieldValue(type: Class<*>, name: String, value: Any) {
+        val field = type.getDeclaredField(name).apply { isAccessible = true }
+        runCatching { field.set(null, value) }.getOrElse {
+            val unsafeClass = Class.forName("sun.misc.Unsafe")
+            val singleton = unsafeClass.getDeclaredField("theUnsafe").apply { isAccessible = true }
+            val unsafe = singleton.get(null)
+            val base = unsafeClass.getMethod("staticFieldBase", java.lang.reflect.Field::class.java).invoke(unsafe, field)
+            val offset = unsafeClass.getMethod("staticFieldOffset", java.lang.reflect.Field::class.java).invoke(unsafe, field) as Long
+            val put = when (value) {
+                is Boolean -> unsafeClass.getMethod("putBoolean", Any::class.java, Long::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+                is Int -> unsafeClass.getMethod("putInt", Any::class.java, Long::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+                else -> unsafeClass.getMethod("putObject", Any::class.java, Long::class.javaPrimitiveType, Any::class.java)
+            }
+            when (value) {
+                is Boolean -> put.invoke(unsafe, base, offset, value)
+                is Int -> put.invoke(unsafe, base, offset, value)
+                else -> put.invoke(unsafe, base, offset, value)
+            }
         }
     }
 
@@ -2436,6 +3347,7 @@ class HyperSystemUiModule : XposedModule() {
                 val runtimeRoot = java.io.File("/data/system/theme_magic/users/0/rearScreenAiApp_Theme")
                 root.listFiles()?.filter { it.isDirectory && it.name.endsWith("_extracted") }?.forEach { folder ->
                     val productId = folder.name.removeSuffix("_extracted")
+                    if (java.io.File(root, "$productId.removed").isFile) return@forEach
                     val appName = runCatching {
                         val xml = java.io.File(folder, "description.xml").readText()
                         Regex("<appName>\\s*(.*?)\\s*</appName>", RegexOption.DOT_MATCHES_ALL)
@@ -4262,6 +5174,189 @@ class HyperSystemUiModule : XposedModule() {
      * Builds the compact two-row dual-SIM glyph from the legacy signal state.  The modern binder
      * supplies the live ImageView that will host it.
      */
+    private fun installStatusBarIconsLeftHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
+        runCatching {
+            val utils = classLoader.loadClass("com.android.systemui.statusbar.phone.MiuiIconManagerUtils")
+            val right = utils.getDeclaredField("RIGHT_BLOCK_LIST").apply { isAccessible = true }.get(null) as? MutableList<Any?>
+                ?: error("RIGHT_BLOCK_LIST unavailable")
+            // HyperOS 4 renamed the sound-profile slot from the older customiuizer "volume"
+            // alias to the policy slot "mute" (MiuiPhoneStatusBarPolicy.LazyInitSlot.MUTE).
+            val slots = listOf(1 to "network_speed", 2 to "alarm_clock", 4 to "mute", 8 to "zen")
+
+            // The new IconManager constructor has eight dependency parameters. Capture the
+            // real, already-wired arguments from SystemUI instead of trying to reconstruct
+            // WifiUiAdapter/MobileUiAdapter/Lazy/Kairos dependencies from private fields.
+            val darkManagerClass = classLoader.loadClass("com.android.systemui.statusbar.phone.ui.DarkIconManager")
+            darkManagerClass.constructors.filter { constructor ->
+                constructor.parameterCount == 8 && ViewGroup::class.java.isAssignableFrom(constructor.parameterTypes.firstOrNull())
+            }.forEach { constructor ->
+                hook(constructor).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("status-bar:icons-left-dark-manager-args")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        statusBarDarkIconManagerConstructor = constructor
+                        statusBarDarkIconManagerArgs = chain.args.toMutableList().toTypedArray()
+                        result
+                    }
+            }
+
+            runCatching {
+                val rootFactory = classLoader.loadClass("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootFactory")
+                rootFactory.declaredConstructors.forEach { constructor ->
+                    hook(constructor).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("status-bar:icons-left-factory")
+                        .intercept { chain ->
+                            val result = chain.proceed()
+                            statusBarDarkIconManagerFactory = chain.thisObject
+                            result
+                        }
+                }
+            }
+
+            val viewClass = classLoader.loadClass("com.android.systemui.statusbar.phone.MiuiPhoneStatusBarView")
+            val attached = viewClass.methods.firstOrNull { it.name == "onAttachedToWindow" && it.parameterCount == 0 }
+                ?: error("MiuiPhoneStatusBarView.onAttachedToWindow unavailable")
+            hook(attached).setExceptionMode(ExceptionMode.PROTECTIVE).setId("status-bar:icons-left").intercept { chain ->
+                val result = chain.proceed()
+                applyStatusBarIconsLeft(chain.thisObject, classLoader, preferences, right, slots)
+                chain.thisObject?.let { (it as? View)?.post { applyStatusBarIconsLeft(it, classLoader, preferences, right, slots) } }
+                result
+            }
+            viewClass.methods.filter { it.name == "setDarkIconManager" && it.parameterCount == 1 }.forEach { setter ->
+                hook(setter).setExceptionMode(ExceptionMode.PROTECTIVE).setId("status-bar:icons-left-manager-ready").intercept { chain ->
+                    val result = chain.proceed()
+                    applyStatusBarIconsLeft(chain.thisObject, classLoader, preferences, right, slots)
+                    result
+                }
+            }
+            // The Compose home-status-bar binder adds the clock/start-side content after the
+            // view's onAttachedToWindow callback. Re-apply the ordering after that bind, or the
+            // binder's child insertion can place our group back before/after the wrong sibling.
+            runCatching {
+                val binderClass = classLoader.loadClass(
+                    "com.android.systemui.statusbar.pipeline.shared.ui.binder.HomeStatusBarViewBinderImpl",
+                )
+                binderClass.methods.filter { method ->
+                    method.name == "bind" && method.parameterCount > 0 &&
+                        method.parameterTypes[0].name.contains("PhoneStatusBarView")
+                }.forEach { method ->
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("status-bar:icons-left-order")
+                        .intercept { chain ->
+                            val result = chain.proceed()
+                            applyStatusBarIconsLeft(chain.getArg(0), classLoader, preferences, right, slots)
+                            positionStatusBarLeftIconGroup(chain.getArg(0) as? View)
+                            result
+                        }
+                }
+            }
+            log(Log.INFO, TAG, "Installed status bar icon left-position hook")
+        }.onFailure { error -> log(Log.WARN, TAG, "Status bar icon left-position hook unavailable", error) }
+    }
+
+    private fun applyStatusBarIconsLeft(
+        rawView: Any?,
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+        right: MutableList<Any?>,
+        slots: List<Pair<Int, String>>,
+    ) {
+        val view = rawView ?: return
+        val rootView = view as? View ?: return
+        val manager = runCatching { view.javaClass.getField("mDarkIconManager").get(view) }.getOrNull() ?: return
+                val mask = preferences.getInt(KEY_STATUS_BAR_ICONS_LEFT_MASK, 0).coerceIn(0, 15)
+                val selectedSlots = slots.filter { mask and it.first != 0 }.map { it.second }
+                // Keep the vendor right-side manager and StatusIconContainer in sync. The
+                // block-list flow is collected after onAttachedToWindow, so update both here.
+                selectedSlots.forEach { if (it !in right) right += it }
+                manager.javaClass.getMethod("setBlockList", List::class.java).invoke(manager, right)
+                val notificationArea = runCatching {
+                    view.javaClass.getField("mDripStatusBarNotificationIconArea").get(view) as? View
+                }.getOrNull()
+                val clockId = rootView.resources.getIdentifier("clock", "id", "com.android.systemui")
+                val clock = if (clockId != 0) rootView.findViewById<View>(clockId) else null
+                val leftContainer = runCatching {
+                    view.javaClass.getField("mStatusBarLeftContainer").get(view) as? ViewGroup
+                }.getOrNull()
+                    ?: clock?.parent as? ViewGroup
+                    ?: notificationArea?.parent as? ViewGroup
+                    ?: return
+                val group = leftContainer.findViewWithTag<View>("hyperChangerLeftIcons") as? LinearLayout
+                    ?: LinearLayout(leftContainer.context).apply {
+                        tag = "hyperChangerLeftIcons"
+                        orientation = LinearLayout.HORIZONTAL
+                        layoutDirection = View.LAYOUT_DIRECTION_LTR
+                        layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                    }
+                if (mask == 0) {
+                    (group.parent as? ViewGroup)?.removeView(group)
+                    rootView.setTag(LEFT_STATUS_BAR_MANAGER_TAG, null)
+                    return
+                }
+                if (group.parent == null) {
+                    val clockIndex = clock?.let { leftContainer.indexOfChild(it) } ?: -1
+                    if (clockIndex >= 0) leftContainer.addView(group, clockIndex + 1) else leftContainer.addView(group)
+                }
+                val clockIndex = clock?.let { leftContainer.indexOfChild(it) } ?: -1
+                val notificationIndex = notificationArea?.let { leftContainer.indexOfChild(it) } ?: -1
+                if (group.parent === leftContainer) {
+                    val currentIndex = leftContainer.indexOfChild(group)
+                    val targetIndex = when {
+                        clockIndex >= 0 -> clockIndex + 1
+                        notificationIndex >= 0 -> notificationIndex
+                        else -> currentIndex
+                    }
+                    if (currentIndex >= 0 && targetIndex != currentIndex) {
+                        leftContainer.removeViewAt(currentIndex)
+                        leftContainer.addView(group, targetIndex.coerceAtMost(leftContainer.childCount))
+                    }
+                }
+                if (rootView.getTag(LEFT_STATUS_BAR_MANAGER_TAG) != null) return
+                val capturedConstructor = statusBarDarkIconManagerConstructor
+                val capturedArgs = statusBarDarkIconManagerArgs?.copyOf()
+                val leftManager = if (capturedConstructor != null && capturedArgs?.size == 8) {
+                    capturedArgs[0] = group
+                    capturedConstructor.apply { isAccessible = true }.newInstance(*capturedArgs)
+                } else {
+                    // On some HyperOS builds the manager constructor is hidden from the
+                    // reflection view. The already-created StatusBarRootFactory exposes the
+                    // same Dagger factory used by the stock binder, so use it as a fallback.
+                    val rootFactory = statusBarDarkIconManagerFactory ?: return
+                    val factory = runCatching {
+                        rootFactory.javaClass.getField("darkIconManagerFactory").get(rootFactory)
+                    }.getOrNull() ?: return
+                    val dispatcher = runCatching { view.javaClass.getField("mDarkIconDispatcher").get(view) }.getOrNull() ?: return
+                    val home = classLoader.loadClass("com.android.systemui.statusbar.phone.StatusBarLocation")
+                        .enumConstants?.firstOrNull { it.toString() == "HOME" } ?: return
+                    val create = factory.javaClass.methods.firstOrNull {
+                        it.name == "create" && it.parameterCount == 3
+                    } ?: return
+                    create.invoke(factory, group, home, dispatcher)
+                }
+                leftManager.javaClass.getMethod("setBlockList", List::class.java).invoke(leftManager, right.filterNot { it in selectedSlots })
+                manager.javaClass.getField("mController").get(manager)?.let { controller -> controller.javaClass.getMethod("addIconGroup", classLoader.loadClass("com.android.systemui.statusbar.phone.ui.IconManager")).invoke(controller, leftManager) }
+                rootView.setTag(LEFT_STATUS_BAR_MANAGER_TAG, leftManager)
+    }
+
+    private fun positionStatusBarLeftIconGroup(root: View?) {
+        val view = root ?: return
+        val group = view.findViewWithTag<View>("hyperChangerLeftIcons") ?: return
+        val clockId = view.resources.getIdentifier("clock", "id", "com.android.systemui")
+        val clock = if (clockId != 0) view.findViewById<View>(clockId) else null
+        val parent = clock?.parent as? ViewGroup ?: return
+        if (group.parent !== parent) (group.parent as? ViewGroup)?.removeView(group)
+        val clockIndex = parent.indexOfChild(clock)
+        if (clockIndex < 0) return
+        val currentIndex = parent.indexOfChild(group)
+        if (currentIndex != clockIndex + 1) {
+            if (currentIndex >= 0) parent.removeViewAt(currentIndex)
+            parent.addView(group, (clockIndex + 1).coerceAtMost(parent.childCount))
+        }
+    }
+
     private fun installStackedMobileSignalHook(
         classLoader: ClassLoader,
         preferences: SharedPreferences,
@@ -11533,6 +12628,11 @@ class HyperSystemUiModule : XposedModule() {
         private const val THEME_MANAGER = "com.android.thememanager"
         private const val REAR_SCREEN_APP_WIDGET_PROPERTY = "persist.sys.app.widget.enable"
         private const val REAR_SCREEN_APP_WIDGET_SETTING = "subscreen_app_widget_enable"
+        private const val REAR_SCREEN_THEME_WIDGET_SETTING = "theme_rear_widget"
+        private const val REAR_SCREEN_AOD_SETTING = "rear_doze_always_on"
+        private const val REAR_SCREEN_AOD_MODE_SETTING = "rear_aod_mode_user_set"
+        private const val REAR_SCREEN_STOCK_REMINDER_SETTING = "key_back_screen_rear_stock_reminder_enabled"
+        private val personalAssistantRearScreenRequest = ThreadLocal.withInitial<Boolean> { false }
         private val SYSTEM_UI_TARGETS = setOf(SYSTEM_UI, SYSTEM_UI_PLUGIN, AOD, SUPER_XIAOAI_IME, SUPER_XIAOAI_PHRASE, SUBSCREEN_CENTER, PERSONAL_ASSISTANT, THEME_MANAGER)
         private const val DEPTH_EVALUATOR_CLASS =
             "com.miui.clock.utils.avoid.DepthAvoidEvaluator"
@@ -12003,6 +13103,7 @@ private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_d
         private const val KEY_MOBILE_NETWORK_TYPE_SHRINK_5GA_A = "mobile_network_type_shrink_5ga_a"
         private const val KEY_MOBILE_NETWORK_TYPE_BOLD = "mobile_network_type_bold"
         private const val INDEPENDENT_MOBILE_TYPE_TAG = "hyper_system_ui_hook.independent_mobile_type"
+        private const val LEFT_STATUS_BAR_MANAGER_TAG = 0x7f0f0ad0
         private const val BATTERY_METER_VIEW_CLASS =
             "com.android.systemui.statusbar.views.MiuiBatteryMeterView"
         private const val NAVIGATION_BAR_VIEW_CLASS =
@@ -12081,6 +13182,10 @@ private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_d
         private var aodLockscreenTemplateLimitHookInstalled = false
         private var statusBarVisibilityHookInstalled = false
         private var stackedMobileSignalHookInstalled = false
+        private var statusBarIconsLeftHookInstalled = false
+        private var statusBarDarkIconManagerFactory: Any? = null
+        private var statusBarDarkIconManagerConstructor: java.lang.reflect.Constructor<*>? = null
+        private var statusBarDarkIconManagerArgs: Array<Any?>? = null
         private var softGlassThemePluginHookInstalled = false
         private var softGlassThemePluginFallbackHookInstalled = false
         private var dynamicPluginThemeHookInstalled = false

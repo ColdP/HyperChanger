@@ -181,6 +181,7 @@ import java.util.Date
 import java.time.Year
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import java.util.zip.ZipInputStream
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -259,8 +260,24 @@ private enum class PageId {
     ISLAND, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
-    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_MUSIC_APPS, OTHER, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION,
+    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, OTHER, APP_NAVIGATION, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION,
 }
+
+private data class CustomRearScreenApp(
+    val productId: String,
+    val name: String,
+    val iconPath: String,
+    val extractedPath: String,
+    val runtimePath: String,
+)
+
+private data class CustomRearScreenImportPreview(
+    val uri: Uri,
+    val preview: ImageBitmap?,
+    val icon: ImageBitmap?,
+    val name: String,
+    val description: String,
+)
 
 private data class ShadePresetActions(
     val userPresets: List<ShadePreset>,
@@ -303,7 +320,14 @@ private fun Root(
             val mime = detectAppearanceMime(context, uri)
             val target = copyAppearanceFile(context, slot, uri)
             appearances.update(service) {
-                when (slot) {
+                val baseSlot = slot.substringBefore(':')
+                val modeKey = slot.takeIf { ':' in it }
+                if (modeKey != null) {
+                    it.copy(
+                        colorModeAssetMimes = it.colorModeAssetMimes + (modeKey to mime),
+                        colorModeAssetVersions = it.colorModeAssetVersions + (modeKey to target.lastModified()),
+                    )
+                } else when (baseSlot) {
                     APPEARANCE_SLOT_HOME -> it.copy(homeMime = mime, homeVersion = target.lastModified())
                     APPEARANCE_SLOT_DEVICE -> it.copy(deviceMime = mime, deviceVersion = target.lastModified())
                     APPEARANCE_SLOT_DEVICE_IMAGE -> it.copy(tutorialCardImageMime = mime, tutorialCardImageVersion = target.lastModified())
@@ -323,7 +347,14 @@ private fun Root(
         runCatching {
             appearanceFile(context, slot).delete()
             appearances.update(service) {
-                when (slot) {
+                val baseSlot = slot.substringBefore(':')
+                val modeKey = slot.takeIf { ':' in it }
+                if (modeKey != null) {
+                    it.copy(
+                        colorModeAssetMimes = it.colorModeAssetMimes + (modeKey to ""),
+                        colorModeAssetVersions = it.colorModeAssetVersions + (modeKey to System.currentTimeMillis()),
+                    )
+                } else when (baseSlot) {
                     APPEARANCE_SLOT_HOME -> it.copy(homeEnabled = false, homeMime = "", homeVersion = System.currentTimeMillis())
                     APPEARANCE_SLOT_DEVICE -> it.copy(deviceEnabled = false, deviceMime = "", deviceVersion = System.currentTimeMillis())
                     APPEARANCE_SLOT_DEVICE_IMAGE -> it.copy(tutorialCardEnabled = false, tutorialCardImageMime = "", tutorialCardImageVersion = System.currentTimeMillis())
@@ -353,6 +384,18 @@ private fun Root(
     }
     val pickStyle2DeviceLogo = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) importAppearance(APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO, result.data?.data)
+    }
+    var pendingColorModeSlot by remember { mutableStateOf<String?>(null) }
+    val pickColorModeAsset = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        pendingColorModeSlot?.let { slot -> importAppearance(slot, uri) }
+        pendingColorModeSlot = null
+    }
+    val onColorModeAssetAction: (String, Boolean, Boolean) -> Unit = { slot, dark, import ->
+        val key = colorModeAssetKey(slot, dark)
+        if (import) {
+            pendingColorModeSlot = key
+            pickColorModeAsset.launch(arrayOf("image/*", "image/svg+xml"))
+        } else clearAppearance(key)
     }
     val pickRasterImages = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments(),
@@ -632,6 +675,7 @@ private fun Root(
                 })
             },
             onClearAppearanceLogo = { clearAppearance(APPEARANCE_SLOT_LOGO) },
+            onColorModeAssetAction = onColorModeAssetAction,
             onRequestNotificationPermission = {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -709,6 +753,7 @@ private fun Shell(
     onClearStyle2DeviceLogo: () -> Unit,
     onPickAppearanceLogo: () -> Unit,
     onClearAppearanceLogo: () -> Unit,
+    onColorModeAssetAction: (String, Boolean, Boolean) -> Unit,
     onRequestNotificationPermission: () -> Unit,
     onEnterOobe: () -> Unit,
 ) {
@@ -803,6 +848,7 @@ private fun Shell(
                 onPickCustomDeviceLogo = onPickCustomDeviceLogo, onClearCustomDeviceLogo = onClearCustomDeviceLogo,
                 onPickStyle2DeviceLogo = onPickStyle2DeviceLogo, onClearStyle2DeviceLogo = onClearStyle2DeviceLogo,
                 onPickAppearanceLogo = onPickAppearanceLogo, onClearAppearanceLogo = onClearAppearanceLogo,
+                onColorModeAssetAction = onColorModeAssetAction,
             onRequestNotificationPermission = onRequestNotificationPermission,
             screenRecorder = screenRecorder,
             updateScreenRecorder = updateScreenRecorder,
@@ -994,8 +1040,10 @@ private fun CategoryHome(
 private fun OtherPage(
     screenRecorder: ScreenRecorderSettings,
     update: (((ScreenRecorderSettings) -> ScreenRecorderSettings) -> Unit),
+    open: (PageId) -> Unit,
     back: () -> Unit,
-) = AppPage(
+) {
+    AppPage(
     tr("其他", "其他"),
     back,
     restartScopes = setOf(ScopeApplication.SCREEN_RECORDER),
@@ -1027,6 +1075,7 @@ private fun OtherPage(
                 )
             }
         }
+        item { Entry(tr("应用底部导航", "应用底部导航")) { open(PageId.APP_NAVIGATION) } }
     }
     WindowDialog(show = showSavePathDialog, onDismissRequest = { showSavePathDialog = false }) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1057,6 +1106,7 @@ private fun OtherPage(
             }
         }
     }
+}
 }
 
 private fun documentTreePath(uri: Uri): String? = runCatching {
@@ -1163,16 +1213,6 @@ private fun RearScreen(
     ScopeApplication.THEME_MANAGER,
     ScopeApplication.PERSONAL_ASSISTANT,
 )) { padding, scroll ->
-    val context = LocalContext.current
-    var showImportConfirm by rememberSaveable { mutableStateOf(false) }
-    var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
-    var importMessage by rememberSaveable { mutableStateOf<String?>(null) }
-    val pickRearScreenApp = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            pendingImportUri = uri
-            showImportConfirm = true
-        }
-    }
     val apps = rememberRearApps()
     AppList(padding, scroll, 28) {
         item {
@@ -1190,9 +1230,9 @@ private fun RearScreen(
                     onCheckedChange = { enabled -> update { it.copy(removeCustomRearScreenRestrictions = enabled) } },
                 )
                 ArrowPreference(
-                    title = tr("导入自定义背屏应用", "导入自定义背屏应用"),
-                    summary = importMessage ?: tr("选择 MTZ、ZIP、rearscreen 或其他文件，导入后重启相关作用域。", "选择 MTZ、ZIP、rearscreen 或其他文件，导入后重启相关作用域。"),
-                    onClick = { pickRearScreenApp.launch(arrayOf("*/*")) },
+                    title = tr("自定义背屏中心", "自定义背屏中心"),
+                    summary = tr("查看和管理已导入的自定义背屏应用", "查看和管理已导入的自定义背屏应用"),
+                    onClick = { open(PageId.REAR_CUSTOM_CENTER) },
                 )
             }
         }
@@ -1228,30 +1268,266 @@ private fun RearScreen(
             }
         }
     }
-    WindowDialog(show = showImportConfirm, onDismissRequest = { showImportConfirm = false }) {
-        Text(
-            tr("确认导入自定义背屏应用？文件会复制到 ThemeManager 的 AI 背屏资源目录。", "确认导入自定义背屏应用？文件会复制到 ThemeManager 的 AI 背屏资源目录。"),
-            style = MiuixTheme.textStyles.body1,
-            modifier = Modifier.padding(bottom = 16.dp),
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-            GlassDialogButton(onClick = { showImportConfirm = false }, modifier = Modifier.weight(1f)) { Text(tr("取消", "取消")) }
-            GlassDialogButton(
-                onClick = {
-                    val uri = pendingImportUri
-                    showImportConfirm = false
-                    if (uri != null) {
-                        importMessage = importCustomRearScreenApp(context, uri).fold(
-                            onSuccess = { tr("导入成功，请重启背屏、主题壁纸和智能助理作用域。", "导入成功，请重启背屏、主题壁纸和智能助理作用域。") },
-                            onFailure = { error -> tr("导入失败：", "导入失败：") + (error.message ?: tr("未知错误", "未知错误")) },
-                        )
+}
+
+@Composable
+private fun CustomRearScreenCenter(back: () -> Unit) {
+    val context = LocalContext.current
+    var apps by remember { mutableStateOf<List<CustomRearScreenApp>>(emptyList()) }
+    var selected by remember { mutableStateOf<CustomRearScreenApp?>(null) }
+    var confirmDelete by remember { mutableStateOf<CustomRearScreenApp?>(null) }
+    var selectionMode by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf(emptySet<String>()) }
+    var importPreview by remember { mutableStateOf<CustomRearScreenImportPreview?>(null) }
+    var importError by remember { mutableStateOf<String?>(null) }
+    var refreshKey by remember { mutableIntStateOf(0) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching { readCustomRearScreenImportPreview(context, uri) }
+            .onSuccess { importPreview = it; importError = null }
+            .onFailure { importError = it.message ?: tr("无法读取压缩文件", "无法读取压缩文件") }
+    }
+    LaunchedEffect(refreshKey) {
+        apps = withContext(Dispatchers.IO) { scanCustomRearScreenApps(context) }
+    }
+    fun closeSelection() {
+        selectionMode = false
+        selectedIds = emptySet()
+    }
+    fun toggleSelection(id: String) {
+        selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
+    }
+    BackHandler(enabled = selectionMode) { closeSelection() }
+    AppPage(
+        title = tr("自定义背屏中心", "自定义背屏中心"),
+        onBack = back,
+        actions = {
+            AnimatedVisibility(visible = !selectionMode) {
+                GlassToolbarIconButton(icon = MiuixIcons.Regular.Refresh, description = tr("刷新", "刷新"), onClick = { refreshKey++ })
+            }
+        },
+        floatingToolbarPosition = ToolbarPosition.BottomCenter,
+        floatingToolbar = {
+            if (!selectionMode) {
+                Box(Modifier.fillMaxWidth().padding(end = 20.dp), contentAlignment = Alignment.CenterEnd) {
+                    GlassActionButton(
+                        onClick = { picker.launch(arrayOf("application/zip", "application/x-zip-compressed", "*/*")) },
+                        size = 60.dp,
+                        surfaceColor = ComposeColor(0xFF0088FF),
+                    ) {
+                        Icon(MiuixIcons.Regular.Add, tr("导入", "导入"), Modifier.size(24.dp), tint = ComposeColor.White)
                     }
-                },
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColorsPrimary(),
-            ) { Text(tr("确认导入", "确认导入")) }
+                }
+            } else AnimatedVisibility(visible = true, enter = fadeIn(tween(180)) + scaleIn(tween(220), initialScale = .86f), exit = fadeOut(tween(140)) + scaleOut(tween(160), targetScale = .9f)) {
+                GlassLyricFloatingToolbar {
+                    Row(Modifier.padding(horizontal = 6.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { selectedIds = if (selectedIds.size == apps.size) emptySet() else apps.mapTo(linkedSetOf(), CustomRearScreenApp::productId) }) {
+                            Icon(MiuixIcons.Regular.SelectAll, tr("全选", "全选"), Modifier.size(26.4.dp))
+                        }
+                        IconButton(enabled = selectedIds.isNotEmpty(), onClick = { confirmDelete = apps.firstOrNull { it.productId in selectedIds } }) {
+                            Icon(MiuixIcons.Regular.Delete, tr("删除", "删除"), Modifier.size(26.4.dp), tint = ComposeColor(0xFFD32F2F))
+                        }
+                        IconButton(onClick = ::closeSelection) {
+                            Icon(MiuixIcons.Regular.Close, tr("关闭", "关闭"), Modifier.size(26.4.dp))
+                        }
+                    }
+                }
+            }
+        },
+        content = { padding, scroll ->
+            AppList(padding, scroll, if (selectionMode) 112 else 28) {
+                if (apps.isEmpty()) {
+                    item {
+                        Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(18.dp)) {
+                            Text(
+                                tr("暂无自定义背屏应用", "暂无自定义背屏应用"),
+                                style = MiuixTheme.textStyles.body2,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                modifier = Modifier.fillMaxWidth(),
+                                textAlign = TextAlign.Center,
+                            )
+                        }
+                    }
+                } else {
+                    items(apps, key = { it.productId }) { app ->
+                        Card(
+                            Modifier.fillMaxWidth(),
+                            cornerRadius = 22.5.dp,
+                            insideMargin = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                            onClick = { if (selectionMode) toggleSelection(app.productId) else selected = app },
+                            onLongPress = { selectionMode = true; selectedIds = selectedIds + app.productId },
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                val bitmap = remember(app.iconPath) {
+                                    BitmapFactory.decodeFile(app.iconPath)?.asImageBitmap()
+                                }
+                                if (bitmap != null) {
+                                    Image(bitmap, tr("应用图标", "应用图标"), Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)), contentScale = ContentScale.Crop)
+                                } else {
+                                    Box(Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)).background(MiuixTheme.colorScheme.secondaryVariant))
+                                }
+                                Spacer(Modifier.width(16.dp))
+                                Text(app.name, style = MiuixTheme.textStyles.body1, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                AnimatedVisibility(visible = selectionMode, enter = fadeIn(tween(180)) + slideInHorizontally(tween(220)) { it / 2 }, exit = fadeOut(tween(120)) + slideOutHorizontally(tween(160)) { it / 2 }) {
+                                    Checkbox(state = if (app.productId in selectedIds) ToggleableState.On else ToggleableState.Off, onClick = { toggleSelection(app.productId) }, modifier = Modifier.padding(start = 12.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    )
+    selected?.let { app ->
+        var name by remember(app.productId) { mutableStateOf(app.name) }
+        WindowDialog(show = true, onDismissRequest = { selected = null }) {
+            TextField(
+                value = name,
+                onValueChange = { name = it },
+                label = tr("应用名", "应用名"),
+                useLabelAsPlaceholder = true,
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(12.dp))
+            GlassDialogButton(
+                onClick = { confirmDelete = app; selected = null },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(tr("删除", "删除"), color = ComposeColor.Red) }
+            Spacer(Modifier.height(8.dp))
+            GlassDialogButton(onClick = { selected = null }, modifier = Modifier.fillMaxWidth()) { Text(tr("取消", "取消")) }
         }
     }
+    confirmDelete?.let { app ->
+        WindowDialog(show = true, onDismissRequest = { confirmDelete = null }) {
+            Text(tr("确认删除此自定义背屏应用？相关文件将被永久删除。", "确认删除此自定义背屏应用？相关文件将被永久删除。"), style = MiuixTheme.textStyles.body1)
+            Spacer(Modifier.height(16.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                GlassDialogButton(onClick = { confirmDelete = null }, modifier = Modifier.weight(1f)) { Text(tr("取消", "取消")) }
+                GlassDialogButton(
+                    onClick = {
+                        val targets = if (selectionMode) apps.filter { it.productId in selectedIds } else listOf(app)
+                        targets.forEach(::deleteCustomRearScreenApp)
+                        confirmDelete = null
+                        closeSelection()
+                        refreshKey++
+                    },
+                    modifier = Modifier.weight(1f),
+                ) { Text(tr("删除", "删除"), color = ComposeColor.Red) }
+            }
+        }
+    }
+    importError?.let { message ->
+        WindowDialog(show = true, onDismissRequest = { importError = null }) {
+            Text(message, style = MiuixTheme.textStyles.body1)
+            Spacer(Modifier.height(12.dp))
+            GlassDialogButton(onClick = { importError = null }, modifier = Modifier.fillMaxWidth()) { Text(tr("取消", "取消")) }
+        }
+    }
+    importPreview?.let { preview ->
+        WindowDialog(show = true, onDismissRequest = { importPreview = null }) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                preview.preview?.let { image ->
+                    Image(image, tr("背屏预览", "背屏预览"), Modifier.fillMaxWidth().aspectRatio(904f / 572f).clip(RoundedCornerShape(22.5.dp)), contentScale = ContentScale.Crop)
+                }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    preview.icon?.let { image -> Image(image, tr("应用图标", "应用图标"), Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop) }
+                    Spacer(Modifier.width(14.dp))
+                    Text(preview.name, style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold)
+                }
+                Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                    Text(preview.description.ifBlank { tr("暂无描述", "暂无描述") }, style = MiuixTheme.textStyles.body2)
+                }
+                GlassDialogButton(
+                    onClick = {
+                        runCatching { importCustomRearScreenApp(context, preview.uri).getOrThrow() }
+                            .onSuccess { importPreview = null; refreshKey++ }
+                            .onFailure { importError = it.message ?: tr("导入失败", "导入失败"); importPreview = null }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColorsPrimary(),
+                ) { Text(tr("导入", "导入")) }
+            }
+        }
+    }
+}
+
+private fun readCustomRearScreenImportPreview(context: Context, uri: Uri): CustomRearScreenImportPreview {
+    var previewBytes: ByteArray? = null
+    var iconBytes: ByteArray? = null
+    var descriptionXml = ""
+    context.contentResolver.openInputStream(uri)?.use { input ->
+        ZipInputStream(input).use { zip ->
+            while (true) {
+                val entry = zip.nextEntry ?: break
+                if (entry.isDirectory) continue
+                val name = entry.name.replace('\\', '/')
+                when {
+                    name.substringAfterLast('/').startsWith("preview_rearscreen", true) && name.endsWith(".png", true) && previewBytes == null -> previewBytes = zip.readBytes()
+                    name.endsWith("/app/app_icon.png", true) || name == "app/app_icon.png" -> iconBytes = zip.readBytes()
+                    name.substringAfterLast('/').equals("description.xml", true) -> descriptionXml = zip.readBytes().toString(Charsets.UTF_8)
+                }
+            }
+        }
+    } ?: error("无法读取压缩文件")
+    val name = Regex("<(?:appName|AppName)>\\s*(.*?)\\s*</(?:appName|AppName)>", RegexOption.DOT_MATCHES_ALL)
+        .find(descriptionXml)?.groupValues?.getOrNull(1)?.trim()
+        ?.replace("&amp;", "&")?.replace("&lt;", "<")?.replace("&gt;", ">")
+        .orEmpty().ifBlank { tr("未命名背屏应用", "未命名背屏应用") }
+    val description = Regex("<funcDesc>\\s*(.*?)\\s*</funcDesc>", RegexOption.DOT_MATCHES_ALL)
+        .find(descriptionXml)?.groupValues?.getOrNull(1)?.trim()
+        ?.replace("&amp;", "&")?.replace("&lt;", "<")?.replace("&gt;", ">")
+        .orEmpty()
+    return CustomRearScreenImportPreview(
+        uri = uri,
+        preview = previewBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() },
+        icon = iconBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() },
+        name = name,
+        description = description,
+    )
+}
+
+private fun scanCustomRearScreenApps(context: Context): List<CustomRearScreenApp> {
+    val rootPath = "/storage/emulated/0/Android/data/com.android.thememanager/files/MIUI/.ai_app"
+    val runtimeRoot = "/data/system/theme_magic/users/0/rearScreenAiApp_Theme"
+    val folders = runRootCommand("find '$rootPath' -maxdepth 1 -type d -name '*_extracted' -print")
+        .lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
+    return folders.mapNotNull { folderPath ->
+        val folder = File(folderPath)
+        val id = folder.name.removeSuffix("_extracted")
+        val xml = runRootCommand("cat ${shellQuote("$folderPath/description.xml")}")
+        val name = Regex("<appName>\\s*(.*?)\\s*</appName>", RegexOption.DOT_MATCHES_ALL).find(xml)?.groupValues?.getOrNull(1)?.trim()
+            ?.replace("&amp;", "&")?.replace("&lt;", "<")?.replace("&gt;", ">")
+            ?.takeUnless { it.isNullOrBlank() } ?: id
+        val sourceIcon = if (runRootCommand("test -f ${shellQuote("$runtimeRoot/$id/app_icon.png")} && echo yes").trim() == "yes") {
+            "$runtimeRoot/$id/app_icon.png"
+        } else "$folderPath/app/app_icon.png"
+        val cachedIcon = File(context.cacheDir, "custom-rear-icons/$id.png")
+        cachedIcon.parentFile?.mkdirs()
+        runRootCommand("test -f ${shellQuote(sourceIcon)} && cp ${shellQuote(sourceIcon)} ${shellQuote(cachedIcon.absolutePath)} && chmod 644 ${shellQuote(cachedIcon.absolutePath)}")
+        val icon = cachedIcon.takeIf { it.isFile }?.absolutePath ?: sourceIcon
+        CustomRearScreenApp(id, name, icon, folderPath, "$runtimeRoot/$id")
+    }.sortedBy { it.name.lowercase(Locale.getDefault()) }
+}
+
+private fun shellQuote(value: String): String = "'${value.replace("'", "'\\''")}'"
+
+private fun runRootCommand(command: String): String = runCatching {
+    val process = ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()
+    val output = process.inputStream.bufferedReader().use { it.readText() }
+    process.waitFor(15, TimeUnit.SECONDS)
+    process.destroy()
+    output
+}.getOrDefault("")
+
+private fun deleteCustomRearScreenApp(app: CustomRearScreenApp) {
+    val command = "rm -rf '${app.extractedPath.replace("'", "'\\''")}' '${app.runtimePath.replace("'", "'\\''")}'"
+    runCatching {
+        ProcessBuilder("su", "-c", command).redirectErrorStream(true).start().apply {
+            inputStream.bufferedReader().readText()
+            waitFor(15, TimeUnit.SECONDS)
+        }
+    }.onFailure { Log.w("HyperChanger", "Custom rear-screen deletion failed", it) }
 }
 
 @Composable
@@ -1819,6 +2095,29 @@ private data class ProfileField(
 )
 
 @Composable
+private fun ColorModeAssetRows(
+    appearance: SettingsAppearanceSettings,
+    slot: String,
+    label: String,
+    onAction: (String, Boolean, Boolean) -> Unit,
+) {
+    listOf(false to tr("浅色", "浅色"), true to tr("深色", "深色")).forEach { (dark, mode) ->
+        val key = colorModeAssetKey(slot, dark)
+        val imported = appearance.colorModeAssetMimes[key].orEmpty().isNotBlank()
+        ArrowPreference(
+            title = "$mode $label - ${tr("导入", "导入")}",
+            summary = if (imported) tr("已导入", "已导入") else tr("未导入", "未导入"),
+            onClick = { onAction(slot, dark, true) },
+        )
+        ArrowPreference(
+            title = "$mode $label - ${tr("清除", "清除")}",
+            summary = if (imported) tr("清除当前素材", "清除当前素材") else tr("无素材", "无素材"),
+            onClick = { onAction(slot, dark, false) },
+        )
+    }
+}
+
+@Composable
 private fun TutorialDeviceCardSettings(
     appearance: SettingsAppearanceSettings,
     update: ((SettingsAppearanceSettings) -> SettingsAppearanceSettings) -> Unit,
@@ -1836,6 +2135,7 @@ private fun TutorialDeviceCardSettings(
     onClearStyle2Logo: () -> Unit,
     onPickStyle2Background: () -> Unit,
     onClearStyle2Background: () -> Unit,
+    onColorModeAssetAction: (String, Boolean, Boolean) -> Unit,
     back: () -> Unit,
 ) = AppPage(tr("自定义我的设备界面", "自定义我的设备界面"), back, restartScopes = setOf(ScopeApplication.SETTINGS)) { padding, scroll ->
     val style = appearance.deviceInterfaceStyle.coerceIn(DEVICE_INTERFACE_STYLE_SYSTEM, DEVICE_INTERFACE_STYLE_TWO)
@@ -1859,6 +2159,16 @@ OverlayDropdownPreference(
                 )
             }
         }
+        item {
+            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                SwitchPreference(
+                    title = tr("按颜色模式使用独立素材", "按颜色模式使用独立素材"),
+                    summary = tr("开启后分别使用浅色和深色素材；关闭时保持当前素材不变", "开启后分别使用浅色和深色素材；关闭时保持当前素材不变"),
+                    checked = appearance.colorModeAssetsEnabled,
+                    onCheckedChange = { enabled -> update { it.copy(colorModeAssetsEnabled = enabled) } },
+                )
+            }
+        }
         if (style == DEVICE_INTERFACE_STYLE_SYSTEM) {
             item {
                 Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
@@ -1878,16 +2188,11 @@ OverlayDropdownPreference(
         if (style == DEVICE_INTERFACE_STYLE_ONE) {
             item {
                 Group(tr("机型图片", "机型图片")) {
-                    ArrowPreference(
-                        title = tr("导入机型图片", "导入机型图片"),
-                        summary = appearance.tutorialCardImageMime.ifBlank { tr("未导入", "未导入") },
-                        onClick = onPickStyle1Image,
-                    )
-                    ArrowPreference(
-                        title = tr("清除机型图片", "清除机型图片"),
-                        summary = if (appearance.tutorialCardImageMime.isBlank()) tr("无图片", "无图片") else tr("已导入", "已导入"),
-                        onClick = onClearStyle1Image,
-                    )
+                    if (appearance.colorModeAssetsEnabled) ColorModeAssetRows(appearance, APPEARANCE_SLOT_DEVICE_IMAGE, tr("机型图片", "机型图片"), onColorModeAssetAction)
+                    else {
+                        ArrowPreference(title = tr("导入机型图片", "导入机型图片"), summary = appearance.tutorialCardImageMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle1Image)
+                        ArrowPreference(title = tr("清除机型图片", "清除机型图片"), summary = if (appearance.tutorialCardImageMime.isBlank()) tr("无图片", "无图片") else tr("已导入", "已导入"), onClick = onClearStyle1Image)
+                    }
                     EditableSliderPreference(
                         value = appearance.tutorialCardImageScale.toFloat(),
                         onValueChange = { value -> update { it.copy(tutorialCardImageScale = value.toInt()) } },
@@ -1912,16 +2217,11 @@ OverlayDropdownPreference(
             }
             item {
                 Group(tr("背景图片", "背景图片")) {
-                    ArrowPreference(
-                        title = tr("导入背景图片", "导入背景图片"),
-                        summary = appearance.tutorialCardBackgroundMime.ifBlank { tr("未导入", "未导入") },
-                        onClick = onPickStyle1Background,
-                    )
-                    ArrowPreference(
-                        title = tr("清除背景图片", "清除背景图片"),
-                        summary = if (appearance.tutorialCardBackgroundMime.isBlank()) tr("无图片", "无图片") else tr("已导入", "已导入"),
-                        onClick = onClearStyle1Background,
-                    )
+                    if (appearance.colorModeAssetsEnabled) ColorModeAssetRows(appearance, APPEARANCE_SLOT_STYLE1_UPDATE_BACKGROUND, tr("背景图片", "背景图片"), onColorModeAssetAction)
+                    else {
+                        ArrowPreference(title = tr("导入背景图片", "导入背景图片"), summary = appearance.tutorialCardBackgroundMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle1Background)
+                        ArrowPreference(title = tr("清除背景图片", "清除背景图片"), summary = if (appearance.tutorialCardBackgroundMime.isBlank()) tr("无图片", "无图片") else tr("已导入", "已导入"), onClick = onClearStyle1Background)
+                    }
                 EditableSliderPreference(
                     value = appearance.tutorialCardBackgroundBlur,
                     onValueChange = { value -> update { it.copy(tutorialCardBackgroundBlur = value) } },
@@ -1970,16 +2270,11 @@ OverlayDropdownPreference(
             }
             item {
                 Group(tr("logo", "LOGO")) {
-                    ArrowPreference(
-                        title = tr("导入LOGO", "导入LOGO"),
-                        summary = appearance.tutorialCardLogoMime.ifBlank { tr("未导入", "未导入") },
-                        onClick = onPickStyle1Logo,
-                    )
-                    ArrowPreference(
-                        title = tr("清除LOGO", "清除LOGO"),
-                        summary = if (appearance.tutorialCardLogoMime.isBlank()) tr("无LOGO", "无LOGO") else tr("已导入", "已导入"),
-                        onClick = onClearStyle1Logo,
-                    )
+                    if (appearance.colorModeAssetsEnabled) ColorModeAssetRows(appearance, APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO, "LOGO", onColorModeAssetAction)
+                    else {
+                        ArrowPreference(title = tr("导入LOGO", "导入LOGO"), summary = appearance.tutorialCardLogoMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle1Logo)
+                        ArrowPreference(title = tr("清除LOGO", "清除LOGO"), summary = if (appearance.tutorialCardLogoMime.isBlank()) tr("无LOGO", "无LOGO") else tr("已导入", "已导入"), onClick = onClearStyle1Logo)
+                    }
                     EditableSliderPreference(
                         value = appearance.tutorialCardLogoScale.toFloat(),
                         onValueChange = { value -> update { it.copy(tutorialCardLogoScale = value.toInt()) } },
@@ -2021,16 +2316,11 @@ OverlayDropdownPreference(
         if (style == DEVICE_INTERFACE_STYLE_TWO) {
             item {
                 Group(tr("机型图片", "机型图片")) {
-                    ArrowPreference(
-                        title = tr("导入机型图片", "导入机型图片"),
-                        summary = appearance.style2ImageMime.ifBlank { tr("未导入", "未导入") },
-                        onClick = onPickStyle2Image,
-                    )
-                    ArrowPreference(
-                        title = tr("清除机型图片", "清除机型图片"),
-                        summary = if (appearance.style2ImageMime.isBlank()) tr("无图片", "无图片") else tr("已导入", "已导入"),
-                        onClick = onClearStyle2Image,
-                    )
+                    if (appearance.colorModeAssetsEnabled) ColorModeAssetRows(appearance, APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE, tr("机型图片", "机型图片"), onColorModeAssetAction)
+                    else {
+                        ArrowPreference(title = tr("导入机型图片", "导入机型图片"), summary = appearance.style2ImageMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle2Image)
+                        ArrowPreference(title = tr("清除机型图片", "清除机型图片"), summary = if (appearance.style2ImageMime.isBlank()) tr("无图片", "无图片") else tr("已导入", "已导入"), onClick = onClearStyle2Image)
+                    }
                     EditableSliderPreference(
                         value = appearance.style2ImageScale.toFloat(),
                         onValueChange = { value -> update { it.copy(style2ImageScale = value.toInt()) } },
@@ -2045,16 +2335,11 @@ OverlayDropdownPreference(
             }
             item {
                 Group(tr("背景图片", "背景图片")) {
-                    ArrowPreference(
-                        title = tr("导入背景图片", "导入背景图片"),
-                        summary = appearance.style2BackgroundMime.ifBlank { tr("未导入", "未导入") },
-                        onClick = onPickStyle2Background,
-                    )
-                    ArrowPreference(
-                        title = tr("清除背景图片", "清除背景图片"),
-                        summary = if (appearance.style2BackgroundMime.isBlank()) tr("无背景图", "无背景图") else tr("已导入", "已导入"),
-                        onClick = onClearStyle2Background,
-                    )
+                    if (appearance.colorModeAssetsEnabled) ColorModeAssetRows(appearance, APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND, tr("背景图片", "背景图片"), onColorModeAssetAction)
+                    else {
+                        ArrowPreference(title = tr("导入背景图片", "导入背景图片"), summary = appearance.style2BackgroundMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle2Background)
+                        ArrowPreference(title = tr("清除背景图片", "清除背景图片"), summary = if (appearance.style2BackgroundMime.isBlank()) tr("无背景图", "无背景图") else tr("已导入", "已导入"), onClick = onClearStyle2Background)
+                    }
                     EditableSliderPreference(
                         value = appearance.style2BackgroundBlur,
                         onValueChange = { value -> update { it.copy(style2BackgroundBlur = value) } },
@@ -2099,16 +2384,11 @@ OverlayDropdownPreference(
             }
             item {
                 Group(tr("LOGO与版本号", "LOGO与版本号")) {
-                    ArrowPreference(
-                        title = tr("导入LOGO", "导入LOGO"),
-                        summary = appearance.style2LogoMime.ifBlank { tr("未导入", "未导入") },
-                        onClick = onPickStyle2Logo,
-                    )
-                    ArrowPreference(
-                        title = tr("清除LOGO", "清除LOGO"),
-                        summary = if (appearance.style2LogoMime.isBlank()) tr("无LOGO", "无LOGO") else tr("已导入", "已导入"),
-                        onClick = onClearStyle2Logo,
-                    )
+                    if (appearance.colorModeAssetsEnabled) ColorModeAssetRows(appearance, APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO, "LOGO", onColorModeAssetAction)
+                    else {
+                        ArrowPreference(title = tr("导入LOGO", "导入LOGO"), summary = appearance.style2LogoMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle2Logo)
+                        ArrowPreference(title = tr("清除LOGO", "清除LOGO"), summary = if (appearance.style2LogoMime.isBlank()) tr("无LOGO", "无LOGO") else tr("已导入", "已导入"), onClick = onClearStyle2Logo)
+                    }
 OverlayDropdownPreference(
                         title = tr("LOGO与版本号对齐方式", "LOGO与版本号对齐方式"),
                         items = listOf(tr("左对齐", "左对齐"), tr("居中对齐", "居中对齐"), tr("右对齐", "右对齐")),
@@ -2507,6 +2787,7 @@ private fun Detail(
     onClearStyle2DeviceLogo: () -> Unit,
     onPickAppearanceLogo: () -> Unit,
     onClearAppearanceLogo: () -> Unit,
+    onColorModeAssetAction: (String, Boolean, Boolean) -> Unit,
     onRequestNotificationPermission: () -> Unit,
     screenRecorder: ScreenRecorderSettings,
     updateScreenRecorder: (((ScreenRecorderSettings) -> ScreenRecorderSettings) -> Unit),
@@ -2562,7 +2843,7 @@ private fun Detail(
         PageId.DEVICE_PROFILE -> DeviceProfileEditor(deviceProfile, updateDeviceProfile, back)
         PageId.SETTINGS_APPEARANCE_HOME -> SettingsAppearancePage(APPEARANCE_SLOT_HOME, appearance, updateAppearance, onPickAppearanceHome, onClearAppearanceHome, back)
         PageId.SETTINGS_APPEARANCE_DEVICE -> SettingsAppearancePage(APPEARANCE_SLOT_DEVICE, appearance, updateAppearance, onPickAppearanceDevice, onClearAppearanceDevice, back)
-            PageId.TUTORIAL_DEVICE_CARD -> TutorialDeviceCardSettings(appearance, updateAppearance, onPickAppearanceLogo, onClearAppearanceLogo, onPickTutorialDeviceImage, onClearTutorialDeviceImage, onPickCustomDeviceLogo, onClearCustomDeviceLogo, onPickStyle1UpdateBackground, onClearStyle1UpdateBackground, onPickStyle2DeviceImage, onClearStyle2DeviceImage, onPickStyle2DeviceLogo, onClearStyle2DeviceLogo, onPickStyle2UpdateBackground, onClearStyle2UpdateBackground, back)
+            PageId.TUTORIAL_DEVICE_CARD -> TutorialDeviceCardSettings(appearance, updateAppearance, onPickAppearanceLogo, onClearAppearanceLogo, onPickTutorialDeviceImage, onClearTutorialDeviceImage, onPickCustomDeviceLogo, onClearCustomDeviceLogo, onPickStyle1UpdateBackground, onClearStyle1UpdateBackground, onPickStyle2DeviceImage, onClearStyle2DeviceImage, onPickStyle2DeviceLogo, onClearStyle2DeviceLogo, onPickStyle2UpdateBackground, onClearStyle2UpdateBackground, onColorModeAssetAction, back)
         PageId.ABOUT -> About(back, openPage, onDebugMode)
         PageId.LEGAL_DISCLAIMER -> LegalDocument(PageId.LEGAL_DISCLAIMER, back)
         PageId.LEGAL_PRIVACY -> LegalDocument(PageId.LEGAL_PRIVACY, back)
@@ -2576,8 +2857,10 @@ private fun Detail(
         PageId.OPEN -> OpenSource(back)
         PageId.CONTRIBUTORS -> Contributors(back)
         PageId.REAR_SCREEN -> RearScreen(settings, update, musicWhitelist, updateMusicWhitelist, openPage, back)
+        PageId.REAR_CUSTOM_CENTER -> CustomRearScreenCenter(back)
         PageId.REAR_MUSIC_APPS -> RearMusicApps(musicWhitelist, updateMusicWhitelist, back)
-        PageId.OTHER -> OtherPage(screenRecorder, updateScreenRecorder, back)
+        PageId.OTHER -> OtherPage(screenRecorder, updateScreenRecorder, openPage, back)
+        PageId.APP_NAVIGATION -> AppNavigationPage(back)
         PageId.SIMULATE_MEDIA_NOTIFICATION -> SimulateMediaNotificationPage(
             musicWhitelist,
             updateMusicWhitelist,
@@ -6467,6 +6750,46 @@ private fun lockscreenBottomTextSummary(mask: Int): String = listOf(
     LOCKSCREEN_TEXT_NOTIFICATIONS to tr("X\u4e2a\u901a\u77e5", "X\u4e2a\u901a\u77e5"),
 ).filter { mask and it.first != 0 }.joinToString(" / ") { it.second }.ifBlank { tr("\u672a\u9690\u85cf", "\u672a\u9690\u85cf") }
 
+private fun statusBarIconsLeftSummary(mask: Int): String = listOf(
+    1 to tr("\u7f51\u901f", "\u7f51\u901f"),
+    2 to tr("\u95f9\u949f", "\u95f9\u949f"),
+    4 to tr("\u58f0\u97f3\u60c5\u666f", "\u58f0\u97f3\u60c5\u666f"),
+    8 to tr("\u52ff\u6270\u6a21\u5f0f", "\u52ff\u6270\u6a21\u5f0f"),
+).filter { mask and it.first != 0 }.joinToString(" / ") { it.second }.ifBlank { tr("\u672a\u9009\u62e9", "\u672a\u9009\u62e9") }
+
+@Composable
+private fun StatusBarIconsLeftDialog(
+    show: Boolean,
+    mask: Int,
+    onDismiss: () -> Unit,
+    onApply: (Int) -> Unit,
+) {
+    var selected by remember(show, mask) { mutableIntStateOf(mask) }
+    val items = listOf(
+        1 to tr("\u7f51\u901f", "\u7f51\u901f"),
+        2 to tr("\u95f9\u949f", "\u95f9\u949f"),
+        4 to tr("\u58f0\u97f3\u60c5\u666f", "\u58f0\u97f3\u60c5\u666f"),
+        8 to tr("\u52ff\u6270\u6a21\u5f0f", "\u52ff\u6270\u6a21\u5f0f"),
+    )
+    WindowDialog(show = show, onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(tr("\u9009\u62e9\u8981\u5de6\u79fb\u7684\u72b6\u6001\u680f\u56fe\u6807", "\u9009\u62e9\u8981\u5de6\u79fb\u7684\u72b6\u6001\u680f\u56fe\u6807"), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
+            items.forEach { (bit, title) ->
+                val toggle = { selected = if (selected and bit != 0) selected and bit.inv() else selected or bit }
+                Row(Modifier.fillMaxWidth().clickable(onClick = toggle).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(state = if (selected and bit != 0) ToggleableState.On else ToggleableState.Off, onClick = toggle, colors = CheckboxDefaults.checkboxColors(uncheckedForegroundColor = ComposeColor(0x808F8F8F)))
+                    Text(title, style = MiuixTheme.textStyles.body1, modifier = Modifier.padding(start = 10.dp))
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GlassDialogButton(onDismiss, Modifier.weight(1f)) { Text(tr("\u53d6\u6d88", "\u53d6\u6d88")) }
+                GlassDialogButton({ onApply(selected) }, Modifier.weight(1f), colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("\u5e94\u7528", "\u5e94\u7528")) }
+            }
+        }
+    }
+    }
+
 @Composable
 private fun LockScreenBottomTextDialog(
     show: Boolean,
@@ -8766,6 +9089,8 @@ internal fun OverlayDropdownPreference(
 private fun GlassActionButton(
     enabled: Boolean = true,
     onClick: () -> Unit,
+    size: Dp = 46.dp,
+    surfaceColor: ComposeColor? = null,
     icon: @Composable () -> Unit,
 ) {
     val animationScope = rememberCoroutineScope()
@@ -8787,11 +9112,11 @@ private fun GlassActionButton(
         }
     }
     val surface = MiuixTheme.colorScheme.surface
-    val tint = surface.copy(alpha = TOOLBAR_GLASS_SURFACE_ALPHA)
+    val tint = (surfaceColor ?: surface).copy(alpha = TOOLBAR_GLASS_SURFACE_ALPHA)
     val backdrop = LocalToolbarBackdrop.current
     val collapsedFraction = LocalToolbarCollapsed.current
     Box(
-        Modifier.padding(end = 4.dp).size(46.dp)
+        Modifier.padding(end = 4.dp).size(size)
             .then(if (enabled) highlight.gestureModifier else Modifier)
             .then(if (enabled) drag.modifier else Modifier)
             .clip(CircleShape)
