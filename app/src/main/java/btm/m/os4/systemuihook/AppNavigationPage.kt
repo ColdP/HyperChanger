@@ -37,6 +37,8 @@ private data class AppNavItem(val name: String, val packageName: String)
 
 private val appNavItems = listOf(
     AppNavItem("Apple Music", "com.apple.android.music"),
+    AppNavItem("微博", "com.sina.weibo"),
+    AppNavItem("小红书", "com.xingin.xhs"),
     AppNavItem("小米商城", "com.xiaomi.shop"),
     AppNavItem("小米钱包", "com.mipay.wallet"),
     AppNavItem("小米运动健康", "com.mi.health"),
@@ -63,7 +65,7 @@ internal fun AppNavigationPage(back: () -> Unit) {
         }
         return
     }
-    AppPage(tr("应用底部导航", "应用底部导航"), back, restartScopes = setOf(ScopeApplication.APPLE_MUSIC, ScopeApplication.XIAOMI_STORE, ScopeApplication.XIAOMI_WALLET, ScopeApplication.XIAOMI_HEALTH), restartEnabled = service != null) { padding, scroll ->
+    AppPage(tr("应用底部导航", "应用底部导航"), back, restartScopes = setOf(ScopeApplication.APPLE_MUSIC, ScopeApplication.WEIBO, ScopeApplication.XIAOHONGSHU, ScopeApplication.XIAOMI_STORE, ScopeApplication.XIAOMI_WALLET, ScopeApplication.XIAOMI_HEALTH), restartEnabled = service != null) { padding, scroll ->
         AppList(padding, scroll, 28) {
             item { SmallTitle(tr("支持的应用", "支持的应用"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp)) }
             items(appNavItems, key = { it.packageName }) { item ->

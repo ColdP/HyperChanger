@@ -1880,6 +1880,8 @@ private fun RestartScopesPage(back: () -> Unit) {
     )
     val otherTargets = listOf(
         ScopeApplication.APPLE_MUSIC,
+        ScopeApplication.WEIBO,
+        ScopeApplication.XIAOHONGSHU,
         ScopeApplication.XIAOMI_STORE,
         ScopeApplication.XIAOMI_WALLET,
         ScopeApplication.XIAOMI_HEALTH,

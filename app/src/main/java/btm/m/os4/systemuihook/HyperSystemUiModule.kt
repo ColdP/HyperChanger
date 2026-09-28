@@ -298,7 +298,8 @@ class HyperSystemUiModule : XposedModule() {
     private fun installAppNavigation(param: PackageLoadedParam) {
         val packageName = param.packageName
         if (packageName != "com.xiaomi.shop" && packageName != "com.mipay.wallet" &&
-            packageName != "com.mi.health" && packageName != "com.apple.android.music"
+            packageName != "com.mi.health" && packageName != "com.apple.android.music" &&
+            packageName != "com.sina.weibo" && packageName != "com.xingin.xhs"
         ) return
         if (!runCatching { android.app.Application.getProcessName() == packageName }.getOrDefault(false)) return
         runCatching {
@@ -331,6 +332,8 @@ class HyperSystemUiModule : XposedModule() {
                     AppBottomNavHooks.installXiaomiHealthWatchFaceMarket(this, param.defaultClassLoader, blur, label, style, advanced, color)
                 }
                 "com.apple.android.music" -> AppBottomNavHooks.installAppleMusic(this, param.defaultClassLoader, blur, label, style, advanced, color)
+                "com.sina.weibo" -> AppBottomNavHooks.installWeibo(this, param.defaultClassLoader, blur, label, style, advanced, color)
+                "com.xingin.xhs" -> AppBottomNavHooks.installXiaohongshu(this, param.defaultClassLoader, blur, label, style, advanced, color)
             }
             log(Log.INFO, TAG, "Installed app navigation hooks for $packageName")
         }.onFailure { error -> log(Log.ERROR, TAG, "Could not install app navigation hooks for $packageName", error) }
@@ -603,7 +606,8 @@ class HyperSystemUiModule : XposedModule() {
     override fun onPackageLoaded(param: PackageLoadedParam) {
         if (!OsCompatibility.areHooksAllowed()) return
         if (param.packageName == "com.xiaomi.shop" || param.packageName == "com.mipay.wallet" ||
-            param.packageName == "com.mi.health" || param.packageName == "com.apple.android.music"
+            param.packageName == "com.mi.health" || param.packageName == "com.apple.android.music" ||
+            param.packageName == "com.sina.weibo" || param.packageName == "com.xingin.xhs"
         ) {
             installAppNavigation(param)
             return

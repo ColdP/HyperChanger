@@ -53,7 +53,7 @@ object AppBottomNavHooks {
         barResourceName = null,
         anchorResourceName = "index_store",
         requiredTabs = setOf(TabKey.HOME, TabKey.MARKET, TabKey.PUBLISH, TabKey.MESSAGES, TabKey.PROFILE),
-        targetVersion = "9.41.0 (9410808)"
+        targetVersion = "9.42.0 (9420805)"
     )
 
     private val tim = AppConfig(
@@ -1102,7 +1102,20 @@ object AppBottomNavHooks {
                 TabKey.PUBLISH -> 5
                 else -> return
             }
-            val handled = runCatching {
+            val handled = (if (tab.key != TabKey.PUBLISH) {
+                runCatching {
+                    val intent = android.content.Intent(activity, activity.javaClass).apply {
+                        addFlags(
+                            android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                                android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        )
+                        putExtra("bottom_tab_index", tabIndex)
+                    }
+                    activity.startActivity(intent)
+                    activity.overridePendingTransition(0, 0)
+                    true
+                }
+            } else runCatching {
                 val interfaceClass = Class.forName(
                     "android.xingin.com.spi.homepage.IMainTabBarProxy",
                     false,
@@ -1133,12 +1146,15 @@ object AppBottomNavHooks {
                     Int::class.javaPrimitiveType
                 ).invoke(proxy, activity, tabIndex)
                 true
-            }.onFailure { error ->
+            }).onFailure { error ->
                 module.log(Log.WARN, TAG, "Xiaohongshu rejected click for ${tab.displayLabel}", error)
             }.getOrDefault(false)
             if (!handled) {
                 val currentTab = detectedTabs.firstOrNull { it.key == tab.key } ?: tab
                 currentTab.clickTarget.callOnClick() || currentTab.clickTarget.performClick()
+            } else if (tab.key != TabKey.PUBLISH) {
+                selectedIndex.intValue = navigationTabs.indexOfFirst { it.key == tab.key }
+                    .takeIf { it >= 0 } ?: selectedIndex.intValue
             }
             originalBar?.postDelayed(::syncHostState, 120L)
         }
