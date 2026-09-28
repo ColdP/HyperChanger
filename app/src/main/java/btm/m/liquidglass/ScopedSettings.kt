@@ -18,6 +18,7 @@ object ScopedSettings {
     const val KEY_ADVANCED_MATERIAL = "advanced_material"
     const val KEY_COLOR_MODE = "color_mode"
     const val KEY_VISIBLE_TABS = "visible_tabs"
+    const val KEY_REMOVE_WATCH_FACE_TRIAL_LIMIT = "remove_watch_face_trial_limit"
     @JvmField
     val WALLET_TAB_IDS = linkedSetOf("HOME", "SAVINGS", "SHORT_DRAMA", "LOAN", "PROFILE")
 

@@ -303,8 +303,21 @@ class HyperSystemUiModule : XposedModule() {
         if (!runCatching { android.app.Application.getProcessName() == packageName }.getOrDefault(false)) return
         runCatching {
             val prefs = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
-            if (!ScopedSettings.getBoolean(prefs, packageName, ScopedSettings.KEY_MODULE_ENABLED, true) ||
-                !ScopedSettings.getBoolean(prefs, packageName, ScopedSettings.KEY_ENABLED, true)) return
+            if (!ScopedSettings.getBoolean(prefs, packageName, ScopedSettings.KEY_MODULE_ENABLED, true)) return
+            if (packageName == "com.mi.health" && ScopedSettings.getBoolean(
+                    prefs,
+                    packageName,
+                    ScopedSettings.KEY_REMOVE_WATCH_FACE_TRIAL_LIMIT,
+                    false,
+                )
+            ) {
+                runCatching {
+                    installXiaomiHealthWatchFaceTrialBypass(param.defaultClassLoader)
+                }.onFailure { error ->
+                    log(Log.ERROR, TAG, "Could not install Xiaomi Health watch-face trial hook", error)
+                }
+            }
+            if (!ScopedSettings.getBoolean(prefs, packageName, ScopedSettings.KEY_ENABLED, true)) return
             val style = ScopedSettings.getString(prefs, packageName, NavigationStyle.PREFERENCE_KEY, NavigationStyle.DEFAULT_VALUE)
             val label = ScopedSettings.getLabelMode(prefs, packageName, LabelMode.DEFAULT_VALUE)
             val color = ScopedSettings.getString(prefs, packageName, ScopedSettings.KEY_COLOR_MODE, AppColorMode.DEFAULT_VALUE)
@@ -321,6 +334,27 @@ class HyperSystemUiModule : XposedModule() {
             }
             log(Log.INFO, TAG, "Installed app navigation hooks for $packageName")
         }.onFailure { error -> log(Log.ERROR, TAG, "Could not install app navigation hooks for $packageName", error) }
+    }
+
+    private fun installXiaomiHealthWatchFaceTrialBypass(loader: ClassLoader) {
+        val moduleClass = loader.loadClass("com.xiaomi.wearable.yrn.modules.WatchFaceModule")
+        val promiseClass = loader.loadClass("com.facebook.react.bridge.Promise")
+        val method = moduleClass.getDeclaredMethod(
+            "getEnterFaceMarketTime",
+            String::class.java,
+            promiseClass,
+        ).apply { isAccessible = true }
+        val resolve = promiseClass.getMethod("resolve", Any::class.java)
+        hook(method)
+            .setExceptionMode(ExceptionMode.PROTECTIVE)
+            .setId("hyperchanger:mi-health-watch-face-unlimited-trial")
+            .intercept { chain ->
+                val promise = chain.getArg(1) ?: return@intercept chain.proceed()
+                val oneHundredYearsMs = 100L * 365L * 24L * 60L * 60L * 1000L
+                resolve.invoke(promise, (System.currentTimeMillis() + oneHundredYearsMs).toDouble())
+                null
+            }
+        log(Log.INFO, TAG, "Installed Xiaomi Health unlimited watch-face trial hook")
     }
 
     private fun invokeNoArgResult(target: Any, name: String): Any? = runCatching {

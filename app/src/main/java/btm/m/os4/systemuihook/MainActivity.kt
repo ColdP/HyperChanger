@@ -130,6 +130,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import btm.m.liquidglass.LabelMode
+import btm.m.liquidglass.ScopedSettings
 import btm.m.liquidglass.hook.DampedDragAnimation
 import btm.m.liquidglass.hook.CustomNavigation
 import btm.m.liquidglass.hook.HostTab
@@ -1053,10 +1054,26 @@ private fun OtherPage(
     open: (PageId) -> Unit,
     back: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsState()
+    val scopedPrefs = remember(service) {
+        service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)
+            ?: context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, 0)
+    }
+    var removeWatchFaceTrialLimit by remember(service) {
+        mutableStateOf(
+            ScopedSettings.getBoolean(
+                scopedPrefs,
+                "com.mi.health",
+                ScopedSettings.KEY_REMOVE_WATCH_FACE_TRIAL_LIMIT,
+                false,
+            ),
+        )
+    }
     AppPage(
     tr("其他", "其他"),
     back,
-    restartScopes = setOf(ScopeApplication.SCREEN_RECORDER),
+    restartScopes = setOf(ScopeApplication.SCREEN_RECORDER, ScopeApplication.XIAOMI_HEALTH),
 ) { padding, scroll ->
     var showSavePathDialog by remember { mutableStateOf(false) }
     var pathDraft by remember(screenRecorder.savePath) { mutableStateOf(screenRecorder.savePath) }
@@ -1085,7 +1102,32 @@ private fun OtherPage(
                 )
             }
         }
-        item { Entry(tr("应用底部导航", "应用底部导航")) { open(PageId.APP_NAVIGATION) } }
+        item {
+            SmallTitle(
+                tr("系统应用优化", "系统应用优化"),
+                insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp),
+            )
+            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                ArrowPreference(
+                    title = tr("应用底部导航", "应用底部导航"),
+                    onClick = { open(PageId.APP_NAVIGATION) },
+                )
+                SwitchPreference(
+                    title = tr("去除表盘试用10分钟限制", "去除表盘试用10分钟限制"),
+                    checked = removeWatchFaceTrialLimit,
+                    onCheckedChange = { enabled ->
+                        removeWatchFaceTrialLimit = enabled
+                        scopedPrefs.edit().putBoolean(
+                            ScopedSettings.key(
+                                "com.mi.health",
+                                ScopedSettings.KEY_REMOVE_WATCH_FACE_TRIAL_LIMIT,
+                            ),
+                            enabled,
+                        ).apply()
+                    },
+                )
+            }
+        }
     }
     WindowDialog(show = showSavePathDialog, onDismissRequest = { showSavePathDialog = false }) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
