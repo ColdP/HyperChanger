@@ -51,6 +51,8 @@ internal class DampedDragAnimation(
     private val onDragStopped: DampedDragAnimation.() -> Unit,
     private val onDrag: DampedDragAnimation.(size: IntSize, dragAmount: Offset) -> Unit,
     private val awaitTargetBeforeRelease: Boolean = true,
+    private val followFingerImmediately: Boolean = false,
+    private val onTap: (DampedDragAnimation.(size: IntSize, position: Offset) -> Unit)? = null,
 ) {
     private val valueAnimationSpec = spring(1f, 1000f, visibilityThreshold)
     private val velocityAnimationSpec = spring(0.5f, 300f, visibilityThreshold * 10f)
@@ -74,12 +76,17 @@ internal class DampedDragAnimation(
 
     val modifier: Modifier = Modifier.pointerInput(Unit) {
         inspectDragGestures(
+            ignoreConsumed = followFingerImmediately,
             onDragStart = {
                 velocityTracker.resetTracking()
                 press()
             },
             onDragEnd = {
                 onDragStopped()
+                release()
+            },
+            onTap = { change ->
+                onTap?.invoke(this@DampedDragAnimation, size, change.position)
                 release()
             },
             onDragCancel = {
@@ -116,6 +123,10 @@ internal class DampedDragAnimation(
     fun updateValue(value: Float) {
         val target = value.coerceIn(valueRange)
         animationScope.launch {
+            if (followFingerImmediately) {
+                valueAnimation.snapTo(target)
+                return@launch
+            }
             valueAnimation.animateTo(target, valueAnimationSpec) {
                 velocityTracker.addPosition(SystemClock.uptimeMillis(), Offset(this.value, 0f))
                 val range = valueRange.endInclusive - valueRange.start
@@ -220,8 +231,10 @@ internal class InteractiveHighlight(
 }
 
 private suspend fun PointerInputScope.inspectDragGestures(
+    ignoreConsumed: Boolean = false,
     onDragStart: (PointerInputChange) -> Unit,
     onDragEnd: (PointerInputChange) -> Unit,
+    onTap: (PointerInputChange) -> Unit = onDragEnd,
     onDragCancel: () -> Unit,
     onDrag: (PointerInputChange, Offset) -> Unit
 ) {
@@ -230,13 +243,25 @@ private suspend fun PointerInputScope.inspectDragGestures(
         val down = awaitFirstDown(false)
         onDragStart(down)
         onDrag(initialDown, Offset.Zero)
-        val up = drag(initialDown.id) { onDrag(it, it.positionChange()) }
-        if (up == null) onDragCancel() else onDragEnd(up)
+        var totalDrag = Offset.Zero
+        val up = drag(initialDown.id, ignoreConsumed) {
+            val delta = if (ignoreConsumed) it.position - it.previousPosition else it.positionChange()
+            totalDrag += delta
+            onDrag(it, delta)
+        }
+        if (up == null) {
+            onDragCancel()
+        } else if (totalDrag.getDistance() < viewConfiguration.touchSlop) {
+            onTap(up)
+        } else {
+            onDragEnd(up)
+        }
     }
 }
 
 private suspend inline fun AwaitPointerEventScope.drag(
     pointerId: PointerId,
+    ignoreConsumed: Boolean = false,
     onDrag: (PointerInputChange) -> Unit
 ): PointerInputChange? {
     if (currentEvent.changes.fastFirstOrNull { it.id == pointerId }?.pressed != true) return null
@@ -244,7 +269,7 @@ private suspend inline fun AwaitPointerEventScope.drag(
     while (true) {
         val event = awaitPointerEvent()
         val change = event.changes.fastFirstOrNull { it.id == pointer } ?: return null
-        if (change.isConsumed) return null
+        if (!ignoreConsumed && change.isConsumed) return null
         if (change.changedToUpIgnoreConsumed()) {
             val other = event.changes.fastFirstOrNull { it.pressed }
             if (other == null) return change

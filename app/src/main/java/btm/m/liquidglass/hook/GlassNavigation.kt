@@ -69,6 +69,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
@@ -170,6 +171,8 @@ fun CustomNavigation(
     concealHostBottomBar: Boolean = false,
     forceFloatingGlass: Boolean = false,
     adaptiveFloatingWidth: Boolean = false,
+    dragWholeFloatingBar: Boolean = false,
+    adaptiveLiquidWidth: Boolean = false,
     accentColorOverride: Color? = null,
     redrawNativeText: Boolean = false,
     onHostPreDraw: () -> Unit,
@@ -181,7 +184,7 @@ fun CustomNavigation(
     val style = NavigationStyle.fromPreference(navigationStyle)
     val requestedMode = LabelMode.fromPreference(labelMode)
     val effectiveMode = requestedMode
-    val systemIsDarkTheme = sourceView.resources.configuration.uiMode and
+    val systemIsDarkTheme = LocalConfiguration.current.uiMode and
         Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
     val hostIsDarkTheme = when (AppColorMode.fromPreference(colorMode)) {
         AppColorMode.SYSTEM -> systemIsDarkTheme
@@ -209,6 +212,7 @@ fun CustomNavigation(
                 hostIsDarkTheme = hostIsDarkTheme,
                 accentColorOverride = accentColorOverride,
                 adaptiveFloatingWidth = adaptiveFloatingWidth,
+                dragWholeFloatingBar = dragWholeFloatingBar,
                 tabImageVector = tabImageVector,
                 tabIconContent = tabIconContent
             )
@@ -250,7 +254,13 @@ fun CustomNavigation(
                 accentColorOverride = accentColorOverride,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .fillMaxWidth(0.53f * 0.82f * 1.10f)
+                    .fillMaxWidth(
+                        if (adaptiveLiquidWidth) {
+                            1f
+                        } else {
+                            0.53f * 0.82f * 1.10f
+                        }
+                    )
                     .height(64.dp)
             ) {
                 tabs.forEachIndexed { index, tab ->
@@ -327,7 +337,7 @@ fun MiniPlayerBackground(
     onHostPreDraw: () -> Unit
 ) {
     val style = NavigationStyle.fromPreference(navigationStyle)
-    val systemIsDarkTheme = sourceView.resources.configuration.uiMode and
+    val systemIsDarkTheme = LocalConfiguration.current.uiMode and
         Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
     val isDarkTheme = when (AppColorMode.fromPreference(colorMode)) {
         AppColorMode.SYSTEM -> systemIsDarkTheme
@@ -407,7 +417,7 @@ fun AppleMusicMiniPlayer(
 ) {
     if (!state.visible) return
     val style = NavigationStyle.fromPreference(navigationStyle)
-    val systemIsDarkTheme = sourceView.resources.configuration.uiMode and
+    val systemIsDarkTheme = LocalConfiguration.current.uiMode and
         Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
     val isDarkTheme = when (AppColorMode.fromPreference(colorMode)) {
         AppColorMode.SYSTEM -> systemIsDarkTheme
@@ -417,10 +427,11 @@ fun AppleMusicMiniPlayer(
     val backdrop = rememberNativeViewBackdrop(sourceView, {}, true)
     val density = LocalDensity.current
     val docked = style == NavigationStyle.HYPER_OS
+    val floating = style == NavigationStyle.HYPER_OS_FLOATING
     val shape = if (docked) {
         androidx.compose.ui.graphics.RectangleShape
     } else {
-        RoundedCornerShape(555.dp)
+        Capsule()
     }
     val blur = with(density) {
         if (style == NavigationStyle.LIQUID_GLASS) {
@@ -429,7 +440,11 @@ fun AppleMusicMiniPlayer(
             blurRadius.coerceIn(0, 40).dp.toPx()
         }
     }
-    val surfaceColor = if (isDarkTheme) {
+    val surfaceColor = if (floating && isDarkTheme) {
+        Color.Black.copy(alpha = 0.30f)
+    } else if (floating) {
+        Color(0xFFF5F5F5).copy(alpha = 0.42f)
+    } else if (isDarkTheme) {
         Color(0xFF171717).copy(alpha = 0.58f)
     } else if (docked) {
         Color.White.copy(alpha = 0.38f)
@@ -442,11 +457,25 @@ fun AppleMusicMiniPlayer(
             shape = { shape },
             effects = {
                 vibrancy()
-                blur(blur)
-                if (style == NavigationStyle.LIQUID_GLASS) lens(14.dp.toPx(), 14.dp.toPx())
+                blur(if (floating) with(density) { (blurRadius * 0.24f).dp.toPx() } else blur)
+                when {
+                    floating -> lens(
+                        refractionHeight = 16.dp.toPx(),
+                        refractionAmount = 32.dp.toPx(),
+                        depthEffect = true,
+                        chromaticAberration = false
+                    )
+                    style == NavigationStyle.LIQUID_GLASS -> lens(14.dp.toPx(), 14.dp.toPx())
+                }
             },
             highlight = if (docked) null else ({
-                Highlight.Default.copy(alpha = if (isDarkTheme) 0.7f else 0.9f)
+                Highlight.Default.copy(
+                    alpha = if (floating) {
+                        if (isDarkTheme) 0.78f else 0.96f
+                    } else {
+                        if (isDarkTheme) 0.7f else 0.9f
+                    }
+                )
             }),
             onDrawSurface = { drawRect(surfaceColor) }
         )
@@ -461,6 +490,19 @@ fun AppleMusicMiniPlayer(
     Row(
         modifier
             .height(64.dp)
+            .then(
+                if (floating) {
+                    Modifier.shadow(
+                        elevation = 6.dp,
+                        shape = shape,
+                        clip = false,
+                        ambientColor = Color.Black.copy(alpha = 0.35f),
+                        spotColor = Color.Black.copy(alpha = 0.35f)
+                    )
+                } else {
+                    Modifier
+                }
+            )
             .then(material)
             .clip(shape)
             .clickable(onClick = onOpenPlayer)
@@ -540,7 +582,7 @@ fun NativeBackdropMusicMiniPlayer(
 ) {
     if (!state.visible) return
     val style = NavigationStyle.fromPreference(navigationStyle)
-    val systemIsDarkTheme = sourceView.resources.configuration.uiMode and
+    val systemIsDarkTheme = LocalConfiguration.current.uiMode and
         Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
     val isDarkTheme = when (AppColorMode.fromPreference(colorMode)) {
         AppColorMode.SYSTEM -> systemIsDarkTheme
@@ -727,6 +769,7 @@ private fun HyperNavigation(
     hostIsDarkTheme: Boolean,
     accentColorOverride: Color? = null,
     adaptiveFloatingWidth: Boolean = false,
+    dragWholeFloatingBar: Boolean = false,
     tabImageVector: ((Int) -> ImageVector)? = null,
     tabIconContent: (@Composable (Int, Color) -> Unit)? = null
 ) {
@@ -756,6 +799,7 @@ private fun HyperNavigation(
                     isDarkTheme = isDarkTheme,
                     accentColorOverride = accentColorOverride,
                     adaptiveFloatingWidth = adaptiveFloatingWidth,
+                    dragWholeFloatingBar = dragWholeFloatingBar,
                     tabImageVector = tabImageVector,
                     tabIconContent = tabIconContent,
                     onTabSelected = { index ->
@@ -858,6 +902,7 @@ private fun HyperFloatingNavigationBar(
     isDarkTheme: Boolean,
     accentColorOverride: Color?,
     adaptiveFloatingWidth: Boolean,
+    dragWholeFloatingBar: Boolean,
     tabImageVector: ((Int) -> ImageVector)?,
     tabIconContent: (@Composable (Int, Color) -> Unit)?,
     onTabSelected: (Int) -> Unit,
@@ -890,6 +935,15 @@ private fun HyperFloatingNavigationBar(
             },
             // OS4 restores the pressed scale as soon as the finger is released.
             awaitTargetBeforeRelease = false,
+            followFingerImmediately = dragWholeFloatingBar,
+            onTap = if (dragWholeFloatingBar) ({ size, position ->
+                val slotWidth = size.width.toFloat() / tabCount
+                if (slotWidth > 0f) {
+                    val target = (position.x / slotWidth).toInt().fastCoerceIn(0, tabCount - 1)
+                    animateToValue(target.toFloat())
+                    if (target != selectedIndex.intValue) onTabSelected(target)
+                }
+            }) else null,
         )
     }
     LaunchedEffect(selectedIndex.intValue) {
@@ -1051,8 +1105,15 @@ private fun HyperFloatingNavigationBar(
                         scaleX = dragAnimation.scaleX
                         scaleY = dragAnimation.scaleY
                     }
-                    .then(dragAnimation.modifier)
+                    .then(if (dragWholeFloatingBar) Modifier else dragAnimation.modifier)
             )
+            if (dragWholeFloatingBar) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .then(dragAnimation.modifier)
+                )
+            }
         }
     }
 }
@@ -1086,9 +1147,9 @@ private fun HyperFloatingNavigationBar(
 
 private fun hyperIcon(label: String): ImageVector = when {
     label == "+" -> HyperIcons.Add
-    label.contains("\u9996\u9875") -> HyperIcons.Home
+    label.contains("\u9996\u9875") || label.contains("\u5065\u5eb7") -> HyperIcons.Home
     label.contains("\u5206\u7c7b") || label.contains("\u6d4f\u89c8") ||
-        label.contains("\u8d44\u6599\u5e93") -> HyperIcons.Category
+        label.contains("\u8d44\u6599\u5e93") || label.contains("\u8bbe\u5907") -> HyperIcons.Category
     label.contains("\u670d\u52a1") -> HyperIcons.Service
     label.contains("\u8d2d\u7269\u8f66") -> HyperIcons.Cart
     label.contains("\u89c6\u9891") || label.contains("\u77ed\u5267") -> HyperIcons.Video
@@ -1101,7 +1162,7 @@ private fun hyperIcon(label: String): ImageVector = when {
         label.contains("\u6536\u4ef6\u7bb1") -> HyperIcons.Messages
     label.contains("\u8054\u7cfb") || label.contains("\u793e\u533a") -> HyperIcons.Contacts
     label.contains("\u9891\u9053") || label.contains("\u5e7f\u64ad") ||
-        label.contains("\u7acb\u5373\u8046\u542c") -> HyperIcons.Channels
+        label.contains("\u7acb\u5373\u8046\u542c") || label.contains("\u8fd0\u52a8") -> HyperIcons.Channels
     else -> HyperIcons.Dynamic
 }
 
@@ -1621,7 +1682,7 @@ private fun TabIcon(label: String, color: Color) {
                     cap = StrokeCap.Round
                 )
             }
-            label.contains("\u9996\u9875") -> {
+            label.contains("\u9996\u9875") || label.contains("\u5065\u5eb7") -> {
                 drawPath(Path().apply {
                     moveTo(center.x - 9.dp.toPx(), center.y - 1.dp.toPx())
                     lineTo(center.x, center.y - 9.dp.toPx())
@@ -1634,7 +1695,7 @@ private fun TabIcon(label: String, color: Color) {
                 }, color, style = stroke)
             }
             label.contains("\u5206\u7c7b") || label.contains("\u6d4f\u89c8") ||
-                label.contains("\u8d44\u6599\u5e93") -> {
+                label.contains("\u8d44\u6599\u5e93") || label.contains("\u8bbe\u5907") -> {
                 val cell = 6.dp.toPx()
                 val gap = 3.dp.toPx()
                 for (row in 0..1) for (column in 0..1) {
@@ -1758,7 +1819,7 @@ private fun TabIcon(label: String, color: Color) {
                 }, color, style = stroke)
             }
             label.contains("\u9891\u9053") || label.contains("\u5e7f\u64ad") ||
-                label.contains("\u7acb\u5373\u8046\u542c") -> {
+                label.contains("\u7acb\u5373\u8046\u542c") || label.contains("\u8fd0\u52a8") -> {
                 drawCircle(color, 9.dp.toPx(), center, style = stroke)
                 drawPath(Path().apply {
                     moveTo(center.x - 3.dp.toPx(), center.y + 4.dp.toPx())

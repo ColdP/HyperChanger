@@ -36,8 +36,10 @@ import btm.m.liquidglass.momentumBackTransform
 private data class AppNavItem(val name: String, val packageName: String)
 
 private val appNavItems = listOf(
+    AppNavItem("Apple Music", "com.apple.android.music"),
     AppNavItem("小米商城", "com.xiaomi.shop"),
     AppNavItem("小米钱包", "com.mipay.wallet"),
+    AppNavItem("小米运动健康", "com.mi.health"),
 )
 
 @Composable
@@ -61,7 +63,7 @@ internal fun AppNavigationPage(back: () -> Unit) {
         }
         return
     }
-    AppPage(tr("应用底部导航", "应用底部导航"), back, restartScopes = setOf(ScopeApplication.XIAOMI_STORE, ScopeApplication.XIAOMI_WALLET), restartEnabled = service != null) { padding, scroll ->
+    AppPage(tr("应用底部导航", "应用底部导航"), back, restartScopes = setOf(ScopeApplication.APPLE_MUSIC, ScopeApplication.XIAOMI_STORE, ScopeApplication.XIAOMI_WALLET, ScopeApplication.XIAOMI_HEALTH), restartEnabled = service != null) { padding, scroll ->
         AppList(padding, scroll, 28) {
             item { SmallTitle(tr("支持的应用", "支持的应用"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp)) }
             items(appNavItems, key = { it.packageName }) { item ->
@@ -83,7 +85,7 @@ private fun AppNavigationCard(item: AppNavItem, prefs: android.content.SharedPre
             icon?.let { Image(it, tr("应用图标", "应用图标"), Modifier.size(54.dp).clip(RoundedCornerShape(14.dp)), contentScale = ContentScale.Crop) }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(item.name, style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(tr(item.name, item.name), style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(item.packageName, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(packageInfo?.let { "${it.versionName ?: "?"} (${it.longVersionCode})" } ?: tr("未安装", "未安装"), style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             }
@@ -100,7 +102,7 @@ private fun AppNavigationSettings(appItem: AppNavItem, prefs: android.content.Sh
     var labelIndex by remember(appItem.packageName) { mutableIntStateOf(LabelMode.fromPreference(ScopedSettings.getLabelMode(prefs, appItem.packageName)).ordinal) }
     var colorIndex by remember(appItem.packageName) { mutableIntStateOf(AppColorMode.fromPreference(ScopedSettings.getString(prefs, appItem.packageName, ScopedSettings.KEY_COLOR_MODE, AppColorMode.DEFAULT_VALUE)).ordinal) }
     var walletTabs by remember(appItem.packageName) { mutableStateOf(ScopedSettings.getWalletVisibleTabs(prefs)) }
-    AppPage(appItem.name, back) { padding, scroll ->
+    AppPage(tr(appItem.name, appItem.name), back) { padding, scroll ->
         AppList(padding, scroll, 28) {
             item {
                 Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {

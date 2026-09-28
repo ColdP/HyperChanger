@@ -3,6 +3,9 @@
 package btm.m.liquidglass.hook
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.PorterDuff
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
@@ -16,6 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.GraphicsLayerScope
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.translate
@@ -33,6 +37,94 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import com.kyant.backdrop.Backdrop
 import java.util.IdentityHashMap
+
+/** Backdrop for hosts such as React Native whose render tree cannot be redrawn safely. */
+@Composable
+fun rememberBitmapNativeViewBackdrop(
+    sourceView: View,
+    sampleHeightPx: Int,
+    onHostPreDraw: () -> Unit
+): BitmapNativeViewBackdrop {
+    val backdrop = remember(sourceView) { BitmapNativeViewBackdrop(sourceView) }
+    backdrop.sampleHeightPx = sampleHeightPx
+    DisposableEffect(sourceView, onHostPreDraw) {
+        val listener = ViewTreeObserver.OnPreDrawListener {
+            onHostPreDraw()
+            backdrop.capture()
+            true
+        }
+        sourceView.viewTreeObserver.addOnPreDrawListener(listener)
+        sourceView.post(backdrop::capture)
+        onDispose {
+            val observer = sourceView.viewTreeObserver
+            if (observer.isAlive) observer.removeOnPreDrawListener(listener)
+            backdrop.release()
+        }
+    }
+    return backdrop
+}
+
+/** Software snapshot avoids recording React Native's render tree into a Compose RenderNode. */
+@Stable
+class BitmapNativeViewBackdrop internal constructor(
+    private val sourceView: View
+) : Backdrop {
+    override val isCoordinatesDependent: Boolean = true
+    internal var sampleHeightPx: Int = 0
+    private var snapshot: Bitmap? = null
+    private var snapshotTop = 0
+    private var version by mutableIntStateOf(0)
+    private var lastCaptureAtNanos = 0L
+
+    internal fun capture() {
+        val now = android.os.SystemClock.elapsedRealtimeNanos()
+        if (now - lastCaptureAtNanos < 8_333_333L || !sourceView.isAttachedToWindow ||
+            sourceView.width <= 0 || sourceView.height <= 0 || sampleHeightPx <= 0
+        ) return
+        lastCaptureAtNanos = now
+        val height = sampleHeightPx.coerceAtMost(sourceView.height)
+        val bitmap = snapshot?.takeIf { it.width == sourceView.width && it.height == height }
+            ?: Bitmap.createBitmap(sourceView.width, height, Bitmap.Config.ARGB_8888).also {
+                snapshot?.recycle()
+                snapshot = it
+            }
+        val top = sourceView.height - height
+        runCatching {
+            val canvas = Canvas(bitmap)
+            canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
+            canvas.translate(-sourceView.scrollX.toFloat(), -(top + sourceView.scrollY).toFloat())
+            sourceView.draw(canvas)
+        }.onSuccess {
+            snapshotTop = top
+            version++
+        }
+    }
+
+    internal fun release() {
+        snapshot?.recycle()
+        snapshot = null
+    }
+
+    override fun DrawScope.drawBackdrop(
+        density: Density,
+        coordinates: LayoutCoordinates?,
+        layerBlock: (GraphicsLayerScope.() -> Unit)?
+    ) {
+        @Suppress("UNUSED_EXPRESSION")
+        version
+        val bitmap = snapshot ?: return
+        val consumer = coordinates ?: return
+        val sourceLocation = IntArray(2).also(sourceView::getLocationInWindow)
+        val consumerLocation = consumer.positionInWindow()
+        drawImage(
+            image = bitmap.asImageBitmap(),
+            topLeft = Offset(
+                sourceLocation[0] - consumerLocation.x,
+                sourceLocation[1] + snapshotTop - consumerLocation.y
+            )
+        )
+    }
+}
 
 @Composable
 fun rememberNativeViewBackdrop(

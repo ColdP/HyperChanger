@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import btm.m.liquidglass.AppColorMode
 import btm.m.liquidglass.NavigationStyle
+import btm.m.os4.systemuihook.tr
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import java.lang.reflect.Method
@@ -175,6 +176,35 @@ object AppBottomNavHooks {
         )
     )
 
+    private val xiaomiHealth = AppConfig(
+        displayName = "XiaomiHealth",
+        packageName = "com.mi.health",
+        activityName = "com.xiaomi.fitness.main.MainActivity",
+        barResourceName = "main_fl_bottom_container",
+        anchorResourceName = null,
+        requiredTabs = setOf(
+            TabKey.HEALTH, TabKey.WORKOUT, TabKey.DEVICE, TabKey.PROFILE
+        ),
+        targetVersion = "3.59.1",
+        fallbackTabOrder = listOf(
+            TabKey.HEALTH, TabKey.WORKOUT, TabKey.DEVICE, TabKey.PROFILE
+        )
+    )
+
+    /** The watch-face market is rendered by the app's YRN host activity. */
+    private val xiaomiHealthWatchFaceMarket = AppConfig(
+        displayName = "XiaomiHealthWatchFaceMarket",
+        packageName = "com.mi.health",
+        activityName = "com.xiaomi.yrn.controller.ui.YRNCMainActivity",
+        intentDataContains = "/dial/DialMarket",
+        barResourceName = null,
+        anchorResourceName = null,
+        requiredTabs = setOf(TabKey.FACE_HOME, TabKey.FACE_CATEGORY, TabKey.FACE_MINE),
+        targetVersion = "3.59.1",
+        fallbackTabOrder = listOf(TabKey.FACE_HOME, TabKey.FACE_CATEGORY, TabKey.FACE_MINE),
+        coordinateTabSurface = true
+    )
+
     private val sessions = WeakHashMap<Activity, Session>()
 
     @JvmStatic
@@ -308,6 +338,30 @@ object AppBottomNavHooks {
         advancedMaterial: Boolean,
         colorMode: String
     ) = install(module, loader, xiaomiStore, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode)
+
+    @JvmStatic
+    @Throws(ReflectiveOperationException::class)
+    fun installXiaomiHealth(
+        module: XposedModule,
+        loader: ClassLoader,
+        blurRadius: Int,
+        labelMode: String,
+        navigationStyle: String,
+        advancedMaterial: Boolean,
+        colorMode: String
+    ) = install(module, loader, xiaomiHealth, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode)
+
+    @JvmStatic
+    @Throws(ReflectiveOperationException::class)
+    fun installXiaomiHealthWatchFaceMarket(
+        module: XposedModule,
+        loader: ClassLoader,
+        blurRadius: Int,
+        labelMode: String,
+        navigationStyle: String,
+        advancedMaterial: Boolean,
+        colorMode: String
+    ) = install(module, loader, xiaomiHealthWatchFaceMarket, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode)
 
     @JvmStatic
     @Throws(ReflectiveOperationException::class)
@@ -484,6 +538,10 @@ object AppBottomNavHooks {
 
     private fun matchesActivity(type: Class<*>, activity: Activity, config: AppConfig): Boolean {
         if (!type.isInstance(activity)) return false
+        config.intentDataContains?.let { token ->
+            val route = activity.intent?.dataString ?: activity.intent?.getStringExtra("url").orEmpty()
+            if (!route.contains(token, ignoreCase = true)) return false
+        }
         val prefix = config.componentPrefix ?: return true
         return activity.intent?.component?.className?.startsWith(prefix) == true
     }
@@ -662,8 +720,12 @@ object AppBottomNavHooks {
                 syncCloudMusicMiniPlayer(content)
                 syncAppleMusicMiniPlayer(content)
                 syncQQMusicMiniPlayer(content)
-                selectedIndex.intValue = navigationTabs.indexOfFirst {
-                    it.key != TabKey.PUBLISH && isSelectedRecursively(it.view)
+                selectedIndex.intValue = navigationTabs.indexOfFirst { tab ->
+                    tab.key != TabKey.PUBLISH && (
+                        isSelectedRecursively(tab.view) ||
+                            (config === xiaomiHealthWatchFaceMarket &&
+                                semanticText(tab.view).contains("已选中"))
+                        )
                 }.takeIf { it >= 0 } ?: 0
                 releaseOriginalBarSpace()
                 hideOriginalBar()
@@ -675,7 +737,7 @@ object AppBottomNavHooks {
                 owner.attachTo(overlayHost)
                 val navigationBackdropSource = when (config) {
                     cloudMusic, qqMusic -> content
-                    appleMusic -> findResourceView(content, "navigation_host_group") ?: sourceView
+                    appleMusic -> content
                     else -> sourceView
                 }
                 val miniPlayerBackdropSource = when (config) {
@@ -689,6 +751,15 @@ object AppBottomNavHooks {
                     setBackgroundColor(android.graphics.Color.TRANSPARENT)
                     setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
                     setContent {
+                        val watchFaceBackdrop = if (config === xiaomiHealthWatchFaceMarket) {
+                            rememberBitmapNativeViewBackdrop(
+                                sourceView = navigationBackdropSource,
+                                sampleHeightPx = navigationOverlayHeight(),
+                                onHostPreDraw = ::syncHostState
+                            )
+                        } else {
+                            null
+                        }
                         Box(Modifier.fillMaxSize()) {
                             CustomNavigation(
                                 sourceView = navigationBackdropSource,
@@ -709,6 +780,10 @@ object AppBottomNavHooks {
                                 advancedMaterial = advancedMaterial,
                                 colorMode = colorMode,
                                 adaptiveFloatingWidth = true,
+                                dragWholeFloatingBar = config === xiaomiHealth ||
+                                    config === xiaomiHealthWatchFaceMarket || config === appleMusic,
+                                adaptiveLiquidWidth = config === xiaomiHealth ||
+                                    config === xiaomiHealthWatchFaceMarket || config === appleMusic,
                                 liquidBottomSpacingDp = if (config === xiaomiWallet) -8 else 8,
                                 concealHostBottomBar = config.concealHostBottomBar ||
                                     config === xiaomiWallet,
@@ -724,7 +799,8 @@ object AppBottomNavHooks {
                                 },
                                 redrawNativeText = config === cloudMusic ||
                                     config === qqMusic || config === appleMusic,
-                                onHostPreDraw = ::syncHostState
+                                onHostPreDraw = ::syncHostState,
+                                backdropOverride = watchFaceBackdrop
                             )
                             if (config === cloudMusic || config === appleMusic || config === qqMusic) {
                                 val playerNavigationStyle =
@@ -917,7 +993,9 @@ object AppBottomNavHooks {
             releaseOriginalBarSpace()
             hideOriginalBar()
             adaptMiniPlayer()
-            if (config !== xiaohongshu && config !== qqMusic && config !== weibo) {
+            if (config !== xiaohongshu && config !== qqMusic && config !== weibo &&
+                config !== xiaomiHealthWatchFaceMarket
+            ) {
                 navigationTabs.indexOfFirst {
                     it.key != TabKey.PUBLISH && isSelectedRecursively(it.view)
                 }.takeIf { it >= 0 }?.let { selectedIndex.intValue = it }
@@ -937,6 +1015,14 @@ object AppBottomNavHooks {
         }
 
         private fun openTab(tab: DetectedTab) {
+            if (config === xiaomiHealthWatchFaceMarket) {
+                openXiaomiHealthWatchFaceMarketTab(tab)
+                return
+            }
+            if (config === xiaomiHealth) {
+                openXiaomiHealthTab(tab)
+                return
+            }
             if (config === xiaohongshu) {
                 openXiaohongshuTab(tab)
                 return
@@ -973,6 +1059,38 @@ object AppBottomNavHooks {
                 module.log(Log.WARN, TAG, "${config.displayName} rejected click for ${tab.displayLabel}")
             }
             currentTab.view.postDelayed(::syncHostState, 120L)
+        }
+
+        private fun openXiaomiHealthWatchFaceMarketTab(tab: DetectedTab) {
+            val currentTab = detectedTabs.firstOrNull { it.key == tab.key } ?: return
+            val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
+            val contentLocation = IntArray(2).also(content::getLocationInWindow)
+            val targetLocation = IntArray(2).also(currentTab.clickTarget::getLocationInWindow)
+            val x = targetLocation[0] - contentLocation[0] + currentTab.clickTarget.width / 2f
+            val y = targetLocation[1] - contentLocation[1] + currentTab.clickTarget.height / 2f
+            if (!dispatchSyntheticTap(content, x, y)) {
+                module.log(Log.WARN, TAG, "${config.displayName} rejected click for ${tab.displayLabel}")
+                return
+            }
+            selectedIndex.intValue = navigationTabs.indexOfFirst { it.key == tab.key }
+                .takeIf { it >= 0 } ?: selectedIndex.intValue
+            currentTab.clickTarget.postDelayed(::syncHostState, 120L)
+        }
+
+        private fun openXiaomiHealthTab(tab: DetectedTab) {
+            val index = detectedTabs.indexOfFirst { it.key == tab.key }
+            if (index < 0) return
+            val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
+            val tabLayout = findResourceView(content, "main_tl_bottom") as? ViewGroup ?: return
+            val tabStrip = tabLayout.getChildAt(0) as? ViewGroup
+            val nativeTab = tabStrip?.getChildAt(index)
+            if (nativeTab?.performClick() != true) {
+                module.log(Log.WARN, TAG, config.displayName + " rejected click for " + tab.displayLabel)
+                return
+            }
+            selectedIndex.intValue = navigationTabs.indexOfFirst { it.key == tab.key }
+                .takeIf { it >= 0 } ?: selectedIndex.intValue
+            nativeTab.postDelayed(::syncHostState, 120L)
         }
 
         private fun openXiaohongshuTab(tab: DetectedTab) {
@@ -1063,6 +1181,9 @@ object AppBottomNavHooks {
             val y = surface.height - navigationBarInset() - 28f * density
             if (!dispatchSyntheticTap(surface, x, y)) {
                 module.log(Log.WARN, TAG, "${config.displayName} rejected click for ${tab.displayLabel}")
+            } else {
+                selectedIndex.intValue = navigationTabs.indexOfFirst { it.key == tab.key }
+                    .takeIf { it >= 0 } ?: selectedIndex.intValue
             }
             surface.postDelayed(::syncHostState, 120L)
         }
@@ -1115,7 +1236,9 @@ object AppBottomNavHooks {
         }
 
         private fun hideOriginalBar() {
-            if (config === xiaomiWallet || config.coordinateTabSurface) return
+            if (config === xiaomiWallet ||
+                (config.coordinateTabSurface && config !== xiaomiHealthWatchFaceMarket)
+            ) return
             originalViews.forEach { view ->
                 if (view.alpha != 0f) view.alpha = 0f
                 if (view is ViewGroup) view.setWillNotDraw(true)
@@ -1890,7 +2013,12 @@ object AppBottomNavHooks {
         }
 
         private fun rememberOriginalNavigationLayers(content: ViewGroup, bar: ViewGroup) {
-            if (config === xiaomiWallet || config.coordinateTabSurface) return
+            if (config === xiaomiWallet) return
+            if (config === xiaomiHealthWatchFaceMarket) {
+                rememberWatchFaceMarketBottomChrome(content, bar)
+                return
+            }
+            if (config.coordinateTabSurface) return
             rememberOriginalView(bar)
             if (config !== xiaohongshu) return
 
@@ -1898,6 +2026,35 @@ object AppBottomNavHooks {
             while (layer != null && layer !== content && layer.childCount == 1) {
                 rememberOriginalView(layer)
                 layer = layer.parent as? ViewGroup
+            }
+        }
+
+        private fun rememberWatchFaceMarketBottomChrome(content: ViewGroup, bar: ViewGroup) {
+            rememberOriginalView(bar)
+            val density = content.resources.displayMetrics.density
+            val contentLocation = IntArray(2).also(content::getLocationInWindow)
+            val contentBottom = contentLocation[1] + content.height
+            var branch: View = bar
+            var parent = bar.parent as? ViewGroup
+            repeat(5) {
+                val group = parent ?: return
+                for (index in 0 until group.childCount) {
+                    val sibling = group.getChildAt(index)
+                    if (sibling === branch || sibling is ViewGroup || !sibling.isShown ||
+                        sibling.width < content.width * 3 / 4 ||
+                        sibling.height !in (48 * density).toInt()..(180 * density).toInt()
+                    ) continue
+                    val location = IntArray(2).also(sibling::getLocationInWindow)
+                    val distanceFromBottom = contentBottom - location[1] - sibling.height
+                    if (distanceFromBottom in 0..(48 * density).toInt() &&
+                        location[1] < IntArray(2).also(bar::getLocationInWindow)[1]
+                    ) {
+                        rememberOriginalView(sibling)
+                    }
+                }
+                if (group === content) return
+                branch = group
+                parent = group.parent as? ViewGroup
             }
         }
 
@@ -2679,6 +2836,15 @@ object AppBottomNavHooks {
         }
 
         private fun canonicalTab(value: String): TabKey? = when {
+            value.contains("我的表盘") || value.contains("my watch face", ignoreCase = true) -> TabKey.FACE_MINE
+            config === xiaomiHealthWatchFaceMarket &&
+                (value.contains("首页") || value.contains("home", ignoreCase = true)) -> TabKey.FACE_HOME
+            config === xiaomiHealthWatchFaceMarket &&
+                (value.contains("分类") || value.contains("category", ignoreCase = true)) -> TabKey.FACE_CATEGORY
+            value.contains("\u5065\u5eb7") || value.contains("health", ignoreCase = true) -> TabKey.HEALTH
+            value.contains("\u8fd0\u52a8") || value.contains("sport", ignoreCase = true) ||
+                value.contains("workout", ignoreCase = true) -> TabKey.WORKOUT
+            value.contains("\u8bbe\u5907") || value.contains("device", ignoreCase = true) -> TabKey.DEVICE
             value.contains("\u9996\u9875") || value.contains("home", ignoreCase = true) -> TabKey.HOME
             value.contains("\u5206\u7c7b") || value.contains("category", ignoreCase = true) -> TabKey.CATEGORY
             value.contains("\u5e02\u96c6") || value.contains("store", ignoreCase = true) -> TabKey.MARKET
@@ -2717,6 +2883,12 @@ object AppBottomNavHooks {
             value.splitToSequence(' ', '\uFF0C', ',').any { it == candidate }
 
         private fun displayLabel(key: TabKey, semanticValue: String = ""): String = when (key) {
+            TabKey.FACE_HOME -> tr("首页", "首页")
+            TabKey.FACE_CATEGORY -> tr("分类", "分类")
+            TabKey.FACE_MINE -> tr("我的表盘", "我的表盘")
+            TabKey.HEALTH -> "\u5065\u5eb7"
+            TabKey.WORKOUT -> "\u8fd0\u52a8"
+            TabKey.DEVICE -> "\u8bbe\u5907"
             TabKey.HOME -> "\u9996\u9875"
             TabKey.CATEGORY -> "\u5206\u7c7b"
             TabKey.MARKET -> "\u5e02\u96c6"
@@ -2838,7 +3010,7 @@ object AppBottomNavHooks {
     }
 
     private enum class TabKey {
-        HOME, CATEGORY, MARKET, PUBLISH, MESSAGES, CONTACTS, FOLLOWING, VIDEO, MUSIC_DISCOVER, STARLIGHT,
+        FACE_HOME, FACE_CATEGORY, FACE_MINE, HEALTH, WORKOUT, DEVICE, HOME, CATEGORY, MARKET, PUBLISH, MESSAGES, CONTACTS, FOLLOWING, VIDEO, MUSIC_DISCOVER, STARLIGHT,
         DISCOVER, DYNAMIC, SERVICE, CART, SAVINGS, SHORT_DRAMA, LOAN, PROFILE, LISTEN_NOW, BROWSE, RADIO,
         LIBRARY, MUSIC_SEARCH, COMMUNITIES, CHAT, INBOX
     }
@@ -2848,6 +3020,7 @@ object AppBottomNavHooks {
         val packageName: String,
         val activityName: String,
         val componentPrefix: String? = null,
+        val intentDataContains: String? = null,
         val barResourceName: String?,
         val anchorResourceName: String?,
         val requiredTabs: Set<TabKey>,

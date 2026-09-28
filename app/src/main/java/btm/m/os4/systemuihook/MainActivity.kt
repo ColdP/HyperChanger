@@ -260,7 +260,7 @@ private enum class PageId {
     ISLAND, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
-    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, OTHER, APP_NAVIGATION, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION,
+    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, OTHER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION,
 }
 
 private data class CustomRearScreenApp(
@@ -1024,8 +1024,13 @@ private fun CategoryHome(
     open: (PageId) -> Unit,
 ) = AppPage(
     "HyperChanger",
-    restartScopes = ScopeApplication.entries.toSet(),
-    restartEnabled = connected,
+    actions = {
+        GlassToolbarIconButton(
+            icon = MiuixIcons.Regular.Refresh,
+            description = tr("重启作用域应用", "重启作用域应用"),
+            onClick = { open(PageId.RESTART_SCOPES) },
+        )
+    },
 ) { padding, scroll ->
     AppList(padding, scroll) {
         item { Entry(tr("\u7cfb\u7edf\u754c\u9762", "\u7cfb\u7edf\u754c\u9762"), enabled = connected) { open(PageId.SHADE) } }
@@ -1713,14 +1718,13 @@ private fun SettingsHome(
 ) = AppPage(tr("settings", tr("设置", "设置"))) { padding, scroll ->
     val context = LocalContext.current
     var predictiveProgress by remember(settings.predictiveBackProgress) { mutableFloatStateOf(settings.predictiveBackProgress.toFloat()) }
-    var showScopeRestartDialog by remember { mutableStateOf(false) }
     AppList(padding, scroll) {
         item { ServiceCard(online) }
         item {
             Group(tr("application_settings", tr("\u5e94\u7528\u8bbe\u7f6e", "\u5e94\u7528\u8bbe\u7f6e"))) {
                 ArrowPreference(
                     title = tr("restart_scope_apps", tr("\u91cd\u542f\u4f5c\u7528\u57df\u5e94\u7528", "\u91cd\u542f\u4f5c\u7528\u57df\u5e94\u7528")),
-                    onClick = { showScopeRestartDialog = true },
+                    onClick = { open(PageId.RESTART_SCOPES) },
                 )
                 val languagePrefs = remember { context.getSharedPreferences("languages", android.content.Context.MODE_PRIVATE) }
                 val selectedLanguage = languagePrefs.getString("selected", "system") ?: "system"
@@ -1808,14 +1812,181 @@ OverlayDropdownPreference(
             }
         }
     }
-    RestartScopeDialog(
-        show = showScopeRestartDialog,
-        onDismiss = { showScopeRestartDialog = false },
-        onRestart = { targets ->
-            SystemUiRestarter.restart(context, targets)
-            showScopeRestartDialog = false
+}
+
+@Composable
+private fun RestartScopesPage(back: () -> Unit) {
+    val context = LocalContext.current
+    var selectedTargets by remember { mutableStateOf(emptySet<ScopeApplication>()) }
+    var showConfirmation by remember { mutableStateOf(false) }
+    val systemUiTargets = listOf(
+        ScopeApplication.SYSTEM_UI,
+        ScopeApplication.WALLPAPER,
+        ScopeApplication.AOD,
+        ScopeApplication.THEME_MANAGER,
+    )
+    val systemFeatureTargets = listOf(
+        ScopeApplication.SETTINGS,
+        ScopeApplication.PERSONAL_ASSISTANT,
+        ScopeApplication.SUBSCREEN_CENTER,
+        ScopeApplication.SYSTEM_UPDATE,
+        ScopeApplication.SCREEN_RECORDER,
+        ScopeApplication.SUPER_XIAOAI_IME,
+        ScopeApplication.GALLERY,
+        ScopeApplication.CAMERA,
+        ScopeApplication.MEDIA_EDITOR,
+    )
+    val otherTargets = listOf(
+        ScopeApplication.APPLE_MUSIC,
+        ScopeApplication.XIAOMI_STORE,
+        ScopeApplication.XIAOMI_WALLET,
+        ScopeApplication.XIAOMI_HEALTH,
+    )
+    val toggleTarget: (ScopeApplication) -> Unit = { target ->
+        selectedTargets = if (target in selectedTargets) selectedTargets - target else selectedTargets + target
+    }
+    AppPage(
+        title = tr("重启作用域应用", "重启作用域应用"),
+        onBack = back,
+        floatingToolbarPosition = ToolbarPosition.BottomCenter,
+        floatingToolbar = {
+            Box(Modifier.fillMaxWidth().padding(end = 20.dp), contentAlignment = Alignment.CenterEnd) {
+                GlassActionButton(
+                    enabled = selectedTargets.isNotEmpty(),
+                    onClick = { showConfirmation = true },
+                    size = 60.dp,
+                    surfaceColor = ComposeColor(0xFF0088FF),
+                ) {
+                    Icon(
+                        MiuixIcons.Regular.Refresh,
+                        tr("重启", "重启"),
+                        Modifier.size(24.dp),
+                        tint = ComposeColor.White,
+                    )
+                }
+            }
+        },
+    ) { padding, scroll ->
+        AppList(padding, scroll, 112) {
+            item {
+                RestartScopeCard(
+                    title = tr("系统界面", "系统界面"),
+                    targets = systemUiTargets,
+                    selectedTargets = selectedTargets,
+                    onToggle = toggleTarget,
+                )
+            }
+            item {
+                RestartScopeCard(
+                    title = tr("系统功能", "系统功能"),
+                    targets = systemFeatureTargets,
+                    selectedTargets = selectedTargets,
+                    onToggle = toggleTarget,
+                )
+            }
+            item {
+                RestartScopeCard(
+                    title = tr("其他", "其他"),
+                    targets = otherTargets,
+                    selectedTargets = selectedTargets,
+                    onToggle = toggleTarget,
+                )
+            }
+        }
+    }
+    RestartScopesConfirmationDialog(
+        show = showConfirmation,
+        selectedTargets = selectedTargets,
+        onDismiss = { showConfirmation = false },
+        onConfirm = {
+            SystemUiRestarter.restart(context, selectedTargets)
+            showConfirmation = false
         },
     )
+}
+
+@Composable
+private fun RestartScopeCard(
+    title: String,
+    targets: List<ScopeApplication>,
+    selectedTargets: Set<ScopeApplication>,
+    onToggle: (ScopeApplication) -> Unit,
+) {
+    SmallTitle(
+        title,
+        insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp),
+    )
+    Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+        targets.forEach { target ->
+            Row(
+                Modifier.fillMaxWidth().clickable { onToggle(target) }
+                    .padding(horizontal = 16.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        tr(target.title, target.title),
+                        style = MiuixTheme.textStyles.body1,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        target.packageName,
+                        style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+                Checkbox(
+                    state = if (target in selectedTargets) ToggleableState.On else ToggleableState.Off,
+                    onClick = { onToggle(target) },
+                    modifier = Modifier.padding(start = 12.dp),
+                    colors = CheckboxDefaults.checkboxColors(
+                        uncheckedForegroundColor = ComposeColor(0x808F8F8F),
+                    ),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RestartScopesConfirmationDialog(
+    show: Boolean,
+    selectedTargets: Set<ScopeApplication>,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    WindowDialog(show = show, onDismissRequest = onDismiss) {
+        Text(
+            tr("确认重启所选作用域应用？", "确认重启所选作用域应用？"),
+            style = MiuixTheme.textStyles.title3,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            tr("重启后相关应用会暂时关闭，并在下次使用时重新启动。", "重启后相关应用会暂时关闭，并在下次使用时重新启动。"),
+            style = MiuixTheme.textStyles.body2,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        Text(
+            selectedTargets.joinToString("、") { tr(it.title, it.title) },
+            style = MiuixTheme.textStyles.body1,
+            modifier = Modifier.padding(top = 12.dp),
+        )
+        Spacer(Modifier.height(16.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            GlassDialogButton(onDismiss, Modifier.weight(1f)) { Text(tr("取消", "取消")) }
+            GlassDialogButton(
+                onClick = onConfirm,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColorsPrimary(),
+                enabled = selectedTargets.isNotEmpty(),
+            ) { Text(tr("重启", "重启")) }
+        }
+    }
 }
 
 @Composable
@@ -2863,6 +3034,7 @@ private fun Detail(
         PageId.REAR_MUSIC_APPS -> RearMusicApps(musicWhitelist, updateMusicWhitelist, back)
         PageId.OTHER -> OtherPage(screenRecorder, updateScreenRecorder, openPage, back)
         PageId.APP_NAVIGATION -> AppNavigationPage(back)
+        PageId.RESTART_SCOPES -> RestartScopesPage(back)
         PageId.SIMULATE_MEDIA_NOTIFICATION -> SimulateMediaNotificationPage(
             musicWhitelist,
             updateMusicWhitelist,

@@ -295,9 +295,11 @@ class HyperSystemUiModule : XposedModule() {
     private var customTileRetryScheduled = false
     private var customRearScreenWidgetRegistrationInstalled = false
 
-    private fun installXiaomiAppNavigation(param: PackageLoadedParam) {
+    private fun installAppNavigation(param: PackageLoadedParam) {
         val packageName = param.packageName
-        if (packageName != "com.xiaomi.shop" && packageName != "com.mipay.wallet") return
+        if (packageName != "com.xiaomi.shop" && packageName != "com.mipay.wallet" &&
+            packageName != "com.mi.health" && packageName != "com.apple.android.music"
+        ) return
         if (!runCatching { android.app.Application.getProcessName() == packageName }.getOrDefault(false)) return
         runCatching {
             val prefs = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
@@ -308,13 +310,17 @@ class HyperSystemUiModule : XposedModule() {
             val color = ScopedSettings.getString(prefs, packageName, ScopedSettings.KEY_COLOR_MODE, AppColorMode.DEFAULT_VALUE)
             val blur = ScopedSettings.getBlurRadius(prefs, packageName, style, 18)
             val advanced = ScopedSettings.getBoolean(prefs, packageName, ScopedSettings.KEY_ADVANCED_MATERIAL, true)
-            if (packageName == "com.xiaomi.shop") {
-                AppBottomNavHooks.installXiaomiStore(this, param.defaultClassLoader, blur, label, style, advanced, color)
-            } else {
-                AppBottomNavHooks.installXiaomiWallet(this, param.defaultClassLoader, blur, label, style, advanced, color, ScopedSettings.getWalletVisibleTabs(prefs))
+            when (packageName) {
+                "com.xiaomi.shop" -> AppBottomNavHooks.installXiaomiStore(this, param.defaultClassLoader, blur, label, style, advanced, color)
+                "com.mipay.wallet" -> AppBottomNavHooks.installXiaomiWallet(this, param.defaultClassLoader, blur, label, style, advanced, color, ScopedSettings.getWalletVisibleTabs(prefs))
+                "com.mi.health" -> {
+                    AppBottomNavHooks.installXiaomiHealth(this, param.defaultClassLoader, blur, label, style, advanced, color)
+                    AppBottomNavHooks.installXiaomiHealthWatchFaceMarket(this, param.defaultClassLoader, blur, label, style, advanced, color)
+                }
+                "com.apple.android.music" -> AppBottomNavHooks.installAppleMusic(this, param.defaultClassLoader, blur, label, style, advanced, color)
             }
-            log(Log.INFO, TAG, "Installed Xiaomi app navigation hooks for $packageName")
-        }.onFailure { error -> log(Log.ERROR, TAG, "Could not install Xiaomi app navigation hooks for $packageName", error) }
+            log(Log.INFO, TAG, "Installed app navigation hooks for $packageName")
+        }.onFailure { error -> log(Log.ERROR, TAG, "Could not install app navigation hooks for $packageName", error) }
     }
 
     private fun invokeNoArgResult(target: Any, name: String): Any? = runCatching {
@@ -562,8 +568,10 @@ class HyperSystemUiModule : XposedModule() {
 
     override fun onPackageLoaded(param: PackageLoadedParam) {
         if (!OsCompatibility.areHooksAllowed()) return
-        if (param.packageName == "com.xiaomi.shop" || param.packageName == "com.mipay.wallet") {
-            installXiaomiAppNavigation(param)
+        if (param.packageName == "com.xiaomi.shop" || param.packageName == "com.mipay.wallet" ||
+            param.packageName == "com.mi.health" || param.packageName == "com.apple.android.music"
+        ) {
+            installAppNavigation(param)
             return
         }
         if (param.packageName == SETTINGS_PACKAGE) {
@@ -7004,7 +7012,13 @@ class HyperSystemUiModule : XposedModule() {
     ) {
         runCatching {
             val backgroundClass = classLoader.loadClass(NOTIFICATION_BACKGROUND_VIEW_CLASS)
-            backgroundClass.declaredMethods
+            // The flashlight focus notification uses the custom-background path.  On some
+            // SystemUI builds setCustomBackground is inherited from NotificationBackgroundView's
+            // parent, so declaredMethods alone misses it and the stock opaque drawable wins.
+            (backgroundClass.methods.asSequence() + backgroundClass.declaredMethods.asSequence())
+                .distinctBy { method ->
+                    method.name to method.parameterTypes.map { it.name }
+                }
                 .filter { method ->
                     method.name == "setCustomBackground" && method.parameterCount == 1 &&
                         (method.parameterTypes[0] == Drawable::class.java ||
@@ -7577,8 +7591,10 @@ class HyperSystemUiModule : XposedModule() {
 
     private fun isNotificationRowBackground(view: View): Boolean {
         if (!view.javaClass.name.contains("NotificationBackgroundView")) return false
-        val idName = runCatching { view.resources.getResourceEntryName(view.id) }.getOrNull()
-        return idName == null || idName == "backgroundNormal" || idName == "backgroundDimmed"
+        // Focus notifications such as the flashlight entry use a third custom background
+        // resource instead of backgroundNormal/backgroundDimmed.  It is still the row's
+        // NotificationBackgroundView and must participate in the unified material pipeline.
+        return true
     }
 
     private fun isMediaNotificationView(view: View): Boolean {
