@@ -6,8 +6,10 @@ import androidx.activity.BackEventCompat
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
@@ -94,19 +96,25 @@ internal fun OobeFlow(
     var agreementsAccepted by remember { mutableStateOf(false) }
     var captchaVerified by remember { mutableStateOf(false) }
     var showCaptcha by remember { mutableStateOf(false) }
+    var navigatingForward by remember { mutableStateOf(true) }
     val captcha = remember { (100000..999999).random().toString() }
     val background = if (MiuixTheme.colorScheme.background.luminance() < .5f) Color.Black else MiuixTheme.colorScheme.surface
     val go: (OobePage) -> Unit = { next ->
         if (next == OobePage.COMPLETE && page != OobePage.COMPLETE) completionVisit++
+        navigatingForward = next.ordinal >= page.ordinal
         page = next
     }
     val canNavigateBack = page != OobePage.WELCOME || legalPage != null
     val navigateBack: () -> Unit = {
+        navigatingForward = false
         if (legalPage != null) legalPage = null else go(OobePage.entries[page.ordinal - 1])
     }
     val renderDestination: @Composable (OobeDestination) -> Unit = { destination ->
         destination.legalPage?.let { legal ->
-            LegalDocumentPage(legal, captcha) { legalPage = null }
+            LegalDocumentPage(legal, captcha) {
+                navigatingForward = false
+                legalPage = null
+            }
         } ?: when (destination.page) {
             OobePage.WELCOME -> WelcomePage { go(OobePage.PREPARATION) }
             OobePage.PREPARATION -> PreparationPage(serviceConnected, { go(OobePage.WELCOME) }, onLanguageChanged) { go(OobePage.AGREEMENTS) }
@@ -116,7 +124,10 @@ internal fun OobeFlow(
                 captcha = captcha,
                 showCaptcha = showCaptcha,
                 back = { go(OobePage.PREPARATION) },
-                open = { legalPage = it },
+                open = {
+                    navigatingForward = true
+                    legalPage = it
+                },
                 requestVerification = { showCaptcha = true },
                 dismissVerification = { showCaptcha = false },
                 verificationConfirmed = { captchaVerified = true; showCaptcha = false },
@@ -168,6 +179,7 @@ internal fun OobeFlow(
     }
     Box(Modifier.fillMaxSize().background(background)) {
         val progress = predictiveProgress.value.coerceIn(0f, 1f)
+        val easedProgress = FastOutSlowInEasing.transform(progress)
         val swipeDirection = if (predictiveSwipeEdge == BackEventCompat.EDGE_LEFT) 1f else -1f
         if (predictiveGestureActive) {
             predictivePreview?.let { preview ->
@@ -177,7 +189,7 @@ internal fun OobeFlow(
                         scaleX = .975f + .025f * progress
                         scaleY = scaleX
                         alpha = progress
-                    },
+                    }.blur((14f * (1f - easedProgress)).dp),
                 ) {
                     renderDestination(preview)
                 }
@@ -236,7 +248,23 @@ internal fun OobeFlow(
                 label = "oobeNavigation",
                 modifier = Modifier.fillMaxSize().background(background),
             ) { destination ->
-                renderDestination(destination)
+                val navigationBlurRadius by transition.animateFloat(
+                    transitionSpec = { tween(520, easing = FastOutSlowInEasing) },
+                    label = "oobeNavigationBlur",
+                ) { state ->
+                    if (navigatingForward) {
+                        if (state == EnterExitState.PostExit) 12f else 0f
+                    } else {
+                        if (state == EnterExitState.PreEnter) 12f else 0f
+                    }
+                }
+                Box(
+                    Modifier.fillMaxSize().blur(
+                        if (predictiveCommit) 0.dp else navigationBlurRadius.dp,
+                    ),
+                ) {
+                    renderDestination(destination)
+                }
             }
         }
     }

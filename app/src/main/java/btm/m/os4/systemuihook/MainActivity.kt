@@ -631,6 +631,17 @@ private fun Root(
             label = "oobeRootTransition",
             modifier = Modifier.fillMaxSize().background(MiuixTheme.colorScheme.surface),
         ) { oobeVisible ->
+        val rootBlurRadius by transition.animateFloat(
+            transitionSpec = { tween(560, easing = FastOutSlowInEasing) },
+            label = "oobeRootBlur",
+        ) { state ->
+            if (showOobe) {
+                if (state == EnterExitState.PostExit) 14f else 0f
+            } else {
+                if (state == EnterExitState.PreEnter) 14f else 0f
+            }
+        }
+        Box(Modifier.fillMaxSize().blur(rootBlurRadius.dp)) {
         if (oobeVisible) {
             OobeFlow(
                 serviceConnected = service != null,
@@ -779,6 +790,7 @@ private fun Root(
         }
         }
         }
+        }
     }
 }
 
@@ -908,6 +920,17 @@ private fun Shell(
     }
     BackHandler(enabled = page != null && !settings.predictiveBackEnabled && !suppressPageBack, onBack = dismissPage)
     val backdrop = rememberLayerBackdrop()
+    val easedBackProgress = FastOutSlowInEasing.transform(backState.progress.coerceIn(0f, 1f))
+    val baseCoveredBlur by animateFloatAsState(
+        targetValue = if (page != null) 12f else 0f,
+        animationSpec = tween(252, easing = FastOutSlowInEasing),
+        label = "basePageCoveredBlur",
+    )
+    val basePageBlur = if (backState.isSwiping && pageStack.size <= 1) {
+        12f * (1f - easedBackProgress)
+    } else {
+        baseCoveredBlur
+    }
 
     // Keep the page immediately below the top page composed. Predictive back moves the
     // top page away before the stack is popped, so the underlying page must already be
@@ -949,7 +972,7 @@ private fun Shell(
     Box(Modifier.fillMaxSize()) {
         // The backdrop must only record page content. Recording the navigation that consumes it
         // creates a RenderNode cycle and crashes HyperOS's RenderThread.
-        Box(Modifier.fillMaxSize().layerBackdrop(backdrop)) {
+        Box(Modifier.fillMaxSize().blur(basePageBlur.dp).layerBackdrop(backdrop)) {
             AnimatedContent(
                 targetState = tab,
                 transitionSpec = {
@@ -960,23 +983,35 @@ private fun Shell(
                 label = "mainTabNavigation",
                 modifier = Modifier.fillMaxSize().background(MiuixTheme.colorScheme.surface),
             ) { currentTab ->
-            when (currentTab) {
-                Tab.CATEGORY -> CategoryHome(
-                    connected = service != null,
-                    open = openRootPage,
-                )
-                Tab.SETTINGS -> SettingsHome(
-                    settings,
-                    service != null,
-                    update,
-                    openRootPage,
-                    onImportModulePreset,
-                    onExportModulePreset,
-                )
+            val tabBlurRadius by transition.animateFloat(
+                transitionSpec = { tween(280, easing = FastOutSlowInEasing) },
+                label = "mainTabBlur",
+            ) { state -> if (state == EnterExitState.Visible) 0f else 12f }
+            Box(Modifier.fillMaxSize().blur(tabBlurRadius.dp)) {
+                when (currentTab) {
+                    Tab.CATEGORY -> CategoryHome(
+                        connected = service != null,
+                        open = openRootPage,
+                    )
+                    Tab.SETTINGS -> SettingsHome(
+                        settings,
+                        service != null,
+                        update,
+                        openRootPage,
+                        onImportModulePreset,
+                        onExportModulePreset,
+                    )
+                }
             }
         }
         }
-        BottomBar(tab, { tab = it }, settings, backdrop, Modifier.align(Alignment.BottomCenter))
+        BottomBar(
+            tab,
+            { tab = it },
+            settings,
+            backdrop,
+            Modifier.align(Alignment.BottomCenter).blur(basePageBlur.dp),
+        )
         AnimatedVisibility(
             visible = page != null,
             enter = slideInHorizontally(
@@ -1001,6 +1036,18 @@ private fun Shell(
                 pageStack.forEachIndexed { index, stackPage ->
                     key(index, stackPage) {
                         val isTop = index == pageStack.lastIndex
+                        val coveredPageBlur by animateFloatAsState(
+                            targetValue = if (isTop) 0f else 12f,
+                            animationSpec = tween(252, easing = FastOutSlowInEasing),
+                            label = "coveredPageBlur:$stackPage",
+                        )
+                        val effectivePageBlur = if (
+                            !isTop && index == pageStack.lastIndex - 1 && backState.isSwiping
+                        ) {
+                            12f * (1f - easedBackProgress)
+                        } else {
+                            coveredPageBlur
+                        }
                         val pageVisibility = remember(stackPage) {
                             MutableTransitionState(false).apply { targetState = true }
                         }
@@ -1021,6 +1068,7 @@ private fun Shell(
                             Box(
                                 Modifier
                                     .fillMaxSize()
+                                    .blur(effectivePageBlur.dp)
                                     .then(if (isTop) Modifier.momentumBackTransform(backState) else Modifier),
                             ) {
                                 renderDetail(stackPage, isTop)
