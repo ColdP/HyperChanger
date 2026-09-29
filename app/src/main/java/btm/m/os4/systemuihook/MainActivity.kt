@@ -40,9 +40,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.tween
@@ -50,6 +52,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
@@ -58,6 +61,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Canvas
@@ -292,6 +296,32 @@ private data class ShadePresetActions(
 
 private data class QrShareRequest(val name: String, val payload: String)
 
+private fun suggestedScopesForHookChange(before: HookSettings, after: HookSettings): Set<ScopeApplication> {
+    if (before == after) return emptySet()
+    val changedNames = runCatching {
+        HookSettings::class.java.declaredFields.mapNotNull { field ->
+            field.isAccessible = true
+            field.name.takeIf { field.get(before) != field.get(after) }
+        }
+    }.getOrDefault(emptyList())
+    val scopes = mutableSetOf(ScopeApplication.SYSTEM_UI)
+    if (changedNames.any { it.contains("lock", true) || it.contains("aod", true) || it.contains("clock", true) }) {
+        scopes += ScopeApplication.AOD
+    }
+    if (changedNames.any { it.contains("wallpaper", true) }) scopes += ScopeApplication.WALLPAPER
+    if (changedNames.any { it.contains("theme", true) }) scopes += ScopeApplication.THEME_MANAGER
+    if (changedNames.any { it.contains("rear", true) || it.contains("subscreen", true) }) {
+        scopes += setOf(
+            ScopeApplication.SUBSCREEN_CENTER,
+            ScopeApplication.THEME_MANAGER,
+            ScopeApplication.PERSONAL_ASSISTANT,
+        )
+    }
+    if (changedNames.any { it.contains("systemUpdate", true) }) scopes += ScopeApplication.SYSTEM_UPDATE
+    if (changedNames.any { it.contains("xiaoai", true) }) scopes += ScopeApplication.SUPER_XIAOAI_IME
+    return scopes
+}
+
 @Composable
 private fun Root(
     hooks: HookSettingsStore,
@@ -320,6 +350,10 @@ private fun Root(
     var musicWhitelist by remember { mutableStateOf(musicStore.apps) }
     val screenRecorderStore = remember(context) { ScreenRecorderSettingsStore(context) }
     var screenRecorder by remember { mutableStateOf(screenRecorderStore.settings) }
+    var pendingRestartTargets by remember { mutableStateOf(emptySet<ScopeApplication>()) }
+    val markRestartTargets: (Set<ScopeApplication>) -> Unit = { targets ->
+        if (targets.isNotEmpty()) pendingRestartTargets = pendingRestartTargets + targets
+    }
     fun importAppearance(slot: String, uri: Uri?) {
         if (uri == null) return
         runCatching {
@@ -346,6 +380,7 @@ private fun Root(
                 }
             }
             appearance = appearances.settings
+            markRestartTargets(setOf(ScopeApplication.SETTINGS))
             Toast.makeText(context, tr("已导入", "已导入"), Toast.LENGTH_SHORT).show()
         }.onFailure { Toast.makeText(context, tr("导入失败", "导入失败"), Toast.LENGTH_SHORT).show() }
     }
@@ -373,6 +408,7 @@ private fun Root(
                 }
             }
             appearance = appearances.settings
+            markRestartTargets(setOf(ScopeApplication.SETTINGS))
             Toast.makeText(context, tr("已清除", "已清除"), Toast.LENGTH_SHORT).show()
         }.onFailure { Toast.makeText(context, tr("清除失败", "清除失败"), Toast.LENGTH_SHORT).show() }
     }
@@ -418,6 +454,7 @@ private fun Root(
         }
         hooks.update(service) { it.copy(rasterWallpaperUris = encodeRasterWallpaperUris(limited.map(Uri::toString))) }
         settings = hooks.settings
+        markRestartTargets(setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.WALLPAPER))
         if (selected.size > 4) Toast.makeText(context, tr("最多选择 4 个素材", "最多选择 4 个素材"), Toast.LENGTH_SHORT).show()
     }
     var pendingJsonExport by remember { mutableStateOf<ShadePreset?>(null) }
@@ -443,8 +480,10 @@ private fun Root(
     fun importPresetPayload(payload: String) {
         runCatching { parseShadePreset(payload) }
             .onSuccess { imported ->
+                val before = hooks.settings
                 hooks.update(service) { it.importShadePreset(payload) }
                 settings = hooks.settings
+                markRestartTargets(suggestedScopesForHookChange(before, settings))
                 imported.name?.let { hooks.saveUserShadePreset(it, settings) }
                 userPresets = hooks.userShadePresets()
                 Toast.makeText(context, tr("预设已导入", "预设已导入"), Toast.LENGTH_SHORT).show()
@@ -477,6 +516,11 @@ private fun Root(
         }
     }
     fun importModulePresetPayload(payload: String) {
+        val previousSettings = hooks.settings
+        val previousCameras = cameras.settings
+        val previousDeviceProfile = deviceProfiles.settings
+        val previousAppearance = appearances.settings
+        val previousMusicWhitelist = musicStore.apps
         runCatching {
             ModulePresetCodec.import(context, service, payload)
             hooks.reload()
@@ -490,6 +534,16 @@ private fun Root(
             appearance = appearances.settings
             musicWhitelist = musicStore.apps
         }.onSuccess {
+            markRestartTargets(suggestedScopesForHookChange(previousSettings, settings))
+            if (previousCameras != cameraSettings) markRestartTargets(
+                setOf(ScopeApplication.CAMERA, ScopeApplication.GALLERY, ScopeApplication.MEDIA_EDITOR),
+            )
+            if (previousDeviceProfile != deviceProfile || previousAppearance != appearance) {
+                markRestartTargets(setOf(ScopeApplication.SETTINGS))
+            }
+            if (previousMusicWhitelist != musicWhitelist) {
+                markRestartTargets(setOf(ScopeApplication.SUBSCREEN_CENTER))
+            }
             Toast.makeText(context, tr("预设已导入", "预设已导入"), Toast.LENGTH_SHORT).show()
         }.onFailure {
             Toast.makeText(context, tr("导入失败", "导入失败"), Toast.LENGTH_SHORT).show()
@@ -589,24 +643,48 @@ private fun Root(
         } else {
         Shell(
             settings, cameraSettings, deviceProfile, appearance, musicWhitelist, screenRecorder, service,
-            update = { transform -> hooks.update(service, transform); settings = hooks.settings },
-            updateCamera = { transform -> cameras.update(service, transform); cameraSettings = cameras.settings },
+            update = { transform ->
+                val before = hooks.settings
+                hooks.update(service, transform)
+                settings = hooks.settings
+                markRestartTargets(suggestedScopesForHookChange(before, settings))
+            },
+            updateCamera = { transform ->
+                val before = cameras.settings
+                cameras.update(service, transform)
+                cameraSettings = cameras.settings
+                if (before != cameraSettings) markRestartTargets(
+                    setOf(ScopeApplication.CAMERA, ScopeApplication.GALLERY, ScopeApplication.MEDIA_EDITOR),
+                )
+            },
             updateDeviceProfile = { transform ->
+                val before = deviceProfiles.settings
                 deviceProfiles.update(service, transform)
                 deviceProfile = deviceProfiles.settings
+                if (before != deviceProfile) markRestartTargets(setOf(ScopeApplication.SETTINGS))
             },
             updateAppearance = { transform ->
+                val before = appearances.settings
                 appearances.update(service, transform)
                 appearance = appearances.settings
+                if (before != appearance) markRestartTargets(setOf(ScopeApplication.SETTINGS))
             },
             updateMusicWhitelist = { next ->
+                val before = musicStore.apps
                 musicStore.update(service, next)
                 musicWhitelist = musicStore.apps
+                if (before != musicWhitelist) markRestartTargets(setOf(ScopeApplication.SUBSCREEN_CENTER))
             },
             updateScreenRecorder = { transform ->
+                val before = screenRecorderStore.settings
                 screenRecorderStore.update(service, transform(screenRecorderStore.settings))
                 screenRecorder = screenRecorderStore.settings
+                if (before != screenRecorder) markRestartTargets(
+                    setOf(ScopeApplication.SCREEN_RECORDER, ScopeApplication.XIAOMI_HEALTH),
+                )
             },
+            suggestedRestartTargets = pendingRestartTargets,
+            onRestartedTargets = { restarted -> pendingRestartTargets = pendingRestartTargets - restarted },
             onImportModulePreset = { importModulePreset.launch(arrayOf("application/json", "text/json", "text/plain")) },
             onExportModulePreset = {
                 pendingModulePresetExport = ModulePresetCodec.export(context)
@@ -736,6 +814,8 @@ private fun Shell(
     updateAppearance: ((SettingsAppearanceSettings) -> SettingsAppearanceSettings) -> Unit,
     updateMusicWhitelist: (Set<String>) -> Unit,
     updateScreenRecorder: (((ScreenRecorderSettings) -> ScreenRecorderSettings) -> Unit),
+    suggestedRestartTargets: Set<ScopeApplication>,
+    onRestartedTargets: (Set<ScopeApplication>) -> Unit,
     onImportModulePreset: () -> Unit,
     onExportModulePreset: () -> Unit,
     presetActions: ShadePresetActions,
@@ -855,9 +935,11 @@ private fun Shell(
                 onPickStyle2DeviceLogo = onPickStyle2DeviceLogo, onClearStyle2DeviceLogo = onClearStyle2DeviceLogo,
                 onPickAppearanceLogo = onPickAppearanceLogo, onClearAppearanceLogo = onClearAppearanceLogo,
                 onColorModeAssetAction = onColorModeAssetAction,
-            onRequestNotificationPermission = onRequestNotificationPermission,
-            screenRecorder = screenRecorder,
-            updateScreenRecorder = updateScreenRecorder,
+                onRequestNotificationPermission = onRequestNotificationPermission,
+                screenRecorder = screenRecorder,
+                updateScreenRecorder = updateScreenRecorder,
+                suggestedRestartTargets = suggestedRestartTargets,
+                onRestartedTargets = onRestartedTargets,
         )
         }
     }
@@ -1857,10 +1939,15 @@ OverlayDropdownPreference(
 }
 
 @Composable
-private fun RestartScopesPage(back: () -> Unit) {
+private fun RestartScopesPage(
+    suggestedTargets: Set<ScopeApplication>,
+    onRestartedTargets: (Set<ScopeApplication>) -> Unit,
+    back: () -> Unit,
+) {
     val context = LocalContext.current
     var selectedTargets by remember { mutableStateOf(emptySet<ScopeApplication>()) }
-    var showConfirmation by remember { mutableStateOf(false) }
+    var confirmationTargets by remember { mutableStateOf<Set<ScopeApplication>?>(null) }
+    var hiddenSuggestionTargets by remember { mutableStateOf(emptySet<ScopeApplication>()) }
     val systemUiTargets = listOf(
         ScopeApplication.SYSTEM_UI,
         ScopeApplication.WALLPAPER,
@@ -1897,7 +1984,7 @@ private fun RestartScopesPage(back: () -> Unit) {
             Box(Modifier.fillMaxWidth().padding(end = 20.dp), contentAlignment = Alignment.CenterEnd) {
                 GlassActionButton(
                     enabled = selectedTargets.isNotEmpty(),
-                    onClick = { showConfirmation = true },
+                    onClick = { confirmationTargets = selectedTargets },
                     size = 60.dp,
                     surfaceColor = ComposeColor(0xFF0088FF),
                 ) {
@@ -1912,6 +1999,35 @@ private fun RestartScopesPage(back: () -> Unit) {
         },
     ) { padding, scroll ->
         AppList(padding, scroll, 112) {
+            if (suggestedTargets.isNotEmpty()) {
+                item {
+                    AnimatedVisibility(
+                        visible = suggestedTargets != hiddenSuggestionTargets,
+                        exit = fadeOut(
+                            animationSpec = tween(320, easing = FastOutSlowInEasing),
+                        ) + slideOutVertically(
+                            animationSpec = tween(380, easing = FastOutSlowInEasing),
+                        ) { height -> -height / 4 } + shrinkVertically(
+                            animationSpec = tween(380, easing = FastOutSlowInEasing),
+                            shrinkTowards = Alignment.Top,
+                        ),
+                    ) {
+                        val exitBlurRadius by transition.animateFloat(
+                            transitionSpec = { tween(300, easing = FastOutSlowInEasing) },
+                            label = "restartSuggestionExitBlur",
+                        ) { state ->
+                            if (state == EnterExitState.Visible) 0f else 12f
+                        }
+                        Box(Modifier.blur(exitBlurRadius.dp)) {
+                            RestartSuggestionCard(
+                                targets = suggestedTargets,
+                                onApply = { selectedTargets = selectedTargets + suggestedTargets },
+                                onDismiss = { hiddenSuggestionTargets = suggestedTargets },
+                            )
+                        }
+                    }
+                }
+            }
             item {
                 RestartScopeCard(
                     title = tr("系统界面", "系统界面"),
@@ -1939,14 +2055,134 @@ private fun RestartScopesPage(back: () -> Unit) {
         }
     }
     RestartScopesConfirmationDialog(
-        show = showConfirmation,
-        selectedTargets = selectedTargets,
-        onDismiss = { showConfirmation = false },
+        show = confirmationTargets != null,
+        selectedTargets = confirmationTargets.orEmpty(),
+        onDismiss = { confirmationTargets = null },
         onConfirm = {
-            SystemUiRestarter.restart(context, selectedTargets)
-            showConfirmation = false
+            val restartedTargets = confirmationTargets.orEmpty()
+            SystemUiRestarter.restart(context, restartedTargets)
+            onRestartedTargets(restartedTargets)
+            selectedTargets = selectedTargets - restartedTargets
+            confirmationTargets = null
         },
     )
+}
+
+@Composable
+private fun RestartSuggestionCard(
+    targets: Set<ScopeApplication>,
+    onApply: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val shape = RoundedCornerShape(22.5.dp)
+    val backdrop = rememberLayerBackdrop()
+    val animationScope = rememberCoroutineScope()
+    val touchHighlight = remember(animationScope) {
+        InteractiveHighlight(
+            animationScope = animationScope,
+            radiusMultiplier = 1.75f,
+            surfaceAlpha = .12f,
+            falloffMultiplier = .30f,
+        ) { size, offset ->
+            Offset(
+                offset.x.coerceIn(0f, size.width),
+                offset.y.coerceIn(0f, size.height),
+            )
+        }
+    }
+    val surface = MiuixTheme.colorScheme.surfaceVariant.copy(alpha = .70f)
+    val glassModifier = if (isRuntimeShaderSupported()) {
+        Modifier.drawBackdrop(
+            backdrop = backdrop,
+            shape = { shape },
+            effects = {
+                vibrancy()
+                blur(4.dp.toPx())
+            },
+            highlight = {
+                Highlight.Default.copy(
+                    width = .75.dp,
+                    blurRadius = .35.dp,
+                    alpha = .78f,
+                )
+            },
+            shadow = null,
+            innerShadow = null,
+            onDrawSurface = { },
+        )
+    } else {
+        Modifier.clip(shape)
+    }
+    val orderedTargets = ScopeApplication.entries.filter { it in targets }
+    val targetNames = orderedTargets.joinToString("、") { tr(it.title, it.title) }
+    Box(
+        modifier = Modifier.fillMaxWidth().then(touchHighlight.gestureModifier),
+    ) {
+        // Keep the sampled layer and the glass consumer as siblings. Reading the page's own
+        // backdrop from inside its recorded content creates a RenderNode cycle on HyperOS.
+        Box(
+            Modifier.matchParentSize()
+                .layerBackdrop(backdrop)
+                .clip(shape)
+                .background(surface),
+        )
+        Box(
+            Modifier.matchParentSize()
+                .then(glassModifier)
+                .border(
+                    width = 1.dp,
+                    color = ComposeColor.Gray.copy(alpha = .20f),
+                    shape = shape,
+                ),
+        )
+        Box(
+            Modifier.matchParentSize()
+                .clip(shape)
+                .then(touchHighlight.modifier),
+        )
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    tr("重启建议", "重启建议"),
+                    style = MiuixTheme.textStyles.body1,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    imageVector = MiuixIcons.Regular.Close,
+                    contentDescription = tr("关闭", "关闭"),
+                    modifier = Modifier.size(18.dp).clip(CircleShape).clickable(onClick = onDismiss),
+                    tint = MiuixTheme.colorScheme.onSurface.copy(alpha = .70f),
+                )
+            }
+            Text(
+                tr("建议重启%s作用域", "建议重启%s作用域").format(targetNames),
+                style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.padding(top = 5.dp),
+            )
+            Row(
+                Modifier.fillMaxWidth().padding(top = 12.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                GlassDialogButton(
+                    onClick = onApply,
+                    modifier = Modifier.widthIn(min = 95.dp).height(43.dp),
+                    colors = ButtonDefaults.buttonColorsPrimary(),
+                ) {
+                    Text(
+                        tr("应用选项", "应用选项"),
+                        style = MiuixTheme.textStyles.body1.copy(
+                            fontSize = MiuixTheme.textStyles.body1.fontSize * .80f,
+                        ),
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -3008,6 +3244,8 @@ private fun Detail(
     onRequestNotificationPermission: () -> Unit,
     screenRecorder: ScreenRecorderSettings,
     updateScreenRecorder: (((ScreenRecorderSettings) -> ScreenRecorderSettings) -> Unit),
+    suggestedRestartTargets: Set<ScopeApplication>,
+    onRestartedTargets: (Set<ScopeApplication>) -> Unit,
     openPage: (PageId) -> Unit,
     back: () -> Unit
 ) {
@@ -3078,7 +3316,11 @@ private fun Detail(
         PageId.REAR_MUSIC_APPS -> RearMusicApps(musicWhitelist, updateMusicWhitelist, back)
         PageId.OTHER -> OtherPage(screenRecorder, updateScreenRecorder, openPage, back)
         PageId.APP_NAVIGATION -> AppNavigationPage(back)
-        PageId.RESTART_SCOPES -> RestartScopesPage(back)
+        PageId.RESTART_SCOPES -> RestartScopesPage(
+            suggestedTargets = suggestedRestartTargets,
+            onRestartedTargets = onRestartedTargets,
+            back = back,
+        )
         PageId.SIMULATE_MEDIA_NOTIFICATION -> SimulateMediaNotificationPage(
             musicWhitelist,
             updateMusicWhitelist,

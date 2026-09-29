@@ -5400,7 +5400,8 @@ class HyperSystemUiModule : XposedModule() {
                         val previousDepth = bigClockWidthCalculationDepth.get() ?: 0
                         bigClockWidthCalculationDepth.set(previousDepth + 1)
                         try {
-                            chain.proceed()
+                            val result = chain.proceed()
+                            restoreRequestedClockWidth(result, chain.getArg(0), chain.getArg(1))
                         } finally {
                             bigClockWidthCalculationDepth.set(previousDepth)
                         }
@@ -5469,6 +5470,47 @@ class HyperSystemUiModule : XposedModule() {
         val left = (center - targetWidth / 2L).coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt()
         val right = (left.toLong() + targetWidth).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
         return Rect(left, original.top, right, original.bottom)
+    }
+
+    /**
+     * Newer SystemUI builds apply a second width clamp inside computeForScreen after creating
+     * the edit rectangle. Restore the requested ClockLayoutInput width in the returned result so
+     * both its drawing rect and the parameters consumed by TimeView agree on the unclamped size.
+     */
+    private fun restoreRequestedClockWidth(result: Any?, contextArg: Any?, input: Any?): Any? {
+        if (result == null || input == null) return result
+        return runCatching {
+            val context = contextArg as? Context ?: return@runCatching result
+            val requestedWidthDp = input.javaClass.getDeclaredField("timeWidth")
+                .apply { isAccessible = true }
+                .getFloat(input)
+            val requestedWidth = (requestedWidthDp * context.resources.displayMetrics.density)
+                .roundToInt()
+                .coerceAtLeast(1)
+            val rectField = result.javaClass.getDeclaredField("rect").apply { isAccessible = true }
+            val original = rectField.get(result) as? Rect ?: return@runCatching result
+            if (requestedWidth <= original.width()) return@runCatching result
+            val center = (original.left.toLong() + original.right.toLong()) / 2L
+            val left = (center - requestedWidth / 2L)
+                .coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong())
+                .toInt()
+            val right = (left.toLong() + requestedWidth)
+                .coerceAtMost(Int.MAX_VALUE.toLong())
+                .toInt()
+            rectField.set(result, Rect(left, original.top, right, original.bottom))
+
+            val rectParams = result.javaClass.getDeclaredField("rectParams")
+                .apply { isAccessible = true }
+                .get(result)
+            rectParams?.javaClass?.getDeclaredField("timeWidth")?.apply {
+                isAccessible = true
+                setInt(rectParams, requestedWidth)
+            }
+            result
+        }.getOrElse { error ->
+            log(Log.WARN, TAG, "Could not restore requested lockscreen clock width", error)
+            result
+        }
     }
 
     /**

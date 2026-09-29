@@ -906,5 +906,9 @@
   "暂无描述": "No description",
   "无法读取压缩文件": "Unable to read the archive",
   "未命名背屏应用": "Unnamed rear-screen app",
-  "导入失败": "Import failed"
+  "导入失败": "Import failed",
+  "重启建议": "Restart recommendation",
+  "建议重启%s作用域": "Recommended scopes to restart: %s",
+  "立即重启": "Restart now",
+  "应用选项": "Apply options"
 }
