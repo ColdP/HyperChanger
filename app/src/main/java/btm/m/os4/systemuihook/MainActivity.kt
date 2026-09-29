@@ -5115,6 +5115,13 @@ private fun Lock(
                         update { it.copy(lockscreenClockColonForceVisible = value) }
                     },
                 )
+                SwitchPreference(
+                    title = tr("\u53bb\u9664\u9501\u5c4f\u5927\u65f6\u949f\u5bbd\u5ea6\u9650\u5236", "\u53bb\u9664\u9501\u5c4f\u5927\u65f6\u949f\u5bbd\u5ea6\u9650\u5236"),
+                    checked = s.lockscreenBigClockWidthLimitRemoved,
+                    onCheckedChange = { value ->
+                        update { it.copy(lockscreenBigClockWidthLimitRemoved = value) }
+                    },
+                )
                 OverlayDropdownPreference(
                     title = tr("\u9690\u85cf\u9501\u5c4f\u8fd0\u8425\u5546", "\u9690\u85cf\u9501\u5c4f\u8fd0\u8425\u5546"),
                     items = listOf(

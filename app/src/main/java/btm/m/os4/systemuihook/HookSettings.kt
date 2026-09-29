@@ -28,6 +28,8 @@ internal const val KEY_MOBILE_NETWORK_TYPE_LEFT_MARGIN = "mobile_network_type_le
 internal const val KEY_MOBILE_NETWORK_TYPE_RIGHT_MARGIN = "mobile_network_type_right_margin"
 internal const val KEY_LOCKSCREEN_CLOCK_COLON_FORCE_VISIBLE =
     "lockscreen_clock_colon_force_visible"
+internal const val KEY_LOCKSCREEN_BIG_CLOCK_WIDTH_LIMIT_REMOVED =
+    "lockscreen_big_clock_width_limit_removed"
 internal const val KEY_LOCKSCREEN_CARRIER_HIDE_MODE = "lockscreen_carrier_hide_mode"
 internal const val KEY_LOCKSCREEN_TEMPLATE_LIMIT_MODE = "lockscreen_template_limit_mode"
 internal const val KEY_LOCKSCREEN_TEMPLATE_LIMIT_CUSTOM = "lockscreen_template_limit_custom"
@@ -200,6 +202,7 @@ data class HookSettings(
     val notificationFodPositionLimitRemoved: Boolean = false,
     val fingerprintHideMode: Int = 0,
     val lockscreenClockColonForceVisible: Boolean = false,
+    val lockscreenBigClockWidthLimitRemoved: Boolean = false,
     val lockscreenCarrierHideMode: Int = LOCKSCREEN_CARRIER_HIDE_NONE,
     val lockscreenTemplateLimitMode: Int = LOCKSCREEN_TEMPLATE_LIMIT_SYSTEM_DEFAULT,
     val lockscreenTemplateLimitCustom: Int = 50,
@@ -1009,6 +1012,10 @@ private fun SharedPreferences.toSettings(): HookSettings {
         KEY_LOCKSCREEN_CLOCK_COLON_FORCE_VISIBLE,
         false,
     ),
+    lockscreenBigClockWidthLimitRemoved = getBoolean(
+        KEY_LOCKSCREEN_BIG_CLOCK_WIDTH_LIMIT_REMOVED,
+        false,
+    ),
     lockscreenCarrierHideMode = getInt(KEY_LOCKSCREEN_CARRIER_HIDE_MODE, LOCKSCREEN_CARRIER_HIDE_NONE)
         .coerceIn(LOCKSCREEN_CARRIER_HIDE_NONE, LOCKSCREEN_CARRIER_HIDE_DATA),
     lockscreenTemplateLimitMode = getInt(
@@ -1570,6 +1577,10 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putBoolean(
             KEY_LOCKSCREEN_CLOCK_COLON_FORCE_VISIBLE,
             value.lockscreenClockColonForceVisible,
+        )
+        .putBoolean(
+            KEY_LOCKSCREEN_BIG_CLOCK_WIDTH_LIMIT_REMOVED,
+            value.lockscreenBigClockWidthLimitRemoved,
         )
         .putInt(
             KEY_LOCKSCREEN_CARRIER_HIDE_MODE,

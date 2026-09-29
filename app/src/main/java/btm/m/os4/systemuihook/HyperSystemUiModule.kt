@@ -721,6 +721,10 @@ class HyperSystemUiModule : XposedModule() {
                         installLockscreenClockColonHook(param.defaultClassLoader, preferences, "systemui")
                         systemUiLockscreenClockColonHookInstalled = true
                     }
+                    if (param.packageName == SYSTEM_UI && !systemUiLockscreenClockWidthHookInstalled) {
+                        installLockscreenBigClockWidthHook(param.defaultClassLoader, preferences, "systemui")
+                        systemUiLockscreenClockWidthHookInstalled = true
+                    }
                     if (!lockscreenCarrierHideHookInstalled) {
                         lockscreenCarrierHideHookInstalled = installLockscreenCarrierHideHook(
                             param.defaultClassLoader,
@@ -821,6 +825,11 @@ class HyperSystemUiModule : XposedModule() {
                     if (!aodLockscreenClockColonHookInstalled) {
                         installLockscreenClockColonHook(param.defaultClassLoader, preferences, "aod")
                         aodLockscreenClockColonHookInstalled = true
+                    }
+                    if (!aodLockscreenClockWidthHookInstalled) {
+                        installLockscreenBigClockWidthHook(param.defaultClassLoader, preferences, "aod")
+                        installLockscreenBigClockEditorWidthHook(param.defaultClassLoader, preferences)
+                        aodLockscreenClockWidthHookInstalled = true
                     }
                     if (!aodLockscreenTemplateLimitHookInstalled) {
                         installAodLockscreenTemplateLimitHook(param.defaultClassLoader, preferences)
@@ -5352,6 +5361,114 @@ class HyperSystemUiModule : XposedModule() {
         }.onFailure { error ->
             log(Log.WARN, TAG, "Could not install notification mini-window bar hide hook", error)
         }
+    }
+
+    /**
+     * AllInOneUtil clamps the requested time width to the edit rectangle in both
+     * SystemUI and the AOD/editor package. Widening only the horizontal clock
+     * envelope keeps the OEM vertical/depth rules intact while allowing an
+     * intentionally oversized clock to survive the final layout calculation.
+     */
+    private fun installLockscreenBigClockWidthHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+        scope: String,
+    ) {
+        runCatching {
+            val allInOneUtilClass = classLoader.loadClass(ALL_IN_ONE_UTIL_CLASS)
+            val computeMethods = allInOneUtilClass.declaredMethods.filter { method ->
+                method.name == "computeForScreen"
+            }
+            check(computeMethods.isNotEmpty()) { "No AllInOneUtil.computeForScreen method found" }
+            computeMethods.forEachIndexed { index, method ->
+                method.isAccessible = true
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("lockscreen-big-clock-compute:$scope:$index")
+                    .intercept { chain ->
+                        if (!preferences.getBoolean(KEY_LOCKSCREEN_BIG_CLOCK_WIDTH_LIMIT_REMOVED, false)) {
+                            return@intercept chain.proceed()
+                        }
+                        // The OEM result is cached by ClockLayoutInput and screen geometry, neither
+                        // of which changes when this module preference is toggled. Drop the stale
+                        // constrained result before recalculating with the widened edit rectangle.
+                        runCatching {
+                            allInOneUtilClass.getDeclaredField("cachedResult")
+                                .apply { isAccessible = true }
+                                .set(null, null)
+                        }
+                        val previousDepth = bigClockWidthCalculationDepth.get() ?: 0
+                        bigClockWidthCalculationDepth.set(previousDepth + 1)
+                        try {
+                            chain.proceed()
+                        } finally {
+                            bigClockWidthCalculationDepth.set(previousDepth)
+                        }
+                    }
+            }
+
+            val method = classLoader.loadClass(CLOCK_DEPTH_AVOID_RULE_UTILS_CLASS)
+                .declaredMethods
+                .single { it.name == "createEditRect\$default" && it.returnType == Rect::class.java }
+                .apply { isAccessible = true }
+            hook(method)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("lockscreen-big-clock-width:$scope")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    val original = result as? Rect ?: return@intercept result
+                    if (!preferences.getBoolean(KEY_LOCKSCREEN_BIG_CLOCK_WIDTH_LIMIT_REMOVED, false) ||
+                        (bigClockWidthCalculationDepth.get() ?: 0) <= 0
+                    ) {
+                        return@intercept original
+                    }
+                    val screenWidth = (chain.getArg(1) as? Int)?.coerceAtLeast(1) ?: original.width()
+                    widenedClockRect(original, screenWidth)
+                }
+            log(Log.INFO, TAG, "Installed lockscreen big-clock width hook for $scope")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install lockscreen big-clock width hook for $scope", error)
+        }
+    }
+
+    /** Lets the lock-screen editor's resize handle move beyond the physical panel width. */
+    private fun installLockscreenBigClockEditorWidthHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
+        runCatching {
+            val method = classLoader.loadClass(ALL_IN_ONE_TEMPLATE_VIEW_CLASS)
+                .getDeclaredMethod("getMaxDragAllowedRect")
+                .apply { isAccessible = true }
+            hook(method)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("lockscreen-big-clock-editor-width")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    val original = result as? Rect ?: return@intercept result
+                    if (!preferences.getBoolean(KEY_LOCKSCREEN_BIG_CLOCK_WIDTH_LIMIT_REMOVED, false)) {
+                        return@intercept original
+                    }
+                    val view = chain.thisObject as? View
+                    val screenWidth = view?.resources?.displayMetrics?.widthPixels?.coerceAtLeast(1)
+                        ?: original.width().coerceAtLeast(1)
+                    widenedClockRect(original, screenWidth)
+                }
+            log(Log.INFO, TAG, "Installed lockscreen big-clock editor width hook")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install lockscreen big-clock editor width hook", error)
+        }
+    }
+
+    private fun widenedClockRect(original: Rect, screenWidth: Int): Rect {
+        val targetWidth = (screenWidth.toLong() * BIG_CLOCK_WIDTH_ENVELOPE_MULTIPLIER)
+            .coerceAtMost(Int.MAX_VALUE.toLong() / 2)
+            .toInt()
+        if (original.width() >= targetWidth) return Rect(original)
+        val center = (original.left.toLong() + original.right.toLong()) / 2L
+        val left = (center - targetWidth / 2L).coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt()
+        val right = (left.toLong() + targetWidth).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        return Rect(left, original.top, right, original.bottom)
     }
 
     /**
@@ -13174,6 +13291,13 @@ class HyperSystemUiModule : XposedModule() {
         private const val THEME_MANAGER_TEMPLATE_API_METHOD = "exv8"
         private const val CLOCK_BEAN_CLASS = "com.miui.clock.module.ClockBean"
         private const val CLOCK_BEAN_IS_COLON_SHOW_METHOD = "isColonShow"
+        private const val CLOCK_DEPTH_AVOID_RULE_UTILS_CLASS =
+            "com.miui.clock.utils.avoid.ClockDepthAvoidRuleUtils"
+        private const val ALL_IN_ONE_UTIL_CLASS = "com.miui.clock.allInOne.AllInOneUtil"
+        private const val ALL_IN_ONE_TEMPLATE_VIEW_CLASS =
+            "com.miui.keyguard.editor.edit.allinone.AllInOneTemplateView"
+        private const val BIG_CLOCK_WIDTH_ENVELOPE_MULTIPLIER = 4
+        private val bigClockWidthCalculationDepth = ThreadLocal.withInitial { 0 }
         private const val CLOCK_EFFECT_OVERLAY = 2
         private const val CLOCK_EFFECT_GLASS = 5
         private const val DYNAMIC_ISLAND_BACKGROUND_CLASS = "miui.systemui.dynamicisland.DynamicIslandBackgroundView"
@@ -13487,6 +13611,7 @@ private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_d
         private var lockscreenClockDateFollowHookInstalled = false
         private var systemUiNativeClockScalerHookInstalled = false
         private var systemUiLockscreenClockColonHookInstalled = false
+        private var systemUiLockscreenClockWidthHookInstalled = false
         private var lockscreenCarrierHideHookInstalled = false
         private var fingerprintIconHookInstalled = false
         private var systemUiDepthHookInstalled = false
@@ -13503,6 +13628,7 @@ private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_d
         private var aodClockMaterialLimitHookInstalled = false
         private var themeManagerClockMaterialLimitHookInstalled = false
         private var aodLockscreenClockColonHookInstalled = false
+        private var aodLockscreenClockWidthHookInstalled = false
         private var aodLockscreenTemplateLimitHookInstalled = false
         private var statusBarVisibilityHookInstalled = false
         private var stackedMobileSignalHookInstalled = false
