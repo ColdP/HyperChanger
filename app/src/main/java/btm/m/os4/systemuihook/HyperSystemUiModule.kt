@@ -12333,11 +12333,11 @@ class HyperSystemUiModule : XposedModule() {
                             preferences.getInt(KEY_LOCKSCREEN_EDITOR_BACKGROUND_MODE, LOCKSCREEN_EDITOR_BACKGROUND_SYSTEM) == LOCKSCREEN_EDITOR_BACKGROUND_LOCKSCREEN
                         ) {
                             val root = activity.findViewById<ViewGroup>(activity.resources.getIdentifier("kg_editor_background", "id", activity.packageName))
-                            root?.postDelayed {
+                            root?.postDelayed({
                                 captureCurrentEditorWallpaper(root)?.let { bitmap ->
                                     applyAodEditorBackground(activity, root, bitmap, preferences)
                                 }
-                            }
+                            }, 0L)
                         }
                         result
                     }

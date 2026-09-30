@@ -143,14 +143,18 @@ class ScreenRecorderModule : XposedModule() {
         }
         val put = ContentValues::class.java.getMethod("put", String::class.java, String::class.java)
         hook(put).setExceptionMode(ExceptionMode.PROTECTIVE).setId("screen-recorder:relative-path").intercept { chain ->
-            if (chain.getArg(0) == "relative_path") {
-                val path = prefs.getString(SCREEN_RECORDER_SAVE_PATH, "").orEmpty().trim()
-                val root = Environment.getExternalStorageDirectory().absolutePath
-                if (path.startsWith(root + File.separator)) {
-                    chain.getArgs()[1] = path.removePrefix(root + File.separator).replace(File.separatorChar, '/')
-                }
-            }
-            chain.proceed()
+            val original = chain.getArg(1) as? String
+            if (chain.getArg(0) != "relative_path" ||
+                original != "DCIM/ScreenRecorder" && original != "Pictures/Screenshots"
+            ) return@intercept chain.proceed()
+
+            val path = prefs.getString(SCREEN_RECORDER_SAVE_PATH, "").orEmpty().trim()
+            val root = Environment.getExternalStorageDirectory().absolutePath + File.separator
+            if (!path.startsWith(root)) return@intercept chain.proceed()
+
+            val relativePath = path.removePrefix(root).trimEnd(File.separatorChar)
+                .replace(File.separatorChar, '/') + "/"
+            chain.proceedWith(chain.thisObject, arrayOf("relative_path", relativePath))
         }
     }
 
