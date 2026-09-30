@@ -8070,10 +8070,13 @@ class HyperSystemUiModule : XposedModule() {
             idName in SLIDER_PART_IDS ||
             idName in setOf("volume_column_slider", "volume_column_slider_bg_glass", "volume_column_slider_bg_blend")
         ) return false
-        return className.contains("NotificationShadeWindowView") ||
-            className.contains("NotificationPanelView") ||
-            className.contains("ControlCenterContainer") ||
-            className.contains("ShadeBackground")
+        // Never replace the background of the shade window or notification panel itself.
+        // Those containers host the notification stack; an opaque wallpaper drawable there
+        // can cover the stack during keyguard/shade transitions. Only dedicated background
+        // surfaces are safe targets.
+        return className.contains("ShadeBackground") ||
+            className.contains("NotificationPanelBackground") ||
+            className.contains("ControlCenterBackground")
     }
 
     private fun isShadePanelBackgroundCall(view: View? = null): Boolean =
@@ -14070,9 +14073,6 @@ class HyperSystemUiModule : XposedModule() {
         private val SLIDER_PART_IDS = setOf("progress_bg")
         private val SHADE_BACKGROUND_IDS = setOf(
             "shade_background",
-            "control_center_container",
-            "notification_panel",
-            "notification_shade_window_view",
             "notification_panel_background",
             "control_center_background",
         )
