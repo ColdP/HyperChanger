@@ -5364,6 +5364,23 @@ private fun Lock(
         ScopeApplication.AOD,
     ),
 ) { p, scroll ->
+    val context = LocalContext.current
+    val pickEditorBackground = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching {
+            val target = lockscreenEditorBackgroundFile(context)
+            val staging = File(target.parentFile, "${target.name}.new")
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                staging.outputStream().use { output -> input.copyTo(output) }
+            } ?: error("open image failed")
+            if (!staging.renameTo(target)) error("replace image failed")
+            val mime = context.contentResolver.getType(uri).orEmpty().ifBlank { "image/*" }
+            update { it.copy(lockscreenEditorBackgroundMime = mime) }
+            Toast.makeText(context, tr("已导入", "已导入"), Toast.LENGTH_SHORT).show()
+        }.onFailure {
+            Toast.makeText(context, tr("导入失败", "导入失败"), Toast.LENGTH_SHORT).show()
+        }
+    }
     var showBottomTextDialog by remember { mutableStateOf(false) }
     var showWidgetDeviceNameDialog by remember { mutableStateOf(false) }
     var showLockscreenTemplateLimitDialog by remember { mutableStateOf(false) }
@@ -5375,6 +5392,64 @@ private fun Lock(
         }
         item {
             Group(tr("\u9501\u5c4f\u642d\u914d", "\u9501\u5c4f\u642d\u914d")) {
+                OverlayDropdownPreference(
+                    title = tr("锁屏编辑页背景自定义", "锁屏编辑页背景自定义"),
+                    items = listOf(
+                        tr("系统默认", "系统默认"),
+                        tr("同步锁屏壁纸", "同步锁屏壁纸"),
+                        tr("自定义", "自定义"),
+                    ),
+                    selectedIndex = s.lockscreenEditorBackgroundMode.coerceIn(
+                        LOCKSCREEN_EDITOR_BACKGROUND_SYSTEM,
+                        LOCKSCREEN_EDITOR_BACKGROUND_CUSTOM,
+                    ),
+                    onSelectedIndexChange = { value ->
+                        update { it.copy(lockscreenEditorBackgroundMode = value) }
+                    },
+                )
+                AnimatedVisibility(
+                    visible = s.lockscreenEditorBackgroundMode != LOCKSCREEN_EDITOR_BACKGROUND_SYSTEM,
+                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                ) {
+                    Column {
+                        ParameterIntSlide(
+                            title = tr("背景图模糊度", "背景图模糊度"),
+                            value = s.lockscreenEditorBackgroundBlur,
+                            range = 0..100,
+                            suffix = "%",
+                            defaultValue = 0,
+                        ) { value -> update { it.copy(lockscreenEditorBackgroundBlur = value) } }
+                        ParameterIntSlide(
+                            title = tr("背景图不透明度", "背景图不透明度"),
+                            value = s.lockscreenEditorBackgroundOpacity,
+                            range = 0..100,
+                            suffix = "%",
+                            defaultValue = 100,
+                        ) { value -> update { it.copy(lockscreenEditorBackgroundOpacity = value) } }
+                    }
+                }
+                AnimatedVisibility(
+                    visible = s.lockscreenEditorBackgroundMode == LOCKSCREEN_EDITOR_BACKGROUND_CUSTOM,
+                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                ) {
+                    Column {
+                        ArrowPreference(
+                            title = tr("选择自定义图片", "选择自定义图片"),
+                            summary = s.lockscreenEditorBackgroundMime.ifBlank { tr("未选择", "未选择") },
+                            onClick = { pickEditorBackground.launch(arrayOf("image/*")) },
+                        )
+                        ArrowPreference(
+                            title = tr("清除自定义图片", "清除自定义图片"),
+                            summary = if (s.lockscreenEditorBackgroundMime.isBlank()) tr("无图片", "无图片") else tr("已选择", "已选择"),
+                            onClick = {
+                                lockscreenEditorBackgroundFile(context).delete()
+                                update { it.copy(lockscreenEditorBackgroundMime = "") }
+                            },
+                        )
+                    }
+                }
                 OverlayDropdownPreference(
                     title = tr("\u81ea\u5b9a\u4e49\u9501\u5c4f\u642d\u914d\u6570\u91cf\u4e0a\u9650", "\u81ea\u5b9a\u4e49\u9501\u5c4f\u642d\u914d\u6570\u91cf\u4e0a\u9650"),
                     items = listOf(
@@ -6399,6 +6474,9 @@ private fun lockscreenWidgetCanAdd(
         else -> false
     }
 }
+
+private fun lockscreenEditorBackgroundFile(context: Context): File =
+    File(context.filesDir, "lockscreen_editor_background.bin")
 
 @Composable
 private fun LockscreenWidgetBackgroundSettings(

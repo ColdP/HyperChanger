@@ -165,7 +165,10 @@ class SettingsAppearanceProvider : ContentProvider() {
     }
 
     private fun appearanceFile(slot: String): File {
-        require(slot == APPEARANCE_SLOT_HOME || slot == APPEARANCE_SLOT_DEVICE || slot == APPEARANCE_SLOT_LOGO || slot == APPEARANCE_SLOT_DEVICE_IMAGE || slot == APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO || slot == APPEARANCE_SLOT_STYLE1_UPDATE_BACKGROUND || slot == APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE || slot == APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO || slot == APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND || slot == LOCKSCREEN_WIDGET_SIGNATURE_SLOT)
+        require(slot == APPEARANCE_SLOT_HOME || slot == APPEARANCE_SLOT_DEVICE || slot == APPEARANCE_SLOT_LOGO || slot == APPEARANCE_SLOT_DEVICE_IMAGE || slot == APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO || slot == APPEARANCE_SLOT_STYLE1_UPDATE_BACKGROUND || slot == APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE || slot == APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO || slot == APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND || slot == LOCKSCREEN_WIDGET_SIGNATURE_SLOT || slot == LOCKSCREEN_EDITOR_BACKGROUND_SLOT)
+        if (slot == LOCKSCREEN_EDITOR_BACKGROUND_SLOT) {
+            return File(requireContext().filesDir, "lockscreen_editor_background.bin")
+        }
         if (slot == LOCKSCREEN_WIDGET_SIGNATURE_SLOT) {
             return File(File(requireContext().filesDir, "lockscreen_widget"), "signature.bin")
         }
@@ -304,6 +307,7 @@ class SettingsAppearanceProvider : ContentProvider() {
         const val COLUMN_STYLE2_BACKGROUND_HORIZONTAL_OFFSET = "style2_background_horizontal_offset"
         const val COLUMN_STYLE2_BACKGROUND_SCALE = "style2_background_scale"
         const val LOCKSCREEN_SCHEDULE_PATH = "lockscreen_schedule"
+        const val LOCKSCREEN_EDITOR_BACKGROUND_SLOT = "lockscreen_editor_background"
         const val COLUMN_SCHEDULE_TITLE = "title"
         const val COLUMN_SCHEDULE_BEGIN = "begin"
         const val COLUMN_SCHEDULE_ALL_DAY = "all_day"

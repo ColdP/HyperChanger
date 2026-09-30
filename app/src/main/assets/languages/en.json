@@ -910,5 +910,11 @@
   "重启建议": "Restart recommendation",
   "建议重启%s作用域": "Recommended scopes to restart: %s",
   "立即重启": "Restart now",
-  "应用选项": "Apply options"
+  "应用选项": "Apply options",
+  "锁屏编辑页背景自定义": "Lock screen editor background",
+  "同步锁屏壁纸": "Sync current lock screen wallpaper",
+  "背景图模糊度": "Background image blur",
+  "背景图不透明度": "Background image opacity",
+  "选择自定义图片": "Choose custom image",
+  "已选择": "Selected"
 }

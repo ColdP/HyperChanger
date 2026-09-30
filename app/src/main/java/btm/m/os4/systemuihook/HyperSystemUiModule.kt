@@ -16,6 +16,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorFilter
@@ -835,6 +836,7 @@ class HyperSystemUiModule : XposedModule() {
                         installAodLockscreenTemplateLimitHook(param.defaultClassLoader, preferences)
                         aodLockscreenTemplateLimitHookInstalled = true
                     }
+                    installAodEditorBackgroundHook(param.defaultClassLoader, preferences)
                 }
                 SUBSCREEN_CENTER -> {
                     installRearScreenAppWidgetUnlockHooks(param.defaultClassLoader)
@@ -12280,6 +12282,120 @@ class HyperSystemUiModule : XposedModule() {
             log(Log.INFO, TAG, "Installed AOD lockscreen template limit hook: $limit")
         }.onFailure { error ->
             log(Log.WARN, TAG, "Could not install AOD lockscreen template limit hook", error)
+        }
+    }
+
+    private fun installAodEditorBackgroundHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
+        runCatching {
+            val activityClass = classLoader.loadClass("com.miui.keyguard.editor.EditorActivity")
+            val init = activityClass.getDeclaredMethod("initContentView").apply { isAccessible = true }
+            hook(init)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("aod-editor-background")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    val activity = chain.thisObject as? android.app.Activity ?: return@intercept result
+                    val mode = preferences.getInt(KEY_LOCKSCREEN_EDITOR_BACKGROUND_MODE, LOCKSCREEN_EDITOR_BACKGROUND_SYSTEM)
+                    if (mode == LOCKSCREEN_EDITOR_BACKGROUND_SYSTEM) return@intercept result
+                    val rootId = activity.resources.getIdentifier("kg_editor_background", "id", activity.packageName)
+                    val root = activity.findViewById<ViewGroup>(rootId) ?: return@intercept result
+                    if (mode == LOCKSCREEN_EDITOR_BACKGROUND_LOCKSCREEN) {
+                        root.postDelayed({
+                            captureCurrentEditorWallpaper(root)?.let { bitmap ->
+                                applyAodEditorBackground(activity, root, bitmap, preferences)
+                            }
+                        }, 700L)
+                        return@intercept result
+                    }
+                    val bitmap = runCatching {
+                            activity.contentResolver.openFileDescriptor(
+                                android.net.Uri.parse("content://btm.m.os4.systemuihook.settingsappearance/${SettingsAppearanceProvider.LOCKSCREEN_EDITOR_BACKGROUND_SLOT}"),
+                                "r",
+                            )?.use { descriptor -> BitmapFactory.decodeFileDescriptor(descriptor.fileDescriptor) }
+                        }.getOrNull() ?: return@intercept result
+                    applyAodEditorBackground(activity, root, bitmap, preferences)
+                    result
+                }
+            val wallpaperClass = classLoader.loadClass("com.miui.keyguard.editor.edit.wallpaper.CombinedWallpaperView")
+            wallpaperClass.declaredMethods.filter { it.name == "switchWallpaperView" }.forEach { method ->
+                method.isAccessible = true
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("aod-editor-background-sync-${method.parameterTypes.size}")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        val wallpaperView = chain.thisObject as? View
+                        val activity = wallpaperView?.context as? android.app.Activity
+                        if (wallpaperView != null && activity != null &&
+                            preferences.getInt(KEY_LOCKSCREEN_EDITOR_BACKGROUND_MODE, LOCKSCREEN_EDITOR_BACKGROUND_SYSTEM) == LOCKSCREEN_EDITOR_BACKGROUND_LOCKSCREEN
+                        ) {
+                            val root = activity.findViewById<ViewGroup>(activity.resources.getIdentifier("kg_editor_background", "id", activity.packageName))
+                            root?.postDelayed {
+                                captureCurrentEditorWallpaper(root)?.let { bitmap ->
+                                    applyAodEditorBackground(activity, root, bitmap, preferences)
+                                }
+                            }
+                        }
+                        result
+                    }
+            }
+        }.onFailure { error ->
+            log(Log.DEBUG, TAG, "AOD editor background hook unavailable", error)
+        }
+    }
+
+    private fun applyAodEditorBackground(
+        activity: android.app.Activity,
+        root: ViewGroup,
+        bitmap: Bitmap,
+        preferences: SharedPreferences,
+    ) {
+                    val backgroundView = (root.findViewWithTag<View>("hyperchanger-editor-background") as? ImageView)
+                        ?: ImageView(activity).also { view ->
+                            view.tag = "hyperchanger-editor-background"
+                            view.scaleType = ImageView.ScaleType.CENTER_CROP
+                            root.addView(view, 0, ViewGroup.LayoutParams(-1, -1))
+                        }
+                    backgroundView.setImageBitmap(bitmap)
+                    backgroundView.alpha = preferences.getInt(KEY_LOCKSCREEN_EDITOR_BACKGROUND_OPACITY, 100).coerceIn(0, 100) / 100f
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                        val radius = preferences.getInt(KEY_LOCKSCREEN_EDITOR_BACKGROUND_BLUR, 0).coerceIn(0, 100) * 0.5f
+                        backgroundView.setRenderEffect(if (radius > 0f) android.graphics.RenderEffect.createBlurEffect(radius, radius, android.graphics.Shader.TileMode.CLAMP) else null)
+                    }
+    }
+
+    private fun captureCurrentEditorWallpaper(root: View): Bitmap? {
+        val wallpaper = findViewByClassName(root, "com.miui.keyguard.editor.edit.wallpaper.CombinedWallpaperView")
+            ?: return null
+        return runCatching {
+            val field = wallpaper.javaClass.getDeclaredField("currentWallpaperView").apply { isAccessible = true }
+            val layer = field.get(wallpaper) ?: return@runCatching null
+            val method = layer.javaClass.methods.firstOrNull { it.name == "getWallpaperBitmap" && it.parameterTypes.size == 1 }
+                ?: return@runCatching null
+            val bitmap = Bitmap.createBitmap(wallpaper.width.coerceAtLeast(1), wallpaper.height.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+            method.invoke(layer, bitmap) as? Bitmap
+        }.getOrNull()
+    }
+
+    private fun findViewByClassName(view: View, name: String): View? {
+        if (view.javaClass.name == name) return view
+        if (view is ViewGroup) {
+            for (index in 0 until view.childCount) {
+                findViewByClassName(view.getChildAt(index), name)?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private fun drawableToBitmap(drawable: Drawable): Bitmap {
+        if (drawable is BitmapDrawable) return drawable.bitmap
+        val width = drawable.intrinsicWidth.coerceAtLeast(1)
+        val height = drawable.intrinsicHeight.coerceAtLeast(1)
+        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
+            Canvas(bitmap).also { canvas -> drawable.setBounds(0, 0, canvas.width, canvas.height); drawable.draw(canvas) }
         }
     }
 

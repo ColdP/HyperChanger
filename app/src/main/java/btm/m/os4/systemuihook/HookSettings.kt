@@ -33,6 +33,14 @@ internal const val KEY_LOCKSCREEN_BIG_CLOCK_WIDTH_LIMIT_REMOVED =
 internal const val KEY_LOCKSCREEN_CARRIER_HIDE_MODE = "lockscreen_carrier_hide_mode"
 internal const val KEY_LOCKSCREEN_TEMPLATE_LIMIT_MODE = "lockscreen_template_limit_mode"
 internal const val KEY_LOCKSCREEN_TEMPLATE_LIMIT_CUSTOM = "lockscreen_template_limit_custom"
+internal const val KEY_LOCKSCREEN_EDITOR_BACKGROUND_MODE = "lockscreen_editor_background_mode"
+internal const val KEY_LOCKSCREEN_EDITOR_BACKGROUND_BLUR = "lockscreen_editor_background_blur"
+internal const val KEY_LOCKSCREEN_EDITOR_BACKGROUND_OPACITY = "lockscreen_editor_background_opacity"
+internal const val KEY_LOCKSCREEN_EDITOR_BACKGROUND_MIME = "lockscreen_editor_background_mime"
+
+internal const val LOCKSCREEN_EDITOR_BACKGROUND_SYSTEM = 0
+internal const val LOCKSCREEN_EDITOR_BACKGROUND_LOCKSCREEN = 1
+internal const val LOCKSCREEN_EDITOR_BACKGROUND_CUSTOM = 2
 
 internal const val LOCKSCREEN_TEMPLATE_LIMIT_SYSTEM_DEFAULT = 0
 internal const val LOCKSCREEN_TEMPLATE_LIMIT_50 = 1
@@ -206,6 +214,10 @@ data class HookSettings(
     val lockscreenCarrierHideMode: Int = LOCKSCREEN_CARRIER_HIDE_NONE,
     val lockscreenTemplateLimitMode: Int = LOCKSCREEN_TEMPLATE_LIMIT_SYSTEM_DEFAULT,
     val lockscreenTemplateLimitCustom: Int = 50,
+    val lockscreenEditorBackgroundMode: Int = LOCKSCREEN_EDITOR_BACKGROUND_SYSTEM,
+    val lockscreenEditorBackgroundBlur: Int = 0,
+    val lockscreenEditorBackgroundOpacity: Int = 100,
+    val lockscreenEditorBackgroundMime: String = "",
     /** Bit mask: charging=1, do-not-disturb=2, notification count=4. */
     val lockscreenBottomTextMask: Int = 0,
     val lockscreenWhiteBarEnabled: Boolean = false,
@@ -1024,6 +1036,11 @@ private fun SharedPreferences.toSettings(): HookSettings {
     ).coerceIn(LOCKSCREEN_TEMPLATE_LIMIT_SYSTEM_DEFAULT, LOCKSCREEN_TEMPLATE_LIMIT_CUSTOM),
     lockscreenTemplateLimitCustom = getInt(KEY_LOCKSCREEN_TEMPLATE_LIMIT_CUSTOM, 50)
         .coerceIn(20, 200),
+    lockscreenEditorBackgroundMode = getInt(KEY_LOCKSCREEN_EDITOR_BACKGROUND_MODE, LOCKSCREEN_EDITOR_BACKGROUND_SYSTEM)
+        .coerceIn(LOCKSCREEN_EDITOR_BACKGROUND_SYSTEM, LOCKSCREEN_EDITOR_BACKGROUND_CUSTOM),
+    lockscreenEditorBackgroundBlur = getInt(KEY_LOCKSCREEN_EDITOR_BACKGROUND_BLUR, 0).coerceIn(0, 100),
+    lockscreenEditorBackgroundOpacity = getInt(KEY_LOCKSCREEN_EDITOR_BACKGROUND_OPACITY, 100).coerceIn(0, 100),
+    lockscreenEditorBackgroundMime = getString(KEY_LOCKSCREEN_EDITOR_BACKGROUND_MIME, "").orEmpty(),
     lockscreenBottomTextMask = if (contains(KEY_LOCKSCREEN_BOTTOM_TEXT_MASK)) {
         getInt(KEY_LOCKSCREEN_BOTTOM_TEXT_MASK, 0).coerceIn(0, 7)
     } else {
@@ -1594,6 +1611,10 @@ private fun SharedPreferences.write(value: HookSettings) {
             ),
         )
         .putInt(KEY_LOCKSCREEN_TEMPLATE_LIMIT_CUSTOM, value.lockscreenTemplateLimitCustom.coerceIn(20, 200))
+        .putInt(KEY_LOCKSCREEN_EDITOR_BACKGROUND_MODE, value.lockscreenEditorBackgroundMode.coerceIn(LOCKSCREEN_EDITOR_BACKGROUND_SYSTEM, LOCKSCREEN_EDITOR_BACKGROUND_CUSTOM))
+        .putInt(KEY_LOCKSCREEN_EDITOR_BACKGROUND_BLUR, value.lockscreenEditorBackgroundBlur.coerceIn(0, 100))
+        .putInt(KEY_LOCKSCREEN_EDITOR_BACKGROUND_OPACITY, value.lockscreenEditorBackgroundOpacity.coerceIn(0, 100))
+        .putString(KEY_LOCKSCREEN_EDITOR_BACKGROUND_MIME, value.lockscreenEditorBackgroundMime.take(128))
         .putInt(KEY_LOCKSCREEN_BOTTOM_TEXT_MASK, value.lockscreenBottomTextMask.coerceIn(0, 7))
         .putBoolean(KEY_HIDE_LOCKSCREEN_CHARGING_TEXT, value.lockscreenBottomTextMask and 1 != 0)
         .putBoolean(KEY_LOCKSCREEN_WHITE_BAR_ENABLED, value.lockscreenWhiteBarEnabled)
