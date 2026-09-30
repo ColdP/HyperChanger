@@ -47,6 +47,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -920,17 +921,22 @@ private fun Shell(
     }
     BackHandler(enabled = page != null && !settings.predictiveBackEnabled && !suppressPageBack, onBack = dismissPage)
     val backdrop = rememberLayerBackdrop()
-    val easedBackProgress = FastOutSlowInEasing.transform(backState.progress.coerceIn(0f, 1f))
+    val maxBackProgress = settings.predictiveBackProgress.coerceIn(10, 100) / 100f
+    val gestureBlur = 12f - 8f *
+        (backState.gestureProgress / maxBackProgress).coerceIn(0f, 1f)
     val baseCoveredBlur by animateFloatAsState(
-        targetValue = if (page != null) 12f else 0f,
-        animationSpec = tween(252, easing = FastOutSlowInEasing),
+        targetValue = when {
+            page == null -> 0f
+            backState.isSwiping && pageStack.size == 1 -> gestureBlur
+            else -> 12f
+        },
+        animationSpec = when {
+            page == null -> tween(300, easing = FastOutSlowInEasing)
+            backState.isSwiping && pageStack.size == 1 -> snap()
+            else -> tween(520, easing = FastOutSlowInEasing)
+        },
         label = "basePageCoveredBlur",
     )
-    val basePageBlur = if (backState.isSwiping && pageStack.size <= 1) {
-        12f * (1f - easedBackProgress)
-    } else {
-        baseCoveredBlur
-    }
 
     // Keep the page immediately below the top page composed. Predictive back moves the
     // top page away before the stack is popped, so the underlying page must already be
@@ -972,7 +978,7 @@ private fun Shell(
     Box(Modifier.fillMaxSize()) {
         // The backdrop must only record page content. Recording the navigation that consumes it
         // creates a RenderNode cycle and crashes HyperOS's RenderThread.
-        Box(Modifier.fillMaxSize().blur(basePageBlur.dp).layerBackdrop(backdrop)) {
+        Box(Modifier.fillMaxSize().blur(baseCoveredBlur.dp).layerBackdrop(backdrop)) {
             AnimatedContent(
                 targetState = tab,
                 transitionSpec = {
@@ -1010,7 +1016,7 @@ private fun Shell(
             { tab = it },
             settings,
             backdrop,
-            Modifier.align(Alignment.BottomCenter).blur(basePageBlur.dp),
+            Modifier.align(Alignment.BottomCenter).blur(baseCoveredBlur.dp),
         )
         AnimatedVisibility(
             visible = page != null,
@@ -1037,17 +1043,18 @@ private fun Shell(
                     key(index, stackPage) {
                         val isTop = index == pageStack.lastIndex
                         val coveredPageBlur by animateFloatAsState(
-                            targetValue = if (isTop) 0f else 12f,
-                            animationSpec = tween(252, easing = FastOutSlowInEasing),
+                            targetValue = when {
+                                isTop -> 0f
+                                index == pageStack.lastIndex - 1 && backState.isSwiping -> gestureBlur
+                                else -> 12f
+                            },
+                            animationSpec = when {
+                                isTop -> tween(300, easing = FastOutSlowInEasing)
+                                index == pageStack.lastIndex - 1 && backState.isSwiping -> snap()
+                                else -> tween(520, easing = FastOutSlowInEasing)
+                            },
                             label = "coveredPageBlur:$stackPage",
                         )
-                        val effectivePageBlur = if (
-                            !isTop && index == pageStack.lastIndex - 1 && backState.isSwiping
-                        ) {
-                            12f * (1f - easedBackProgress)
-                        } else {
-                            coveredPageBlur
-                        }
                         val pageVisibility = remember(stackPage) {
                             MutableTransitionState(false).apply { targetState = true }
                         }
@@ -1068,7 +1075,7 @@ private fun Shell(
                             Box(
                                 Modifier
                                     .fillMaxSize()
-                                    .blur(effectivePageBlur.dp)
+                                    .blur(coveredPageBlur.dp)
                                     .then(if (isTop) Modifier.momentumBackTransform(backState) else Modifier),
                             ) {
                                 renderDetail(stackPage, isTop)

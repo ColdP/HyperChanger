@@ -32,6 +32,8 @@ import kotlin.math.min
 internal class MomentumBackState {
     var progress by mutableFloatStateOf(0f)
         private set
+    var gestureProgress by mutableFloatStateOf(0f)
+        private set
     var isSwiping by mutableStateOf(false)
         private set
     var swipeEdge by mutableIntStateOf(BackEventCompat.EDGE_LEFT)
@@ -39,6 +41,7 @@ internal class MomentumBackState {
 
     internal fun reset() {
         progress = 0f
+        gestureProgress = 0f
         isSwiping = false
     }
 
@@ -48,6 +51,7 @@ internal class MomentumBackState {
 
     internal fun update(event: BackEventCompat, maxProgress: Float) {
         progress = min(event.progress, maxProgress)
+        gestureProgress = progress
         swipeEdge = event.swipeEdge
     }
 

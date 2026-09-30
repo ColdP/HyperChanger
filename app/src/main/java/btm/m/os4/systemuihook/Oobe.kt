@@ -54,6 +54,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.state.ToggleableState
 import btm.m.liquidglass.hook.DampedDragAnimation
@@ -97,11 +99,13 @@ internal fun OobeFlow(
     var captchaVerified by remember { mutableStateOf(false) }
     var showCaptcha by remember { mutableStateOf(false) }
     var navigatingForward by remember { mutableStateOf(true) }
+    var predictiveHandoffDestination by remember { mutableStateOf<OobeDestination?>(null) }
     val captcha = remember { (100000..999999).random().toString() }
     val background = if (MiuixTheme.colorScheme.background.luminance() < .5f) Color.Black else MiuixTheme.colorScheme.surface
     val go: (OobePage) -> Unit = { next ->
         if (next == OobePage.COMPLETE && page != OobePage.COMPLETE) completionVisit++
         navigatingForward = next.ordinal >= page.ordinal
+        predictiveHandoffDestination = null
         page = next
     }
     val canNavigateBack = page != OobePage.WELCOME || legalPage != null
@@ -113,6 +117,7 @@ internal fun OobeFlow(
         destination.legalPage?.let { legal ->
             LegalDocumentPage(legal, captcha) {
                 navigatingForward = false
+                predictiveHandoffDestination = null
                 legalPage = null
             }
         } ?: when (destination.page) {
@@ -126,6 +131,7 @@ internal fun OobeFlow(
                 back = { go(OobePage.PREPARATION) },
                 open = {
                     navigatingForward = true
+                    predictiveHandoffDestination = null
                     legalPage = it
                 },
                 requestVerification = { showCaptcha = true },
@@ -139,31 +145,48 @@ internal fun OobeFlow(
     }
     val currentDestination = OobeDestination(page, legalPage)
     val predictiveProgress = remember { Animatable(0f) }
+    val predictivePreviewBlur = remember { Animatable(14f) }
     var predictivePreview by remember { mutableStateOf<OobeDestination?>(null) }
     var predictiveSwipeEdge by remember { mutableIntStateOf(BackEventCompat.EDGE_LEFT) }
     var predictiveGestureActive by remember { mutableStateOf(false) }
-    var predictiveCommit by remember { mutableStateOf(false) }
 
     PredictiveBackHandler(enabled = canNavigateBack) { events ->
+        predictivePreviewBlur.snapTo(14f)
         predictivePreview = if (legalPage != null) {
             OobeDestination(page)
         } else {
             OobeDestination(OobePage.entries[page.ordinal - 1])
         }
         predictiveGestureActive = true
-        var committed = false
         try {
             events.collect { event ->
                 predictiveSwipeEdge = event.swipeEdge
                 predictiveProgress.snapTo(
                     event.progress.coerceAtMost(OOBE_PREDICTIVE_BACK_MAX_PROGRESS),
                 )
+                predictivePreviewBlur.snapTo(
+                    14f - 10f *
+                        (predictiveProgress.value / OOBE_PREDICTIVE_BACK_MAX_PROGRESS).coerceIn(0f, 1f),
+                )
             }
             val completionDuration = ((1f - predictiveProgress.value) * 240f).toInt().coerceAtLeast(1)
-            predictiveProgress.animateTo(1f, tween(completionDuration, easing = FastOutSlowInEasing))
-            predictiveCommit = true
-            committed = true
+            coroutineScope {
+                launch {
+                    predictiveProgress.animateTo(
+                        1f,
+                        tween(completionDuration, easing = FastOutSlowInEasing),
+                    )
+                }
+                launch {
+                    predictivePreviewBlur.animateTo(
+                        0f,
+                        tween(300, easing = FastOutSlowInEasing),
+                    )
+                }
+            }
+            val handoffDestination = predictivePreview
             navigateBack()
+            predictiveHandoffDestination = handoffDestination
             withFrameNanos { }
         } catch (_: CancellationException) {
             predictiveProgress.animateTo(0f, tween(180, easing = FastOutSlowInEasing))
@@ -171,15 +194,11 @@ internal fun OobeFlow(
             predictiveGestureActive = false
             predictivePreview = null
             predictiveProgress.snapTo(0f)
-            if (committed) {
-                withFrameNanos { }
-                predictiveCommit = false
-            }
+            predictivePreviewBlur.snapTo(14f)
         }
     }
     Box(Modifier.fillMaxSize().background(background)) {
         val progress = predictiveProgress.value.coerceIn(0f, 1f)
-        val easedProgress = FastOutSlowInEasing.transform(progress)
         val swipeDirection = if (predictiveSwipeEdge == BackEventCompat.EDGE_LEFT) 1f else -1f
         if (predictiveGestureActive) {
             predictivePreview?.let { preview ->
@@ -189,7 +208,7 @@ internal fun OobeFlow(
                         scaleX = .975f + .025f * progress
                         scaleY = scaleX
                         alpha = progress
-                    }.blur((14f * (1f - easedProgress)).dp),
+                    }.blur(predictivePreviewBlur.value.dp),
                 ) {
                     renderDestination(preview)
                 }
@@ -206,7 +225,7 @@ internal fun OobeFlow(
             AnimatedContent(
                 targetState = currentDestination,
                 transitionSpec = {
-                    if (predictiveCommit) {
+                    if (predictiveHandoffDestination == targetState) {
                         EnterTransition.None togetherWith ExitTransition.None
                     } else {
                         val forward = when {
@@ -260,7 +279,7 @@ internal fun OobeFlow(
                 }
                 Box(
                     Modifier.fillMaxSize().blur(
-                        if (predictiveCommit) 0.dp else navigationBlurRadius.dp,
+                        if (destination == predictiveHandoffDestination) 0.dp else navigationBlurRadius.dp,
                     ),
                 ) {
                     renderDestination(destination)
