@@ -4091,7 +4091,11 @@ private fun Shade(
     presetActions: ShadePresetActions,
     openPage: (PageId) -> Unit,
     back: () -> Unit,
-) = AppPage(tr("\u7cfb\u7edf\u754c\u9762", "\u7cfb\u7edf\u754c\u9762"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI)) { p, scroll ->
+) = AppPage(tr("\u7cfb\u7edf\u754c\u9762", "\u7cfb\u7edf\u754c\u9762"), back, restartScopes = setOf(
+    ScopeApplication.SYSTEM_UI,
+    ScopeApplication.AOD,
+    ScopeApplication.THEME_MANAGER,
+)) { p, scroll ->
     var showSavePresetDialog by remember { mutableStateOf(false) }
     AppList(p, scroll, 28) {
         item {
@@ -5365,6 +5369,7 @@ private fun Lock(
     ),
 ) { p, scroll ->
     val context = LocalContext.current
+    var showSaveWallpaperDialog by remember { mutableStateOf(false) }
     val pickEditorBackground = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         runCatching {
@@ -5392,6 +5397,10 @@ private fun Lock(
         }
         item {
             Group(tr("\u9501\u5c4f\u642d\u914d", "\u9501\u5c4f\u642d\u914d")) {
+                ArrowPreference(
+                    title = tr("保存当前壁纸", "保存当前壁纸"),
+                    onClick = { showSaveWallpaperDialog = true },
+                )
                 OverlayDropdownPreference(
                     title = tr("锁屏编辑页背景自定义", "锁屏编辑页背景自定义"),
                     items = listOf(
@@ -5976,6 +5985,10 @@ OverlayDropdownPreference(
             showLockscreenTemplateLimitDialog = false
         },
     )
+    SaveCurrentWallpaperDialog(
+        show = showSaveWallpaperDialog,
+        onDismiss = { showSaveWallpaperDialog = false },
+    )
     }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -6477,6 +6490,122 @@ private fun lockscreenWidgetCanAdd(
 
 private fun lockscreenEditorBackgroundFile(context: Context): File =
     File(context.filesDir, "lockscreen_editor_background.bin")
+
+@Composable
+private fun SaveCurrentWallpaperDialog(show: Boolean, onDismiss: () -> Unit) {
+    if (!show) return
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val preferences = remember(context) { context.getSharedPreferences("wallpaper_export", Context.MODE_PRIVATE) }
+    var directory by remember {
+        mutableStateOf(preferences.getString("tree_uri", null)?.let(Uri::parse)?.takeIf { saved ->
+            context.contentResolver.persistedUriPermissions.any { it.uri == saved && it.isWritePermission }
+        })
+    }
+    var saveLock by remember { mutableStateOf(true) }
+    var saveHome by remember { mutableStateOf(true) }
+    var saving by remember { mutableStateOf(false) }
+    val chooseDirectory = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            val granted = runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            }.isSuccess
+            if (granted) {
+                directory = uri
+                preferences.edit().putString("tree_uri", uri.toString()).apply()
+            } else {
+                Toast.makeText(context, tr("壁纸保存失败", "壁纸保存失败"), Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    WindowDialog(show = true, onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(tr("保存当前壁纸", "保存当前壁纸"), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(state = if (saveLock) ToggleableState.On else ToggleableState.Off, onClick = { saveLock = !saveLock })
+                Text(tr("锁屏壁纸", "锁屏壁纸"), modifier = Modifier.padding(start = 8.dp).clickable { saveLock = !saveLock })
+            }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(state = if (saveHome) ToggleableState.On else ToggleableState.Off, onClick = { saveHome = !saveHome })
+                Text(tr("桌面壁纸", "桌面壁纸"), modifier = Modifier.padding(start = 8.dp).clickable { saveHome = !saveHome })
+            }
+            GlassDialogButton(onClick = { chooseDirectory.launch(directory) }, modifier = Modifier.fillMaxWidth()) {
+                Text(tr("选择输出目录", "选择输出目录"))
+            }
+            Text(
+                directory?.let(::wallpaperExportDirectoryLabel) ?: tr("未选择目录", "未选择目录"),
+                style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GlassDialogButton(onDismiss, Modifier.weight(1f)) { Text(tr("取消", "取消")) }
+                GlassDialogButton(
+                    onClick = {
+                        val tree = directory ?: return@GlassDialogButton
+                        saving = true
+                        scope.launch {
+                            val success = withContext(Dispatchers.IO) {
+                                runCatching { exportCurrentWallpapers(context, tree, saveLock, saveHome) }
+                                    .onFailure { error -> Log.e("HyperChanger", "Wallpaper export failed", error) }
+                                    .isSuccess
+                            }
+                            saving = false
+                            Toast.makeText(context, if (success) tr("壁纸保存成功", "壁纸保存成功") else tr("壁纸保存失败", "壁纸保存失败"), Toast.LENGTH_SHORT).show()
+                            if (success) onDismiss()
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = directory != null && (saveLock || saveHome) && !saving,
+                    colors = ButtonDefaults.buttonColorsPrimary(),
+                ) { Text(tr("保存", "保存")) }
+            }
+        }
+    }
+}
+
+private fun wallpaperExportDirectoryLabel(tree: Uri): String {
+    val id = android.provider.DocumentsContract.getTreeDocumentId(tree)
+    val volume = id.substringBefore(':')
+    val path = id.substringAfter(':', "").trimStart('/')
+    return when (volume) {
+        "primary" -> "/sdcard" + if (path.isEmpty()) "" else "/$path"
+        else -> "/storage/$volume" + if (path.isEmpty()) "" else "/$path"
+    }
+}
+
+private fun exportCurrentWallpapers(context: Context, tree: Uri, lock: Boolean, home: Boolean) {
+    val wallpaperManager = WallpaperManager.getInstance(context)
+    val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+    fun save(which: Int, label: String) {
+        val bitmap = runCatching {
+            wallpaperManager.getWallpaperFile(which)?.use { descriptor ->
+                BitmapFactory.decodeFileDescriptor(descriptor.fileDescriptor)
+            }
+        }.getOrNull() ?: run {
+            val drawable = wallpaperManager.getDrawable(which) ?: error("wallpaper unavailable")
+            if (drawable is BitmapDrawable) drawable.bitmap else {
+                Bitmap.createBitmap(drawable.intrinsicWidth.coerceAtLeast(1), drawable.intrinsicHeight.coerceAtLeast(1), Bitmap.Config.ARGB_8888).also { result ->
+                    val canvas = Canvas(result)
+                    drawable.setBounds(0, 0, canvas.width, canvas.height)
+                    drawable.draw(canvas)
+                }
+            }
+        }
+        val document = android.provider.DocumentsContract.createDocument(
+            context.contentResolver,
+            android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, android.provider.DocumentsContract.getTreeDocumentId(tree)),
+            "image/png",
+            "HyperChanger-$label-$timestamp.png",
+        ) ?: error("create document failed")
+        context.contentResolver.openOutputStream(document)?.use { stream ->
+            check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream))
+        } ?: error("open output failed")
+    }
+    if (lock) save(WallpaperManager.FLAG_LOCK, "lockscreen")
+    if (home) save(WallpaperManager.FLAG_SYSTEM, "home")
+}
 
 @Composable
 private fun LockscreenWidgetBackgroundSettings(

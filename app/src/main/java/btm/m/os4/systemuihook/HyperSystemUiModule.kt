@@ -805,6 +805,7 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     if (param.packageName == SYSTEM_UI && !systemUiClockMaterialLimitHookInstalled) {
                         installClockMaterialLimitHook(param.defaultClassLoader, preferences)
+                        installClockMaterialCapabilityHook(param.defaultClassLoader, preferences)
                         systemUiClockMaterialLimitHookInstalled = true
                     }
                     if (param.packageName == SYSTEM_UI_PLUGIN && !softGlassThemePluginHookInstalled) {
@@ -821,6 +822,8 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     if (!aodClockMaterialLimitHookInstalled) {
                         installClockMaterialLimitHook(param.defaultClassLoader, preferences)
+                        installClockMaterialCapabilityHook(param.defaultClassLoader, preferences)
+                        installAodClockMaterialLimitHook(param.defaultClassLoader, preferences)
                         aodClockMaterialLimitHookInstalled = true
                     }
                     if (!aodLockscreenClockColonHookInstalled) {
@@ -860,6 +863,12 @@ class HyperSystemUiModule : XposedModule() {
                     installThemeManagerRearScreenFeatureGuards(param.defaultClassLoader)
                     if (!themeManagerClockMaterialLimitHookInstalled) {
                         installThemeManagerClockMaterialLimitHook(param.defaultClassLoader, preferences)
+                        installClockMaterialCapabilityHook(
+                            param.defaultClassLoader,
+                            preferences,
+                            setOf("vyq", "lrht", "uv6"),
+                        )
+                        installThemeManagerEditorClockMaterialHook(param.defaultClassLoader, preferences)
                         themeManagerClockMaterialLimitHookInstalled = true
                     }
                     installAodLockscreenTemplateLimitHook(param.defaultClassLoader, preferences)
@@ -5472,6 +5481,178 @@ class HyperSystemUiModule : XposedModule() {
         val left = (center - targetWidth / 2L).coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt()
         val right = (left.toLong() + targetWidth).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
         return Rect(left, original.top, right, original.bottom)
+    }
+
+    private fun installAodClockMaterialLimitHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
+        runCatching {
+            val companionClass = classLoader.loadClass("com.miui.keyguard.editor.viewmodel.EditFragmentViewModel\$Companion")
+            val method = companionClass.declaredMethods.firstOrNull {
+                it.name == "computeSupportedClockEffect" && it.parameterCount == 2 &&
+                    it.parameterTypes[1] == Int::class.javaPrimitiveType
+            } ?: error("computeSupportedClockEffect was not found")
+            method.isAccessible = true
+            hook(method)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("aod-editor-clock-material-limit")
+                .intercept { chain ->
+                    val effect = chain.getArg(1) as? Int
+                    if (preferences.getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false) &&
+                        (effect == CLOCK_EFFECT_GLASS || effect == CLOCK_EFFECT_OVERLAY)
+                    ) effect else chain.proceed()
+                }
+
+            val disableGlass = companionClass.declaredMethods.firstOrNull {
+                it.name == "shouldDisableGlassEffect" && it.parameterCount == 2
+            }
+            disableGlass?.let { method ->
+                method.isAccessible = true
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("aod-editor-glass-selection-limit")
+                    .intercept { chain ->
+                        if (preferences.getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false) &&
+                            chain.getArg(0) == CLOCK_EFFECT_GLASS
+                        ) false else chain.proceed()
+                    }
+            }
+
+            val filterClass = classLoader.loadClass("com.miui.keyguard.editor.data.preset.FontFilterKt")
+            val filterMethod = filterClass.getDeclaredMethod("getFILTER_SUPPORT_INFO").apply { isAccessible = true }
+            @Suppress("UNCHECKED_CAST")
+            val support = filterMethod.invoke(null) as? MutableMap<Int, Boolean>
+            val originalGlass = support?.get(CLOCK_EFFECT_GLASS)
+            val originalOverlay = support?.get(CLOCK_EFFECT_OVERLAY)
+            fun syncSupport() {
+                if (preferences.getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false)) {
+                    support?.set(CLOCK_EFFECT_GLASS, true)
+                    support?.set(CLOCK_EFFECT_OVERLAY, true)
+                } else {
+                    originalGlass?.let { support?.set(CLOCK_EFFECT_GLASS, it) }
+                    originalOverlay?.let { support?.set(CLOCK_EFFECT_OVERLAY, it) }
+                }
+            }
+            syncSupport()
+            hook(filterMethod)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("aod-editor-clock-filter-support")
+                .intercept { chain ->
+                    syncSupport()
+                    chain.proceed()
+                }
+
+            val clockViewClass = classLoader.loadClass("com.miui.keyguard.editor.edit.base.BaseClockView")
+            clockViewClass.declaredMethods.firstOrNull {
+                it.name == "effectDisable" && it.parameterCount == 1
+            }?.let { method ->
+                method.isAccessible = true
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("aod-editor-clock-effect-selection")
+                    .intercept { chain ->
+                        val filter = chain.getArg(0)
+                        val effect = runCatching { filter?.javaClass?.getMethod("getFilterId")?.invoke(filter) as? Int }.getOrNull()
+                        if (preferences.getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false) &&
+                            (effect == CLOCK_EFFECT_GLASS || effect == CLOCK_EFFECT_OVERLAY)
+                        ) false else chain.proceed()
+                    }
+            }
+
+            val apiClass = classLoader.loadClass("com.miui.keyguard.editor.data.template.TemplateApiImpl")
+            val depthMethod = apiClass.declaredMethods.firstOrNull {
+                it.name == "processDepthVideo" && it.parameterCount == 3
+            } ?: error("processDepthVideo was not found")
+            depthMethod.isAccessible = true
+            hook(depthMethod)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("aod-depth-video-clock-material-limit")
+                .intercept { chain ->
+                    val config = chain.getArg(2)
+                    val clock = runCatching {
+                        config?.javaClass?.getMethod("getLockscreenInfo")?.invoke(config)
+                            ?.let { it.javaClass.getMethod("getClockInfo").invoke(it) }
+                    }.getOrNull()
+                    val effect = runCatching { clock?.javaClass?.getMethod("getClockEffect")?.invoke(clock) as? Int }.getOrNull()
+                    val result = chain.proceed()
+                    if (preferences.getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false) &&
+                        (effect == CLOCK_EFFECT_GLASS || effect == CLOCK_EFFECT_OVERLAY)
+                    ) {
+                        runCatching {
+                            clock?.javaClass?.getMethod("setClockEffect", Int::class.javaPrimitiveType)?.invoke(clock, effect)
+                        }.onFailure { error ->
+                            log(Log.WARN, TAG, "Could not restore AOD depth-video clock material", error)
+                        }
+                    }
+                    result
+                }
+            log(Log.INFO, TAG, "Installed AOD editor clock material-limit bypass")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install AOD editor clock material-limit bypass", error)
+        }
+    }
+
+    private fun installClockMaterialCapabilityHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+        aliases: Set<String> = emptySet(),
+    ) {
+        runCatching {
+            val config = classLoader.loadClass("com.miui.clock.utils.DeviceConfig")
+            config.declaredMethods.filter {
+                it.parameterCount == 0 && it.returnType == Boolean::class.javaPrimitiveType &&
+                    it.name in setOf("supportGlassEffect", "supportDiffEffect", "supportDiffEffectAndGradientEffect") + aliases
+            }.forEach { method ->
+                method.isAccessible = true
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("clock-material-capability-${method.name}")
+                    .intercept { chain ->
+                        if (preferences.getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false)) true else chain.proceed()
+                    }
+            }
+        }.onFailure { error ->
+            log(Log.DEBUG, TAG, "Clock material capability hook unavailable", error)
+        }
+    }
+
+    private fun installThemeManagerEditorClockMaterialHook(classLoader: ClassLoader, preferences: SharedPreferences) {
+        runCatching {
+            val companion = classLoader.loadClass("com.miui.keyguard.editor.viewmodel.EditFragmentViewModel\$Companion")
+            val configClass = classLoader.loadClass("com.miui.keyguard.editor.data.bean.CommonConfig")
+            val method = companion.getDeclaredMethod("k", configClass, Int::class.javaPrimitiveType)
+            method.isAccessible = true
+            hook(method)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("theme-manager-editor-clock-material-limit")
+                .intercept { chain ->
+                    val effect = chain.getArg(1) as? Int
+                    if (preferences.getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false) &&
+                        (effect == CLOCK_EFFECT_GLASS || effect == CLOCK_EFFECT_OVERLAY)
+                    ) effect else chain.proceed()
+                }
+            companion.getDeclaredMethod("f7l8", Int::class.javaPrimitiveType, configClass).also { disable ->
+                disable.isAccessible = true
+                hook(disable)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("theme-manager-editor-glass-selection-limit")
+                    .intercept { chain ->
+                        if (preferences.getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false) &&
+                            chain.getArg(0) == CLOCK_EFFECT_GLASS
+                        ) false else chain.proceed()
+                    }
+            }
+            val filters = classLoader.loadClass("com.miui.keyguard.editor.data.preset.FontFilterKt")
+            @Suppress("UNCHECKED_CAST")
+            val support = filters.getDeclaredField("fti").apply { isAccessible = true }.get(null) as? MutableMap<Int, Boolean>
+            if (preferences.getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false)) {
+                support?.set(CLOCK_EFFECT_GLASS, true)
+                support?.set(CLOCK_EFFECT_OVERLAY, true)
+            }
+        }.onFailure { error ->
+            log(Log.DEBUG, TAG, "ThemeManager editor clock material hook unavailable", error)
+        }
     }
 
     /**

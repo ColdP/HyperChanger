@@ -916,5 +916,12 @@
   "背景图模糊度": "Background image blur",
   "背景图不透明度": "Background image opacity",
   "选择自定义图片": "Choose custom image",
-  "已选择": "Selected"
+  "已选择": "Selected",
+  "保存当前壁纸": "Save current wallpaper",
+  "锁屏壁纸": "Lock screen wallpaper",
+  "桌面壁纸": "Home wallpaper",
+  "选择输出目录": "Choose output folder",
+  "未选择目录": "No folder selected",
+  "壁纸保存成功": "Wallpaper saved",
+  "壁纸保存失败": "Could not save wallpaper"
 }
