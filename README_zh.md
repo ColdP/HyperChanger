@@ -28,7 +28,7 @@
 
 ## 项目简介
 
-HyperChanger 是一个面向部分小米 HyperOS 4 Beta 系统的 LSPosed 模块。它在同一个配套应用中提供系统界面、通知与控制中心、锁屏及相机相关的自定义选项。模块需要设备已获取 Root 权限；它不会替换系统界面或小米相机应用。
+HyperChanger 是一个面向部分小米 HyperOS 4 Beta 系统的 LSPosed 模块。配套应用可配置系统界面、通知、锁屏、系统设置、背屏、相机及其他受支持的小米应用。模块需要 Root 权限，通过 Hook 修改现有应用，而不替换它们。
 
 本项目处于 Beta 阶段。HyperOS 的框架类与资源会因设备、地区和系统构建版本而不同，因此某项功能在一台设备上可用，并不代表在另一台设备上具有相同行为。
 
@@ -50,11 +50,20 @@ HyperChanger 是一个实验性的社区开发 LSPosed 模块，与小米无任�
 - 自定义兼容的灵动岛与焦点通知行为。
 - 在目标系统支持时调整状态栏展示效果。
 - 控制部分锁屏效果，包括充电文本和快捷方式外观。
+- 自定义锁屏编辑页背景、时钟、小组件、迷你音乐播放器、音乐锁屏和歌词，并在歌词库管理本地歌词。
+- 配置光栅壁纸与锁屏小组件背景。
 - 在应用全局主题后保持系统界面的柔光玻璃效果。
 - 解除息屏时钟“玻璃”和“叠加”材质被 OTA 转换限制。
 - 新增锁屏小组件编辑器，可组合天气、电量、日出日落、步数、闹钟、日程和自定义签名图片，支持拖拽排序及布局、颜色、材质调节。
 - 自定义状态栏双排信号、网络类型文本、图标显示逻辑、缩放、位置和边距。
 - 修改设置后，可从应用内重启各个已选择作用域的进程。
+
+### 系统设置、背屏与其他应用
+
+- 自定义设置主页和设备页面的背景、设备卡片、LOGO 与显示的设备参数。
+- 解锁部分背屏 AI 功能、管理导入的自定义背屏应用，并选择背屏音乐控件可用的应用。
+- 增加屏幕录制帧率和码率选项，并指定录制文件的保存位置。
+- 配置受支持应用的底部导航，并解除表盘试用时长限制。
 
 ### 超级小爱输入法
 
@@ -64,6 +73,7 @@ HyperChanger 是一个实验性的社区开发 LSPosed 模块，与小米无任�
 ### 系统更新与兼容性
 
 - 禁用系统更新、移除 OTA 限制，并可自定义系统版本与 SOTA 版本显示。
+- 通过 GitHub 或 Gitee 检查模块更新，下载后手动安装，或在具备 Root 权限时静默安装。
 - 启用 Hook 前检测 HyperOS 兼容性，并在应用内查看免责声明与许可证信息。
 
 ### 多语言与预设
@@ -85,7 +95,7 @@ HyperChanger 是一个实验性的社区开发 LSPosed 模块，与小米无任�
 | 目标 SDK | API 37 |
 | 系统 | 兼容的小米 HyperOS 4 Beta 系统 |
 | Root 框架 | Root 权限与 LSPosed API 101 或更高版本 |
-| 架构 | Release APK 为通用包；实际兼容性取决于目标 HyperOS 构建版本 |
+| 架构 | APK 为通用包；实际兼容性取决于目标 HyperOS 构建版本 |
 
 HyperChanger 依赖小米系统包的实现细节。测试新的系统构建版本前，请确保可以通过 LSPosed 或 Recovery 禁用模块。
 
@@ -96,15 +106,27 @@ HyperChanger 依赖小米系统包的实现细节。测试新的系统构建版�
 | 作用域 | 包名 |
 | --- | --- |
 | 系统界面 | `com.android.systemui` |
+| 壁纸 | `com.miui.miwallpaper` |
 | 系统界面插件 | `miui.systemui.plugin` |
 | 息屏显示 | `com.miui.aod` |
 | 小米相机 | `com.android.camera` |
 | 小米相册 | `com.miui.gallery` |
 | Hyper 相册插件 | `com.hyper.gallery.plugin` |
 | 媒体编辑器 | `com.miui.mediaeditor` |
+| 屏幕录制 | `com.miui.screenrecorder` |
 | 超级小爱输入法 | `com.xiaomi.type` |
 | 小爱短语 | `com.miui.phrase` |
+| 系统设置 | `com.android.settings` |
 | 系统更新 | `com.android.updater` |
+| 背屏中心 | `com.xiaomi.subscreencenter` |
+| 智能助理 | `com.miui.personalassistant` |
+| 主题壁纸 | `com.android.thememanager` |
+| 小米商城 | `com.xiaomi.shop` |
+| 小米钱包 | `com.mipay.wallet` |
+| 小米运动健康 | `com.mi.health` |
+| Apple Music | `com.apple.android.music` |
+| 微博 | `com.sina.weibo` |
+| 小红书 | `com.xingin.xhs` |
 
 部分包在某些设备上并不存在。LSPosed 只会在已安装且已选中的作用域内激活模块。
 
@@ -120,7 +142,7 @@ HyperChanger 依赖小米系统包的实现细节。测试新的系统构建版�
 
 ## 使用预设
 
-通知与控制中心预设页面支持内置预设和用户预设。长按预设可访问导出选项，然后选择 JSON 或二维码分享。导入时会先校验 HyperChanger 预设格式与版本，再应用设置。
+通知与控制中心预设页面支持内置预设和用户预设。长按预设可访问导出选项，然后选择 JSON 或二维码分享。导入时会先校验 HyperChanger 预设格式与版本，再应用设置。应用的“设置”页面也支持通过 JSON 导入和导出完整模块设置。
 
 导入后的设置可能会同时修改多个视觉选项。请检查结果，并重启系统界面以应用基于 Hook 的改动。
 
@@ -139,18 +161,18 @@ HyperChanger 依赖小米系统包的实现细节。测试新的系统构建版�
 
 ### 环境要求
 
-- Android Studio Narwhal（2025.1）或更高版本
-- JDK 17 或更高版本
+- 支持 Android Gradle Plugin 9.2.1 的 Android Studio，或直接使用 Gradle Wrapper
+- JDK 21（GitHub Actions 构建环境也使用此版本）
 - Android SDK 37
 - 用于安装测试的 Android 15（API 35）或更高版本设备
 
 ```bash
 git clone https://github.com/ColdP/HyperChanger.git
 cd HyperChanger
-./gradlew assembleDebug
+./gradlew :app:assembleDebug
 ```
 
-Debug APK 输出至 `app/build/outputs/apk/debug/`。
+在 Windows 上使用 `.\gradlew.bat :app:assembleDebug`。Debug APK 输出至 `app/build/outputs/apk/debug/app-debug.apk`。
 
 ### Release 构建与签名
 
@@ -172,10 +194,13 @@ Debug APK 输出至 `app/build/outputs/apk/debug/`。
 HyperChanger/
 |-- app/
 |   |-- src/main/java/       Kotlin 与 Java 模块源码
+|   |-- src/main/assets/     语言包与法律文档
 |   |-- src/main/res/        Android 资源
 |   `-- src/main/resources/  LSPosed 元数据与作用域
+|-- languages/example.json   语言包模板
 |-- gradle/                  Gradle Wrapper 文件
 |-- CONTRIBUTING_zh.md
+|-- README.md
 |-- NOTICE
 `-- LICENSE
 ```

@@ -28,7 +28,7 @@
 
 ## Overview
 
-HyperChanger is an LSPosed module for selected Xiaomi HyperOS 4 Beta builds. It exposes System UI, notification shade, lock-screen, and camera-related customization in one companion app. The module is intended for rooted devices and does not replace System UI or Xiaomi Camera applications.
+HyperChanger is an LSPosed module for selected Xiaomi HyperOS 4 Beta builds. Its companion app configures System UI, notifications, the lock screen, system Settings, the rear screen, camera, and other supported Xiaomi apps. The module requires root and hooks existing apps rather than replacing them.
 
 The project is in beta. HyperOS framework classes and resources can differ by device, region, and system build. A setting that works on one build may be unavailable or behave differently on another.
 
@@ -50,11 +50,20 @@ HyperChanger is an experimental, community-developed LSPosed module and is not a
 - Customize compatible Dynamic Island and focus-notification behavior.
 - Adjust status-bar presentation where supported by the target build.
 - Control selected lock-screen effects, including charging text and shortcut appearance.
+- Customize the lock-screen editor background, clock, widgets, mini music player, music cover, and lyrics; manage local lyrics in the lyrics library.
+- Configure raster wallpaper and lock-screen widget backgrounds.
 - Keep System UI soft-glass effects after applying a global theme.
 - Remove the OTA conversion limit for glass and overlay AOD clock materials.
 - Edit lock-screen widgets with weather, battery, sunrise/sunset, steps, alarms, schedules, and custom signature images; reorder cards and tune layout, colors, and materials.
 - Customize dual-row status-bar signal indicators, network-type labels, visibility, scale, position, and spacing.
 - Restart individual scoped processes from the app after changing settings.
+
+### Settings, rear screen, and other apps
+
+- Customize the Settings home and device pages with backgrounds, device cards, logos, and displayed device specifications.
+- Unlock selected rear-screen AI features, manage imported rear-screen apps, and choose apps for the rear-screen music widget.
+- Add screen-recording frame-rate and bitrate choices and set a custom recording output folder.
+- Configure bottom navigation in supported apps and remove the watch-face trial time limit.
 
 ### Super XiaoAi input method
 
@@ -64,6 +73,7 @@ HyperChanger is an experimental, community-developed LSPosed module and is not a
 ### System updates and compatibility
 
 - Disable system updates, remove OTA restrictions, and optionally spoof displayed system and SOTA versions.
+- Check for module updates through GitHub or Gitee, then download and install them manually or, with root, silently.
 - Check HyperOS compatibility before enabling hooks and review the in-app disclaimer and license information.
 
 ### Languages and presets
@@ -85,7 +95,7 @@ HyperChanger is an experimental, community-developed LSPosed module and is not a
 | Target SDK | API 37 |
 | System | Compatible Xiaomi HyperOS 4 Beta build |
 | Root framework | Root access and LSPosed API 101 or later |
-| Architecture | The release APK is universal; device compatibility is determined by the target HyperOS build |
+| Architecture | The APK is universal; device compatibility is determined by the target HyperOS build |
 
 HyperChanger relies on implementation details of Xiaomi system packages. Update the module only after keeping a way to disable it through LSPosed or recovery if you are testing a new system build.
 
@@ -96,15 +106,27 @@ Enable HyperChanger in LSPosed and select only the scopes required for the featu
 | Scope | Package |
 | --- | --- |
 | System UI | `com.android.systemui` |
+| Wallpaper | `com.miui.miwallpaper` |
 | System UI plugin | `miui.systemui.plugin` |
 | Always-on display | `com.miui.aod` |
 | Xiaomi Camera | `com.android.camera` |
 | Xiaomi Gallery | `com.miui.gallery` |
 | Hyper Gallery plugin | `com.hyper.gallery.plugin` |
 | Media editor | `com.miui.mediaeditor` |
+| Screen recorder | `com.miui.screenrecorder` |
 | Super XiaoAi input method | `com.xiaomi.type` |
 | XiaoAi phrases | `com.miui.phrase` |
+| Settings | `com.android.settings` |
 | System updater | `com.android.updater` |
+| Rear-screen center | `com.xiaomi.subscreencenter` |
+| Personal assistant | `com.miui.personalassistant` |
+| Themes | `com.android.thememanager` |
+| Xiaomi Shop | `com.xiaomi.shop` |
+| Mi Wallet | `com.mipay.wallet` |
+| Mi Health | `com.mi.health` |
+| Apple Music | `com.apple.android.music` |
+| Weibo | `com.sina.weibo` |
+| Xiaohongshu | `com.xingin.xhs` |
 
 Some packages are optional and may not be installed on every device. LSPosed will only activate hooks for installed, selected scopes.
 
@@ -120,7 +142,7 @@ Do not enable every scope solely for convenience. Enabling only the packages use
 
 ## Using Presets
 
-The notification-shade preset page supports built-in and user-defined presets. Long-press a preset to access export options, then choose JSON or QR code sharing. Importing validates the HyperChanger preset format and version before settings are applied.
+The notification-shade preset page supports built-in and user-defined presets. Long-press a preset to access export options, then choose JSON or QR code sharing. Importing validates the HyperChanger preset format and version before settings are applied. The app's Settings page also imports and exports complete module settings as JSON.
 
 Imported settings can affect several visual options at once. Review the result and restart System UI to apply hook-based changes.
 
@@ -139,18 +161,18 @@ When reporting an issue, include the device model, Android and HyperOS versions,
 
 ### Prerequisites
 
-- Android Studio Narwhal (2025.1) or later
-- JDK 17 or later
+- Android Studio with Android Gradle Plugin 9.2.1 support, or the Gradle wrapper
+- JDK 21 (also used by the GitHub Actions build)
 - Android SDK 37
 - A device running Android 15 (API 35) or later for installation testing
 
 ```bash
 git clone https://github.com/ColdP/HyperChanger.git
 cd HyperChanger
-./gradlew assembleDebug
+./gradlew :app:assembleDebug
 ```
 
-The debug APK is written to `app/build/outputs/apk/debug/`.
+On Windows, use `.\gradlew.bat :app:assembleDebug`. The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
 
 ### Release Build and Signing
 
@@ -172,10 +194,13 @@ The signed APK is written to `app/build/outputs/apk/release/`. Never commit a ke
 HyperChanger/
 |-- app/
 |   |-- src/main/java/       Kotlin and Java module sources
+|   |-- src/main/assets/     Language packs and legal documents
 |   |-- src/main/res/        Android resources
 |   `-- src/main/resources/  LSPosed metadata and scopes
+|-- languages/example.json   Language pack template
 |-- gradle/                  Gradle wrapper files
 |-- CONTRIBUTING.md
+|-- README_zh.md
 |-- NOTICE
 `-- LICENSE
 ```
