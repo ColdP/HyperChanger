@@ -288,6 +288,8 @@ private const val CONTROL_CENTER_PLUS_PATH =
 private const val CONTROL_CENTER_POWER_PATH =
     "M248.197 0.000213623C263.47 0.000213623 274.926 12.7283 274.926 26.7291V244.379C274.926 259.652 263.47 271.107 248.197 271.107C232.923 271.107 221.468 259.652 221.468 244.379V26.7291C221.468 12.7283 232.923 0.000213623 248.197 0.000213623ZM388.205 77.6412C398.388 66.186 416.207 67.4588 426.389 77.6412C467.119 122.189 492.575 179.466 492.575 244.379C492.575 381.841 379.296 492.575 240.56 488.757C108.188 484.938 9.05991e-06 370.386 3.81842 236.742C5.09122e-06 175.647 30.5473 119.644 70.0042 77.6412C80.1866 67.4588 98.0059 66.186 108.188 77.6412C118.371 87.8237 118.371 104.37 109.461 114.553C77.641 148.918 58.549 194.739 58.549 244.379C58.549 350.021 145.1 435.299 250.742 434.026C355.112 432.753 440.39 343.657 437.845 239.287C436.572 190.921 418.752 147.645 386.932 115.825C378.023 104.37 376.75 87.8237 388.205 77.6412Z"
 
+private val gestureMaterialOverlays = Collections.synchronizedMap(WeakHashMap<View, View>())
+
 class HyperSystemUiModule : XposedModule() {
     internal fun installHook(member: java.lang.reflect.Executable) = hook(member)
 
@@ -758,6 +760,11 @@ class HyperSystemUiModule : XposedModule() {
                     if (param.packageName == SYSTEM_UI && !lockscreenWhiteBarHookInstalled) {
                         lockscreenWhiteBarHookInstalled =
                             installLockscreenWhiteBarHook(param.defaultClassLoader, preferences)
+                    }
+                    if (param.packageName == SYSTEM_UI && !globalGestureHandleHookInstalled) {
+                        globalGestureHandleHookInstalled =
+                            installGlobalGestureHandleHook(param.defaultClassLoader, preferences)
+                        installGlobalGestureControllerHook(param.defaultClassLoader, preferences)
                     }
                     if (param.packageName == SYSTEM_UI && !lockscreenShortcutGlassHookInstalled) {
                         installLockscreenShortcutGlassHook(param.defaultClassLoader, preferences)
@@ -9587,6 +9594,18 @@ class HyperSystemUiModule : XposedModule() {
             Int::class.javaPrimitiveType,
             View::class.java,
         ).invoke(null, SHORTCUT_GLASS_MATERIAL_TYPE, view)
+        // MiGlassCompat normally installs this from a layout listener. The gesture
+        // overlay is positioned manually, so explicitly provide its SDF bounds as
+        // well; otherwise the glass shader has no valid clipping extent and renders
+        // as a transparent view on several HyperOS builds.
+        runCatching {
+            glassCompat.getMethod(
+                "setMiGlassSdfMaxSizeCompat",
+                View::class.java,
+                Float::class.javaPrimitiveType,
+                Float::class.javaPrimitiveType,
+            ).invoke(null, view, view.width.toFloat(), view.height.toFloat())
+        }
         glassCompat.getMethod("setMiGlassCompat", View::class.java, FloatArray::class.java)
             .invoke(null, view, glassParameters)
     }
@@ -11830,6 +11849,383 @@ class HyperSystemUiModule : XposedModule() {
         }.getOrDefault(false)
     }
 
+    private fun installGlobalGestureHandleHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ): Boolean = runCatching {
+        val handleClass = classLoader.loadClass("com.android.systemui.navigationbar.gestural.NavigationHandle")
+        val onDraw = handleClass.getDeclaredMethod("onDraw", Canvas::class.java)
+        hook(onDraw)
+            .setExceptionMode(ExceptionMode.PROTECTIVE)
+            .setId("global-gesture-handle:hidden")
+            .intercept { chain ->
+                val handle = chain.thisObject as View
+                if (preferences.getBoolean(KEY_HIDE_GLOBAL_GESTURE_HANDLE, false)) {
+                    gestureMaterialOverlays.remove(handle)?.let { (it.parent as? ViewGroup)?.removeView(it) }
+                    null
+                } else {
+                    val customEnabled = preferences.getBoolean(KEY_GESTURE_HANDLE_CUSTOM_ENABLED, false)
+                    if (!customEnabled) {
+                        gestureMaterialOverlays.remove(handle)?.let { (it.parent as? ViewGroup)?.removeView(it) }
+                        chain.proceed()
+                    } else {
+                        drawCustomGestureHandle(
+                            handle,
+                            chain.getArg(0) as Canvas,
+                            GESTURE_HANDLE_STYLE_DEFAULT,
+                            classLoader,
+                            preferences,
+                        )
+                        null
+                    }
+                }
+            }
+        runCatching {
+            hook(handleClass.getDeclaredMethod("onAttachedToWindow"))
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("global-gesture-handle:material")
+                .intercept { chain ->
+                    chain.proceed()
+                }
+        }
+        runCatching {
+            hook(handleClass.getDeclaredMethod("onDetachedFromWindow"))
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("global-gesture-handle:material-detach")
+                .intercept { chain ->
+                    val handle = chain.thisObject as View
+                    gestureMaterialOverlays.remove(handle)?.let { overlay ->
+                        (overlay.parent as? ViewGroup)?.removeView(overlay)
+                    }
+                    chain.proceed()
+                }
+        }
+        // Some HyperOS builds use an overriding draw method for rotated quick-switch
+        // navigation. Suppress only that drawing method as well; leave visibility,
+        // measurement, insets, and touch handling untouched.
+        runCatching {
+            val rotatedClass = classLoader.loadClass(
+                "com.android.systemui.navigationbar.gestural.QuickswitchOrientedNavHandle",
+            )
+            hook(rotatedClass.getDeclaredMethod("onDraw", Canvas::class.java))
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("global-gesture-handle:rotated-hidden")
+                .intercept { chain ->
+                    val handle = chain.thisObject as View
+                    if (preferences.getBoolean(KEY_HIDE_GLOBAL_GESTURE_HANDLE, false)) {
+                        gestureMaterialOverlays.remove(handle)?.let { (it.parent as? ViewGroup)?.removeView(it) }
+                        null
+                    } else {
+                        val customEnabled = preferences.getBoolean(KEY_GESTURE_HANDLE_CUSTOM_ENABLED, false)
+                        if (!customEnabled) {
+                            gestureMaterialOverlays.remove(handle)?.let { (it.parent as? ViewGroup)?.removeView(it) }
+                            chain.proceed()
+                        } else {
+                            drawCustomGestureHandle(
+                                handle,
+                                chain.getArg(0) as Canvas,
+                                GESTURE_HANDLE_STYLE_DEFAULT,
+                                classLoader,
+                                preferences,
+                            )
+                            null
+                        }
+                    }
+                }
+        }
+        true
+    }.onFailure { error ->
+        log(Log.WARN, TAG, "Could not install global gesture-handle hook", error)
+    }.getOrDefault(false)
+
+    private fun isGlobalGestureHandle(view: View): Boolean {
+        val name = view.javaClass.name
+        return name == "com.android.systemui.navigationbar.gestural.NavigationHandle" ||
+            name == "com.android.systemui.navigationbar.gestural.QuickswitchOrientedNavHandle" ||
+            name.endsWith(".NavigationHandle") || name.endsWith(".QuickswitchOrientedNavHandle")
+    }
+
+    private fun configureCustomGestureHandleMaterial(
+        handle: View,
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
+        val style = preferences.getInt(KEY_GESTURE_HANDLE_STYLE, GESTURE_HANDLE_STYLE_DEFAULT)
+        val adaptiveColor = currentGestureHandleColor(handle)
+        if (style == GESTURE_HANDLE_STYLE_ADVANCED) {
+            runCatching {
+                applyLegacyBackdropMaterial(
+                    handle,
+                    preferences.getInt(KEY_GESTURE_HANDLE_OPACITY, 100),
+                    preferences.getInt(KEY_GESTURE_HANDLE_BLUR, 40),
+                    adaptiveColor,
+                    preferences.getBoolean(KEY_GESTURE_HANDLE_HIGHLIGHT, false),
+                )
+                // HyperOS 4's advanced material is the MiGlass pipeline.  The
+                // legacy backdrop calls above only provide a compatibility fallback;
+                // without this call the gesture handle stays a plain translucent pill.
+                applySystemGlassMaterial(
+                    handle,
+                    classLoader,
+                    preferences.getInt(KEY_GESTURE_HANDLE_BLUR, 40),
+                    DEFAULT_SOFT_GLASS_LUMINANCE,
+                )
+            }
+        } else if (style == GESTURE_HANDLE_STYLE_SOFT_GLASS) {
+            runCatching {
+                applyLegacyBackdropMaterial(
+                    handle,
+                    preferences.getInt(KEY_GESTURE_HANDLE_OPACITY, 100),
+                    preferences.getInt(KEY_GESTURE_HANDLE_BLUR, 40),
+                    adaptiveColor,
+                    false,
+                )
+                applySystemGlassMaterial(
+                    handle,
+                    classLoader,
+                    preferences.getInt(KEY_GESTURE_HANDLE_BLUR, 40),
+                    (preferences.getInt(KEY_GESTURE_HANDLE_REFRACTION, 0) / 100f).coerceIn(0f, 0.4f),
+                )
+            }
+        }
+    }
+
+    private fun drawCustomGestureHandle(
+        handle: View,
+        canvas: Canvas,
+        style: Int,
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
+        // Reapply material parameters while drawing so slider changes take effect on
+        // the existing SystemUI view without waiting for a new attachment.
+        // The current customization page controls geometry and opacity only. Remove
+        // any legacy material layer left by older preference versions.
+        gestureMaterialOverlays.remove(handle)?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        val density = handle.resources.displayMetrics.density
+        val hookMask = preferences.getInt(KEY_GESTURE_HANDLE_HOOK_MASK, GESTURE_HANDLE_HOOK_LENGTH or GESTURE_HANDLE_HOOK_HEIGHT or GESTURE_HANDLE_HOOK_BOTTOM or GESTURE_HANDLE_HOOK_OPACITY)
+        val stockWidth = runCatching { handle.javaClass.getMethod("getHandleDrawWidth").invoke(handle) as Number }.getOrNull()?.toFloat()
+            ?: 120f * density
+        val stockHeight = runCatching { handle.javaClass.getMethod("getPillRadius").invoke(handle) as Number }.getOrNull()?.toFloat()?.times(2f)
+            ?: 5f * density
+        val width = if (hookMask and GESTURE_HANDLE_HOOK_LENGTH != 0) {
+            preferences.getFloat(KEY_GESTURE_HANDLE_LENGTH, 120f).coerceIn(40f, 240f) * density
+        } else stockWidth
+        val height = if (hookMask and GESTURE_HANDLE_HOOK_HEIGHT != 0) {
+            preferences.getFloat(KEY_GESTURE_HANDLE_HEIGHT, 5f).coerceIn(1f, 24f) * density
+        } else stockHeight
+        val left = (handle.width - width) / 2f
+        val bottom = if (hookMask and GESTURE_HANDLE_HOOK_BOTTOM != 0) {
+            preferences.getFloat(KEY_GESTURE_HANDLE_BOTTOM, 6f).coerceIn(0f, 48f) * density
+        } else gestureHandleBottom(handle)
+        val top = handle.height - bottom - height
+        val radius = height / 2f
+        val color = if (style == GESTURE_HANDLE_STYLE_PURE) {
+            preferences.getInt(KEY_GESTURE_HANDLE_COLOR, Color.WHITE)
+        } else {
+            currentGestureHandleColor(handle)
+        }
+        // Keep a translucent adaptive-color fallback visible when a vendor build does
+        // not render the backdrop source layer. The independent material overlay still
+        // supplies blur/glass effects on builds that support those APIs.
+        val opacity = if (style == GESTURE_HANDLE_STYLE_PURE) 255 else if (
+            hookMask and GESTURE_HANDLE_HOOK_OPACITY != 0
+        ) {
+            preferences.getInt(KEY_GESTURE_HANDLE_OPACITY, 100).coerceIn(0, 100) * 255 / 100
+        } else 255
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = Color.argb(opacity, Color.red(color), Color.green(color), Color.blue(color))
+            this.style = Paint.Style.FILL
+        }
+        canvas.drawRoundRect(left, top, left + width, top + height, radius, radius, paint)
+        if (preferences.getBoolean(KEY_GESTURE_HANDLE_HIGHLIGHT, false) && style == GESTURE_HANDLE_STYLE_PURE) {
+            paint.color = Color.argb((opacity * .42f).toInt(), 255, 255, 255)
+            canvas.drawRoundRect(left + radius * .35f, top + radius * .2f, left + width - radius * .35f, top + radius * .55f, radius, radius, paint)
+        }
+    }
+
+    private fun currentGestureHandleColor(handle: View): Int = runCatching {
+        handle.javaClass.getMethod("getHandleColor").invoke(handle) as Int
+    }.getOrDefault(Color.WHITE)
+
+    /** Stock NavigationHandle bottom inset, in pixels. */
+    private fun gestureHandleBottom(handle: View): Float = runCatching {
+        handle.javaClass.getDeclaredField("mBottom").apply { isAccessible = true }.getFloat(handle)
+    }.getOrDefault(0f).coerceAtLeast(0f)
+
+    /** Adds the same independent material source layer used by lockscreen shortcut backgrounds. */
+    private fun syncGestureMaterialOverlay(
+        handle: View,
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
+        val style = preferences.getInt(KEY_GESTURE_HANDLE_STYLE, GESTURE_HANDLE_STYLE_DEFAULT)
+        val material = style == GESTURE_HANDLE_STYLE_ADVANCED || style == GESTURE_HANDLE_STYLE_SOFT_GLASS
+        // Do not add the overlay to NavigationHandle's immediate LinearLayout parent:
+        // that would make it a new flow item and move it to the left. Attach it to the
+        // nearest FrameLayout host and position it using the handle's absolute bounds.
+        var host: FrameLayout? = null
+        var fallbackHost: FrameLayout? = null
+        var ancestor: View? = handle.parent as? View
+        while (ancestor != null) {
+            if (ancestor is FrameLayout) {
+                fallbackHost = fallbackHost ?: ancestor
+                // NavigationBarFrame is the actual navigation-bar window root. The
+                // nearer nav_buttons containers can be clipped or transformed and do
+                // not participate in the window backdrop pass on some builds.
+                if (ancestor.javaClass.name.endsWith("NavigationBarFrame")) {
+                    host = ancestor
+                    break
+                }
+            }
+            ancestor = ancestor.parent as? View
+        }
+        val materialHost = host ?: fallbackHost ?: return
+        materialHost.clipChildren = false
+        materialHost.clipToPadding = false
+        if (!material || handle.width <= 0 || handle.height <= 0) {
+            gestureMaterialOverlays.remove(handle)?.let { (it.parent as? ViewGroup)?.removeView(it) }
+            return
+        }
+        val overlay = gestureMaterialOverlays[handle] ?: ImageView(handle.context).also { created ->
+            created.isClickable = false
+            created.isFocusable = false
+            created.isDuplicateParentStateEnabled = true
+            created.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            created.setImageDrawable(GradientDrawable().apply { setColor(Color.argb(1, 255, 255, 255)) })
+            created.clipToOutline = true
+            created.outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) {
+                    val density = view.resources.displayMetrics.density
+                    val width = preferences.getFloat(KEY_GESTURE_HANDLE_LENGTH, 120f).coerceIn(40f, 240f) * density
+                    val height = preferences.getFloat(KEY_GESTURE_HANDLE_HEIGHT, 5f).coerceIn(1f, 24f) * density
+                    val left = ((view.width - width) / 2f).coerceAtLeast(0f)
+                    val top = (view.height - gestureHandleBottom(handle) - height).coerceAtLeast(0f)
+                    outline.setRoundRect(left.toInt(), top.toInt(), (left + width).toInt(), (top + height).toInt(), height / 2f)
+                }
+            }
+            gestureMaterialOverlays[handle] = created
+            materialHost.addView(created)
+            created
+        }
+        val handleLocation = IntArray(2)
+        val hostLocation = IntArray(2)
+        handle.getLocationOnScreen(handleLocation)
+        materialHost.getLocationOnScreen(hostLocation)
+        val lp = FrameLayout.LayoutParams(handle.width, handle.height).apply {
+            leftMargin = handleLocation[0] - hostLocation[0]
+            topMargin = handleLocation[1] - hostLocation[1]
+        }
+        overlay.layoutParams = lp
+        overlay.measure(
+            View.MeasureSpec.makeMeasureSpec(handle.width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(handle.height, View.MeasureSpec.EXACTLY),
+        )
+        overlay.layout(lp.leftMargin, lp.topMargin, lp.leftMargin + handle.width, lp.topMargin + handle.height)
+        overlay.invalidateOutline()
+        val adaptiveColor = currentGestureHandleColor(handle)
+        runCatching {
+            applyLegacyBackdropMaterial(
+                overlay,
+                preferences.getInt(KEY_GESTURE_HANDLE_OPACITY, 100),
+                preferences.getInt(KEY_GESTURE_HANDLE_BLUR, 40),
+                adaptiveColor,
+                preferences.getBoolean(KEY_GESTURE_HANDLE_HIGHLIGHT, false),
+            )
+            if (style == GESTURE_HANDLE_STYLE_ADVANCED || style == GESTURE_HANDLE_STYLE_SOFT_GLASS) {
+                val luminance = if (style == GESTURE_HANDLE_STYLE_SOFT_GLASS) {
+                    val refraction = preferences.getInt(KEY_GESTURE_HANDLE_REFRACTION, 0)
+                    (refraction / 100f).coerceIn(0f, 0.4f)
+                } else {
+                    DEFAULT_SOFT_GLASS_LUMINANCE
+                }
+                applySystemGlassMaterial(
+                    overlay,
+                    classLoader,
+                    preferences.getInt(KEY_GESTURE_HANDLE_BLUR, 40),
+                    luminance,
+                )
+            }
+        }.onFailure { error ->
+            log(Log.DEBUG, TAG, "Could not apply gesture material overlay", error)
+        }
+        overlay.bringToFront()
+        overlay.post {
+            if (overlay.isAttachedToWindow && overlay.width > 0 && overlay.height > 0) {
+                runCatching {
+                    val color = currentGestureHandleColor(handle)
+                    applyLegacyBackdropMaterial(
+                        overlay,
+                        preferences.getInt(KEY_GESTURE_HANDLE_OPACITY, 100),
+                        preferences.getInt(KEY_GESTURE_HANDLE_BLUR, 40),
+                        color,
+                        preferences.getBoolean(KEY_GESTURE_HANDLE_HIGHLIGHT, false),
+                    )
+                    if (style == GESTURE_HANDLE_STYLE_ADVANCED || style == GESTURE_HANDLE_STYLE_SOFT_GLASS) {
+                        val luminance = if (style == GESTURE_HANDLE_STYLE_SOFT_GLASS) {
+                            val refraction = preferences.getInt(KEY_GESTURE_HANDLE_REFRACTION, 0)
+                            (refraction / 100f).coerceIn(0f, 0.4f)
+                        } else {
+                            DEFAULT_SOFT_GLASS_LUMINANCE
+                        }
+                        applySystemGlassMaterial(
+                            overlay,
+                            classLoader,
+                            preferences.getInt(KEY_GESTURE_HANDLE_BLUR, 40),
+                            luminance,
+                        )
+                    }
+                    overlay.invalidate()
+                }.onFailure { error ->
+                    log(Log.DEBUG, TAG, "Could not reapply gesture material overlay", error)
+                }
+            }
+        }
+    }
+
+    /** Keep the vendor navigation controller's own mHideGestureLine state enabled. */
+    private fun installGlobalGestureControllerHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
+        runCatching {
+            val controllerClass = classLoader.loadClass(
+                "com.android.systemui.navigationbar.NavigationBarControllerImpl",
+            )
+            val injectorField = controllerClass.getDeclaredField(
+                "mNavigationModeControllerInjector",
+            ).apply { isAccessible = true }
+            controllerClass.declaredMethods.filter { it.name == "createNavigationBar" }.forEach { method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("global-gesture-handle:controller-create")
+                    .intercept { chain ->
+                        // Keep a real navigation-bar host so its height and inset remain
+                        // unchanged. If the stock controller would skip host creation due
+                        // to its own hidden-line flag, temporarily clear that flag only for
+                        // this call and restore it after the host has been created.
+                        val injector = injectorField.get(chain.thisObject)
+                        val hideField = injector?.javaClass?.getDeclaredField("mHideGestureLine")
+                            ?.apply { isAccessible = true }
+                        val fsgField = injector?.javaClass?.getDeclaredField("mIsFsgMode")
+                            ?.apply { isAccessible = true }
+                        val stockHidden = hideField?.getBoolean(injector) == true
+                        val fsgMode = fsgField?.getBoolean(injector) == true
+                        val override = preferences.getBoolean(KEY_HIDE_GLOBAL_GESTURE_HANDLE, false) &&
+                            stockHidden && fsgMode
+                        if (override) hideField?.setBoolean(injector, false)
+                        try {
+                            chain.proceed()
+                        } finally {
+                            if (override) hideField?.setBoolean(injector, true)
+                        }
+                    }
+            }
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install global gesture controller hook", error)
+        }
+    }
+
     private fun installDimensionHooks(preferences: SharedPreferences) {
         hook(Resources::class.java.getMethod("getDimension", Int::class.javaPrimitiveType))
             .setExceptionMode(ExceptionMode.PROTECTIVE)
@@ -13956,6 +14352,7 @@ private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_d
         private var systemUiDepthHookInstalled = false
         private var lockscreenChargingHookInstalled = false
         private var lockscreenWhiteBarHookInstalled = false
+        private var globalGestureHandleHookInstalled = false
         private var lockscreenShortcutGlassHookInstalled = false
         private var lockscreenWidgetSceneVisibilityHookInstalled = false
         private var lockscreenMusicLockscreenHookInstalled = false

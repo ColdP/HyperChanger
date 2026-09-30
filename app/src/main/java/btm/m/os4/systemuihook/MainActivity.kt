@@ -263,6 +263,7 @@ private enum class PageId {
     SHADE_CONTROL_CENTER_ELEMENTS,
     SHADE_NOTIFICATION_BACKGROUND,
     SHADE_CONTROL_CENTER_BACKGROUND,
+    GESTURE_HANDLE_STYLE,
     ISLAND, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
@@ -3335,6 +3336,7 @@ private fun Detail(
             val next = value.copy(controlCenterBackgroundMaterial = it)
             if (value.shadeSettingsUnified) next.copy(notificationCenterBackgroundMaterial = it) else next
         } }
+        PageId.GESTURE_HANDLE_STYLE -> GestureHandleStylePage(back)
         PageId.ISLAND -> Island(settings, update, openPage, onRequestNotificationPermission, back)
         PageId.STATUS -> Status(settings, update, openPage, back)
         PageId.STATUS_SIGNAL_CUSTOMIZATION -> StatusSignalCustomization(settings, update, openPage, back)
@@ -4097,9 +4099,32 @@ private fun Shade(
     ScopeApplication.THEME_MANAGER,
 )) { p, scroll ->
     var showSavePresetDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    val gesturePrefs = remember(context) { context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE) }
+    var hideGlobalGestureHandle by remember { mutableStateOf(gesturePrefs.getBoolean(KEY_HIDE_GLOBAL_GESTURE_HANDLE, false)) }
+    LaunchedEffect(service) {
+        service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.edit()
+            ?.putBoolean(KEY_HIDE_GLOBAL_GESTURE_HANDLE, gesturePrefs.getBoolean(KEY_HIDE_GLOBAL_GESTURE_HANDLE, false))
+            ?.apply()
+    }
     AppList(p, scroll, 28) {
         item {
-            Group(tr("\u5168\u5c40\u4e3b\u9898", "\u5168\u5c40\u4e3b\u9898")) {
+            Group(tr("\u754c\u9762", "\u754c\u9762")) {
+                SwitchPreference(
+                    title = tr("\u5168\u5c40\u9690\u85cf\u624b\u52bf\u63d0\u793a\u7ebf", "\u5168\u5c40\u9690\u85cf\u624b\u52bf\u63d0\u793a\u7ebf"),
+                    checked = hideGlobalGestureHandle,
+                    onCheckedChange = { enabled ->
+                        hideGlobalGestureHandle = enabled
+                        gesturePrefs.edit().putBoolean(KEY_HIDE_GLOBAL_GESTURE_HANDLE, enabled).apply()
+                        service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.edit()
+                            ?.putBoolean(KEY_HIDE_GLOBAL_GESTURE_HANDLE, enabled)?.apply()
+                    },
+                )
+                ArrowPreference(
+                    title = tr("\u624b\u52bf\u63d0\u793a\u7ebf\u6837\u5f0f\u81ea\u5b9a\u4e49", "\u624b\u52bf\u63d0\u793a\u7ebf\u6837\u5f0f\u81ea\u5b9a\u4e49"),
+                    onClick = { openPage(PageId.GESTURE_HANDLE_STYLE) },
+                )
                 SwitchPreference(
                     title = tr("\u4f7f\u7528\u5168\u5c40\u4e3b\u9898\u540e\u4fdd\u6301\u67d4\u5149\u73bb\u7483", "\u4f7f\u7528\u5168\u5c40\u4e3b\u9898\u540e\u4fdd\u6301\u67d4\u5149\u73bb\u7483"),
                     checked = s.keepSoftGlassAfterGlobalTheme,
@@ -4325,7 +4350,118 @@ private fun MaterialOverrideAdvancedPage(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun GestureHandleStylePage(back: () -> Unit) {
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    val localPrefs = remember(context) {
+        context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE)
+    }
+    var hideGlobal by remember { mutableStateOf(localPrefs.getBoolean(KEY_HIDE_GLOBAL_GESTURE_HANDLE, false)) }
+    var customEnabled by remember { mutableStateOf(localPrefs.getBoolean(KEY_GESTURE_HANDLE_CUSTOM_ENABLED, false)) }
+    var length by remember { mutableFloatStateOf(localPrefs.getFloat(KEY_GESTURE_HANDLE_LENGTH, 120f)) }
+    var height by remember { mutableFloatStateOf(localPrefs.getFloat(KEY_GESTURE_HANDLE_HEIGHT, 5f)) }
+    var bottom by remember { mutableFloatStateOf(localPrefs.getFloat(KEY_GESTURE_HANDLE_BOTTOM, 6f)) }
+    var opacity by remember { mutableIntStateOf(localPrefs.getInt(KEY_GESTURE_HANDLE_OPACITY, 100)) }
+    var hookMask by remember { mutableIntStateOf(localPrefs.getInt(KEY_GESTURE_HANDLE_HOOK_MASK, GESTURE_HANDLE_HOOK_LENGTH or GESTURE_HANDLE_HOOK_HEIGHT or GESTURE_HANDLE_HOOK_BOTTOM or GESTURE_HANDLE_HOOK_OPACITY)) }
+    var showAdjustDialog by remember { mutableStateOf(false) }
+
+    fun edit(block: android.content.SharedPreferences.Editor.() -> Unit) {
+        localPrefs.edit().apply(block).apply()
+        service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.edit()?.apply(block)?.apply()
+    }
+    LaunchedEffect(service) {
+        service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.edit()?.apply {
+            putBoolean(KEY_HIDE_GLOBAL_GESTURE_HANDLE, localPrefs.getBoolean(KEY_HIDE_GLOBAL_GESTURE_HANDLE, false))
+            putBoolean(KEY_GESTURE_HANDLE_CUSTOM_ENABLED, customEnabled)
+            putInt(KEY_GESTURE_HANDLE_HOOK_MASK, hookMask)
+        }?.apply()
+    }
+    val enabled = !hideGlobal
+    AppPage(tr("手势提示线样式自定义", "手势提示线样式自定义"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI)) { p, scroll ->
+        AppList(p, scroll, 28) {
+            item {
+                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                    SwitchPreference(
+                        title = tr("手势提示线样式自定义", "手势提示线样式自定义"),
+                        checked = customEnabled,
+                        enabled = enabled,
+                        onCheckedChange = { value -> customEnabled = value; edit { putBoolean(KEY_GESTURE_HANDLE_CUSTOM_ENABLED, value) } },
+                    )
+                }
+            }
+            item {
+                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                    ArrowPreference(
+                        title = tr("调整项目", "调整项目"),
+                        enabled = enabled && customEnabled,
+                        onClick = { showAdjustDialog = true },
+                    )
+                    if (hookMask and GESTURE_HANDLE_HOOK_LENGTH != 0) {
+                        ParameterFloatSlide(tr("手势提示线长度", "手势提示线长度"), length, 40f..240f, 120f, enabled = enabled && customEnabled) {
+                            length = it; edit { putFloat(KEY_GESTURE_HANDLE_LENGTH, it) }
+                        }
+                    }
+                    if (hookMask and GESTURE_HANDLE_HOOK_HEIGHT != 0) {
+                        ParameterFloatSlide(tr("手势提示线高度", "手势提示线高度"), height, 1f..24f, 5f, enabled = enabled && customEnabled) {
+                            height = it; edit { putFloat(KEY_GESTURE_HANDLE_HEIGHT, it) }
+                        }
+                    }
+                    if (hookMask and GESTURE_HANDLE_HOOK_BOTTOM != 0) {
+                        ParameterFloatSlide(tr("手势提示线底边距", "手势提示线底边距"), bottom, 0f..48f, 6f, enabled = enabled && customEnabled) {
+                            bottom = it; edit { putFloat(KEY_GESTURE_HANDLE_BOTTOM, it) }
+                        }
+                    }
+                    if (hookMask and GESTURE_HANDLE_HOOK_OPACITY != 0) {
+                        ParameterIntSlide(tr("手势提示线不透明度", "手势提示线不透明度"), opacity, 0..100, "%", 100, enabled = enabled && customEnabled) {
+                            opacity = it; edit { putInt(KEY_GESTURE_HANDLE_OPACITY, it) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    GestureHandleAdjustmentDialog(
+        show = showAdjustDialog,
+        mask = hookMask,
+        onDismiss = { showAdjustDialog = false },
+        onApply = { value -> hookMask = value; edit { putInt(KEY_GESTURE_HANDLE_HOOK_MASK, value) }; showAdjustDialog = false },
+    )
+}
+
+@Composable
+private fun GestureHandleAdjustmentDialog(
+    show: Boolean,
+    mask: Int,
+    onDismiss: () -> Unit,
+    onApply: (Int) -> Unit,
+) {
+    var selected by remember(show, mask) { mutableIntStateOf(mask) }
+    val items = listOf(
+        GESTURE_HANDLE_HOOK_LENGTH to tr("手势提示线长度", "手势提示线长度"),
+        GESTURE_HANDLE_HOOK_HEIGHT to tr("手势提示线高度", "手势提示线高度"),
+        GESTURE_HANDLE_HOOK_BOTTOM to tr("手势提示线底边距", "手势提示线底边距"),
+        GESTURE_HANDLE_HOOK_OPACITY to tr("手势提示线不透明度", "手势提示线不透明度"),
+    )
+    WindowDialog(show = show, onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(tr("调整项目", "调整项目"), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
+            items.forEach { (bit, title) ->
+                val toggle = { selected = if (selected and bit != 0) selected and bit.inv() else selected or bit }
+                Row(Modifier.fillMaxWidth().clickable(onClick = toggle).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(state = if (selected and bit != 0) ToggleableState.On else ToggleableState.Off, onClick = toggle)
+                    Text(title, style = MiuixTheme.textStyles.body1, modifier = Modifier.padding(start = 10.dp))
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GlassDialogButton(onDismiss, Modifier.weight(1f)) { Text(tr("取消", "取消")) }
+                GlassDialogButton({ onApply(selected) }, Modifier.weight(1f), colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("保存", "保存")) }
+            }
+        }
+    }
+}
+
 @Composable
 private fun ShadePresets(
     settings: HookSettings,
@@ -7623,12 +7759,13 @@ OverlayDropdownPreference(
 private fun ShortcutBackgroundColorPreference(
     title: String = tr("\u80cc\u666f\u989c\u8272", "\u80cc\u666f\u989c\u8272"),
     color: Int,
+    enabled: Boolean = true,
     onColorChange: (Int) -> Unit,
 ) {
     var showPicker by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier.fillMaxWidth()
-            .clickable { showPicker = true }
+            .clickable(enabled = enabled) { showPicker = true }
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -7636,6 +7773,7 @@ private fun ShortcutBackgroundColorPreference(
             title,
             modifier = Modifier.weight(1f),
             style = MiuixTheme.textStyles.body1,
+            color = if (enabled) MiuixTheme.colorScheme.onSurface else MiuixTheme.colorScheme.onSurface.copy(alpha = .38f),
         )
         Box(
             Modifier.size(28.dp)
@@ -8220,6 +8358,7 @@ private fun ParameterIntSlide(
     range: IntRange,
     suffix: String = "",
     defaultValue: Int = range.first,
+    enabled: Boolean = true,
     save: (Int) -> Unit,
 ) {
     var current by remember(value) { mutableFloatStateOf(value.toFloat()) }
@@ -8232,6 +8371,7 @@ private fun ParameterIntSlide(
         valueRange = range.first.toFloat()..range.last.toFloat(),
         steps = (range.last - range.first - 1).coerceAtLeast(0),
         defaultValue = defaultValue.toFloat(),
+        enabled = enabled,
     )
 }
 
@@ -8267,6 +8407,7 @@ private fun ParameterFloatSlide(
     value: Float,
     range: ClosedFloatingPointRange<Float>,
     defaultValue: Float = range.start,
+    enabled: Boolean = true,
     save: (Float) -> Unit,
 ) {
     var current by remember(value) { mutableFloatStateOf(value) }
@@ -8279,6 +8420,7 @@ private fun ParameterFloatSlide(
         valueRange = range,
         steps = ((range.endInclusive - range.start) * 100f).toInt() - 1,
         defaultValue = defaultValue,
+        enabled = enabled,
     )
 }
 
