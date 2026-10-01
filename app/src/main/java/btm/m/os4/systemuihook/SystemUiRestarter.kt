@@ -95,6 +95,7 @@ object SystemUiRestarter {
 
 enum class ScopeApplication(val title: String, val packageName: String) {
     SYSTEM_UI("\u7cfb\u7edf\u754c\u9762", "com.android.systemui"),
+    DESKTOP("\u684c\u9762", "com.miui.home"),
     WALLPAPER("\u58c1\u7eb8", "com.miui.miwallpaper"),
     AOD("\u606f\u5c4f\u4e0e\u9501\u5c4f\u7f16\u8f91", "com.miui.aod"),
     SUBSCREEN_CENTER("\u80cc\u5c4f", "com.xiaomi.subscreencenter"),

@@ -25,8 +25,7 @@ import java.util.List;
  *    the expensive one. If that is still a tie, the module does nothing and says so - a wrong
  *    guess here is silent, and silence is what makes it expensive.
  *
- * The constructor hook is the only place `enableScale` can be cleared: MIUI reads that field in
- * its own `setBlurRatio`, and the constructor is where it is still ours to write.
+ * The OEM's enableScale policy is preserved, including while our feature is disabled.
  */
 final class ShadeBlur {
 
@@ -58,20 +57,11 @@ final class ShadeBlur {
     /**
      * Called from the BlurProvider constructor hook.
      *
-     * The zoom-back is removed here and not in the per-frame path: `enableScale` is a field MIUI
-     * reads when it computes its own `setBlurRatio`, so clearing it once at construction removes
-     * the "the whole screen shrinks as you pull" half of the animation for the life of the
-     * provider. The alternative - intercepting `setMiBackgroundBlurScaleRatio` - would be a hook
-     * on the hottest path in the shade to undo a number we can simply not write.
+     * Register identity without changing the provider's scale or pass-window policy.
      */
     static void onProvider(Object provider) {
-        try {
-            Xp.setBooleanField(provider, "enableScale", false);
-        } catch (Throwable t) {
-            // Costs the zoom-back and nothing else: the blur half of the effect still works.
-            Xp.log(TAG + "no enableScale on " + provider.getClass().getName()
-                    + ", the background will still shrink as you pull: " + t);
-        }
+        // Preserve the OEM scale policy. Providers also serve keyguard and control centre,
+        // and constructor-time writes affect them even when the shade feature is disabled.
         synchronized (PROVIDERS) {
             if (!PROVIDERS.contains(provider)) PROVIDERS.add(provider);
         }
@@ -84,6 +74,7 @@ final class ShadeBlur {
         int bestRadius = -1;
         int byView = 0;
         int byCallback = 0;
+        int bestCount = 0;
 
         final StringBuilder table = new StringBuilder();
         synchronized (PROVIDERS) {
@@ -104,6 +95,9 @@ final class ShadeBlur {
                     if (radius > bestRadius) {
                         bestRadius = radius;
                         best = p;
+                        bestCount = 1;
+                    } else if (radius == bestRadius) {
+                        bestCount++;
                     }
                 }
             }
@@ -126,11 +120,11 @@ final class ShadeBlur {
             return;
         }
 
-        if (byCallback == 0) {
-            if (sWindow != null) return;
-            Xp.log(TAG + "no window-level blur provider found - the shade will not lag the "
-                    + "finger. " + PROVIDERS.size() + " providers seen, none with a non-null "
-                    + "onSlowdownBlurChanged and none whose view is the shade root.");
+        if (byCallback == 0 || bestCount != 1 || root == null || byView > 1) {
+            sWindow = null;
+            Xp.log(TAG + "window blur provider unresolved or ambiguous: root=" + (root != null)
+                    + " rootMatches=" + byView + " callbacks=" + byCallback
+                    + " largestRadiusMatches=" + bestCount + "; keeping OEM blur");
             return;
         }
         if (sWindow == best) return;

@@ -19,12 +19,13 @@ android {
     compileSdk = 37
     ndkPath = rootProject.file(".build-tmp/android-ndk-r28c").absolutePath
 
+
     defaultConfig {
         applicationId = "btm.m.os4.systemuihook"
         minSdk = 35
         targetSdk = 37
-        versionCode = 1010404
-        versionName = "1.1.4 RC3"
+        versionCode = 1010405
+        versionName = "1.1.4 RC4"
         buildConfigField("String", "BUILD_DATE", "\"$buildDate\"")
 
     }

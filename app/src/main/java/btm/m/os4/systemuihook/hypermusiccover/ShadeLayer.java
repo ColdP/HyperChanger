@@ -69,6 +69,175 @@ final class ShadeLayer {
     private static volatile int sMode = 0;
     /** Whether the shade is currently ours. Read by the setBlurRatio hook, every frame. */
     private static volatile boolean sEffectOn;
+    private static volatile boolean sIosEnabled;
+    private static volatile int sIosWallpaper;
+    private static final IosShadeState IOS = new IosShadeState();
+    private static boolean sIosRawDriver;
+    private static boolean sIosSwitchDriver;
+    private static android.animation.ValueAnimator sIosSettle;
+    private static float sIosSettleTarget;
+
+    static void onRawControllerAvailable() {
+        sIosRawDriver = true;
+    }
+
+    static boolean iosEnabled() {
+        return sIosEnabled;
+    }
+
+    static void onRawExpansion(float height, float threshold, boolean tracking, boolean animate) {
+        if (!sIosEnabled || IOS.controlCenter || IOS.switching) return;
+        float target = IOS.gestureTarget(height, threshold, tracking);
+        if (tracking) {
+            cancelIosSettle();
+            IOS.move(target);
+            applyIosProgress();
+            return;
+        }
+        // Only the release is animated. A new drag cancels this before its first write.
+        if (sIosSettle != null && sIosSettleTarget == target) return;
+        cancelIosSettle();
+        if (Math.abs(IOS.progress - target) < 0.001f) {
+            IOS.move(target);
+            applyIosProgress();
+            return;
+        }
+        android.animation.ValueAnimator settle = android.animation.ValueAnimator.ofFloat(IOS.progress, target);
+        settle.setDuration(Math.max(180L, (long) (380L * Math.abs(IOS.progress - target))));
+        // Start moving immediately when the finger releases, without an ease-in pause.
+        settle.setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f));
+        sIosSettle = settle;
+        sIosSettleTarget = target;
+        settle.addUpdateListener(animation -> {
+            if (sIosSettle != animation) return;
+            IOS.move((Float) animation.getAnimatedValue());
+            applyIosProgress();
+        });
+        settle.start();
+    }
+
+    private static void cancelIosSettle() {
+        android.animation.ValueAnimator old = sIosSettle;
+        sIosSettle = null;
+        if (old != null) old.cancel();
+    }
+
+    static void onControlCenterAppearance(boolean visible) {
+        if (sIosSwitchDriver) return;
+        IOS.controlCenter(visible);
+        if (visible) {
+            cancelIosSettle();
+            hideIosLayer();
+        }
+    }
+
+    static void onNotificationAppearance() {
+        if (sIosSwitchDriver) return;
+        boolean returning = IOS.controlCenter;
+        IOS.notification();
+        if (sIosEnabled && returning) {
+            cancelIosSettle();
+            IOS.move(1f);
+            applyIosProgress();
+        }
+    }
+
+    static void onNotificationHidden() {
+        if (IOS.switching) return;
+        cancelIosSettle();
+        IOS.gestureTarget(0f, 1f, false);
+        IOS.move(0f);
+        if (sIosEnabled) hideIosLayer();
+    }
+
+    static void onSwitchDriverAvailable() {
+        sIosSwitchDriver = true;
+    }
+
+    /** Native progress is 0 for control centre, 1 for notifications. Appearance callbacks
+     * also fire when the opposite panel collapses, so they cannot determine ownership. */
+    static void onSwitchProgress(float progress, boolean switching) {
+        if (!IOS.switchProgress(progress, switching)) return;
+        if (!sIosEnabled) return;
+        cancelIosSettle();
+        applyIosProgress();
+    }
+
+    private static void hideIosLayer() {
+        sEffectOn = false;
+        IosShadeMaterial.setActive(false, sRoot);
+        if (sFrame != null) {
+            sFrame.setAlpha(0f);
+            // Keep the measured sheet in the tree so the next drag requires no layout pass.
+            sFrame.setVisibility(View.INVISIBLE);
+            sFrame.setTranslationY(0f);
+        }
+        sLastAlpha = Float.NaN;
+    }
+
+    private static void applyIosProgress() {
+        if (sFrame == null) return;
+        if (IOS.controlCenter || IOS.progress <= 0f || IOS.switchFraction <= 0f || !effectActive()) {
+            hideIosLayer();
+            return;
+        }
+        ensurePlacement();
+        syncShown();
+        float visual = IOS.progress * IOS.switchFraction;
+        // Both effects are driven by the finger/native switch animator, without another spring.
+        float opacity = visual * visual * (3f - 2f * visual);
+        sFrame.setAlpha(opacity);
+        sFrame.setVisibility(View.VISIBLE);
+        sEffectOn = true;
+        int blur = Math.round(28f * sFrame.getResources().getDisplayMetrics().density * (1f - visual));
+        if (sWp != null && sLastWpBlur != blur) {
+            sWp.setRenderEffect(blur == 0 ? null : android.graphics.RenderEffect.createBlurEffect(
+                    blur, blur, android.graphics.Shader.TileMode.CLAMP));
+            sLastWpBlur = blur;
+        }
+        applyCurtain(IOS.progress);
+        IosShadeMaterial.setActive(true, sRoot);
+    }
+    private static android.content.SharedPreferences sPreferences;
+    private static final android.content.SharedPreferences.OnSharedPreferenceChangeListener PREFS_CHANGED =
+            (prefs, key) -> {
+                if (btm.m.os4.systemuihook.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_CENTER.equals(key)
+                        || btm.m.os4.systemuihook.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_WALLPAPER.equals(key)) {
+                    UI.post(() -> readPreferences(prefs));
+                }
+            };
+
+    static void bindPreferences(android.content.SharedPreferences prefs) {
+        sPreferences = prefs;
+        readPreferences(prefs);
+        prefs.registerOnSharedPreferenceChangeListener(PREFS_CHANGED);
+    }
+
+    private static void readPreferences(android.content.SharedPreferences prefs) {
+        boolean enabled = prefs.getBoolean(
+                btm.m.os4.systemuihook.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_CENTER, false);
+        int source = Math.max(0, Math.min(1, prefs.getInt(
+                btm.m.os4.systemuihook.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_WALLPAPER, 0)));
+        if (enabled == sIosEnabled && source == sIosWallpaper) return;
+        reset();
+        if (sEffectOn) Main.setCardBlurActive(false);
+        sEffectOn = false;
+        sIosEnabled = enabled;
+        sIosWallpaper = source;
+        Main.invalidateShadeWallpaper();
+        if (enabled) {
+            Main.requestShadeWallpaper();
+            if (sFrame != null) {
+                ensurePlacement();
+                sFrame.setVisibility(View.INVISIBLE);
+            }
+        }
+        if (sRoot != null) applyProgress(sExpansion);
+    }
+
+    static boolean lockWallpaperSelected() {
+        return sIosEnabled && sIosWallpaper == 0;
+    }
 
     /**
      * Below this fraction nothing is drawn at all. Flyme's number, and the reason a pull-down
@@ -137,12 +306,25 @@ final class ShadeLayer {
     static void onWindowRoot(Object view) {
         if (!(view instanceof ViewGroup)) return;
         final ViewGroup root = (ViewGroup) view;
+        if (sRoot != null && sRoot != root) {
+            reset();
+            if (sEffectOn) Main.setCardBlurActive(false);
+            sEffectOn = false;
+            if (sFrame != null && sFrame.getParent() instanceof ViewGroup) {
+                ((ViewGroup) sFrame.getParent()).removeView(sFrame);
+            }
+            sFrame = null;
+            sWp = null;
+            sShown = null;
+            sPanel = null;
+        }
         sRoot = root;
+        sCornerRadius = -1f;
         sPlacedAt = -1;
         root.post(new Runnable() {
             @Override
             public void run() {
-                inject(root);
+                if (sRoot == root) inject(root);
             }
         });
     }
@@ -175,6 +357,11 @@ final class ShadeLayer {
             // The shade window outlives a track change but is rebuilt on a SystemUI restart, so
             // by the time this runs there may already be a picture waiting.
             syncShown();
+            if (sIosEnabled) {
+                ensurePlacement();
+                frame.setVisibility(View.INVISIBLE);
+                applyIosProgress();
+            }
             Xp.log(TAG + "cover layer built for " + root.getClass().getName()
                     + " (" + root.getChildCount() + " children)");
         } catch (Throwable t) {
@@ -278,6 +465,13 @@ final class ShadeLayer {
         // Kept for the touch handler, which has to read it at the instant a finger lifts - by
         // which time the next frame may never arrive.
         sExpansion = f;
+        if (sIosEnabled) {
+            if (!sIosRawDriver) {
+                IOS.move(f);
+                applyIosProgress();
+            }
+            return;
+        }
 
         if (!sDriverAlive) {
             sDriverAlive = true;
@@ -329,8 +523,14 @@ final class ShadeLayer {
      * is precisely the state a shade pull-down over the desktop is in.
      */
     private static boolean effectActive() {
-        if (sMode < 0 || sMode > 2) return false;
+        if (!Main.screenOnCached()) return false;
         if (Main.keyguardLocked()) return false;
+        if (sIosEnabled) {
+            // Until an eligible wallpaper is ready, keep the platform background intact.
+            if (sWallpaper == null) Main.requestShadeWallpaper();
+            return sWallpaper != null && !sWallpaper.isRecycled();
+        }
+        if (sMode < 0 || sMode > 2) return false;
         // The album cover is the lockscreen wallpaper, never an unlocked notification-centre
         // background. The imported shade experiment normally reveals sArt in mode 0; keeping
         // it out here prevents an active music session from replacing the desktop's shade
@@ -348,6 +548,10 @@ final class ShadeLayer {
      * together would also mean a null bitmap silently turned the whole feature off.
      */
     private static android.graphics.Bitmap background() {
+        if (sIosEnabled) {
+            if (sWallpaper == null) Main.requestShadeWallpaper();
+            return sWallpaper;
+        }
         if (Main.coverModeOn() || Main.releasing()) return sArt;
         // Modes 1 and 2 differ here and only here.
         if (sMode != 1) return null;
@@ -374,6 +578,7 @@ final class ShadeLayer {
         @Override
         public void run() {
             syncShown();
+            if (sIosEnabled) applyIosProgress();
         }
     };
 
@@ -709,6 +914,10 @@ final class ShadeLayer {
     }
 
     private static void applyProgress(float expansion) {
+        if (sIosEnabled) {
+            applyIosProgress();
+            return;
+        }
         final FrameLayout frame = sFrame;
         if (frame == null) return;
 
@@ -756,15 +965,15 @@ final class ShadeLayer {
         // The cards' material follows the same edge the curtain does, and for the same reason:
         // this is the only moment anything in the module knows the notification centre is up.
         if (on != sEffectOn) {
-            Main.setCardBlurActive(on);
+            Main.setCardBlurActive(on && !sIosEnabled);
             // Only with a picture: the shift exists to uncover the cover, and shifting the whole
             // shade's content for a pull-down that has nothing to reveal is a change with no
             // reason behind it. background() is read here rather than per frame, so a mode-1
             // wallpaper that has not loaded yet costs one request on this edge and nothing more.
-            Main.setShadeContentShift(on && background() != null);
+            Main.setShadeContentShift(on && !sIosEnabled && background() != null);
             // Not gated on a picture, unlike the content push: the header offsets are about where
             // the control centre's own text sits, not about uncovering anything.
-            ShadeHeader.arm(on);
+            ShadeHeader.arm(on && !sIosEnabled);
             // The gesture is over the moment the curtain is asked for nothing: the frames after
             // this are the blur spring settling, not the pull.
             if (!on) logFrameCost();
@@ -782,6 +991,7 @@ final class ShadeLayer {
             if (frame.getVisibility() != View.GONE) {
                 frame.setVisibility(View.GONE);
                 frame.setAlpha(0f);
+                sLastAlpha = Float.NaN;
                 frame.setClipBounds(null);
                 if (sWp != null) sWp.setRenderEffect(null);
                 sLastWpBlur = -1;
@@ -790,7 +1000,7 @@ final class ShadeLayer {
             return;
         }
 
-        if (sGateOn) ShadeGate.apply(panelView(), f);
+        if (!sIosEnabled && sGateOn) ShadeGate.apply(panelView(), f);
 
         final android.graphics.Bitmap bg = background();
         if (bg != null) {
@@ -808,7 +1018,8 @@ final class ShadeLayer {
                 // is already at maximum and then relaxing.
                 sBlurSpring.snapTo(blurTarget(f));
             }
-            final float alpha = f >= sAlphaEnd ? 1f : (f - sDeadZone) / (sAlphaEnd - sDeadZone);
+            final float alpha = sIosEnabled ? 1f :
+                    (f >= sAlphaEnd ? 1f : (f - sDeadZone) / (sAlphaEnd - sDeadZone));
             if (alpha != sLastAlpha) {
                 sLastAlpha = alpha;
                 frame.setAlpha(alpha);
@@ -866,7 +1077,9 @@ final class ShadeLayer {
      */
     private static void applyPictureBlur(float f) {
         int r;
-        if (f <= 0f) {
+        if (sIosEnabled) {
+            r = (int) (24f * (1f - f));
+        } else if (f <= 0f) {
             r = 0;
         } else if (f <= sWpSharpStart) {
             r = (int) sWpBlur;
@@ -903,6 +1116,18 @@ final class ShadeLayer {
         if (maxH <= 0) return;
 
         sCurtainFraction = cf;
+        if (sIosEnabled) {
+            // Translate one complete sheet with the platform expansion. Its bottom edge
+            // stays at the finger while the wallpaper retains its full-screen geometry.
+            float offset = -maxH * (1f - cf);
+            if (frame.getTranslationY() != offset) frame.setTranslationY(offset);
+            if (sCurtainLine != maxH) {
+                sCurtainLine = maxH;
+                frame.invalidateOutline();
+            }
+            if (sWp != null && sWp.getTranslationY() != 0f) sWp.setTranslationY(0f);
+            return;
+        }
         final int line = (int) (maxH * cf);
         // Written only when the value actually moves, and that is not tidiness: this function is
         // reached TWICE on every frame while a finger is down - once from the curtain spring's own
@@ -1016,6 +1241,10 @@ final class ShadeLayer {
             Xp.log(TAG + "no corner radius from the insets, the curtain line will run to the "
                     + "screen edge: " + t);
         }
+        if (r <= 0f) {
+            // First expansion can precede insets dispatch; do not cache zero forever.
+            return sRoot == null ? 0f : 28f * sRoot.getResources().getDisplayMetrics().density;
+        }
         sCornerRadius = r;
         Xp.log(TAG + "display corner radius = " + r);
         return r;
@@ -1089,6 +1318,11 @@ final class ShadeLayer {
      */
     static void reset() {
         sResets++;
+        cancelIosSettle();
+        IOS.clear();
+        IosShadeMaterial.setActive(false, sRoot);
+        if (sEffectOn) Main.setCardBlurActive(false);
+        sEffectOn = false;
         final FrameLayout frame = sFrame;
         final ImageView wp = sWp;
         // The write guards in applyCurtain are invalidated here, not left at whatever the last
@@ -1113,6 +1347,7 @@ final class ShadeLayer {
         Main.setShadeContentShift(false);
         ShadeHeader.disarm();
         if (frame != null) {
+            frame.setTranslationY(0f);
             frame.setAlpha(0f);
             // The outline goes with it: a stale rounded rect left on a GONE layer is one the next
             // pull-down would be clipped to for the frame before the first applyCurtain().
@@ -1136,7 +1371,7 @@ final class ShadeLayer {
      * is written, so the two never race.
      */
     static boolean driving() {
-        return sEffectOn;
+        return sEffectOn && !sIosEnabled;
     }
 
     /** The blur spring's current value. */
@@ -1348,7 +1583,7 @@ final class ShadeLayer {
     private static float visualFraction(float expansion) {
         final ShadeSpring curtain = sCurtainSpring;
         if (curtain == null) return expansion;
-        if (!sFollowTouch) {
+        if (sIosEnabled || !sFollowTouch) {
             // Snapped, not sprung: a spring here would be a lag behind the panel, and the whole
             // point of this path is that the two agree.
             sSrc = "panel";

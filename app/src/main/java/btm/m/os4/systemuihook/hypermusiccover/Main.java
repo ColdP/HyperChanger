@@ -746,6 +746,26 @@ public class Main extends XposedModule {
         }
         if (!"com.android.systemui".equals(pkg)) return;
 
+        IosShadeMaterial.install();
+        try {
+            Class<?> glass = Xp.findClass(
+                    "com.android.systemui.statusbar.notification.style.vieweffect.MediaViewGlassEffect", param.getDefaultClassLoader());
+            Xp.hookAll(glass, "apply", chain -> {
+                // Enroll before the native recipe so its setters are redirected as well.
+                if (!chain.getArgs().isEmpty() && chain.getArgs().get(0) instanceof View)
+                    IosShadeMaterial.registerMedia((View) chain.getArgs().get(0));
+                return chain.proceed();
+            });
+        } catch (Throwable error) {
+            Xp.log("[IOSShade] media glass hook unavailable: " + error);
+        }
+
+        try {
+            ShadeLayer.bindPreferences(getRemotePreferences("hyper_system_ui_hook"));
+        } catch (Throwable t) {
+            Xp.log(TAG + "notification centre preferences unavailable: " + t);
+        }
+
         final ClassLoader cl = param.getDefaultClassLoader();
         Xp.log(TAG + "loaded into SystemUI");
 
@@ -1176,7 +1196,63 @@ public class Main extends XposedModule {
                     + "nothing will animate it: " + t);
         }
 
-        // The blur half: kill the background zoom, then drive the window blur from the spring.
+        // The header expansion is animated even while the native controller is tracking a
+        // finger. Read the raw height independently for the iOS wallpaper sheet.
+        try {
+            Class<?> expand = Xp.findClass("com.android.systemui.shade.NotificationPanelExpandController", cl);
+            Xp.hookAll(expand, "notifyExpandHeightChanged", chain -> {
+                Object result = chain.proceed();
+                java.util.List<Object> args = chain.getArgs();
+                if (args.size() == 4 && ShadeLayer.iosEnabled()) {
+                    Object tracking = Xp.callMethod(chain.getThisObject(), "getTracking");
+                    boolean dragging = Boolean.TRUE.equals(Xp.callMethod(tracking, "getValue"));
+                    ShadeLayer.onRawExpansion(((Number) args.get(0)).floatValue(),
+                            ((Number) args.get(1)).floatValue(), dragging, Boolean.TRUE.equals(args.get(3)));
+                }
+                return result;
+            });
+            Xp.hookAll(expand, "setVisible$2", chain -> {
+                Object result = chain.proceed();
+                if (Boolean.FALSE.equals(chain.getArgs().get(0))) ShadeLayer.onNotificationHidden();
+                return result;
+            });
+            ShadeLayer.onRawControllerAvailable();
+            Xp.log("[IOSShade] raw notification height and visibility hooked");
+        } catch (Throwable error) {
+            Xp.log("[IOSShade] raw driver unavailable; using native expansion: " + error);
+        }
+        try {
+            Class<?> switcher = Xp.findClass("com.miui.systemui.shade.ShadeSwitchControllerImpl", cl);
+            io.github.libxposed.api.XposedInterface.Hooker switchProgress = chain -> {
+                Object result = chain.proceed();
+                Object controller = chain.getThisObject();
+                Object animator = Xp.getObjectField(controller, "progressAnimator");
+                ShadeLayer.onSwitchProgress(((Number) Xp.getObjectField(animator, "_progress")).floatValue(),
+                        Boolean.TRUE.equals(Xp.getObjectField(controller, "switching")));
+                return result;
+            };
+            Xp.hookAll(switcher, "performProgressChanged", switchProgress);
+            Xp.hookAll(switcher, "setSwitching", switchProgress);
+            ShadeLayer.onSwitchDriverAvailable();
+        } catch (Throwable error) {
+            Xp.log("[IOSShade] native switch progress unavailable: " + error);
+        }
+        try {
+            Class<?> injector = Xp.findClass("com.android.systemui.shade.NotificationPanelViewControllerInjector", cl);
+            Xp.hookAll(injector, "onControlCenterAppearChanged", chain -> {
+                ShadeLayer.onControlCenterAppearance(Boolean.TRUE.equals(chain.getArgs().get(0)));
+                return chain.proceed();
+            });
+            Xp.hookAll(injector, "onNotificationAppearChanged", chain -> {
+                if (Boolean.TRUE.equals(chain.getArgs().get(0))) ShadeLayer.onNotificationAppearance();
+                return chain.proceed();
+            });
+            Xp.log("[IOSShade] notification/control-centre ownership hooked");
+        } catch (Throwable error) {
+            Xp.log("[IOSShade] panel ownership hooks unavailable: " + error);
+        }
+
+        // The legacy shade experiment's spring only; the iOS sheet keeps native window blur.
         //
         // Two hooks on the same class, each with its own catch, because they cost different
         // things: without the constructor one the picture still shrinks as it is pulled (a
@@ -1648,6 +1724,7 @@ public class Main extends XposedModule {
         }
         sReceiverRegistered = true;
         sAppCtx = ctx;
+        if (ShadeLayer.iosEnabled()) requestShadeWallpaper();
         BroadcastReceiver r = new BroadcastReceiver() {
             @Override
             public void onReceive(Context c, Intent i) {
@@ -2168,6 +2245,7 @@ public class Main extends XposedModule {
                 if (Intent.ACTION_SCREEN_ON.equals(a)) sScreenOn = true;
                 else if (Intent.ACTION_SCREEN_OFF.equals(a)) {
                     sScreenOn = false;
+                    ShadeLayer.reset();
                     // A tap still waiting out its double tap window was aimed at a screen that
                     // is gone; whatever was going to cancel it cannot arrive now.
                     cancelPendingTap("screen off");
@@ -6247,37 +6325,52 @@ public class Main extends XposedModule {
     private static volatile Bitmap sShadeWallpaperRetired;
     /** One load in flight at a time; the shade asks on every frame it has no picture. */
     private static volatile boolean sShadeWpLoading;
+    private static volatile int sShadeWpGeneration;
+    private static volatile long sShadeWpRetryAt;
 
     /** Asked for by the shade layer when mode 1 wants a background and has none. */
     static void requestShadeWallpaper() {
         final Context ctx = sAppCtx;
         if (ctx == null || sShadeWpLoading) return;
+        if (android.os.SystemClock.uptimeMillis() < sShadeWpRetryAt) return;
+        final boolean lock = ShadeLayer.lockWallpaperSelected();
+        final int generation = sShadeWpGeneration;
         sShadeWpLoading = true;
         worker().post(new Runnable() {
             @Override
             public void run() {
                 Bitmap b = null;
                 try {
-                    String kind = wallpaperKind(ctx, "home");
+                    String kind = wallpaperKind(ctx, lock ? "lock" : "home");
                     if (kind == null || KIND_IMAGE.equals(kind)) {
                         android.app.WallpaperManager wm = (android.app.WallpaperManager)
                                 ctx.getSystemService(Context.WALLPAPER_SERVICE);
-                        if (wm != null) b = homeWallpaper(wm);
+                        if (wm != null) b = shadeWallpaper(wm, lock);
                     } else {
-                        // A live home wallpaper is not a picture anything can hold. homeWallpaper
-                        // would hand back a still of one frame, which is a lie the user sees as
-                        // the shade revealing something that is not on their screen.
-                        Xp.log(TAG + "shade wallpaper: the home wallpaper is " + kind
-                                + ", not an image - mode 1 will reveal nothing rather than a "
-                                + "still of it");
+                        Xp.log(TAG + "shade wallpaper: selected " + (lock ? "lock" : "home")
+                                + " wallpaper is " + kind + "; keeping the platform background");
                     }
                 } catch (Throwable t) {
                     Xp.log(TAG + "shade wallpaper load failed: " + t);
                 }
-                sShadeWpLoading = false;
-                if (b == null) return;
-                setShadeWallpaper(b);
-                Xp.log(TAG + "shade wallpaper loaded " + b.getWidth() + "x" + b.getHeight());
+                final Bitmap result = b;
+                main().post(new Runnable() {
+                    @Override
+                    public void run() {
+                        // A source switch or wallpaper broadcast invalidates any pending decode.
+                        sShadeWpLoading = false;
+                        if (generation != sShadeWpGeneration) {
+                            if (result != null && !result.isRecycled()) result.recycle();
+                            return;
+                        }
+                        if (result == null) {
+                            sShadeWpRetryAt = android.os.SystemClock.uptimeMillis() + 5000L;
+                            return;
+                        }
+                        setShadeWallpaper(result);
+                        Xp.log(TAG + "shade wallpaper loaded " + result.getWidth() + "x" + result.getHeight());
+                    }
+                });
             }
         });
     }
@@ -6303,7 +6396,27 @@ public class Main extends XposedModule {
 
     /** The wallpaper is not the one we cached any more. */
     static void invalidateShadeWallpaper() {
+        sShadeWpGeneration++;
+        sShadeWpRetryAt = 0L;
         setShadeWallpaper(null);
+    }
+
+    @SuppressLint("MissingPermission")
+    private static Bitmap shadeWallpaper(android.app.WallpaperManager wm, boolean lock) throws Exception {
+        android.os.ParcelFileDescriptor file = wm.getWallpaperFile(lock
+                ? android.app.WallpaperManager.FLAG_LOCK : android.app.WallpaperManager.FLAG_SYSTEM);
+        // A shared home/lock wallpaper has no separate lock file.
+        if (file == null && lock) file = wm.getWallpaperFile(android.app.WallpaperManager.FLAG_SYSTEM);
+        if (file == null) {
+            Bitmap borrowed = homeWallpaper(wm);
+            // Cache retirement must never recycle WallpaperManager's own bitmap.
+            return borrowed == null ? null : borrowed.copy(Bitmap.Config.ARGB_8888, false);
+        }
+        try (java.io.InputStream in = new android.os.ParcelFileDescriptor.AutoCloseInputStream(file)) {
+            android.graphics.BitmapFactory.Options options = new android.graphics.BitmapFactory.Options();
+            options.inPreferredConfig = Bitmap.Config.ARGB_8888;
+            return android.graphics.BitmapFactory.decodeStream(in, null, options);
+        }
     }
 
     /**
@@ -9498,12 +9611,14 @@ public class Main extends XposedModule {
     }
 
     /**
-     * The keyguard is actually in front. The clock container is the test - only the keyguard
-     * shows it - and it is what keeps the shade's copy of this same card view out of all this.
+     * Require both the system lock state and a visible clock. The shared clock can also
+     * be visible during an unlocked notification pull-down.
      */
     private static boolean onKeyguardNow() {
         View c = sContainer;
-        return c != null && c.isShown();
+        // The shared clock can be shown during an unlocked shade expansion.
+        // Visibility alone must never authorize writes to the live lock-wallpaper surfaces.
+        return keyguardShowing() && c != null && c.isShown();
     }
 
     /**

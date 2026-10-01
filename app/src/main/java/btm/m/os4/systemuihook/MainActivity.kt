@@ -263,7 +263,7 @@ private enum class PageId {
     SHADE_CONTROL_CENTER_ELEMENTS,
     SHADE_NOTIFICATION_BACKGROUND,
     SHADE_CONTROL_CENTER_BACKGROUND,
-    GESTURE_HANDLE_STYLE,
+    GESTURE_HANDLE_STYLE, DESKTOP,
     ISLAND, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
@@ -352,6 +352,8 @@ private fun Root(
     var musicWhitelist by remember { mutableStateOf(musicStore.apps) }
     val screenRecorderStore = remember(context) { ScreenRecorderSettingsStore(context) }
     var screenRecorder by remember { mutableStateOf(screenRecorderStore.settings) }
+    val dockStore = remember(context) { DockSettingsStore(context) }
+    var dockSettings by remember { mutableStateOf(dockStore.settings) }
     var pendingRestartTargets by remember { mutableStateOf(emptySet<ScopeApplication>()) }
     val markRestartTargets: (Set<ScopeApplication>) -> Unit = { targets ->
         if (targets.isNotEmpty()) pendingRestartTargets = pendingRestartTargets + targets
@@ -523,6 +525,7 @@ private fun Root(
         val previousDeviceProfile = deviceProfiles.settings
         val previousAppearance = appearances.settings
         val previousMusicWhitelist = musicStore.apps
+        val previousDockSettings = dockStore.settings
         runCatching {
             ModulePresetCodec.import(context, service, payload)
             hooks.reload()
@@ -530,11 +533,13 @@ private fun Root(
             deviceProfiles.reload()
             appearances.reload()
             musicStore.reload()
+            dockStore.reload()
             settings = hooks.settings
             cameraSettings = cameras.settings
             deviceProfile = deviceProfiles.settings
             appearance = appearances.settings
             musicWhitelist = musicStore.apps
+            dockSettings = dockStore.settings
         }.onSuccess {
             markRestartTargets(suggestedScopesForHookChange(previousSettings, settings))
             if (previousCameras != cameraSettings) markRestartTargets(
@@ -546,6 +551,7 @@ private fun Root(
             if (previousMusicWhitelist != musicWhitelist) {
                 markRestartTargets(setOf(ScopeApplication.SUBSCREEN_CENTER))
             }
+            if (previousDockSettings != dockSettings) markRestartTargets(setOf(ScopeApplication.DESKTOP))
             Toast.makeText(context, tr("预设已导入", "预设已导入"), Toast.LENGTH_SHORT).show()
         }.onFailure {
             Toast.makeText(context, tr("导入失败", "导入失败"), Toast.LENGTH_SHORT).show()
@@ -604,11 +610,13 @@ private fun Root(
             deviceProfiles.syncRemote(it)
             appearances.syncRemote(it)
             musicStore.syncRemote(it)
+            dockStore.syncRemote(it)
             settings = hooks.settings
             cameraSettings = cameras.settings
             deviceProfile = deviceProfiles.settings
             appearance = appearances.settings
             musicWhitelist = musicStore.apps
+            dockSettings = dockStore.settings
         }
     }
     MiuixTheme(controller = controller) {
@@ -655,12 +663,19 @@ private fun Root(
             )
         } else {
         Shell(
-            settings, cameraSettings, deviceProfile, appearance, musicWhitelist, screenRecorder, service,
+            settings, cameraSettings, deviceProfile, appearance, musicWhitelist, screenRecorder,
+            dockSettings, service,
             update = { transform ->
                 val before = hooks.settings
                 hooks.update(service, transform)
                 settings = hooks.settings
                 markRestartTargets(suggestedScopesForHookChange(before, settings))
+            },
+            updateDock = { transform ->
+                val before = dockStore.settings
+                dockStore.update(service, transform)
+                dockSettings = dockStore.settings
+                if (before != dockSettings) markRestartTargets(setOf(ScopeApplication.DESKTOP))
             },
             updateCamera = { transform ->
                 val before = cameras.settings
@@ -821,8 +836,10 @@ private fun Shell(
     appearance: SettingsAppearanceSettings,
     musicWhitelist: Set<String>,
     screenRecorder: ScreenRecorderSettings,
+    dockSettings: DockSettings,
     service: XposedService?,
     update: ((HookSettings) -> HookSettings) -> Unit,
+    updateDock: ((DockSettings) -> DockSettings) -> Unit,
     updateCamera: ((CameraSettings) -> CameraSettings) -> Unit,
     updateDeviceProfile: ((DeviceProfileSettings) -> DeviceProfileSettings) -> Unit,
     updateAppearance: ((SettingsAppearanceSettings) -> SettingsAppearanceSettings) -> Unit,
@@ -948,7 +965,8 @@ private fun Shell(
             LocalPageBackSuppressed provides if (isTop) ({ value -> suppressPageBack = value }) else ({ }),
         ) {
             Detail(
-                detailPage, settings, cameras, deviceProfile, appearance, musicWhitelist, update, updateCamera,
+                detailPage, settings, cameras, deviceProfile, appearance, musicWhitelist, dockSettings,
+                update, updateDock, updateCamera,
                 updateDeviceProfile, updateAppearance, updateMusicWhitelist, presetActions,
                 openPage = openNestedPage, back = dismissPage,
                 onDebugMode = { showDebug = true }, captcha = captcha,
@@ -2006,6 +2024,7 @@ private fun RestartScopesPage(
     var hiddenSuggestionTargets by remember { mutableStateOf(emptySet<ScopeApplication>()) }
     val systemUiTargets = listOf(
         ScopeApplication.SYSTEM_UI,
+        ScopeApplication.DESKTOP,
         ScopeApplication.WALLPAPER,
         ScopeApplication.AOD,
         ScopeApplication.THEME_MANAGER,
@@ -2404,6 +2423,47 @@ private fun ScopeRestartCheckboxes(
                 style = MiuixTheme.textStyles.body1,
                 modifier = Modifier.padding(start = 10.dp),
             )
+        }
+    }
+}
+
+@Composable
+private fun Desktop(
+    settings: DockSettings,
+    update: ((DockSettings) -> DockSettings) -> Unit,
+    back: () -> Unit,
+) = AppPage(tr("桌面", "桌面"), back, restartScopes = setOf(ScopeApplication.DESKTOP)) { padding, scroll ->
+    AppList(padding, scroll) {
+        item {
+            Group(tr("Dock栏", "Dock栏")) {
+                SwitchPreference(
+                    title = tr("启用 Dock栏", "启用 Dock栏"),
+                    checked = settings.enabled,
+                    onCheckedChange = { enabled -> update { it.copy(enabled = enabled) } },
+                )
+            }
+        }
+        item {
+            AnimatedVisibility(
+                visible = settings.enabled,
+                enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+            ) {
+                Group(tr("柔光玻璃", "柔光玻璃")) {
+                    ParameterIntSlide(tr("背景不透明度", "背景不透明度"), settings.glassOpacity, 0..100, "%", defaultValue = 85) { value ->
+                        update { it.copy(glassOpacity = value) }
+                    }
+                    ParameterIntSlide(tr("背景模糊度", "背景模糊度"), settings.glassBackdropBlur, 0..100, " px", defaultValue = 40) { value ->
+                        update { it.copy(glassBackdropBlur = value) }
+                    }
+                    ParameterIntSlide(tr("玻璃模糊半径", "玻璃模糊半径"), settings.glassBlur, 0..100, " px", defaultValue = 30) { value ->
+                        update { it.copy(glassBlur = value) }
+                    }
+                    ParameterIntSlide(tr("柔光强度", "柔光强度"), settings.glassSoftLight, 0..100, "%", defaultValue = 50) { value ->
+                        update { it.copy(glassSoftLight = value) }
+                    }
+                }
+            }
         }
     }
 }
@@ -3268,7 +3328,9 @@ private fun Detail(
     deviceProfile: DeviceProfileSettings,
     appearance: SettingsAppearanceSettings,
     musicWhitelist: Set<String>,
+    dockSettings: DockSettings,
     update: ((HookSettings) -> HookSettings) -> Unit,
+    updateDock: ((DockSettings) -> DockSettings) -> Unit,
     updateCamera: ((CameraSettings) -> CameraSettings) -> Unit,
     updateDeviceProfile: ((DeviceProfileSettings) -> DeviceProfileSettings) -> Unit,
     updateAppearance: ((SettingsAppearanceSettings) -> SettingsAppearanceSettings) -> Unit,
@@ -3307,6 +3369,7 @@ private fun Detail(
 ) {
     when (page) {
         PageId.SHADE -> Shade(settings, update, presetActions, openPage, back)
+        PageId.DESKTOP -> Desktop(dockSettings, updateDock, back)
         PageId.SHADE_PRESETS -> ShadePresets(settings, update, presetActions, back)
         PageId.SHADE_NOTIFICATION_ELEMENTS -> MaterialOverrideAdvancedPage(
             tr("通知元素", "通知元素"), settings.notificationElementsMaterial, false,
@@ -4102,6 +4165,9 @@ private fun Shade(
     val context = LocalContext.current
     val service by HookApplication.service.collectAsStateWithLifecycle()
     val gesturePrefs = remember(context) { context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE) }
+    val iosStore = remember(context) { IosNotificationCenterSettingsStore(context) }
+    var iosSettings by remember { mutableStateOf(iosStore.settings) }
+    LaunchedEffect(service) { service?.let(iosStore::syncRemote) }
     var hideGlobalGestureHandle by remember { mutableStateOf(gesturePrefs.getBoolean(KEY_HIDE_GLOBAL_GESTURE_HANDLE, false)) }
     LaunchedEffect(service) {
         service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.edit()
@@ -4145,6 +4211,30 @@ private fun Shade(
             ArrowPreference(title = tr("\u9884\u8bbe", "\u9884\u8bbe"), onClick = { openPage(PageId.SHADE_PRESETS) })
             ArrowPreference(title = tr("\u4fdd\u5b58\u5f53\u524d\u9884\u8bbe", "\u4fdd\u5b58\u5f53\u524d\u9884\u8bbe"), onClick = { showSavePresetDialog = true })
         } }
+        item {
+            Group(tr("iosNotificationCenter", "iOS 风格通知中心")) {
+                SwitchPreference(
+                    title = tr("iosNotificationCenter", "iOS 风格通知中心"),
+                    summary = tr("iosNotificationCenterSummary", "下拉时以圆角壁纸面板跟手展开，保留系统通知与时钟。动态壁纸暂不支持。"),
+                    checked = iosSettings.enabled,
+                    onCheckedChange = { enabled ->
+                        iosStore.update(service) { it.copy(enabled = enabled) }
+                        iosSettings = iosStore.settings
+                    },
+                )
+                if (iosSettings.enabled) {
+                    OverlayDropdownPreference(
+                        title = tr("iosNotificationWallpaper", "通知中心壁纸来源"),
+                        items = listOf(tr("iosNotificationLockWallpaper", "锁屏壁纸"), tr("iosNotificationHomeWallpaper", "桌面壁纸")),
+                        selectedIndex = iosSettings.wallpaper,
+                        onSelectedIndexChange = { source ->
+                            iosStore.update(service) { it.copy(wallpaper = source) }
+                            iosSettings = iosStore.settings
+                        },
+                    )
+                }
+            }
+        }
         item {
             Group(tr("\u63a7\u5236\u4e2d\u5fc3\u4e0e\u901a\u77e5\u4e2d\u5fc3\u6750\u8d28\u8c03\u6574", "\u63a7\u5236\u4e2d\u5fc3\u4e0e\u901a\u77e5\u4e2d\u5fc3\u6750\u8d28\u8c03\u6574")) {
                 SwitchPreference(

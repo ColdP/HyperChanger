@@ -62,6 +62,7 @@ import androidx.core.graphics.PathParser
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
+import io.github.libxposed.api.XposedModuleInterface.SystemServerStartingParam
 import btm.m.xiaoaihook.SuperXiaoAiInputHook
 import btm.m.liquidglass.AppColorMode
 import btm.m.liquidglass.LabelMode
@@ -292,6 +293,12 @@ private val gestureMaterialOverlays = Collections.synchronizedMap(WeakHashMap<Vi
 
 class HyperSystemUiModule : XposedModule() {
     internal fun installHook(member: java.lang.reflect.Executable) = hook(member)
+
+    override fun onSystemServerStarting(param: SystemServerStartingParam) {
+        android.util.Log.i("HyperChangerDock", "system server callback entered")
+        runCatching { DockWmsHook.install(this, param.classLoader) }
+            .onFailure { error -> log(Log.ERROR, TAG, "Could not install desktop Dock WMS hook", error) }
+    }
 
     private var customTileHookInstalled = false
     private var customPluginTileHookInstalled = false
@@ -608,6 +615,11 @@ class HyperSystemUiModule : XposedModule() {
 
     override fun onPackageLoaded(param: PackageLoadedParam) {
         if (!OsCompatibility.areHooksAllowed()) return
+        if (param.packageName == "android" || param.packageName == "system") {
+            runCatching { DockWmsHook.install(this, param) }
+                .onFailure { error -> log(Log.ERROR, TAG, "Could not install desktop Dock WMS hook", error) }
+            return
+        }
         if (param.packageName == "com.xiaomi.shop" || param.packageName == "com.mipay.wallet" ||
             param.packageName == "com.mi.health" || param.packageName == "com.apple.android.music" ||
             param.packageName == "com.sina.weibo" || param.packageName == "com.xingin.xhs"

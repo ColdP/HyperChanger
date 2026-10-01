@@ -3,6 +3,11 @@
   "creator": "btm_m",
   "locale": "ja",
   "strings": {
+    "iosNotificationCenter": "iOS風通知センター",
+    "iosNotificationCenterSummary": "丸みのある壁紙パネルがスワイプに合わせて展開し、システムの通知と時計を維持します。ライブ壁紙は現在未対応です。",
+    "iosNotificationWallpaper": "通知センターの壁紙ソース",
+    "iosNotificationLockWallpaper": "ロック画面の壁紙",
+    "iosNotificationHomeWallpaper": "ホーム画面の壁紙",
     "进入 OOBE": "OOBE を開く",
     "欢迎使用": "ようこそ",
     "继续": "続行",
@@ -867,7 +872,11 @@
     "使用系统默认位置": "システム既定の保存先を使用",
     "录制的视频将保存到指定文件夹。需要重启屏幕录制应用后生效。": "録画は指定したフォルダーに保存されます。反映には画面録画アプリの再起動が必要です。",
     "文件路径": "ファイルパス",
-    "选择文件夹": "フォルダーを選択"
+    "选择文件夹": "フォルダーを選択",
+    "桌面": "ホーム画面",
+    "Dock栏": "Dock バー",
+    "启用 Dock栏": "Dock バーを有効にする",
+    "玻璃模糊半径": "ガラスのぼかし半径"
   },
   "Xiaomi 18 Pro 系列 AI 背屏": "Xiaomi 18 Pro シリーズ AI 背面画面",
   "解锁 AI 功能": "AI 機能を解放",

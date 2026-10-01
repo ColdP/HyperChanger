@@ -3,6 +3,11 @@
   "creator": "btm_m",
   "locale": "en",
   "strings": {
+    "iosNotificationCenter": "iOS-style Notification Center",
+    "iosNotificationCenterSummary": "Pull down a rounded wallpaper sheet that follows your gesture, keeping system notifications and clock. Live wallpapers are not supported yet.",
+    "iosNotificationWallpaper": "Notification Center wallpaper source",
+    "iosNotificationLockWallpaper": "Lock screen wallpaper",
+    "iosNotificationHomeWallpaper": "Home screen wallpaper",
     "进入 OOBE": "Enter OOBE",
     "欢迎使用": "Welcome",
     "继续": "Continue",
@@ -806,7 +811,11 @@
     "使用系统默认位置": "Use system default location",
     "录制的视频将保存到指定文件夹。需要重启屏幕录制应用后生效。": "Recordings will be saved to the selected folder. Restart Screen Recorder to apply.",
     "文件路径": "File path",
-    "选择文件夹": "Choose folder"
+    "选择文件夹": "Choose folder",
+    "桌面": "Desktop",
+    "Dock栏": "Dock bar",
+    "启用 Dock栏": "Enable Dock bar",
+    "玻璃模糊半径": "Glass blur radius"
   },
   "Xiaomi 18 Pro 系列 AI 背屏": "Xiaomi 18 Pro Series AI Rear Screen",
   "解锁 AI 功能": "Unlock AI features",
