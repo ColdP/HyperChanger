@@ -355,8 +355,6 @@ data class HookSettings(
     val showGoogleServiceEntry: Boolean = false,
     val showSavedWifiPasswords: Boolean = false,
     val themeMode: String = "system",
-    val navigationStyle: String = "hyper_os",
-    val navigationLabelMode: String = "icon_and_text",
     val predictiveBackEnabled: Boolean = true,
     val predictiveBackProgress: Int = 90,
     val hideAppIcon: Boolean = false,
@@ -756,8 +754,6 @@ private const val KEY_MOBILE_NETWORK_TYPE_CUSTOM_TEXT = "mobile_network_type_cus
 private const val KEY_MOBILE_NETWORK_TYPE_SHRINK_5GA_A = "mobile_network_type_shrink_5ga_a"
 private const val KEY_MOBILE_NETWORK_TYPE_BOLD = "mobile_network_type_bold"
 private const val KEY_THEME_MODE = "theme_mode"
-private const val KEY_NAVIGATION_STYLE = "navigation_style"
-private const val KEY_NAVIGATION_LABEL_MODE = "navigation_label_mode"
 private const val KEY_PREDICTIVE_BACK_ENABLED = "predictive_back_enabled"
 private const val KEY_PREDICTIVE_BACK_PROGRESS = "predictive_back_progress"
 private fun migrateStatusBarScaleToAbsolute(preferences: SharedPreferences) {
@@ -1353,8 +1349,6 @@ private fun SharedPreferences.toSettings(): HookSettings {
     showGoogleServiceEntry = getBoolean(KEY_SHOW_GOOGLE_SERVICE_ENTRY, false),
     showSavedWifiPasswords = getBoolean(KEY_SHOW_SAVED_WIFI_PASSWORDS, false),
     themeMode = getString(KEY_THEME_MODE, "system").orEmpty().ifBlank { "system" },
-    navigationStyle = getString(KEY_NAVIGATION_STYLE, "hyper_os").orEmpty().ifBlank { "hyper_os" },
-    navigationLabelMode = getString(KEY_NAVIGATION_LABEL_MODE, "icon_and_text").orEmpty().ifBlank { "icon_and_text" },
     predictiveBackEnabled = getBoolean(KEY_PREDICTIVE_BACK_ENABLED, true),
     predictiveBackProgress = getInt(KEY_PREDICTIVE_BACK_PROGRESS, 90).coerceIn(10, 100),
     hideAppIcon = getBoolean(KEY_HIDE_APP_ICON, false),
@@ -1913,8 +1907,6 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putBoolean(KEY_SHOW_GOOGLE_SERVICE_ENTRY, value.showGoogleServiceEntry)
         .putBoolean(KEY_SHOW_SAVED_WIFI_PASSWORDS, value.showSavedWifiPasswords)
         .putString(KEY_THEME_MODE, value.themeMode)
-        .putString(KEY_NAVIGATION_STYLE, value.navigationStyle)
-        .putString(KEY_NAVIGATION_LABEL_MODE, value.navigationLabelMode)
         .putBoolean(KEY_PREDICTIVE_BACK_ENABLED, value.predictiveBackEnabled)
         .putInt(KEY_PREDICTIVE_BACK_PROGRESS, value.predictiveBackProgress)
         .putBoolean(KEY_HIDE_APP_ICON, value.hideAppIcon)

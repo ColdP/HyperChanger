@@ -750,6 +750,7 @@
     "navigation_style": "Navigation bar style",
     "hyperos_bar": "HyperOS bar",
     "hyperos_floating_bar": "HyperOS floating bar",
+    "harmonyos_floating_bar": "HarmonyOS floating bar",
     "liquid_glass_bar": "Liquid glass bar",
     "nav_label_icon_text": "Icon and text",
     "nav_label_icon_only": "Icons only",

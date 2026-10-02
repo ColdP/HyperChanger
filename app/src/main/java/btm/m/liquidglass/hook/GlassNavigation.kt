@@ -202,7 +202,8 @@ fun CustomNavigation(
                 sourceView = sourceView,
                 tabs = tabs,
                 selectedIndex = selectedIndex,
-                floating = style == NavigationStyle.HYPER_OS_FLOATING || forceFloatingGlass,
+                floating = style == NavigationStyle.HYPER_OS_FLOATING || style == NavigationStyle.HARMONY_OS_FLOATING || forceFloatingGlass,
+                harmonyFloating = style == NavigationStyle.HARMONY_OS_FLOATING,
                 backdrop = backdrop,
                 blurRadius = blurRadius,
                 showIcons = effectiveMode != LabelMode.TEXT_ONLY,
@@ -353,11 +354,13 @@ fun MiniPlayerBackground(
         NavigationStyle.LIQUID_GLASS -> RoundedCornerShape(555.dp)
         NavigationStyle.HYPER_OS -> androidx.compose.ui.graphics.RectangleShape
         NavigationStyle.HYPER_OS_FLOATING -> RoundedCornerShape(555.dp)
+        NavigationStyle.HARMONY_OS_FLOATING -> RoundedCornerShape(555.dp)
     }
     val horizontalPadding = when (style) {
         NavigationStyle.LIQUID_GLASS -> 14.dp
         NavigationStyle.HYPER_OS -> 0.dp
         NavigationStyle.HYPER_OS_FLOATING -> 14.dp
+        NavigationStyle.HARMONY_OS_FLOATING -> 14.dp
     }
     val surfaceColor = when (style) {
         NavigationStyle.LIQUID_GLASS -> if (isDarkTheme) {
@@ -366,7 +369,8 @@ fun MiniPlayerBackground(
             Color.White.copy(alpha = 0.48f)
         }
         NavigationStyle.HYPER_OS,
-        NavigationStyle.HYPER_OS_FLOATING -> if (isDarkTheme) {
+        NavigationStyle.HYPER_OS_FLOATING,
+        NavigationStyle.HARMONY_OS_FLOATING -> if (isDarkTheme) {
             Color.Black.copy(alpha = 0.36f)
         } else {
             Color.White.copy(alpha = 0.38f)
@@ -760,6 +764,7 @@ private fun HyperNavigation(
     tabs: List<HostTab>,
     selectedIndex: MutableIntState,
     floating: Boolean,
+    harmonyFloating: Boolean,
     backdrop: Backdrop,
     blurRadius: Int,
     showIcons: Boolean,
@@ -770,6 +775,7 @@ private fun HyperNavigation(
     accentColorOverride: Color? = null,
     adaptiveFloatingWidth: Boolean = false,
     dragWholeFloatingBar: Boolean = false,
+    enableDrag: Boolean = true,
     tabImageVector: ((Int) -> ImageVector)? = null,
     tabIconContent: (@Composable (Int, Color) -> Unit)? = null
 ) {
@@ -800,6 +806,8 @@ private fun HyperNavigation(
                     accentColorOverride = accentColorOverride,
                     adaptiveFloatingWidth = adaptiveFloatingWidth,
                     dragWholeFloatingBar = dragWholeFloatingBar,
+                    harmonyFloating = harmonyFloating,
+                    enableDrag = !harmonyFloating,
                     tabImageVector = tabImageVector,
                     tabIconContent = tabIconContent,
                     onTabSelected = { index ->
@@ -903,6 +911,8 @@ private fun HyperFloatingNavigationBar(
     accentColorOverride: Color?,
     adaptiveFloatingWidth: Boolean,
     dragWholeFloatingBar: Boolean,
+    harmonyFloating: Boolean,
+    enableDrag: Boolean,
     tabImageVector: ((Int) -> ImageVector)?,
     tabIconContent: (@Composable (Int, Color) -> Unit)?,
     onTabSelected: (Int) -> Unit,
@@ -995,6 +1005,13 @@ private fun HyperFloatingNavigationBar(
         Box(
             Modifier
                 .fillMaxSize()
+                .graphicsLayer {
+                    if (harmonyFloating) {
+                        val deformation = lerp(1f, 0.95f, dragAnimation.pressProgress)
+                        scaleX = deformation
+                        scaleY = deformation
+                    }
+                }
                 .shadow(
                     elevation = 6.dp,
                     shape = capsule,
@@ -1019,7 +1036,10 @@ private fun HyperFloatingNavigationBar(
                                 )
                             },
                             highlight = {
-                                Highlight.Default.copy(alpha = if (isDarkTheme) 0.78f else 0.96f)
+                                Highlight.Default.copy(
+                                    alpha = (if (isDarkTheme) 0.78f else 0.96f) *
+                                        (if (harmonyFloating) 0.72f + dragAnimation.pressProgress * 0.7f else 1f)
+                                )
                             },
                             onDrawSurface = {
                                 drawRect(containerSurface)
@@ -1030,7 +1050,7 @@ private fun HyperFloatingNavigationBar(
         )
         Box(Modifier.fillMaxSize().padding(innerPadding)) {
             // Draw the selection behind labels, while a transparent overlay below captures drag.
-            Box(
+            if (!harmonyFloating) Box(
                 Modifier
                     .width(tabWidth)
                     .fillMaxHeight()
@@ -1048,7 +1068,9 @@ private fun HyperFloatingNavigationBar(
             ) {
                 tabs.forEachIndexed { index, tab ->
                     val pressedProgress = if (pressedIndex == index) dragAnimation.pressProgress else 0f
-                    val color = if (pressedProgress > 0f) {
+                    val color = if (harmonyFloating) {
+                        if (index == selectedIndex.intValue || pressedProgress > 0f) Color(0xFF0088FF) else contentColor.copy(alpha = 0.58f)
+                    } else if (pressedProgress > 0f) {
                         Color.Gray
                     } else {
                         // OS4 uses the hover capsule, rather than a different tint, to show selection.
@@ -1105,9 +1127,9 @@ private fun HyperFloatingNavigationBar(
                         scaleX = dragAnimation.scaleX
                         scaleY = dragAnimation.scaleY
                     }
-                    .then(if (dragWholeFloatingBar) Modifier else dragAnimation.modifier)
+                    .then(if (dragWholeFloatingBar || !enableDrag) Modifier else dragAnimation.modifier)
             )
-            if (dragWholeFloatingBar) {
+            if (dragWholeFloatingBar && enableDrag) {
                 Box(
                     Modifier
                         .fillMaxSize()

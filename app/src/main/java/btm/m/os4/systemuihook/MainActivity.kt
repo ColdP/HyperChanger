@@ -195,6 +195,7 @@ import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
     private val hookStore by lazy { HookSettingsStore(this) }
+    private val navigationStore by lazy { ModuleNavigationSettingsStore(this) }
     private val cameraStore by lazy { CameraSettingsStore(this) }
     private val deviceProfileStore by lazy { DeviceProfileStore(this) }
     private val appearanceStore by lazy { SettingsAppearanceStore(this) }
@@ -204,7 +205,7 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = Color.TRANSPARENT
         window.navigationBarColor = Color.TRANSPARENT
-        setContent { Root(hookStore, cameraStore, deviceProfileStore, appearanceStore) }
+        setContent { Root(hookStore, navigationStore, cameraStore, deviceProfileStore, appearanceStore) }
     }
 }
 
@@ -329,12 +330,14 @@ private fun suggestedScopesForHookChange(before: HookSettings, after: HookSettin
 @Composable
 private fun Root(
     hooks: HookSettingsStore,
+    navigation: ModuleNavigationSettingsStore,
     cameras: CameraSettingsStore,
     deviceProfiles: DeviceProfileStore,
     appearances: SettingsAppearanceStore,
 ) {
     val service by HookApplication.service.collectAsStateWithLifecycle()
     var settings by remember { mutableStateOf(hooks.settings) }
+    var navigationSettings by remember { mutableStateOf(navigation.settings) }
     var cameraSettings by remember { mutableStateOf(cameras.settings) }
     var deviceProfile by remember { mutableStateOf(deviceProfiles.settings) }
     var appearance by remember { mutableStateOf(appearances.settings) }
@@ -608,12 +611,14 @@ private fun Root(
     LaunchedEffect(service) {
         service?.let {
             hooks.syncRemote(it)
+            navigation.syncRemote(it)
             cameras.syncRemote(it)
             deviceProfiles.syncRemote(it)
             appearances.syncRemote(it)
             musicStore.syncRemote(it)
             dockStore.syncRemote(it)
             settings = hooks.settings
+            navigationSettings = navigation.settings
             cameraSettings = cameras.settings
             deviceProfile = deviceProfiles.settings
             appearance = appearances.settings
@@ -665,13 +670,17 @@ private fun Root(
             )
         } else {
         Shell(
-            settings, cameraSettings, deviceProfile, appearance, musicWhitelist, screenRecorder,
+            settings, navigationSettings, cameraSettings, deviceProfile, appearance, musicWhitelist, screenRecorder,
             dockSettings, service,
             update = { transform ->
                 val before = hooks.settings
                 hooks.update(service, transform)
                 settings = hooks.settings
                 markRestartTargets(suggestedScopesForHookChange(before, settings))
+            },
+            updateNavigation = { transform ->
+                navigation.update(service, transform)
+                navigationSettings = navigation.settings
             },
             updateDock = { transform ->
                 val before = dockStore.settings
@@ -833,6 +842,7 @@ private fun ApplySystemBarAppearance() {
 @Composable
 private fun Shell(
     settings: HookSettings,
+    navigationSettings: ModuleNavigationSettings,
     cameras: CameraSettings,
     deviceProfile: DeviceProfileSettings,
     appearance: SettingsAppearanceSettings,
@@ -841,6 +851,7 @@ private fun Shell(
     dockSettings: DockSettings,
     service: XposedService?,
     update: ((HookSettings) -> HookSettings) -> Unit,
+    updateNavigation: ((ModuleNavigationSettings) -> ModuleNavigationSettings) -> Unit,
     updateDock: ((DockSettings) -> DockSettings) -> Unit,
     updateCamera: ((CameraSettings) -> CameraSettings) -> Unit,
     updateDeviceProfile: ((DeviceProfileSettings) -> DeviceProfileSettings) -> Unit,
@@ -1022,8 +1033,10 @@ private fun Shell(
                     )
                     Tab.SETTINGS -> SettingsHome(
                         settings,
+                        navigationSettings,
                         service != null,
                         update,
+                        updateNavigation,
                         openRootPage,
                         onImportModulePreset,
                         onExportModulePreset,
@@ -1036,6 +1049,7 @@ private fun Shell(
             tab,
             { tab = it },
             settings,
+            navigationSettings,
             backdrop,
             Modifier.align(Alignment.BottomCenter).blur(baseCoveredBlur.dp),
         )
@@ -1142,6 +1156,7 @@ private fun BottomBar(
     tab: Tab,
     select: (Tab) -> Unit,
     settings: HookSettings,
+    navigationSettings: ModuleNavigationSettings,
     backdrop: Backdrop,
     modifier: Modifier
 ) {
@@ -1157,16 +1172,16 @@ private fun BottomBar(
         HostTab(title, "os4.$i") { index.intValue = i; select(item) }
     }
     Box(
-        modifier.fillMaxWidth().height(if (settings.navigationStyle == "hyper_os") 76.dp else 100.dp),
+        modifier.fillMaxWidth().height(if (navigationSettings.style == "hyper_os") 76.dp else 100.dp),
         contentAlignment = Alignment.BottomCenter
     ) {
         CustomNavigation(
             sourceView = view,
             tabs = tabs,
             selectedIndex = index,
-            blurRadius = if (settings.navigationStyle == "liquid_glass") 3 else 18,
-            labelMode = settings.navigationLabelMode,
-            navigationStyle = settings.navigationStyle,
+            blurRadius = if (navigationSettings.style == "liquid_glass") 3 else 18,
+            labelMode = navigationSettings.labelMode,
+            navigationStyle = navigationSettings.style,
             advancedMaterial = true,
             colorMode = settings.themeMode,
             liquidBottomSpacingDp = 0,
@@ -1910,8 +1925,10 @@ private fun RearAppIcon(packageManager: PackageManager, info: ApplicationInfo) {
 @Composable
 private fun SettingsHome(
     settings: HookSettings,
+    navigationSettings: ModuleNavigationSettings,
     online: Boolean,
     update: ((HookSettings) -> HookSettings) -> Unit,
+    updateNavigation: ((ModuleNavigationSettings) -> ModuleNavigationSettings) -> Unit,
     open: (PageId) -> Unit,
     onImportModulePreset: () -> Unit,
     onExportModulePreset: () -> Unit,
@@ -1963,9 +1980,14 @@ private fun SettingsHome(
                 )
 OverlayDropdownPreference(
                     title = tr("navigation_style", tr("\u5e95\u90e8\u5bfc\u822a\u680f\u6837\u5f0f", "\u5e95\u90e8\u5bfc\u822a\u680f\u6837\u5f0f")),
-                    items = listOf(tr("hyperos_bar", tr("HyperOS \u5e95\u680f", "HyperOS \u5e95\u680f")), tr("hyperos_floating_bar", tr("HyperOS \u60ac\u6d6e\u5e95\u680f", "HyperOS \u60ac\u6d6e\u5e95\u680f")), tr("liquid_glass_bar", tr("\u6db2\u6001\u73bb\u7483\u5e95\u680f", "\u6db2\u6001\u73bb\u7483\u5e95\u680f"))),
-                    selectedIndex = listOf("hyper_os", "hyper_os_floating", "liquid_glass").indexOf(settings.navigationStyle).coerceAtLeast(0),
-                    onSelectedIndexChange = { i -> update { it.copy(navigationStyle = listOf("hyper_os", "hyper_os_floating", "liquid_glass")[i]) } }
+                    items = listOf(
+                        tr("hyperos_bar", tr("HyperOS 底栏", "HyperOS 底栏")),
+                        tr("hyperos_floating_bar", tr("HyperOS 悬浮底栏", "HyperOS 悬浮底栏")),
+                        tr("harmonyos_floating_bar", tr("HarmonyOS 悬浮底栏", "HarmonyOS 悬浮底栏")),
+                        tr("liquid_glass_bar", tr("液态玻璃底栏", "液态玻璃底栏")),
+                    ),
+                    selectedIndex = listOf("hyper_os", "hyper_os_floating", "harmony_os_floating", "liquid_glass").indexOf(navigationSettings.style).coerceAtLeast(0),
+                    onSelectedIndexChange = { i -> updateNavigation { it.copy(style = listOf("hyper_os", "hyper_os_floating", "harmony_os_floating", "liquid_glass")[i]) } }
                 )
                 OverlayDropdownPreference(
                     title = tr("\u5e95\u90e8\u5bfc\u822a\u680f\u6807\u7b7e\u663e\u793a\u65b9\u5f0f", "\u5e95\u90e8\u5bfc\u822a\u680f\u6807\u7b7e\u663e\u793a\u65b9\u5f0f"),
@@ -1976,8 +1998,8 @@ OverlayDropdownPreference(
                             LabelMode.TEXT_ONLY -> tr("nav_label_text_only", "仅文本")
                         }
                     },
-                    selectedIndex = LabelMode.entries.indexOfFirst { it.preferenceValue == settings.navigationLabelMode }.coerceAtLeast(0),
-                    onSelectedIndexChange = { i -> update { it.copy(navigationLabelMode = LabelMode.entries[i].preferenceValue) } },
+                    selectedIndex = LabelMode.entries.indexOfFirst { it.preferenceValue == navigationSettings.labelMode }.coerceAtLeast(0),
+                    onSelectedIndexChange = { i -> updateNavigation { it.copy(labelMode = LabelMode.entries[i].preferenceValue) } },
                 )
                 SwitchPreference(
                     title = tr("\u9884\u6d4b\u6027\u8fd4\u56de\u52a8\u753b", "\u9884\u6d4b\u6027\u8fd4\u56de\u52a8\u753b"),

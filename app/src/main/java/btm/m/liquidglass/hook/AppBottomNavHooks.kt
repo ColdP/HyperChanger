@@ -808,7 +808,8 @@ object AppBottomNavHooks {
                                 val miniPlayerBottomPadding = when (playerNavigationStyle) {
                                     NavigationStyle.HYPER_OS -> 64.dp
                                     NavigationStyle.LIQUID_GLASS,
-                                    NavigationStyle.HYPER_OS_FLOATING -> 86.dp
+                                    NavigationStyle.HYPER_OS_FLOATING,
+                                    NavigationStyle.HARMONY_OS_FLOATING -> 86.dp
                                 }
                                 val miniPlayerHorizontalPadding =
                                     if (playerNavigationStyle == NavigationStyle.HYPER_OS) 0.dp else 14.dp
@@ -2644,6 +2645,7 @@ object AppBottomNavHooks {
                 NavigationStyle.HYPER_OS -> 64
                 // MIUIX 0.9.2 uses a 52dp minimum plus 26dp bottom spacing.
                 NavigationStyle.HYPER_OS_FLOATING -> 78
+                NavigationStyle.HARMONY_OS_FLOATING -> 78
             }
             val insets = activity.window.decorView.rootWindowInsets
             val navigationInset = when {
@@ -2688,7 +2690,8 @@ object AppBottomNavHooks {
             val density = activity.resources.displayMetrics.density
             val visualTopAdjustment = when (NavigationStyle.fromPreference(navigationStyle)) {
                 NavigationStyle.LIQUID_GLASS,
-                NavigationStyle.HYPER_OS_FLOATING -> -12f * density
+                NavigationStyle.HYPER_OS_FLOATING,
+                NavigationStyle.HARMONY_OS_FLOATING -> -12f * density
                 NavigationStyle.HYPER_OS -> -8f * density
             }
             val targetOffset = (overlayLocation[1] + visualTopAdjustment - baseBottom)
