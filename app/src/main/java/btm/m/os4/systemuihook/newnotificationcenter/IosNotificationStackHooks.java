@@ -8,6 +8,22 @@ final class IosNotificationStackHooks {
 
     static void install(ClassLoader loader) {
         try {
+            Class<?> stack = Xp.findClass(
+                    "com.android.systemui.statusbar.notification.stack.NotificationStackScrollLayout", loader);
+            Xp.hookAll(stack, "updateTopPadding", chain -> {
+                if (chain.getArgs().size() != 2 || !(chain.getThisObject() instanceof android.view.View)) {
+                    return chain.proceed();
+                }
+                android.view.View view = (android.view.View) chain.getThisObject();
+                float nativeTop = ((Number) chain.getArgs().get(0)).floatValue();
+                float adjusted = IosNotificationCenterPresentation.adjustTopPadding(view, nativeTop);
+                if (adjusted == nativeTop) return chain.proceed();
+                return chain.proceed(new Object[]{adjusted, chain.getArgs().get(1)});
+            });
+        } catch (Throwable error) {
+            Xp.log("[IOSShade] notification bounds padding unavailable: " + error);
+        }
+        try {
             Class<?> interactor = Xp.findClass(
                     "com.miui.systemui.notification.domain.interactor.NotificationStackingInteractor", loader);
             Xp.hookAll(interactor, "getKeyguardTwoNotifFirstLineOffset", chain -> {

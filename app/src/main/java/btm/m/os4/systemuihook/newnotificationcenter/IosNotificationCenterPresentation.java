@@ -30,8 +30,8 @@ public final class IosNotificationCenterPresentation {
     private static View capturedHeader;
     private static View[] oldHeader;
     private static float[] oldHeaderAlpha;
-    private static int paddingAdded;
-    private static int paddingWritten = -1;
+    private static float nativeTopPadding = Float.NaN;
+    private static boolean writingTopPadding;
     private static float progress;
     private static float lastNotificationY = Float.NaN;
     private static Drawable lastDepthDrawable;
@@ -39,6 +39,7 @@ public final class IosNotificationCenterPresentation {
     private static boolean clockUnavailable;
     private static View wallpaperSheet;
     private static int lastBlur = -1;
+    private static int lastStatusBlur = -1;
 
     private IosNotificationCenterPresentation() {}
 
@@ -61,6 +62,7 @@ public final class IosNotificationCenterPresentation {
         }
         if (host == null && (clockUnavailable || !create())) return;
         host.setAlpha(progress);
+        if (status != null) status.setAlpha(progress * progress * (3f - 2f * progress));
         sync();
         if (Math.abs(progress - previous) > .01f) requestStackUpdate(stack);
     }
@@ -72,6 +74,12 @@ public final class IosNotificationCenterPresentation {
 
     public static boolean isActive() {
         return host != null && progress > 0f;
+    }
+
+    static float adjustTopPadding(View view, float nativeTop) {
+        if (writingTopPadding || !isActive() || view != stack || panel == null) return nativeTop;
+        nativeTopPadding = nativeTop;
+        return adjustedTopPadding(nativeTop);
     }
 
     static void captureHeader(View view) {
@@ -178,6 +186,12 @@ public final class IosNotificationCenterPresentation {
                     blur, blur, Shader.TileMode.CLAMP));
             lastBlur = blur;
         }
+        int statusBlur = Math.round(12f * panel.getResources().getDisplayMetrics().density * (1f - progress));
+        if (status != null && statusBlur != lastStatusBlur) {
+            status.setRenderEffect(statusBlur == 0 ? null : RenderEffect.createBlurEffect(
+                    statusBlur, statusBlur, Shader.TileMode.CLAMP));
+            lastStatusBlur = statusBlur;
+        }
         syncNotifications();
     }
 
@@ -224,34 +238,14 @@ public final class IosNotificationCenterPresentation {
     private static void syncNotifications() {
         View currentStack = stack;
         if (currentStack == null || currentStack.getHeight() == 0 || clock == null) return;
+        if (Float.isNaN(nativeTopPadding)) nativeTopPadding = getPadding(currentStack);
+        float target = adjustedTopPadding(nativeTopPadding);
+        if (Math.abs(getPadding(currentStack) - target) > .5f) writeTopPadding(currentStack, target);
         int[] panelPoint = new int[2];
         int[] stackPoint = new int[2];
         panel.getLocationInWindow(panelPoint);
         currentStack.getLocationInWindow(stackPoint);
-        int current;
-        try {
-            current = ((Number) currentStack.getClass().getMethod("getTopPadding")
-                    .invoke(currentStack)).intValue();
-        } catch (Throwable ignored) { return; }
-        if (current != paddingWritten) paddingAdded = 0;
-        int nativePadding = current - paddingAdded;
-        float desired = clockNotificationTop() + host.getTranslationY();
-        float gap = 16f * panel.getResources().getDisplayMetrics().density;
-        int limit = Math.max(nativePadding, currentStack.getHeight() -
-                Math.round(160f * panel.getResources().getDisplayMetrics().density));
-        int added = Math.max(0, Math.min(limit, Math.round(desired + gap -
-                (stackPoint[1] - panelPoint[1]))) - nativePadding);
-        added = Math.round(added * progress);
-        if (added != paddingAdded || current != paddingWritten) {
-            int next = nativePadding + added;
-            try {
-                currentStack.getClass().getMethod("updateTopPadding", float.class, boolean.class)
-                        .invoke(currentStack, (float) next, false);
-                paddingAdded = added;
-                paddingWritten = next;
-            } catch (Throwable ignored) { return; }
-        }
-        float notificationY = stackPoint[1] - panelPoint[1] + nativePadding + added;
+        float notificationY = stackPoint[1] - panelPoint[1] + target;
         if (Math.abs(notificationY - lastNotificationY) > 1f) {
             lastNotificationY = notificationY;
             try {
@@ -267,9 +261,34 @@ public final class IosNotificationCenterPresentation {
         }
     }
 
-    private static float clockNotificationTop() {
+    private static float adjustedTopPadding(float nativeTop) {
+        if (stack == null || stack.getHeight() == 0 || clock == null) return nativeTop;
+        int[] panelPoint = new int[2];
+        int[] stackPoint = new int[2];
+        panel.getLocationInWindow(panelPoint);
+        stack.getLocationInWindow(stackPoint);
+        float gap = 16f * panel.getResources().getDisplayMetrics().density;
+        float desired = clockBottom() + host.getTranslationY() + gap -
+                (stackPoint[1] - panelPoint[1]);
+        float limit = Math.max(nativeTop, stack.getHeight() -
+                160f * panel.getResources().getDisplayMetrics().density);
+        return nativeTop + Math.max(0f, Math.min(limit, desired) - nativeTop) * progress;
+    }
+
+    private static void writeTopPadding(View view, float value) {
+        writingTopPadding = true;
         try {
-            Object value = clock.getClass().getMethod("getNotificationClockTop").invoke(clock);
+            view.getClass().getMethod("updateTopPadding", float.class, boolean.class)
+                    .invoke(view, value, false);
+        } catch (Throwable ignored) {
+        } finally {
+            writingTopPadding = false;
+        }
+    }
+
+    private static float clockBottom() {
+        try {
+            Object value = clock.getClass().getMethod("getClockBottom").invoke(clock);
             if (value instanceof Number) {
                 float top = ((Number) value).floatValue();
                 if (top > 0f && top < panel.getHeight()) return top;
@@ -300,15 +319,11 @@ public final class IosNotificationCenterPresentation {
         }
         oldHeader = null;
         oldHeaderAlpha = null;
-        if (stack != null && paddingAdded != 0 && getPadding(stack) == paddingWritten) {
-            try {
-                stack.getClass().getMethod("updateTopPadding", float.class, boolean.class)
-                        .invoke(stack, (float) (paddingWritten - paddingAdded), false);
-            } catch (Throwable ignored) {}
+        if (stack != null && !Float.isNaN(nativeTopPadding)) {
+            writeTopPadding(stack, nativeTopPadding);
         }
         stack = null;
-        paddingAdded = 0;
-        paddingWritten = -1;
+        nativeTopPadding = Float.NaN;
         lastNotificationY = Float.NaN;
         lastDepthDrawable = null;
         if (host != null && host.getParent() instanceof ViewGroup) {
@@ -324,6 +339,7 @@ public final class IosNotificationCenterPresentation {
         status = null;
         wallpaperSheet = null;
         lastBlur = -1;
+        lastStatusBlur = -1;
     }
 
     private static int getPadding(View view) {
