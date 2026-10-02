@@ -15,6 +15,7 @@ final class IosNotificationStackHooks {
                     return chain.proceed();
                 }
                 android.view.View view = (android.view.View) chain.getThisObject();
+                IosNotificationCenterPresentation.captureStack(view);
                 float nativeTop = ((Number) chain.getArgs().get(0)).floatValue();
                 float adjusted = IosNotificationCenterPresentation.adjustTopPadding(view, nativeTop);
                 if (adjusted == nativeTop) return chain.proceed();
@@ -22,6 +23,26 @@ final class IosNotificationStackHooks {
             });
         } catch (Throwable error) {
             Xp.log("[IOSShade] notification bounds padding unavailable: " + error);
+        }
+        try {
+            Class<?> algorithm = Xp.findClass(
+                    "com.android.systemui.statusbar.notification.stack.StackScrollAlgorithm", loader);
+            Xp.hookAll(algorithm, "resetViewStates", chain -> {
+                Object ambient = chain.getArgs().get(0);
+                Object host = Xp.getObjectField(chain.getThisObject(), "mHostView");
+                if (!(host instanceof android.view.View)) return chain.proceed();
+                float original = ((Number) Xp.getObjectField(ambient, "mStackY")).floatValue();
+                float offset = IosNotificationCenterPresentation.stackOffset((android.view.View) host, original);
+                if (offset <= .5f) return chain.proceed();
+                Xp.setObjectField(ambient, "mStackY", original + offset);
+                try {
+                    return chain.proceed();
+                } finally {
+                    Xp.setObjectField(ambient, "mStackY", original);
+                }
+            });
+        } catch (Throwable error) {
+            Xp.log("[IOSShade] notification stack position unavailable: " + error);
         }
         try {
             Class<?> interactor = Xp.findClass(

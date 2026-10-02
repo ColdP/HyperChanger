@@ -1,6 +1,7 @@
 package btm.m.os4.systemuihook.newnotificationcenter;
 
 import android.content.Context;
+import android.graphics.Color;
 import android.graphics.Canvas;
 import android.graphics.Rect;
 import android.graphics.RenderEffect;
@@ -12,6 +13,7 @@ import android.view.MotionEvent;
 import android.view.ViewTreeObserver;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
+import android.widget.TextView;
 
 import java.lang.reflect.Method;
 
@@ -24,9 +26,12 @@ public final class IosNotificationCenterPresentation {
     private static FrameLayout panel;
     private static FrameLayout host;
     private static View clock;
+    private static TextView date;
+    private static TextView dateSource;
     private static ImageView depth;
     private static MirrorView status;
     private static View stack;
+    private static View capturedStack;
     private static View capturedHeader;
     private static View[] oldHeader;
     private static float[] oldHeaderAlpha;
@@ -40,6 +45,7 @@ public final class IosNotificationCenterPresentation {
     private static View wallpaperSheet;
     private static int lastBlur = -1;
     private static int lastStatusBlur = -1;
+    private static long dateMinute = -1L;
 
     private IosNotificationCenterPresentation() {}
 
@@ -82,6 +88,21 @@ public final class IosNotificationCenterPresentation {
         return adjustedTopPadding(nativeTop);
     }
 
+    static void captureStack(View view) {
+        capturedStack = view;
+        if (panel != null && stack == null && view.getRootView() == panel.getRootView()) {
+            stack = view;
+        }
+    }
+
+    static float stackOffset(View view, float nativeStackY) {
+        if (!isActive() || view != stack || panel == null || clock == null) return 0f;
+        float desired = desiredNotificationTop();
+        float limit = Math.max(nativeStackY, view.getHeight() -
+                160f * panel.getResources().getDisplayMetrics().density);
+        return Math.max(0f, Math.min(limit, desired) - nativeStackY) * progress;
+    }
+
     static void captureHeader(View view) {
         capturedHeader = view;
         if (isActive()) findHeader();
@@ -120,6 +141,17 @@ public final class IosNotificationCenterPresentation {
             allowBackdropSampling(container);
             allowBackdropSampling(nativeClock);
             container.addView(nativeClock, new FrameLayout.LayoutParams(-1, -1));
+            TextView lockDate = new TextView(context);
+            lockDate.setGravity(android.view.Gravity.CENTER);
+            lockDate.setTextColor(Color.WHITE);
+            int dateSize = context.getResources().getIdentifier(
+                    "miui_common_unlock_screen_date_text_size", "dimen", "com.android.systemui");
+            lockDate.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, dateSize == 0
+                    ? 16f * context.getResources().getDisplayMetrics().scaledDensity
+                    : context.getResources().getDimension(dateSize));
+            lockDate.setClickable(false);
+            container.addView(lockDate, new FrameLayout.LayoutParams(-1,
+                    Math.round(42f * context.getResources().getDisplayMetrics().density)));
             ImageView foreground = new ImageView(context);
             foreground.setScaleType(ImageView.ScaleType.FIT_XY);
             foreground.setClickable(false);
@@ -131,10 +163,15 @@ public final class IosNotificationCenterPresentation {
             panel = target;
             host = container;
             clock = nativeClock;
+            date = lockDate;
             IosShadeMaterial.registerClock(nativeClock);
             depth = foreground;
             status = statusMirror;
             stack = byId(target, "notification_stack_scroller");
+            if (stack == null) stack = byId(root, "notification_stack_scroller");
+            if (stack == null && capturedStack != null
+                    && capturedStack.getRootView() == target.getRootView()) stack = capturedStack;
+            Xp.log(TAG + "notification stack " + (stack == null ? "not found" : "attached"));
             findHeader();
             observer = target.getViewTreeObserver();
             observer.addOnPreDrawListener(FRAME);
@@ -180,6 +217,7 @@ public final class IosNotificationCenterPresentation {
         }
         syncDepth();
         syncStatus();
+        syncDate();
         int blur = Math.round(28f * panel.getResources().getDisplayMetrics().density * (1f - progress));
         if (blur != lastBlur) {
             host.setRenderEffect(blur == 0 ? null : RenderEffect.createBlurEffect(
@@ -235,10 +273,93 @@ public final class IosNotificationCenterPresentation {
         }
     }
 
+    private static void syncDate() {
+        if (date == null || clock == null) return;
+        if (dateSource == null) dateSource = lockscreenDateSource();
+        if (dateSource != null && dateSource.getText().length() > 0) {
+            if (!dateSource.getText().toString().contentEquals(date.getText())) {
+                date.setText(dateSource.getText());
+            }
+            if (date.getCurrentTextColor() != dateSource.getCurrentTextColor()) {
+                date.setTextColor(dateSource.getCurrentTextColor());
+            }
+            if (date.getTypeface() != dateSource.getTypeface()) {
+                date.setTypeface(dateSource.getTypeface());
+            }
+            if (date.getTextSize() != dateSource.getTextSize()) {
+                date.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, dateSource.getTextSize());
+            }
+        } else {
+            long minute = System.currentTimeMillis() / 60000L;
+            if (minute != dateMinute) {
+                dateMinute = minute;
+                try {
+                    Context context = date.getContext();
+                    boolean hour24 = android.text.format.DateFormat.is24HourFormat(context);
+                    int id = context.getResources().getIdentifier(hour24
+                            ? "miui_lock_screen_date" : "miui_lock_screen_date_12",
+                            "string", "com.android.systemui");
+                    String pattern = context.getString(id);
+                    Class<?> calendarType = Class.forName("miuix.pickerwidget.date.Calendar", false,
+                            context.getClassLoader());
+                    Object calendar = calendarType.getConstructor().newInstance();
+                    calendarType.getMethod("setTimeInMillis", long.class)
+                            .invoke(calendar, System.currentTimeMillis());
+                    date.setText((CharSequence) calendarType.getMethod("format", Context.class, String.class)
+                            .invoke(calendar, context, pattern));
+                } catch (Throwable ignored) {
+                    java.text.DateFormat format = java.text.DateFormat.getDateInstance(
+                            java.text.DateFormat.FULL, date.getResources().getConfiguration().getLocales().get(0));
+                    date.setText(format.format(new java.util.Date()));
+                }
+            }
+        }
+        int height = date.getLayoutParams().height;
+        float top = 0f;
+        try {
+            Object value = clock.getClass().getMethod("getNotificationClockTop").invoke(clock);
+            if (value instanceof Number) top = ((Number) value).floatValue();
+        } catch (Throwable ignored) {}
+        float density = date.getResources().getDisplayMetrics().density;
+        float y = Math.max(64f * density, top - height - 8f * density);
+        if (date.getTranslationY() != y) date.setTranslationY(y);
+    }
+
+    private static TextView lockscreenDateSource() {
+        try {
+            Object controller = Xp.getObjectField(clock, "mMiuiClockController");
+            Object face = Xp.getObjectField(controller, "mClockView");
+            Object source = Xp.getObjectField(face, "mCurrentDate");
+            if (source instanceof TextView) return (TextView) source;
+        } catch (Throwable ignored) {}
+        return findDateText(clock);
+    }
+
+    private static TextView findDateText(View view) {
+        if (view instanceof TextView && view.getId() != View.NO_ID) {
+            try {
+                if (view.getResources().getResourceEntryName(view.getId()).contains("date")) {
+                    return (TextView) view;
+                }
+            } catch (Throwable ignored) {}
+        }
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                TextView found = findDateText(group.getChildAt(i));
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
     private static void syncNotifications() {
         View currentStack = stack;
         if (currentStack == null || currentStack.getHeight() == 0 || clock == null) return;
-        if (Float.isNaN(nativeTopPadding)) nativeTopPadding = getPadding(currentStack);
+        if (Float.isNaN(nativeTopPadding)) {
+            nativeTopPadding = getPadding(currentStack);
+            if (nativeTopPadding < 0f) return;
+        }
         float target = adjustedTopPadding(nativeTopPadding);
         if (Math.abs(getPadding(currentStack) - target) > .5f) writeTopPadding(currentStack, target);
         int[] panelPoint = new int[2];
@@ -263,16 +384,20 @@ public final class IosNotificationCenterPresentation {
 
     private static float adjustedTopPadding(float nativeTop) {
         if (stack == null || stack.getHeight() == 0 || clock == null) return nativeTop;
+        float desired = desiredNotificationTop();
+        float limit = Math.max(nativeTop, stack.getHeight() -
+                160f * panel.getResources().getDisplayMetrics().density);
+        return nativeTop + Math.max(0f, Math.min(limit, desired) - nativeTop) * progress;
+    }
+
+    private static float desiredNotificationTop() {
         int[] panelPoint = new int[2];
         int[] stackPoint = new int[2];
         panel.getLocationInWindow(panelPoint);
         stack.getLocationInWindow(stackPoint);
         float gap = 16f * panel.getResources().getDisplayMetrics().density;
-        float desired = clockBottom() + host.getTranslationY() + gap -
+        return clockBottom() + host.getTranslationY() + gap -
                 (stackPoint[1] - panelPoint[1]);
-        float limit = Math.max(nativeTop, stack.getHeight() -
-                160f * panel.getResources().getDisplayMetrics().density);
-        return nativeTop + Math.max(0f, Math.min(limit, desired) - nativeTop) * progress;
     }
 
     private static void writeTopPadding(View view, float value) {
@@ -306,7 +431,15 @@ public final class IosNotificationCenterPresentation {
                 bottom = Math.max(bottom, bounds.bottom - point[1]);
             }
         }
-        return bottom;
+        if (bottom > 0f) return bottom;
+        float density = panel.getResources().getDisplayMetrics().density;
+        try {
+            Object value = clock.getClass().getMethod("getNotificationClockTop").invoke(clock);
+            if (value instanceof Number) {
+                return Math.max(220f * density, ((Number) value).floatValue() + 140f * density);
+            }
+        } catch (Throwable ignored) {}
+        return 220f * density;
     }
 
     private static void releasePresentation() {
@@ -335,11 +468,14 @@ public final class IosNotificationCenterPresentation {
         host = null;
         panel = null;
         clock = null;
+        date = null;
+        dateSource = null;
         depth = null;
         status = null;
         wallpaperSheet = null;
         lastBlur = -1;
         lastStatusBlur = -1;
+        dateMinute = -1L;
     }
 
     private static int getPadding(View view) {

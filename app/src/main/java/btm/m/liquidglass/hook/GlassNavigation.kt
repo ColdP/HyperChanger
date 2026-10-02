@@ -7,11 +7,14 @@ import android.view.HapticFeedbackConstants
 import android.view.View
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.EaseOut
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -956,6 +959,22 @@ private fun HyperFloatingNavigationBar(
             }) else null,
         )
     }
+    val touchInteractionSource = remember { MutableInteractionSource() }
+    val touchPressed by touchInteractionSource.collectIsPressedAsState()
+    val touchProgress by animateFloatAsState(
+        targetValue = if (harmonyFloating && touchPressed) 1f else 0f,
+        animationSpec = spring(stiffness = 700f, dampingRatio = 0.82f),
+        label = "harmonyFloatingTouchProgress",
+    )
+    val visualPressProgress = if (harmonyFloating) touchProgress else dragAnimation.pressProgress
+    val interactiveHighlight = remember(animationScope, tabCount) {
+        InteractiveHighlight(animationScope) { size, offset ->
+            Offset(
+                offset.x.coerceIn(0f, size.width),
+                offset.y.coerceIn(0f, size.height),
+            )
+        }
+    }
     LaunchedEffect(selectedIndex.intValue) {
         dragAnimation.animateToValue(selectedIndex.intValue.coerceIn(0, tabCount - 1).toFloat())
     }
@@ -1007,7 +1026,9 @@ private fun HyperFloatingNavigationBar(
                 .fillMaxSize()
                 .graphicsLayer {
                     if (harmonyFloating) {
-                        val deformation = lerp(1f, 0.95f, dragAnimation.pressProgress)
+                        // Match the title button glass response: the capsule expands visibly
+                        // while the touch highlight and refraction build up.
+                        val deformation = lerp(1f, 1.08f, visualPressProgress)
                         scaleX = deformation
                         scaleY = deformation
                     }
@@ -1027,18 +1048,36 @@ private fun HyperFloatingNavigationBar(
                             effects = {
                                 vibrancy()
                                 blur(with(density) { (blurRadius * 0.24f).dp.toPx() })
-                                // Keep the lens pronounced while avoiding an overly strong refraction.
-                                lens(
-                                    refractionHeight = 16.dp.toPx(),
-                                    refractionAmount = 32.dp.toPx(),
-                                    depthEffect = true,
-                                    chromaticAberration = false,
-                                )
+                                if (harmonyFloating) {
+                                    // Harmony's capsule keeps its liquid refraction at rest. A
+                                    // press boosts it instead of being the only time it exists.
+                                    val progress = 0.7f + 0.3f * visualPressProgress
+                                    lens(
+                                        refractionHeight = 10.dp.toPx() * progress,
+                                        refractionAmount = 14.dp.toPx() * progress,
+                                        chromaticAberration = true,
+                                    )
+                                } else {
+                                    // Keep the lens pronounced while avoiding an overly strong refraction.
+                                    lens(
+                                        refractionHeight = 16.dp.toPx(),
+                                        refractionAmount = 32.dp.toPx(),
+                                        depthEffect = true,
+                                        chromaticAberration = false,
+                                    )
+                                }
                             },
                             highlight = {
                                 Highlight.Default.copy(
-                                    alpha = (if (isDarkTheme) 0.78f else 0.96f) *
-                                        (if (harmonyFloating) 0.72f + dragAnimation.pressProgress * 0.7f else 1f)
+                                    alpha = if (harmonyFloating) {
+                                        // Keep the edge highlight visible when idle, then make
+                                        // the pressed state noticeably brighter.
+                                        val base = if (isDarkTheme) 0.78f else 0.96f
+                                        (base * (0.72f + 0.28f * visualPressProgress))
+                                            .coerceIn(0f, 1f)
+                                    } else {
+                                        if (isDarkTheme) 0.78f else 0.96f
+                                    }
                                 )
                             },
                             onDrawSurface = {
@@ -1086,7 +1125,7 @@ private fun HyperFloatingNavigationBar(
                                 scaleY = scale
                             }
                             .clickable(
-                                interactionSource = null,
+                                interactionSource = if (harmonyFloating) touchInteractionSource else null,
                                 indication = null,
                                 role = Role.Tab,
                             ) {
@@ -1134,6 +1173,16 @@ private fun HyperFloatingNavigationBar(
                     Modifier
                         .fillMaxSize()
                         .then(dragAnimation.modifier)
+                )
+            }
+            // Draw the interactive highlight above the backdrop surface. InteractiveHighlight's
+            // draw modifier renders before its child content, so it must be a final overlay here.
+            if (harmonyFloating) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .clip(capsule)
+                        .then(interactiveHighlight.modifier)
                 )
             }
         }

@@ -207,6 +207,9 @@ internal class InteractiveHighlight(
 
     val gestureModifier: Modifier = Modifier.pointerInput(animationScope) {
         inspectDragGestures(
+            // Tab clickables consume the gesture in the Main pass. This observer must still
+            // receive the stream so the touch highlight can follow every press.
+            ignoreConsumed = true,
             onDragStart = { down ->
                 startPosition = down.position
                 animationScope.launch {
