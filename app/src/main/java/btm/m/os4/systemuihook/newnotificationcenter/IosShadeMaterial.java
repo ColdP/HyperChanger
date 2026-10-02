@@ -29,6 +29,7 @@ public final class IosShadeMaterial {
     private static final ThreadLocal<Boolean> WRITING = new ThreadLocal<>();
     private static boolean active;
     private static ViewGroup root;
+    private static View clockRoot;
     private static ViewTreeObserver observer;
     private static boolean loggedFailure;
     private static final ViewTreeObserver.OnGlobalLayoutListener LAYOUT = () -> {
@@ -55,11 +56,12 @@ public final class IosShadeMaterial {
                             View view = (View) chain.getThisObject();
                             if (Boolean.TRUE.equals(WRITING.get())) return chain.proceed();
                             Object requested = chain.getArgs().get(0);
-                            if (slot == 4 && !isPanel(view)) return chain.proceed();
-                            if (slot == 4 && isPanel(view)) {
+                            if (slot == 4 && !isPanel(view) && !isClock(view)) return chain.proceed();
+                            if (slot == 4 && (isPanel(view) || isClock(view))) {
                                 CONTAIN_REQUESTS.put(view, (Boolean) requested);
                             }
-                            if (!active || !target(view) || view.getRootView() != root) return chain.proceed();
+                            if (!active || (!target(view) && !(slot == 4 && isClock(view)))
+                                    || view.getRootView() != root) return chain.proceed();
                             Object[] saved = remember(view);
                             saved[slot] = requested;
                             return chain.proceed(new Object[]{wanted(view, slot, saved)});
@@ -96,6 +98,41 @@ public final class IosShadeMaterial {
         scan(window);
     }
 
+    public static void registerClock(View view) {
+        clockRoot = view;
+        if (active && view != null) scanClock(view);
+    }
+
+    private static boolean isClock(View view) {
+        View clock = clockRoot;
+        for (View cursor = view; cursor != null; ) {
+            if (cursor == clock) return clock != null;
+            cursor = cursor.getParent() instanceof View ? (View) cursor.getParent() : null;
+        }
+        return false;
+    }
+
+    private static void scanClock(View view) {
+        if (METHODS[4] != null && !SAVED.containsKey(view)) {
+            Object[] saved = new Object[SETTERS.length];
+            try {
+                if (READERS[4] != null) saved[4] = !(Boolean) READERS[4].invoke(view);
+                if (saved[4] != null) {
+                    SAVED.put(view, saved);
+                    WRITING.set(true);
+                    METHODS[4].invoke(view, false);
+                }
+            } catch (Throwable ignored) {
+            } finally {
+                WRITING.remove();
+            }
+        }
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) scanClock(group.getChildAt(i));
+        }
+    }
+
     private static boolean isPanel(View view) {
         return view.getClass().getName().equals("com.android.systemui.shade.NotificationPanelView");
     }
@@ -120,6 +157,7 @@ public final class IosShadeMaterial {
     }
 
     private static void scan(View view) {
+        if (view == clockRoot) scanClock(view);
         if (view.getClass().getName().equals(
                 "com.android.systemui.statusbar.notification.mediacontrol.MiuiMediaHeaderView")) registerMedia(view);
         if (target(view) && view.isShown() && !SAVED.containsKey(view)) apply(view);
@@ -182,6 +220,7 @@ public final class IosShadeMaterial {
 
     private static void restore() {
         active = false;
+        clockRoot = null;
         if (observer != null && observer.isAlive()) observer.removeOnGlobalLayoutListener(LAYOUT);
         observer = null;
         WRITING.set(true);

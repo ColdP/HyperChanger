@@ -169,7 +169,7 @@ public final class ShadeLayer {
 
     private static void hideIosLayer() {
         sEffectOn = false;
-        IosNotificationCenterPresentation.update(0f, false);
+        IosNotificationCenterPresentation.update(0f, false, null);
         IosShadeMaterial.setActive(false, sRoot);
         if (sFrame != null) {
             sFrame.setAlpha(0f);
@@ -202,7 +202,7 @@ public final class ShadeLayer {
         }
         applyCurtain(IOS.progress);
         IosShadeMaterial.setActive(true, sRoot);
-        IosNotificationCenterPresentation.update(visual, true);
+        IosNotificationCenterPresentation.update(visual, true, sFrame);
     }
     private static android.content.SharedPreferences sPreferences;
     private static final android.content.SharedPreferences.OnSharedPreferenceChangeListener PREFS_CHANGED =
@@ -1327,7 +1327,7 @@ public final class ShadeLayer {
         sResets++;
         cancelIosSettle();
         IOS.clear();
-        IosNotificationCenterPresentation.update(0f, false);
+        IosNotificationCenterPresentation.update(0f, false, null);
         IosShadeMaterial.setActive(false, sRoot);
         if (sEffectOn) Main.setCardBlurActive(false);
         sEffectOn = false;

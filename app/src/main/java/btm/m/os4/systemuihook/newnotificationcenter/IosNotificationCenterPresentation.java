@@ -34,6 +34,7 @@ public final class IosNotificationCenterPresentation {
     private static Drawable lastDepthDrawable;
     private static ViewTreeObserver observer;
     private static boolean clockUnavailable;
+    private static View wallpaperSheet;
 
     private IosNotificationCenterPresentation() {}
 
@@ -44,20 +45,29 @@ public final class IosNotificationCenterPresentation {
         clockUnavailable = false;
     }
 
-    public static void update(float fraction, boolean enabled) {
+    public static void update(float fraction, boolean enabled, View sheet) {
+        float previous = progress;
         progress = enabled ? Math.max(0f, Math.min(1f, fraction)) : 0f;
+        wallpaperSheet = sheet;
         if (progress <= 0f) {
+            View previousStack = stack;
             releasePresentation();
+            if (previous > 0f) requestStackUpdate(previousStack);
             return;
         }
         if (host == null && (clockUnavailable || !create())) return;
         host.setAlpha(progress);
         sync();
+        if (Math.abs(progress - previous) > .01f) requestStackUpdate(stack);
     }
 
     public static void release() {
         releasePresentation();
         window = null;
+    }
+
+    public static boolean isActive() {
+        return host != null && progress > 0f;
     }
 
     private static boolean create() {
@@ -89,6 +99,8 @@ public final class IosNotificationCenterPresentation {
             container.setClipChildren(false);
             container.setClipToPadding(false);
             container.setClickable(false);
+            allowBackdropSampling(container);
+            allowBackdropSampling(nativeClock);
             container.addView(nativeClock, new FrameLayout.LayoutParams(-1, -1));
             ImageView foreground = new ImageView(context);
             foreground.setScaleType(ImageView.ScaleType.FIT_XY);
@@ -100,6 +112,7 @@ public final class IosNotificationCenterPresentation {
             panel = target;
             host = container;
             clock = nativeClock;
+            IosShadeMaterial.registerClock(nativeClock);
             depth = foreground;
             status = statusMirror;
             stack = byId(target, "notification_stack_scroller");
@@ -132,6 +145,17 @@ public final class IosNotificationCenterPresentation {
 
     private static void sync() {
         if (host == null || panel == null || progress <= 0f) return;
+        View sheet = wallpaperSheet;
+        if (sheet != null && sheet.isAttachedToWindow()) {
+            int[] sheetPoint = new int[2];
+            int[] panelPoint = new int[2];
+            sheet.getLocationInWindow(sheetPoint);
+            panel.getLocationInWindow(panelPoint);
+            float x = sheetPoint[0] - panelPoint[0];
+            float y = sheetPoint[1] - panelPoint[1];
+            if (host.getTranslationX() != x) host.setTranslationX(x);
+            if (host.getTranslationY() != y) host.setTranslationY(y);
+        }
         for (int i = 0; i < oldHeader.length; i++) {
             View original = oldHeader[i];
             if (original != null && original.getAlpha() != 0f) {
@@ -177,7 +201,7 @@ public final class IosNotificationCenterPresentation {
         float current = currentStack.getTranslationY();
         if (current != stackWritten) stackAdded = 0f;
         float nativeTop = stackPoint[1] - panelPoint[1] - stackAdded;
-        float desired = clockNotificationTop();
+        float desired = clockNotificationTop() + host.getTranslationY();
         if (desired <= 0f) return;
         float gap = 16f * panel.getResources().getDisplayMetrics().density;
         float added = Math.max(0f, desired + gap - nativeTop) * progress;
@@ -252,6 +276,25 @@ public final class IosNotificationCenterPresentation {
         clock = null;
         depth = null;
         status = null;
+        wallpaperSheet = null;
+    }
+
+    private static void allowBackdropSampling(View view) {
+        try {
+            Method method = View.class.getDeclaredMethod("disableMiBackgroundContainBelow", boolean.class);
+            method.setAccessible(true);
+            method.invoke(view, false);
+        } catch (Throwable error) {
+            Xp.log(TAG + "clock backdrop containment unavailable: " + error);
+        }
+    }
+
+    private static void requestStackUpdate(View currentStack) {
+        if (currentStack == null) return;
+        try {
+            Xp.callMethod(currentStack, "requestChildrenUpdate");
+        } catch (Throwable ignored) {
+        }
     }
 
     private static View byId(View root, String name) {

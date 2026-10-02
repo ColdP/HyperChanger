@@ -181,7 +181,7 @@ public final class Xp {
         }
     }
 
-    static void setObjectField(Object obj, String name, Object value) {
+    public static void setObjectField(Object obj, String name, Object value) {
         try {
             field(obj, name).set(obj, value);
         } catch (IllegalAccessException e) {

@@ -8,6 +8,7 @@ public final class IosNotificationCenterHooks {
     private IosNotificationCenterHooks() {}
 
     public static void install(ClassLoader loader) {
+        IosNotificationStackHooks.install(loader);
         try {
             Class<?> expand = Xp.findClass("com.android.systemui.shade.NotificationPanelExpandController", loader);
             Xp.hookAll(expand, "notifyExpandHeightChanged", chain -> {
