@@ -3,6 +3,8 @@ package btm.m.os4.systemuihook.newnotificationcenter;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Rect;
+import android.graphics.RenderEffect;
+import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
 import android.view.View;
 import android.view.ViewGroup;
@@ -25,16 +27,18 @@ public final class IosNotificationCenterPresentation {
     private static ImageView depth;
     private static MirrorView status;
     private static View stack;
+    private static View capturedHeader;
     private static View[] oldHeader;
     private static float[] oldHeaderAlpha;
-    private static float stackAdded;
-    private static float stackWritten = Float.NaN;
+    private static int paddingAdded;
+    private static int paddingWritten = -1;
     private static float progress;
     private static float lastNotificationY = Float.NaN;
     private static Drawable lastDepthDrawable;
     private static ViewTreeObserver observer;
     private static boolean clockUnavailable;
     private static View wallpaperSheet;
+    private static int lastBlur = -1;
 
     private IosNotificationCenterPresentation() {}
 
@@ -70,6 +74,11 @@ public final class IosNotificationCenterPresentation {
         return host != null && progress > 0f;
     }
 
+    static void captureHeader(View view) {
+        capturedHeader = view;
+        if (isActive()) findHeader();
+    }
+
     private static boolean create() {
         ViewGroup root = window;
         if (root == null) return false;
@@ -96,8 +105,9 @@ public final class IosNotificationCenterPresentation {
                 return false;
             }
             FrameLayout container = new DisplayHost(context);
-            container.setClipChildren(false);
-            container.setClipToPadding(false);
+            container.setClipChildren(true);
+            container.setClipToPadding(true);
+            container.setClipToOutline(true);
             container.setClickable(false);
             allowBackdropSampling(container);
             allowBackdropSampling(nativeClock);
@@ -107,8 +117,9 @@ public final class IosNotificationCenterPresentation {
             foreground.setClickable(false);
             container.addView(foreground, new FrameLayout.LayoutParams(-1, -1));
             MirrorView statusMirror = new MirrorView(context);
-            container.addView(statusMirror, new FrameLayout.LayoutParams(-1, -1));
             target.addView(container, 0, new FrameLayout.LayoutParams(-1, -1));
+            target.addView(statusMirror, 1, new FrameLayout.LayoutParams(-1,
+                    Math.round(80f * context.getResources().getDisplayMetrics().density)));
             panel = target;
             host = container;
             clock = nativeClock;
@@ -116,16 +127,7 @@ public final class IosNotificationCenterPresentation {
             depth = foreground;
             status = statusMirror;
             stack = byId(target, "notification_stack_scroller");
-            View header = byId(target, "normal_notification_header_view");
-            oldHeader = new View[]{byId(header, "big_time"), byId(header, "date_time"),
-                    byId(header, "horizontal_time")};
-            oldHeaderAlpha = new float[oldHeader.length];
-            for (int i = 0; i < oldHeader.length; i++) {
-                if (oldHeader[i] != null) {
-                    oldHeaderAlpha[i] = oldHeader[i].getAlpha();
-                    oldHeader[i].setAlpha(0f);
-                }
-            }
+            findHeader();
             observer = target.getViewTreeObserver();
             observer.addOnPreDrawListener(FRAME);
             Xp.log(TAG + "keyguard clock presentation attached");
@@ -155,8 +157,13 @@ public final class IosNotificationCenterPresentation {
             float y = sheetPoint[1] - panelPoint[1];
             if (host.getTranslationX() != x) host.setTranslationX(x);
             if (host.getTranslationY() != y) host.setTranslationY(y);
+            if (host.getOutlineProvider() != sheet.getOutlineProvider()) {
+                host.setOutlineProvider(sheet.getOutlineProvider());
+                host.invalidateOutline();
+            }
         }
-        for (int i = 0; i < oldHeader.length; i++) {
+        if (oldHeader == null) findHeader();
+        for (int i = 0; oldHeader != null && i < oldHeader.length; i++) {
             View original = oldHeader[i];
             if (original != null && original.getAlpha() != 0f) {
                 oldHeaderAlpha[i] = original.getAlpha();
@@ -165,7 +172,30 @@ public final class IosNotificationCenterPresentation {
         }
         syncDepth();
         syncStatus();
+        int blur = Math.round(28f * panel.getResources().getDisplayMetrics().density * (1f - progress));
+        if (blur != lastBlur) {
+            host.setRenderEffect(blur == 0 ? null : RenderEffect.createBlurEffect(
+                    blur, blur, Shader.TileMode.CLAMP));
+            lastBlur = blur;
+        }
         syncNotifications();
+    }
+
+    private static void findHeader() {
+        View header = byId(capturedHeader, "normal_notification_header_view");
+        if (header == null) header = byId(window, "normal_notification_header_view");
+        if (header == null) return;
+        View[] views = {byId(header, "big_time"), byId(header, "date_time"),
+                byId(header, "horizontal_time")};
+        if (oldHeader != null && oldHeader[0] == views[0]) return;
+        oldHeader = views;
+        oldHeaderAlpha = new float[views.length];
+        for (int i = 0; i < views.length; i++) {
+            if (views[i] != null) {
+                oldHeaderAlpha[i] = views[i].getAlpha();
+                views[i].setAlpha(0f);
+            }
+        }
     }
 
     private static void syncDepth() {
@@ -198,20 +228,30 @@ public final class IosNotificationCenterPresentation {
         int[] stackPoint = new int[2];
         panel.getLocationInWindow(panelPoint);
         currentStack.getLocationInWindow(stackPoint);
-        float current = currentStack.getTranslationY();
-        if (current != stackWritten) stackAdded = 0f;
-        float nativeTop = stackPoint[1] - panelPoint[1] - stackAdded;
+        int current;
+        try {
+            current = ((Number) currentStack.getClass().getMethod("getTopPadding")
+                    .invoke(currentStack)).intValue();
+        } catch (Throwable ignored) { return; }
+        if (current != paddingWritten) paddingAdded = 0;
+        int nativePadding = current - paddingAdded;
         float desired = clockNotificationTop() + host.getTranslationY();
-        if (desired <= 0f) return;
         float gap = 16f * panel.getResources().getDisplayMetrics().density;
-        float added = Math.max(0f, desired + gap - nativeTop) * progress;
-        if (Math.abs(added - stackAdded) > .5f || current != stackWritten) {
-            float next = current == stackWritten ? current - stackAdded + added : current + added;
-            stackAdded = added;
-            stackWritten = next;
-            currentStack.setTranslationY(next);
+        int limit = Math.max(nativePadding, currentStack.getHeight() -
+                Math.round(160f * panel.getResources().getDisplayMetrics().density));
+        int added = Math.max(0, Math.min(limit, Math.round(desired + gap -
+                (stackPoint[1] - panelPoint[1]))) - nativePadding);
+        added = Math.round(added * progress);
+        if (added != paddingAdded || current != paddingWritten) {
+            int next = nativePadding + added;
+            try {
+                currentStack.getClass().getMethod("updateTopPadding", float.class, boolean.class)
+                        .invoke(currentStack, (float) next, false);
+                paddingAdded = added;
+                paddingWritten = next;
+            } catch (Throwable ignored) { return; }
         }
-        float notificationY = nativeTop + added;
+        float notificationY = stackPoint[1] - panelPoint[1] + nativePadding + added;
         if (Math.abs(notificationY - lastNotificationY) > 1f) {
             lastNotificationY = notificationY;
             try {
@@ -260,16 +300,22 @@ public final class IosNotificationCenterPresentation {
         }
         oldHeader = null;
         oldHeaderAlpha = null;
-        if (stack != null && stackAdded != 0f && stack.getTranslationY() == stackWritten) {
-            stack.setTranslationY(stack.getTranslationY() - stackAdded);
+        if (stack != null && paddingAdded != 0 && getPadding(stack) == paddingWritten) {
+            try {
+                stack.getClass().getMethod("updateTopPadding", float.class, boolean.class)
+                        .invoke(stack, (float) (paddingWritten - paddingAdded), false);
+            } catch (Throwable ignored) {}
         }
         stack = null;
-        stackAdded = 0f;
-        stackWritten = Float.NaN;
+        paddingAdded = 0;
+        paddingWritten = -1;
         lastNotificationY = Float.NaN;
         lastDepthDrawable = null;
         if (host != null && host.getParent() instanceof ViewGroup) {
             ((ViewGroup) host.getParent()).removeView(host);
+        }
+        if (status != null && status.getParent() instanceof ViewGroup) {
+            ((ViewGroup) status.getParent()).removeView(status);
         }
         host = null;
         panel = null;
@@ -277,6 +323,13 @@ public final class IosNotificationCenterPresentation {
         depth = null;
         status = null;
         wallpaperSheet = null;
+        lastBlur = -1;
+    }
+
+    private static int getPadding(View view) {
+        try {
+            return ((Number) view.getClass().getMethod("getTopPadding").invoke(view)).intValue();
+        } catch (Throwable ignored) { return -1; }
     }
 
     private static void allowBackdropSampling(View view) {
@@ -310,14 +363,7 @@ public final class IosNotificationCenterPresentation {
 
         @Override protected void onDraw(Canvas canvas) {
             if (source == null || source.getWidth() <= 0 || source.getHeight() <= 0) return;
-            int[] sourcePoint = new int[2];
-            int[] ownPoint = new int[2];
-            source.getLocationOnScreen(sourcePoint);
-            getLocationOnScreen(ownPoint);
-            int save = canvas.save();
-            canvas.translate(sourcePoint[0] - ownPoint[0], sourcePoint[1] - ownPoint[1]);
             source.draw(canvas);
-            canvas.restoreToCount(save);
             if (isAttachedToWindow()) postInvalidateDelayed(1000L);
         }
     }

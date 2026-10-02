@@ -10,6 +10,29 @@ public final class IosNotificationCenterHooks {
     public static void install(ClassLoader loader) {
         IosNotificationStackHooks.install(loader);
         try {
+            Class<?> headerView = Xp.findClass("com.android.systemui.qs.MiuiNotificationHeaderView", loader);
+            Xp.hookAll(headerView, "onFinishInflate", chain -> {
+                Object result = chain.proceed();
+                IosNotificationCenterPresentation.captureHeader((android.view.View) chain.getThisObject());
+                return result;
+            });
+        } catch (Throwable error) {
+            Xp.log("[IOSShade] notification header inflate capture unavailable: " + error);
+        }
+        try {
+            Class<?> header = Xp.findClass(
+                    "com.android.systemui.controlcenter.shade.CombinedHeaderController", loader);
+            Xp.hookAll(header, "getHeaderView", chain -> {
+                Object result = chain.proceed();
+                if (result instanceof android.view.View) {
+                    IosNotificationCenterPresentation.captureHeader((android.view.View) result);
+                }
+                return result;
+            });
+        } catch (Throwable error) {
+            Xp.log("[IOSShade] combined header capture unavailable: " + error);
+        }
+        try {
             Class<?> expand = Xp.findClass("com.android.systemui.shade.NotificationPanelExpandController", loader);
             Xp.hookAll(expand, "notifyExpandHeightChanged", chain -> {
                 Object result = chain.proceed();
