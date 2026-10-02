@@ -1,4 +1,6 @@
-package btm.m.os4.systemuihook.hypermusiccover;
+package btm.m.os4.systemuihook.newnotificationcenter;
+
+import btm.m.os4.systemuihook.hypermusiccover.Xp;
 
 import android.view.View;
 import android.view.ViewGroup;
@@ -10,7 +12,7 @@ import java.util.Map;
 import java.util.WeakHashMap;
 
 /** Redirect native glass to the wallpaper in this window without replacing its glass recipe. */
-final class IosShadeMaterial {
+public final class IosShadeMaterial {
     private static final String[] SETTERS = {
             "setMiBackgroundBlurMode", "setMiBackgroundBlurType", "setMiBackgroundBlurRadius",
             "setPassWindowBlurEnabled", "disableMiBackgroundContainBelow"
@@ -33,7 +35,7 @@ final class IosShadeMaterial {
         if (active && root != null) scan(root);
     };
 
-    static void install() {
+    public static void install() {
         for (int index = 0; index < SETTERS.length; index++) {
             final int slot = index;
             try {
@@ -83,7 +85,7 @@ final class IosShadeMaterial {
         }
     }
 
-    static void setActive(boolean enabled, ViewGroup window) {
+    public static void setActive(boolean enabled, ViewGroup window) {
         if (enabled == active && window == root) return;
         restore();
         root = window;
@@ -104,7 +106,7 @@ final class IosShadeMaterial {
                 || name.equals("com.miui.systemui.widget.CircleAndTickAnimView") || MEDIA.containsKey(view);
     }
 
-    static void registerMedia(View header) {
+    public static void registerMedia(View header) {
         try {
             Object holder = Xp.callMethod(header, "getMediaViewHolder");
             if (holder == null) return;

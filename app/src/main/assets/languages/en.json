@@ -4,7 +4,7 @@
   "locale": "en",
   "strings": {
     "iosNotificationCenter": "iOS-style Notification Center",
-    "iosNotificationCenterSummary": "Pull down a rounded wallpaper sheet that follows your gesture, keeping system notifications and clock. Live wallpapers are not supported yet.",
+    "iosNotificationCenterSummary": "Pull down a rounded wallpaper sheet with the lock screen clock and depth effect. Live wallpapers are not supported yet.",
     "iosNotificationWallpaper": "Notification Center wallpaper source",
     "iosNotificationLockWallpaper": "Lock screen wallpaper",
     "iosNotificationHomeWallpaper": "Home screen wallpaper",

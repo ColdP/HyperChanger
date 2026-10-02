@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 btm_m
-package btm.m.os4.systemuihook
+package btm.m.os4.systemuihook.newnotificationcenter
 
 import android.content.Context
 import android.content.SharedPreferences
 import io.github.libxposed.service.XposedService
+import btm.m.os4.systemuihook.REMOTE_PREFERENCE_GROUP
 
 const val KEY_IOS_NOTIFICATION_CENTER = "ios_notification_center"
 const val KEY_IOS_NOTIFICATION_WALLPAPER = "ios_notification_wallpaper"

@@ -1,5 +1,9 @@
 package btm.m.os4.systemuihook.hypermusiccover;
 
+import btm.m.os4.systemuihook.newnotificationcenter.IosShadeMaterial;
+import btm.m.os4.systemuihook.newnotificationcenter.IosShadeState;
+import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterPresentation;
+
 import android.content.Context;
 import android.graphics.Rect;
 import android.view.View;
@@ -30,7 +34,7 @@ import android.widget.ImageView;
  * (index 5), because indices 0-4 are MIUI's own scrims and background, which paint over anything
  * put there. That index is read from the tree, never hard-coded - see {@link #ensurePlacement}.
  */
-final class ShadeLayer {
+public final class ShadeLayer {
 
     private ShadeLayer() {
     }
@@ -77,15 +81,15 @@ final class ShadeLayer {
     private static android.animation.ValueAnimator sIosSettle;
     private static float sIosSettleTarget;
 
-    static void onRawControllerAvailable() {
+    public static void onRawControllerAvailable() {
         sIosRawDriver = true;
     }
 
-    static boolean iosEnabled() {
+    public static boolean iosEnabled() {
         return sIosEnabled;
     }
 
-    static void onRawExpansion(float height, float threshold, boolean tracking, boolean animate) {
+    public static void onRawExpansion(float height, float threshold, boolean tracking, boolean animate) {
         if (!sIosEnabled || IOS.controlCenter || IOS.switching) return;
         float target = IOS.gestureTarget(height, threshold, tracking);
         if (tracking) {
@@ -122,7 +126,7 @@ final class ShadeLayer {
         if (old != null) old.cancel();
     }
 
-    static void onControlCenterAppearance(boolean visible) {
+    public static void onControlCenterAppearance(boolean visible) {
         if (sIosSwitchDriver) return;
         IOS.controlCenter(visible);
         if (visible) {
@@ -131,7 +135,7 @@ final class ShadeLayer {
         }
     }
 
-    static void onNotificationAppearance() {
+    public static void onNotificationAppearance() {
         if (sIosSwitchDriver) return;
         boolean returning = IOS.controlCenter;
         IOS.notification();
@@ -142,7 +146,7 @@ final class ShadeLayer {
         }
     }
 
-    static void onNotificationHidden() {
+    public static void onNotificationHidden() {
         if (IOS.switching) return;
         cancelIosSettle();
         IOS.gestureTarget(0f, 1f, false);
@@ -150,13 +154,13 @@ final class ShadeLayer {
         if (sIosEnabled) hideIosLayer();
     }
 
-    static void onSwitchDriverAvailable() {
+    public static void onSwitchDriverAvailable() {
         sIosSwitchDriver = true;
     }
 
     /** Native progress is 0 for control centre, 1 for notifications. Appearance callbacks
      * also fire when the opposite panel collapses, so they cannot determine ownership. */
-    static void onSwitchProgress(float progress, boolean switching) {
+    public static void onSwitchProgress(float progress, boolean switching) {
         if (!IOS.switchProgress(progress, switching)) return;
         if (!sIosEnabled) return;
         cancelIosSettle();
@@ -165,6 +169,7 @@ final class ShadeLayer {
 
     private static void hideIosLayer() {
         sEffectOn = false;
+        IosNotificationCenterPresentation.update(0f, false);
         IosShadeMaterial.setActive(false, sRoot);
         if (sFrame != null) {
             sFrame.setAlpha(0f);
@@ -197,12 +202,13 @@ final class ShadeLayer {
         }
         applyCurtain(IOS.progress);
         IosShadeMaterial.setActive(true, sRoot);
+        IosNotificationCenterPresentation.update(visual, true);
     }
     private static android.content.SharedPreferences sPreferences;
     private static final android.content.SharedPreferences.OnSharedPreferenceChangeListener PREFS_CHANGED =
             (prefs, key) -> {
-                if (btm.m.os4.systemuihook.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_CENTER.equals(key)
-                        || btm.m.os4.systemuihook.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_WALLPAPER.equals(key)) {
+                if (btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_CENTER.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_WALLPAPER.equals(key)) {
                     UI.post(() -> readPreferences(prefs));
                 }
             };
@@ -215,9 +221,9 @@ final class ShadeLayer {
 
     private static void readPreferences(android.content.SharedPreferences prefs) {
         boolean enabled = prefs.getBoolean(
-                btm.m.os4.systemuihook.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_CENTER, false);
+                btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_CENTER, false);
         int source = Math.max(0, Math.min(1, prefs.getInt(
-                btm.m.os4.systemuihook.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_WALLPAPER, 0)));
+                btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_WALLPAPER, 0)));
         if (enabled == sIosEnabled && source == sIosWallpaper) return;
         reset();
         if (sEffectOn) Main.setCardBlurActive(false);
@@ -350,6 +356,7 @@ final class ShadeLayer {
 
             sFrame = frame;
             sWp = wp;
+            IosNotificationCenterPresentation.attach(root);
             // The blur providers are built during startup and the shade window may come after
             // them, so the identity rule gets a second chance now that there is something to
             // compare against.
@@ -1320,6 +1327,7 @@ final class ShadeLayer {
         sResets++;
         cancelIosSettle();
         IOS.clear();
+        IosNotificationCenterPresentation.update(0f, false);
         IosShadeMaterial.setActive(false, sRoot);
         if (sEffectOn) Main.setCardBlurActive(false);
         sEffectOn = false;

@@ -24,7 +24,7 @@ import io.github.libxposed.api.XposedInterface;
  * carry on past: the call sites already sit inside try/catch blocks that log and give up, and a
  * silent null would turn a rename into a much stranger bug much later.
  */
-final class Xp {
+public final class Xp {
 
     private Xp() {
     }
@@ -36,7 +36,7 @@ final class Xp {
         sApi = api;
     }
 
-    static XposedInterface api() {
+    public static XposedInterface api() {
         XposedInterface api = sApi;
         if (api == null) throw new IllegalStateException("Xposed framework not attached yet");
         return api;
@@ -48,7 +48,7 @@ final class Xp {
      * The framework's log, which is where LSPosed collects module output. Tagged per line the
      * way the old XposedBridge.log was, so `logcat | grep MCProbe` still works.
      */
-    static void log(String msg) {
+    public static void log(String msg) {
         XposedInterface api = sApi;
         if (api != null) {
             api.log(Log.INFO, "LSPosed-Bridge", msg);
@@ -59,7 +59,7 @@ final class Xp {
 
     // ---------------------------------------------------------------- lookup
 
-    static Class<?> findClass(String name, ClassLoader loader) {
+    public static Class<?> findClass(String name, ClassLoader loader) {
         try {
             return Class.forName(name, false, loader);
         } catch (ClassNotFoundException e) {
@@ -86,7 +86,7 @@ final class Xp {
      * module hooks are obfuscated and their signatures move between OS versions, so hooking by
      * name and taking whatever is there has proven far more durable than naming the parameters.
      */
-    static List<XposedInterface.HookHandle> hookAll(Class<?> cls, String name,
+    public static List<XposedInterface.HookHandle> hookAll(Class<?> cls, String name,
                                                     XposedInterface.Hooker hooker) {
         // Declared methods only, no walk up the hierarchy - the same rule the classic
         // hookAllMethods followed, and here it is load-bearing: onAttachedToWindow and onDraw
@@ -173,7 +173,7 @@ final class Xp {
         throw new IllegalArgumentException("no field " + obj.getClass().getName() + "." + name);
     }
 
-    static Object getObjectField(Object obj, String name) {
+    public static Object getObjectField(Object obj, String name) {
         try {
             return field(obj, name).get(obj);
         } catch (IllegalAccessException e) {
@@ -204,7 +204,7 @@ final class Xp {
      * differ only in a numeric parameter type would be ambiguous here, but nothing this module
      * calls is: the OEM setters it drives take one argument of one type.
      */
-    static Object callMethod(Object obj, String name, Object... args) {
+    public static Object callMethod(Object obj, String name, Object... args) {
         Method m = findMethod(obj.getClass(), name, args);
         try {
             return m.invoke(obj, args);

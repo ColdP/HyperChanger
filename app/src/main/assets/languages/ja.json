@@ -4,7 +4,7 @@
   "locale": "ja",
   "strings": {
     "iosNotificationCenter": "iOS風通知センター",
-    "iosNotificationCenterSummary": "丸みのある壁紙パネルがスワイプに合わせて展開し、システムの通知と時計を維持します。ライブ壁紙は現在未対応です。",
+    "iosNotificationCenterSummary": "スワイプで丸みのある壁紙パネルを開き、ロック画面の時計と被写界深度効果を表示します。ライブ壁紙は現在未対応です。",
     "iosNotificationWallpaper": "通知センターの壁紙ソース",
     "iosNotificationLockWallpaper": "ロック画面の壁紙",
     "iosNotificationHomeWallpaper": "ホーム画面の壁紙",

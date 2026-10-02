@@ -2,6 +2,8 @@
 // Copyright 2026 btm_m
 package btm.m.os4.systemuihook
 
+import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsStore
+
 import android.app.Activity
 import android.app.DownloadManager
 import android.app.WallpaperManager
@@ -4215,7 +4217,7 @@ private fun Shade(
             Group(tr("iosNotificationCenter", "iOS 风格通知中心")) {
                 SwitchPreference(
                     title = tr("iosNotificationCenter", "iOS 风格通知中心"),
-                    summary = tr("iosNotificationCenterSummary", "下拉时以圆角壁纸面板跟手展开，保留系统通知与时钟。动态壁纸暂不支持。"),
+                    summary = tr("iosNotificationCenterSummary", "下拉时展示圆角壁纸面板、锁屏时钟及景深效果。动态壁纸暂不支持。"),
                     checked = iosSettings.enabled,
                     onCheckedChange = { enabled ->
                         iosStore.update(service) { it.copy(enabled = enabled) }

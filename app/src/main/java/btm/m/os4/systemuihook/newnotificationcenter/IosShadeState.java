@@ -1,18 +1,18 @@
-package btm.m.os4.systemuihook.hypermusiccover;
+package btm.m.os4.systemuihook.newnotificationcenter;
 
 /** Gesture state independent of the header's delayed Folme animation and render caches. */
-final class IosShadeState {
+public final class IosShadeState {
     private static final float GESTURE_DISTANCE_SCALE = 1.2f;
     private boolean dragging;
     private float nativeFraction;
     private float dragStartNative;
     private float dragStartProgress;
-    float progress;
-    boolean controlCenter;
-    boolean switching;
-    float switchFraction = 1f;
+    public float progress;
+    public boolean controlCenter;
+    public boolean switching;
+    public float switchFraction = 1f;
 
-    float gestureTarget(float height, float threshold, boolean tracking) {
+    public float gestureTarget(float height, float threshold, boolean tracking) {
         // Keep overscroll until AFTER the gesture distance is scaled. Clamping here
         // parks the sheet at 1 / scale even though the finger keeps moving.
         float next = Float.isFinite(height) && Float.isFinite(threshold) && threshold > 0f
@@ -31,7 +31,7 @@ final class IosShadeState {
         return nativeFraction; // Release still reaches the native open/closed endpoint.
     }
 
-    boolean switchProgress(float value, boolean inSwitch) {
+    public boolean switchProgress(float value, boolean inSwitch) {
         float next = fraction(value, 1f);
         if (!inSwitch && !switching && next == switchFraction) return false;
         switching = inSwitch;
@@ -50,11 +50,11 @@ final class IosShadeState {
         return Math.max(0f, Math.min(1f, height / threshold));
     }
 
-    void move(float value) {
+    public void move(float value) {
         progress = controlCenter ? 0f : fraction(value, 1f);
     }
 
-    void controlCenter(boolean visible) {
+    public void controlCenter(boolean visible) {
         controlCenter = visible;
         if (visible) {
             progress = 0f;
@@ -63,11 +63,11 @@ final class IosShadeState {
         }
     }
 
-    void notification() {
+    public void notification() {
         controlCenter = false;
     }
 
-    void clear() {
+    public void clear() {
         progress = 0f;
         controlCenter = false;
         switching = false;
