@@ -49,6 +49,8 @@ public final class IosNotificationCenterPresentation {
     private static float progress;
     private static float layoutProgress;
     private static float lastNotificationY = Float.NaN;
+    private static float restingNotificationY = Float.NaN;
+    private static final ThreadLocal<Boolean> DRIVING_HOSTED_CLOCK = new ThreadLocal<>();
     private static Drawable lastDepthDrawable;
     private static ViewTreeObserver observer;
     private static boolean clockUnavailable;
@@ -95,6 +97,14 @@ public final class IosNotificationCenterPresentation {
 
     public static boolean isActive() {
         return host != null && progress > 0f;
+    }
+
+    public static boolean isHostedClock(View view) {
+        return view != null && view == clock;
+    }
+
+    public static boolean isDrivingHostedClock() {
+        return Boolean.TRUE.equals(DRIVING_HOSTED_CLOCK.get());
     }
 
     public static void setHideClearButton(boolean hide) {
@@ -214,12 +224,12 @@ public final class IosNotificationCenterPresentation {
             statusMirror.setEnabled(false);
             statusMirror.setFocusableInTouchMode(false);
             statusMirror.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            clock = nativeClock;
             target.addView(container, 0, new FrameLayout.LayoutParams(-1, -1));
             target.addView(statusMirror, 1, new FrameLayout.LayoutParams(-1,
                     Math.round(80f * context.getResources().getDisplayMetrics().density)));
             panel = target;
             host = container;
-            clock = nativeClock;
             IosShadeMaterial.registerClock(nativeClock);
             depth = foreground;
             status = statusMirror;
@@ -553,19 +563,61 @@ public final class IosNotificationCenterPresentation {
                 160f * panel.getResources().getDisplayMetrics().density);
         float notificationY = stackPoint[1] - panelPoint[1]
                 + Math.min(maxTop, desiredNotificationTop());
-        if (Math.abs(notificationY - lastNotificationY) > 1f) {
-            lastNotificationY = notificationY;
+        if (layoutProgress >= .95f && progress >= .95f) {
+            if (Float.isNaN(restingNotificationY)) restingNotificationY = notificationY;
+            int scrollY = 0;
+            try {
+                scrollY = ((Number) currentStack.getClass().getMethod("getOwnScrollY")
+                        .invoke(currentStack)).intValue();
+            } catch (Throwable ignored) {}
+            if (scrollY > 0) {
+                float firstTop = firstNotificationTop(currentStack, panelPoint);
+                if (!Float.isNaN(firstTop)) {
+                    float lower = restingNotificationY - scrollY
+                            - 16f * panel.getResources().getDisplayMetrics().density;
+                    notificationY = Math.min(restingNotificationY, Math.max(lower, firstTop));
+                }
+            } else {
+                notificationY = restingNotificationY;
+            }
+        }
+        if (Float.isNaN(lastNotificationY) || Math.abs(notificationY - lastNotificationY) > 1f) {
             try {
                 Class<?> kind = Class.forName(
                         "com.miui.systemui.notification.data.repository.NotificationTopChangeType",
                         false, clock.getClass().getClassLoader());
                 Object changed = kind.getField("NOTIFS_CHANGED").get(null);
                 Method method = clock.getClass().getMethod("notifStateChange", float.class, boolean.class, kind);
-                method.invoke(clock, notificationY, false, changed);
+                DRIVING_HOSTED_CLOCK.set(true);
+                try {
+                    method.invoke(clock, notificationY, true, changed);
+                    lastNotificationY = notificationY;
+                } finally {
+                    DRIVING_HOSTED_CLOCK.remove();
+                }
             } catch (Throwable ignored) {
                 // Other OEM builds may use a different notification change type.
             }
         }
+    }
+
+    /** Returns the top of the first real notification in panel coordinates, including scroll. */
+    private static float firstNotificationTop(View currentStack, int[] panelPoint) {
+        if (!(currentStack instanceof ViewGroup)) return Float.NaN;
+        ViewGroup group = (ViewGroup) currentStack;
+        float top = Float.NaN;
+        int[] point = new int[2];
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            String name = child.getClass().getName();
+            if (child.getVisibility() != View.VISIBLE || child.getHeight() <= 0
+                    || (!name.endsWith(".ExpandableNotificationRow")
+                    && !name.endsWith(".MiuiMediaHeaderView"))) continue;
+            child.getLocationInWindow(point);
+            float childTop = point[1] - panelPoint[1];
+            if (Float.isNaN(top) || childTop < top) top = childTop;
+        }
+        return top;
     }
 
     private static float desiredNotificationTop() {
@@ -653,6 +705,7 @@ public final class IosNotificationCenterPresentation {
         stack = null;
         layoutProgress = 0f;
         lastNotificationY = Float.NaN;
+        restingNotificationY = Float.NaN;
         lastDepthDrawable = null;
         if (host != null && host.getParent() instanceof ViewGroup) {
             ((ViewGroup) host.getParent()).removeView(host);

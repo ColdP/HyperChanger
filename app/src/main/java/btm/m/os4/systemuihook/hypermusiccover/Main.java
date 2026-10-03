@@ -2,6 +2,7 @@ package btm.m.os4.systemuihook.hypermusiccover;
 
 import btm.m.os4.systemuihook.newnotificationcenter.IosShadeMaterial;
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterHooks;
+import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterPresentation;
 
 import btm.m.os4.systemuihook.BuildConfig;
 
@@ -793,6 +794,9 @@ public class Main extends XposedModule {
         try {
             Xp.hookAll(sContainerCls, "onAttachedToWindow", chain -> {
                 Object result = chain.proceed();
+                if (IosNotificationCenterPresentation.isHostedClock((View) chain.getThisObject())) {
+                    return result;
+                }
                 sContainer = (View) chain.getThisObject();
                 captureScreenSize(sContainer);
                 // The clock container attach is the first reliably-fired event after both
@@ -1366,6 +1370,9 @@ public class Main extends XposedModule {
         // otherwise pull the clock back out of the collapse every few frames.
         try {
             Xp.hookAll(sContainerCls, "notifStateChange", chain -> {
+                if (IosNotificationCenterPresentation.isHostedClock((View) chain.getThisObject())) {
+                    return chain.proceed();
+                }
                 // Anyone calling this is by definition the live instance.
                 sContainer = (View) chain.getThisObject();
                 if (findClockView(sContainer, "time_group") != null) return chain.proceed();
@@ -1469,6 +1476,9 @@ public class Main extends XposedModule {
         try {
             Class<?> interactor = Xp.findClass(CLS_INTERACTOR, cl);
             Xp.hookAll(interactor, "setNotifY", chain -> {
+                if (IosNotificationCenterPresentation.isDrivingHostedClock()) {
+                    return chain.proceed();
+                }
                 Object[] args = chain.getArgs().toArray();
                 float requested = (Float) args[0];
                 // Only the system's own emissions tell us where the clock really
