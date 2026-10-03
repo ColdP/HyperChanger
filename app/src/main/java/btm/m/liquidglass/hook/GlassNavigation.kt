@@ -991,9 +991,9 @@ private fun HyperFloatingNavigationBar(
         Color.Black.copy(alpha = 0.08f)
     }
     val containerSurface = if (isDarkTheme) {
-        Color.Black.copy(alpha = 0.30f)
+        Color.Black.copy(alpha = if (harmonyFloating) 0.36f else 0.30f)
     } else {
-        Color(0xFFF5F5F5).copy(alpha = 0.42f)
+        Color(0xFFF5F5F5).copy(alpha = if (harmonyFloating) 0.48f else 0.42f)
     }
     val fallbackSurface = if (isDarkTheme) {
         Color(0xFF242424).copy(alpha = 0.88f)
@@ -1047,15 +1047,18 @@ private fun HyperFloatingNavigationBar(
                             shape = { capsule },
                             effects = {
                                 vibrancy()
-                                blur(with(density) { (blurRadius * 0.24f).dp.toPx() })
+                                blur(with(density) {
+                                    (blurRadius * if (harmonyFloating) 0.29f else 0.24f).dp.toPx()
+                                })
                                 if (harmonyFloating) {
                                     // Harmony's capsule keeps its liquid refraction at rest. A
                                     // press boosts it instead of being the only time it exists.
-                                    val progress = 0.7f + 0.3f * visualPressProgress
+                                    val progress = 1f + 0.3f * visualPressProgress
                                     lens(
-                                        refractionHeight = 10.dp.toPx() * progress,
-                                        refractionAmount = 14.dp.toPx() * progress,
-                                        chromaticAberration = true,
+                                        refractionHeight = 16.dp.toPx() * progress,
+                                        refractionAmount = 32.dp.toPx() * progress,
+                                        depthEffect = true,
+                                        chromaticAberration = false,
                                     )
                                 } else {
                                     // Keep the lens pronounced while avoiding an overly strong refraction.

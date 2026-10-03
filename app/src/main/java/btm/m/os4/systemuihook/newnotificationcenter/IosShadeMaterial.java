@@ -56,8 +56,8 @@ public final class IosShadeMaterial {
                             View view = (View) chain.getThisObject();
                             if (Boolean.TRUE.equals(WRITING.get())) return chain.proceed();
                             Object requested = chain.getArgs().get(0);
-                            if (slot == 4 && !isPanel(view) && !isClock(view)) return chain.proceed();
-                            if (slot == 4 && (isPanel(view) || isClock(view))) {
+                            if (slot == 4 && !isContainmentSurface(view)) return chain.proceed();
+                            if (slot == 4 && isContainmentSurface(view)) {
                                 CONTAIN_REQUESTS.put(view, (Boolean) requested);
                             }
                             if (!active || (!target(view) && !(slot == 4 && isClock(view)))
@@ -137,6 +137,16 @@ public final class IosShadeMaterial {
         return view.getClass().getName().equals("com.android.systemui.shade.NotificationPanelView");
     }
 
+    private static boolean isDismissView(View view) {
+        // The clear-all control is a CircleAndTickAnimView. Its native material keeps the
+        // notification surface as the sampling boundary, which is wrong over the iOS sheet.
+        return view.getClass().getName().equals("com.miui.systemui.widget.CircleAndTickAnimView");
+    }
+
+    private static boolean isContainmentSurface(View view) {
+        return isPanel(view) || isDismissView(view) || isClock(view);
+    }
+
     private static boolean target(View view) {
         String name = view.getClass().getName();
         return isPanel(view) || name.endsWith(".NotificationBackgroundView")
@@ -204,8 +214,9 @@ public final class IosShadeMaterial {
         WRITING.set(true);
         try {
             for (int slot = 0; slot < METHODS.length; slot++) {
-                // Only the panel defines the cross-container boundary. Rows keep their own.
-                if (slot == 4 && (!isPanel(view) || saved[4] == null)) continue;
+                // The panel and clear-all control sample the wallpaper sibling below the
+                // notification surface. Notification rows keep their native containment.
+                if (slot == 4 && (!(isPanel(view) || isDismissView(view)) || saved[4] == null)) continue;
                 if (METHODS[slot] != null) METHODS[slot].invoke(view, wanted(view, slot, saved));
             }
         } catch (Throwable error) {

@@ -10,24 +10,22 @@ final class IosNotificationStackHooks {
         try {
             Class<?> stack = Xp.findClass(
                     "com.android.systemui.statusbar.notification.stack.NotificationStackScrollLayout", loader);
-            Xp.hookAll(stack, "updateTopPadding", chain -> {
-                if (chain.getArgs().size() != 2 || !(chain.getThisObject() instanceof android.view.View)) {
-                    return chain.proceed();
+            Xp.hookAll(stack, "getScrollRange", chain -> {
+                Object result = chain.proceed();
+                if (!(chain.getThisObject() instanceof android.view.View) || !(result instanceof Number)) {
+                    return result;
                 }
-                android.view.View view = (android.view.View) chain.getThisObject();
-                IosNotificationCenterPresentation.captureStack(view);
-                float nativeTop = ((Number) chain.getArgs().get(0)).floatValue();
-                float adjusted = IosNotificationCenterPresentation.adjustTopPadding(view, nativeTop);
-                if (adjusted == nativeTop) return chain.proceed();
-                return chain.proceed(new Object[]{adjusted, chain.getArgs().get(1)});
+                return ((Number) result).intValue() + IosNotificationCenterPresentation.extraScrollRange(
+                        (android.view.View) chain.getThisObject());
             });
         } catch (Throwable error) {
-            Xp.log("[IOSShade] notification bounds padding unavailable: " + error);
+            Xp.log("[IOSShade] notification scroll range unavailable: " + error);
         }
         try {
             Class<?> algorithm = Xp.findClass(
                     "com.android.systemui.statusbar.notification.stack.StackScrollAlgorithm", loader);
             Xp.hookAll(algorithm, "resetViewStates", chain -> {
+                if (chain.getArgs().isEmpty()) return chain.proceed();
                 Object ambient = chain.getArgs().get(0);
                 Object host = Xp.getObjectField(chain.getThisObject(), "mHostView");
                 if (!(host instanceof android.view.View)) return chain.proceed();
@@ -43,20 +41,6 @@ final class IosNotificationStackHooks {
             });
         } catch (Throwable error) {
             Xp.log("[IOSShade] notification stack position unavailable: " + error);
-        }
-        try {
-            Class<?> interactor = Xp.findClass(
-                    "com.miui.systemui.notification.domain.interactor.NotificationStackingInteractor", loader);
-            Xp.hookAll(interactor, "getKeyguardTwoNotifFirstLineOffset", chain -> {
-                if (IosNotificationCenterPresentation.isActive()
-                        && !Boolean.TRUE.equals(chain.getArgs().get(0))
-                        && ((Number) Xp.getObjectField(chain.getThisObject(), "visibleNotifCount")).intValue() == 2) {
-                    return ((Number) Xp.getObjectField(chain.getThisObject(), "stackingHeight2")).floatValue();
-                }
-                return chain.proceed();
-            });
-        } catch (Throwable error) {
-            Xp.log("[IOSShade] two-notification stacking rule unavailable: " + error);
         }
     }
 }

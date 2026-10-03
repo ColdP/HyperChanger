@@ -5,10 +5,55 @@ import btm.m.os4.systemuihook.hypermusiccover.Xp;
 
 /** Hooks the OEM's raw shade gesture and notification/control-center ownership. */
 public final class IosNotificationCenterHooks {
+    private static float switchDownX;
+    private static float switchDownY;
+    private static boolean switchFromEmptyArea;
+    private static boolean horizontalSwitchGesture;
+
     private IosNotificationCenterHooks() {}
 
     public static void install(ClassLoader loader) {
         IosNotificationStackHooks.install(loader);
+        try {
+            Class<?> shadeWindow = Xp.findClass(
+                    "com.android.systemui.shade.NotificationShadeWindowView", loader);
+            Xp.hookAll(shadeWindow, "dispatchTouchEvent", chain -> {
+                android.view.MotionEvent event = (android.view.MotionEvent) chain.getArgs().get(0);
+                trackSwitchGesture((android.view.View) chain.getThisObject(), event);
+                try {
+                    return chain.proceed();
+                } finally {
+                    int action = event.getActionMasked();
+                    if (action == android.view.MotionEvent.ACTION_UP
+                            || action == android.view.MotionEvent.ACTION_CANCEL) {
+                        switchFromEmptyArea = false;
+                        horizontalSwitchGesture = false;
+                    }
+                }
+            });
+            Class<?> wrapper = Xp.findClass(
+                    "com.miui.systemui.shade.NotificationShadeWrapper", loader);
+            Xp.hookAll(wrapper, "getAllowParentInterceptSwitchEvent", chain -> {
+                Object result = chain.proceed();
+                return Boolean.TRUE.equals(result) || (IosNotificationCenterPresentation.isActive()
+                        && horizontalSwitchGesture);
+            });
+        } catch (Throwable error) {
+            Xp.log("[IOSShade] horizontal switch gesture unavailable: " + error);
+        }
+        try {
+            Class<?> headerContainer = Xp.findClass(
+                    "com.miui.systemui.shade.header.ShadeHeaderContainer", loader);
+            Xp.hookAll(headerContainer, "dispatchTouchEvent", chain -> {
+                if (!chain.getArgs().isEmpty()
+                        && chain.getArgs().get(0) instanceof android.view.MotionEvent
+                        && IosNotificationCenterPresentation.shouldPassHeaderTouch(
+                                (android.view.MotionEvent) chain.getArgs().get(0))) return false;
+                return chain.proceed();
+            });
+        } catch (Throwable error) {
+            Xp.log("[IOSShade] header touch routing unavailable: " + error);
+        }
         try {
             Class<?> headerView = Xp.findClass("com.android.systemui.qs.MiuiNotificationHeaderView", loader);
             Xp.hookAll(headerView, "onFinishInflate", chain -> {
@@ -84,6 +129,22 @@ public final class IosNotificationCenterHooks {
             Xp.log("[IOSShade] notification/control-centre ownership hooked");
         } catch (Throwable error) {
             Xp.log("[IOSShade] panel ownership hooks unavailable: " + error);
+        }
+    }
+
+    private static void trackSwitchGesture(android.view.View view, android.view.MotionEvent event) {
+        if (event.getActionMasked() == android.view.MotionEvent.ACTION_DOWN) {
+            switchDownX = event.getRawX();
+            switchDownY = event.getRawY();
+            switchFromEmptyArea = IosNotificationCenterPresentation.isActive()
+                    && !IosNotificationCenterPresentation.shouldPassHeaderTouch(event);
+            horizontalSwitchGesture = false;
+        } else if (event.getActionMasked() == android.view.MotionEvent.ACTION_MOVE
+                && switchFromEmptyArea && !horizontalSwitchGesture) {
+            float dx = event.getRawX() - switchDownX;
+            float dy = event.getRawY() - switchDownY;
+            float slop = 24f * view.getResources().getDisplayMetrics().density;
+            horizontalSwitchGesture = dx < -slop && -dx > Math.abs(dy) * 1.25f;
         }
     }
 }

@@ -169,7 +169,7 @@ public final class ShadeLayer {
 
     private static void hideIosLayer() {
         sEffectOn = false;
-        IosNotificationCenterPresentation.update(0f, false, null);
+        IosNotificationCenterPresentation.update(0f, 0f, false, null);
         IosShadeMaterial.setActive(false, sRoot);
         if (sFrame != null) {
             sFrame.setAlpha(0f);
@@ -202,7 +202,7 @@ public final class ShadeLayer {
         }
         applyCurtain(IOS.progress);
         IosShadeMaterial.setActive(true, sRoot);
-        IosNotificationCenterPresentation.update(visual, true, sFrame);
+        IosNotificationCenterPresentation.update(visual, IOS.progress, true, sFrame);
     }
     private static android.content.SharedPreferences sPreferences;
     private static final android.content.SharedPreferences.OnSharedPreferenceChangeListener PREFS_CHANGED =
@@ -347,6 +347,9 @@ public final class ShadeLayer {
             frame.setClipChildren(true);
             frame.setClickable(false);
             frame.setFocusable(false);
+            // This layer is visual-only. Disabled state makes ViewGroup dispatch skip it
+            // even when the wallpaper ImageView is full-screen and opaque.
+            frame.setEnabled(false);
             // The curtain is a SHAPE, not a rectangle: see CURTAIN_OUTLINE.
             frame.setClipToOutline(true);
             frame.setOutlineProvider(CURTAIN_OUTLINE);
@@ -358,6 +361,7 @@ public final class ShadeLayer {
             final ImageView wp = new ImageView(ctx);
             wp.setClickable(false);
             wp.setFocusable(false);
+            wp.setEnabled(false);
             wp.setScaleType(ImageView.ScaleType.CENTER_CROP);
             frame.addView(wp, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -1335,7 +1339,7 @@ public final class ShadeLayer {
         sResets++;
         cancelIosSettle();
         IOS.clear();
-        IosNotificationCenterPresentation.update(0f, false, null);
+        IosNotificationCenterPresentation.update(0f, 0f, false, null);
         IosShadeMaterial.setActive(false, sRoot);
         if (sEffectOn) Main.setCardBlurActive(false);
         sEffectOn = false;

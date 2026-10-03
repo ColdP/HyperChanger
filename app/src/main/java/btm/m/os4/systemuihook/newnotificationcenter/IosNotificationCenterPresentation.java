@@ -40,13 +40,14 @@ public final class IosNotificationCenterPresentation {
     private static float notificationHeaderAlpha = 1f;
     private static View headerGradient;
     private static int headerGradientVisibility = View.VISIBLE;
+    private static View headerForeground;
+    private static int headerForegroundVisibility = View.VISIBLE;
     private static View headerShadow;
     private static int headerShadowVisibility = View.VISIBLE;
     private static View[] oldHeader;
     private static float[] oldHeaderAlpha;
-    private static float nativeTopPadding = Float.NaN;
-    private static boolean writingTopPadding;
     private static float progress;
+    private static float layoutProgress;
     private static float lastNotificationY = Float.NaN;
     private static Drawable lastDepthDrawable;
     private static ViewTreeObserver observer;
@@ -68,9 +69,11 @@ public final class IosNotificationCenterPresentation {
         clockUnavailable = false;
     }
 
-    public static void update(float fraction, boolean enabled, View sheet) {
+    public static void update(float fraction, float layoutFraction, boolean enabled, View sheet) {
         float previous = progress;
+        float previousLayout = layoutProgress;
         progress = enabled ? Math.max(0f, Math.min(1f, fraction)) : 0f;
+        layoutProgress = enabled ? Math.max(0f, Math.min(1f, layoutFraction)) : 0f;
         wallpaperSheet = sheet;
         if (progress <= 0f) {
             View previousStack = stack;
@@ -82,7 +85,7 @@ public final class IosNotificationCenterPresentation {
         host.setAlpha(progress);
         if (status != null) status.setAlpha(progress * progress * (3f - 2f * progress));
         sync();
-        if (Math.abs(progress - previous) > .01f) requestStackUpdate(stack);
+        if (Math.abs(layoutProgress - previousLayout) > .01f) requestStackUpdate(stack);
     }
 
     public static void release() {
@@ -99,12 +102,6 @@ public final class IosNotificationCenterPresentation {
         syncClearButton();
     }
 
-    static float adjustTopPadding(View view, float nativeTop) {
-        if (writingTopPadding || !isActive() || view != stack || panel == null) return nativeTop;
-        nativeTopPadding = nativeTop;
-        return adjustedTopPadding(nativeTop);
-    }
-
     static void captureStack(View view) {
         capturedStack = view;
         if (panel != null && stack == null && view.getRootView() == panel.getRootView()) {
@@ -113,9 +110,49 @@ public final class IosNotificationCenterPresentation {
     }
 
     static float stackOffset(View view, float nativeStackY) {
-        // updateTopPadding is the native list-boundary path. Applying another
-        // mStackY offset here doubles the displacement during layout passes.
-        return 0f;
+        if (!isActive() || view != stack || panel == null || stack.getHeight() == 0) return 0f;
+        float limit = Math.max(nativeStackY, stack.getHeight() -
+                160f * panel.getResources().getDisplayMetrics().density);
+        return Math.max(0f, Math.min(limit, desiredNotificationTop()) - nativeStackY) * layoutProgress;
+    }
+
+    static int extraScrollRange(View view) {
+        float clearance = stackClearance(view);
+        if (clearance <= .5f) return 0;
+        try {
+            float contentHeight = ((Number) Xp.getObjectField(view, "mContentHeight")).floatValue();
+            Object controller = Xp.getObjectField(view, "mController");
+            Object injector = Xp.getObjectField(controller, "mNsslControllerInjector");
+            float bottom = ((Number) Xp.getObjectField(injector, "stackingBottom")).floatValue();
+            if (bottom <= 0f) bottom = view.getHeight();
+            float addedOverflow = Math.max(0f, contentHeight + clearance - bottom)
+                    - Math.max(0f, contentHeight - bottom);
+            return Math.max(0, (int) Math.ceil(Math.min(clearance, addedOverflow)));
+        } catch (Throwable ignored) {
+            return Math.max(0, (int) Math.ceil(clearance));
+        }
+    }
+
+    private static float stackClearance(View view) {
+        if (!isActive() || view != stack) return 0f;
+        try {
+            float nativeTop = ((Number) view.getClass().getMethod("getTopPadding").invoke(view)).floatValue();
+            return stackOffset(view, nativeTop);
+        } catch (Throwable ignored) {
+            return 0f;
+        }
+    }
+
+    static boolean shouldPassHeaderTouch(MotionEvent event) {
+        if (!isActive() || stack == null || event == null
+                || event.getActionMasked() != MotionEvent.ACTION_DOWN) return false;
+        try {
+            Object row = stack.getClass().getMethod("getChildAtRawPosition", float.class, float.class)
+                    .invoke(stack, event.getRawX(), event.getRawY());
+            return row instanceof View && ((View) row).getVisibility() == View.VISIBLE;
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     static void captureHeader(View view) {
@@ -153,16 +190,30 @@ public final class IosNotificationCenterPresentation {
             container.setClipToPadding(true);
             container.setClipToOutline(true);
             container.setClickable(false);
+            container.setEnabled(false);
+            container.setFocusable(false);
+            container.setFocusableInTouchMode(false);
+            container.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             allowBackdropSampling(container);
             allowBackdropSampling(nativeClock);
+            nativeClock.setClickable(false);
+            nativeClock.setFocusable(false);
+            nativeClock.setFocusableInTouchMode(false);
+            nativeClock.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             container.addView(nativeClock, new FrameLayout.LayoutParams(-1, -1));
             ImageView foreground = new ImageView(context);
             foreground.setScaleType(ImageView.ScaleType.FIT_XY);
             foreground.setClickable(false);
+            foreground.setEnabled(false);
+            foreground.setFocusable(false);
+            foreground.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             container.addView(foreground, new FrameLayout.LayoutParams(-1, -1));
             MirrorView statusMirror = new MirrorView(context);
             statusMirror.setClickable(false);
             statusMirror.setFocusable(false);
+            statusMirror.setEnabled(false);
+            statusMirror.setFocusableInTouchMode(false);
+            statusMirror.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             target.addView(container, 0, new FrameLayout.LayoutParams(-1, -1));
             target.addView(statusMirror, 1, new FrameLayout.LayoutParams(-1,
                     Math.round(80f * context.getResources().getDisplayMetrics().density)));
@@ -213,6 +264,9 @@ public final class IosNotificationCenterPresentation {
             }
         }
         if (oldHeader == null) findHeader();
+        if (notificationHeader != null && notificationHeader.getAlpha() != 0f) {
+            notificationHeader.setAlpha(0f);
+        }
         hideHeaderGradient();
         for (int i = 0; oldHeader != null && i < oldHeader.length; i++) {
             View original = oldHeader[i];
@@ -276,9 +330,15 @@ public final class IosNotificationCenterPresentation {
             if (headerGradient != null) headerGradientVisibility = headerGradient.getVisibility();
         }
         if (headerGradient != null) headerGradient.setVisibility(View.GONE);
+        if (headerForeground == null) {
+            headerForeground = byId(window, "header_foreground");
+            if (headerForeground != null) headerForegroundVisibility = headerForeground.getVisibility();
+        }
+        if (headerForeground != null) headerForeground.setVisibility(View.GONE);
         if (headerShadow == null) {
             View headerContainer = byId(window, "shade_header_container");
             headerShadow = byId(headerContainer, "shadow");
+            if (headerShadow == null) headerShadow = byId(notificationHeader, "shadow");
             if (headerShadow != null) headerShadowVisibility = headerShadow.getVisibility();
         }
         if (headerShadow != null) headerShadow.setVisibility(View.GONE);
@@ -485,21 +545,14 @@ public final class IosNotificationCenterPresentation {
     private static void syncNotifications() {
         View currentStack = stack;
         if (currentStack == null || currentStack.getHeight() == 0 || clock == null) return;
-        if (Float.isNaN(nativeTopPadding)) {
-            nativeTopPadding = getPadding(currentStack);
-            if (nativeTopPadding < 0f) return;
-        }
-        float target = adjustedTopPadding(nativeTopPadding);
-        if (Math.abs(getPadding(currentStack) - target) > .5f) {
-            writeTopPadding(currentStack, target);
-            currentStack.requestLayout();
-            currentStack.invalidate();
-        }
         int[] panelPoint = new int[2];
         int[] stackPoint = new int[2];
         panel.getLocationInWindow(panelPoint);
         currentStack.getLocationInWindow(stackPoint);
-        float notificationY = stackPoint[1] - panelPoint[1] + target;
+        float maxTop = Math.max(0f, currentStack.getHeight() -
+                160f * panel.getResources().getDisplayMetrics().density);
+        float notificationY = stackPoint[1] - panelPoint[1]
+                + Math.min(maxTop, desiredNotificationTop());
         if (Math.abs(notificationY - lastNotificationY) > 1f) {
             lastNotificationY = notificationY;
             try {
@@ -515,14 +568,6 @@ public final class IosNotificationCenterPresentation {
         }
     }
 
-    private static float adjustedTopPadding(float nativeTop) {
-        if (stack == null || stack.getHeight() == 0 || clock == null) return nativeTop;
-        float desired = desiredNotificationTop();
-        float limit = Math.max(nativeTop, stack.getHeight() -
-                160f * panel.getResources().getDisplayMetrics().density);
-        return nativeTop + Math.max(0f, Math.min(limit, desired) - nativeTop) * progress;
-    }
-
     private static float desiredNotificationTop() {
         int[] panelPoint = new int[2];
         int[] stackPoint = new int[2];
@@ -531,17 +576,6 @@ public final class IosNotificationCenterPresentation {
         float gap = 10f * panel.getResources().getDisplayMetrics().density;
         return clockBottom() + host.getTranslationY() + gap -
                 (stackPoint[1] - panelPoint[1]);
-    }
-
-    private static void writeTopPadding(View view, float value) {
-        writingTopPadding = true;
-        try {
-            view.getClass().getMethod("updateTopPadding", float.class, boolean.class)
-                    .invoke(view, value, false);
-        } catch (Throwable ignored) {
-        } finally {
-            writingTopPadding = false;
-        }
     }
 
     private static float clockBottom() {
@@ -603,6 +637,8 @@ public final class IosNotificationCenterPresentation {
         notificationHeader = null;
         if (headerGradient != null) headerGradient.setVisibility(headerGradientVisibility);
         headerGradient = null;
+        if (headerForeground != null) headerForeground.setVisibility(headerForegroundVisibility);
+        headerForeground = null;
         if (headerShadow != null) headerShadow.setVisibility(headerShadowVisibility);
         headerShadow = null;
         if (emptyText != null) emptyText.setAlpha(emptyTextAlpha);
@@ -614,11 +650,8 @@ public final class IosNotificationCenterPresentation {
         clockInfoOffset = 0f;
         clockInfoBaseTranslation = 0f;
         clockInfoRefreshMinute = -1L;
-        if (stack != null && !Float.isNaN(nativeTopPadding)) {
-            writeTopPadding(stack, nativeTopPadding);
-        }
         stack = null;
-        nativeTopPadding = Float.NaN;
+        layoutProgress = 0f;
         lastNotificationY = Float.NaN;
         lastDepthDrawable = null;
         if (host != null && host.getParent() instanceof ViewGroup) {
@@ -640,12 +673,6 @@ public final class IosNotificationCenterPresentation {
         wallpaperSheet = null;
         lastBlur = -1;
         lastStatusBlur = -1;
-    }
-
-    private static int getPadding(View view) {
-        try {
-            return ((Number) view.getClass().getMethod("getTopPadding").invoke(view)).intValue();
-        } catch (Throwable ignored) { return -1; }
     }
 
     private static void allowBackdropSampling(View view) {
