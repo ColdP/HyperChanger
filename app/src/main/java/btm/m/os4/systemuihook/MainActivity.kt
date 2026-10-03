@@ -359,6 +359,8 @@ private fun Root(
     var screenRecorder by remember { mutableStateOf(screenRecorderStore.settings) }
     val dockStore = remember(context) { DockSettingsStore(context) }
     var dockSettings by remember { mutableStateOf(dockStore.settings) }
+    val homeRecentsStore = remember(context) { HomeRecentsSettingsStore(context) }
+    var homeRecentsSettings by remember { mutableStateOf(homeRecentsStore.settings) }
     var pendingRestartTargets by remember { mutableStateOf(emptySet<ScopeApplication>()) }
     val markRestartTargets: (Set<ScopeApplication>) -> Unit = { targets ->
         if (targets.isNotEmpty()) pendingRestartTargets = pendingRestartTargets + targets
@@ -539,12 +541,14 @@ private fun Root(
             appearances.reload()
             musicStore.reload()
             dockStore.reload()
+            homeRecentsStore.reload()
             settings = hooks.settings
             cameraSettings = cameras.settings
             deviceProfile = deviceProfiles.settings
             appearance = appearances.settings
             musicWhitelist = musicStore.apps
             dockSettings = dockStore.settings
+            homeRecentsSettings = homeRecentsStore.settings
         }.onSuccess {
             markRestartTargets(suggestedScopesForHookChange(previousSettings, settings))
             if (previousCameras != cameraSettings) markRestartTargets(
@@ -617,6 +621,7 @@ private fun Root(
             appearances.syncRemote(it)
             musicStore.syncRemote(it)
             dockStore.syncRemote(it)
+            homeRecentsStore.syncRemote(it)
             settings = hooks.settings
             navigationSettings = navigation.settings
             cameraSettings = cameras.settings
@@ -624,6 +629,7 @@ private fun Root(
             appearance = appearances.settings
             musicWhitelist = musicStore.apps
             dockSettings = dockStore.settings
+            homeRecentsSettings = homeRecentsStore.settings
         }
     }
     MiuixTheme(controller = controller) {
@@ -671,7 +677,7 @@ private fun Root(
         } else {
         Shell(
             settings, navigationSettings, cameraSettings, deviceProfile, appearance, musicWhitelist, screenRecorder,
-            dockSettings, service,
+            dockSettings, homeRecentsSettings, service,
             update = { transform ->
                 val before = hooks.settings
                 hooks.update(service, transform)
@@ -687,6 +693,16 @@ private fun Root(
                 dockStore.update(service, transform)
                 dockSettings = dockStore.settings
                 if (before != dockSettings) markRestartTargets(setOf(ScopeApplication.DESKTOP))
+            },
+            updateHomeRecents = { transform ->
+                val before = homeRecentsStore.settings
+                val staged = homeRecentsStore.update(service, transform)
+                homeRecentsSettings = homeRecentsStore.settings
+                if (staged && before != homeRecentsSettings) {
+                    markRestartTargets(setOf(ScopeApplication.DESKTOP))
+                } else if (!staged) {
+                    Toast.makeText(context, tr("写入桌面配置失败，请检查 Root 权限", "写入桌面配置失败，请检查 Root 权限"), Toast.LENGTH_LONG).show()
+                }
             },
             updateCamera = { transform ->
                 val before = cameras.settings
@@ -849,10 +865,12 @@ private fun Shell(
     musicWhitelist: Set<String>,
     screenRecorder: ScreenRecorderSettings,
     dockSettings: DockSettings,
+    homeRecentsSettings: HomeRecentsSettings,
     service: XposedService?,
     update: ((HookSettings) -> HookSettings) -> Unit,
     updateNavigation: ((ModuleNavigationSettings) -> ModuleNavigationSettings) -> Unit,
     updateDock: ((DockSettings) -> DockSettings) -> Unit,
+    updateHomeRecents: ((HomeRecentsSettings) -> HomeRecentsSettings) -> Unit,
     updateCamera: ((CameraSettings) -> CameraSettings) -> Unit,
     updateDeviceProfile: ((DeviceProfileSettings) -> DeviceProfileSettings) -> Unit,
     updateAppearance: ((SettingsAppearanceSettings) -> SettingsAppearanceSettings) -> Unit,
@@ -978,8 +996,8 @@ private fun Shell(
             LocalPageBackSuppressed provides if (isTop) ({ value -> suppressPageBack = value }) else ({ }),
         ) {
             Detail(
-                detailPage, settings, cameras, deviceProfile, appearance, musicWhitelist, dockSettings,
-                update, updateDock, updateCamera,
+                detailPage, settings, cameras, deviceProfile, appearance, musicWhitelist, dockSettings, homeRecentsSettings,
+                update, updateDock, updateHomeRecents, updateCamera,
                 updateDeviceProfile, updateAppearance, updateMusicWhitelist, presetActions,
                 openPage = openNestedPage, back = dismissPage,
                 onDebugMode = { showDebug = true }, captcha = captcha,
@@ -1208,6 +1226,7 @@ private fun CategoryHome(
 ) { padding, scroll ->
     AppList(padding, scroll) {
         item { Entry(tr("\u7cfb\u7edf\u754c\u9762", "\u7cfb\u7edf\u754c\u9762"), enabled = connected) { open(PageId.SHADE) } }
+        item { Entry(tr("桌面", "桌面"), enabled = connected) { open(PageId.DESKTOP) } }
         item { Entry(tr("\u901a\u77e5\u4e0e\u8d85\u7ea7\u5c9b", "\u901a\u77e5\u4e0e\u8d85\u7ea7\u5c9b"), enabled = connected) { open(PageId.ISLAND) } }
         item { Entry(tr("\u72b6\u6001\u680f\u4e0e\u63a7\u5236\u4e2d\u5fc3", "\u72b6\u6001\u680f\u4e0e\u63a7\u5236\u4e2d\u5fc3"), enabled = connected) { open(PageId.STATUS) } }
         item { Entry(tr("\u9501\u5c4f", "\u9501\u5c4f"), enabled = connected) { open(PageId.LOCK) } }
@@ -2455,16 +2474,30 @@ private fun ScopeRestartCheckboxes(
 private fun Desktop(
     settings: DockSettings,
     update: ((DockSettings) -> DockSettings) -> Unit,
+    homeRecentsSettings: HomeRecentsSettings,
+    updateHomeRecents: ((HomeRecentsSettings) -> HomeRecentsSettings) -> Unit,
     back: () -> Unit,
 ) = AppPage(tr("桌面", "桌面"), back, restartScopes = setOf(ScopeApplication.DESKTOP)) { padding, scroll ->
     AppList(padding, scroll) {
         item {
-            Group(tr("Dock栏", "Dock栏")) {
+            Group(tr("Dock 栏", "Dock 栏")) {
                 SwitchPreference(
-                    title = tr("启用 Dock栏", "启用 Dock栏"),
+                    title = tr("为桌面添加 Dock", "为桌面添加 Dock"),
+                    summary = tr("需要勾选\"系统框架\"作用域，初次使用需要重启手机", "需要勾选\"系统框架\"作用域，初次使用需要重启手机"),
                     checked = settings.enabled,
                     onCheckedChange = { enabled -> update { it.copy(enabled = enabled) } },
                 )
+                AnimatedVisibility(
+                    visible = settings.enabled,
+                    enter = fadeIn(tween(180)),
+                    exit = fadeOut(tween(140)),
+                ) {
+                    SwitchPreference(
+                        title = tr("Dock 入场动画", "Dock 入场动画"),
+                        checked = settings.entryAnimation,
+                        onCheckedChange = { enabled -> update { it.copy(entryAnimation = enabled) } },
+                    )
+                }
             }
         }
         item {
@@ -2473,20 +2506,85 @@ private fun Desktop(
                 enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
                 exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
             ) {
-                Group(tr("柔光玻璃", "柔光玻璃")) {
-                    ParameterIntSlide(tr("背景不透明度", "背景不透明度"), settings.glassOpacity, 0..100, "%", defaultValue = 85) { value ->
-                        update { it.copy(glassOpacity = value) }
+                Group(tr("Dock 背景材质", "Dock 背景材质")) {
+                    OverlayDropdownPreference(
+                        title = tr("Dock 背景材质", "Dock 背景材质"),
+                        items = listOf(tr("纯色", "纯色"), tr("高级材质", "高级材质"), tr("柔光玻璃", "柔光玻璃")),
+                        selectedIndex = settings.material,
+                        onSelectedIndexChange = { value -> update { it.copy(material = value) } },
+                    )
+                    ParameterIntSlide(tr("Dock 高度", "Dock 高度"), settings.height, 40..300, " dp", defaultValue = 150) { value ->
+                        update { it.copy(height = value) }
                     }
-                    ParameterIntSlide(tr("背景模糊度", "背景模糊度"), settings.glassBackdropBlur, 0..100, " px", defaultValue = 40) { value ->
-                        update { it.copy(glassBackdropBlur = value) }
+                    ParameterIntSlide(tr("Dock 水平边距", "Dock 水平边距"), settings.margin, 0..150, " dp", defaultValue = 25) { value ->
+                        update { it.copy(margin = value) }
                     }
-                    ParameterIntSlide(tr("玻璃模糊半径", "玻璃模糊半径"), settings.glassBlur, 0..100, " px", defaultValue = 30) { value ->
-                        update { it.copy(glassBlur = value) }
+                    ParameterIntSlide(tr("Dock 底部边距", "Dock 底部边距"), settings.bottom, 0..150, " dp", defaultValue = 15) { value ->
+                        update { it.copy(bottom = value) }
                     }
-                    ParameterIntSlide(tr("柔光强度", "柔光强度"), settings.glassSoftLight, 0..100, "%", defaultValue = 50) { value ->
-                        update { it.copy(glassSoftLight = value) }
+                    ParameterIntSlide(tr("Dock 圆角", "Dock 圆角"), settings.radius, 0..60, " dp", defaultValue = 30) { value ->
+                        update { it.copy(radius = value) }
+                    }
+                    when (settings.material) {
+                        0 -> ShortcutBackgroundColorPreference(
+                            color = settings.solidColor,
+                            onColorChange = { value -> update { it.copy(solidColor = value) } },
+                        )
+                        1 -> Column {
+                            ShortcutBackgroundColorPreference(
+                                color = settings.advancedColor,
+                                onColorChange = { value -> update { it.copy(advancedColor = value) } },
+                            )
+                            ParameterIntSlide(tr("不透明度", "不透明度"), settings.advancedOpacity, 0..100, "%", defaultValue = 14) { value ->
+                                update { it.copy(advancedOpacity = value) }
+                            }
+                            ParameterIntSlide(tr("背景模糊度", "背景模糊度"), settings.advancedBlur, 0..100, " px", defaultValue = 40) { value ->
+                                update { it.copy(advancedBlur = value) }
+                            }
+                            SwitchPreference(
+                                title = tr("显示高光", "显示高光"),
+                                checked = settings.advancedHighlight,
+                                onCheckedChange = { value -> update { it.copy(advancedHighlight = value) } },
+                            )
+                        }
+                        else -> Column {
+                            ShortcutBackgroundColorPreference(
+                                color = settings.glassColor,
+                                onColorChange = { value -> update { it.copy(glassColor = value) } },
+                            )
+                            ParameterIntSlide(tr("不透明度", "不透明度"), settings.glassOpacity, 0..100, "%", defaultValue = 85) { value ->
+                                update { it.copy(glassOpacity = value) }
+                            }
+                            ParameterIntSlide(tr("背景模糊度", "背景模糊度"), settings.glassBackdropBlur, 0..100, " px", defaultValue = 40) { value ->
+                                update { it.copy(glassBackdropBlur = value) }
+                            }
+                            ParameterIntSlide(tr("Glass 模糊度", "Glass 模糊度"), settings.glassBlur, 0..100, " px", defaultValue = 30) { value ->
+                                update { it.copy(glassBlur = value) }
+                            }
+                            ParameterIntSlide(tr("柔光强度", "柔光强度"), settings.glassSoftLight, 0..100, "%", defaultValue = 50) { value ->
+                                update { it.copy(glassSoftLight = value) }
+                            }
+                        }
                     }
                 }
+            }
+        }
+        item {
+            Group(tr("多任务界面", "多任务界面")) {
+                OverlayDropdownPreference(
+                    title = tr("隐藏多任务界面的清除按钮", "隐藏多任务界面的清除按钮"),
+                    items = listOf(
+                        tr("不隐藏", "不隐藏"),
+                        tr("保留功能", "保留功能"),
+                        tr("不保留功能", "不保留功能"),
+                    ),
+                    selectedIndex = homeRecentsSettings.clearMode.value,
+                    onSelectedIndexChange = { index ->
+                        updateHomeRecents {
+                            it.copy(clearMode = HomeRecentsClearMode.fromValue(index))
+                        }
+                    },
+                )
             }
         }
     }
@@ -3353,8 +3451,10 @@ private fun Detail(
     appearance: SettingsAppearanceSettings,
     musicWhitelist: Set<String>,
     dockSettings: DockSettings,
+    homeRecentsSettings: HomeRecentsSettings,
     update: ((HookSettings) -> HookSettings) -> Unit,
     updateDock: ((DockSettings) -> DockSettings) -> Unit,
+    updateHomeRecents: ((HomeRecentsSettings) -> HomeRecentsSettings) -> Unit,
     updateCamera: ((CameraSettings) -> CameraSettings) -> Unit,
     updateDeviceProfile: ((DeviceProfileSettings) -> DeviceProfileSettings) -> Unit,
     updateAppearance: ((SettingsAppearanceSettings) -> SettingsAppearanceSettings) -> Unit,
@@ -3393,7 +3493,7 @@ private fun Detail(
 ) {
     when (page) {
         PageId.SHADE -> Shade(settings, update, presetActions, openPage, back)
-        PageId.DESKTOP -> Desktop(dockSettings, updateDock, back)
+        PageId.DESKTOP -> Desktop(dockSettings, updateDock, homeRecentsSettings, updateHomeRecents, back)
         PageId.SHADE_PRESETS -> ShadePresets(settings, update, presetActions, back)
         PageId.SHADE_NOTIFICATION_ELEMENTS -> MaterialOverrideAdvancedPage(
             tr("通知元素", "通知元素"), settings.notificationElementsMaterial, false,
@@ -9305,14 +9405,27 @@ private fun Contributors(back: () -> Unit) = AppPage(tr("contributors", "\u8d21\
     }
 }
 
-private data class OpenProject(val name: String, val version: String, val description: String, val url: String)
+private data class OpenProject(
+    val name: String,
+    val version: String,
+    val description: String,
+    val url: String,
+    val license: String = tr("Apache License 2.0", "Apache License 2.0"),
+)
 private fun openProjects() = listOf(
     OpenProject("MIUIX", "0.9.3", tr("HyperOS \u98ce\u683c\u754c\u9762\u3001\u504f\u597d\u8bbe\u7f6e\u3001\u56fe\u6807\u4e0e\u6a21\u7cca\u6548\u679c", "HyperOS \u98ce\u683c\u754c\u9762\u3001\u504f\u597d\u8bbe\u7f6e\u3001\u56fe\u6807\u4e0e\u6a21\u7cca\u6548\u679c"), "https://github.com/compose-miuix-ui/miuix"),
     OpenProject("LSPosed API", "102", tr("LSPosed \u6a21\u5757 API \u4e0e\u670d\u52a1\u901a\u4fe1", "LSPosed \u6a21\u5757 API \u4e0e\u670d\u52a1\u901a\u4fe1"), "https://github.com/LSPosed/LSPosed"),
     OpenProject("Backdrop / AndroidLiquidGlass", "2.0.0", tr("\u6db2\u6001\u73bb\u7483\u6e32\u67d3\u4e0e\u5e95\u90e8\u5bfc\u822a\u4ea4\u4e92", "\u6db2\u6001\u73bb\u7483\u6e32\u67d3\u4e0e\u5e95\u90e8\u5bfc\u822a\u4ea4\u4e92"), "https://github.com/Kyant0/AndroidLiquidGlass"),
     OpenProject("Compose Multiplatform", "1.11.x", tr("\u58f0\u660e\u5f0f\u754c\u9762\u3001\u5e03\u5c40\u4e0e\u52a8\u753b", "\u58f0\u660e\u5f0f\u754c\u9762\u3001\u5e03\u5c40\u4e0e\u52a8\u753b"), "https://github.com/JetBrains/compose-multiplatform"),
     OpenProject("AndroidX", tr("\u591a\u4e2a\u7ec4\u4ef6", "\u591a\u4e2a\u7ec4\u4ef6"), tr("Activity\u3001Lifecycle\u3001Core \u7b49 Android \u57fa\u7840\u5e93", "Activity\u3001Lifecycle\u3001Core \u7b49 Android \u57fa\u7840\u5e93"), "https://github.com/androidx/androidx"),
-    OpenProject(tr("HyperMusicCover", "HyperMusicCover"), tr("0.0.9", "0.0.9"), tr("\u97f3\u4e50\u9501\u5c4f\u90e8\u5206\u76f8\u5173\u4ee3\u7801", "\u97f3\u4e50\u9501\u5c4f\u90e8\u5206\u76f8\u5173\u4ee3\u7801"), "https://github.com/zyl6932/HyperMusicCover")
+    OpenProject(tr("HyperMusicCover", "HyperMusicCover"), tr("0.0.9", "0.0.9"), tr("\u97f3\u4e50\u9501\u5c4f\u90e8\u5206\u76f8\u5173\u4ee3\u7801", "\u97f3\u4e50\u9501\u5c4f\u90e8\u5206\u76f8\u5173\u4ee3\u7801"), "https://github.com/zyl6932/HyperMusicCover"),
+    OpenProject(
+        tr("HyperCeiler", "HyperCeiler"),
+        tr("Canary", "Canary"),
+        tr("HyperOS 4 Rust 桌面的 Dock 栏相关代码", "HyperOS 4 Rust 桌面的 Dock 栏相关代码"),
+        "https://github.com/ReChronoRain/HyperCeiler",
+        tr("AGPL-3.0/MIT License", "AGPL-3.0/MIT License"),
+    ),
 )
 
 @Composable
@@ -9334,7 +9447,7 @@ private fun OpenSource(back: () -> Unit) = AppPage(tr("\u5f00\u6e90\u4ee3\u7801\
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(item.name, style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold)
-                        Text("${item.version} \u00b7 Apache License 2.0", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 3.dp))
+                        Text("${item.version} \u00b7 ${item.license}", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 3.dp))
                         Text(item.description, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 6.dp))
                     }
                     Image(MiuixIcons.Regular.ChevronForward, null, Modifier.padding(start = 12.dp).size(22.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary))

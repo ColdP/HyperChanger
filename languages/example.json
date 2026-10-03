@@ -826,9 +826,19 @@
     "文件路径": "File path",
     "选择文件夹": "Choose folder",
     "桌面": "Desktop",
-    "Dock栏": "Dock bar",
-    "启用 Dock栏": "Enable Dock bar",
-    "玻璃模糊半径": "Glass blur radius"
+    "Dock 栏": "Dock bar",
+    "启用 Dock 栏": "Enable Dock bar",
+    "自定义 Dock 背景": "Custom Dock background",
+    "Dock 高度": "Dock height",
+    "Dock 水平边距": "Dock horizontal margin",
+    "Dock 底部边距": "Dock bottom margin",
+    "Dock 圆角": "Dock corner radius",
+    "玻璃模糊半径": "Glass blur radius",
+    "多任务界面": "Recent tasks",
+    "隐藏多任务界面的清除按钮": "Hide the clear button in recent tasks",
+    "保留功能": "Keep functionality",
+    "不保留功能": "Disable functionality",
+    "写入桌面配置失败，请检查 Root 权限": "Could not write launcher configuration. Check Root access."
   },
   "Xiaomi 18 Pro 系列 AI 背屏": "Xiaomi 18 Pro Series AI Rear Screen",
   "解锁 AI 功能": "Unlock AI features",
@@ -884,5 +894,14 @@
   "选择输出目录": "Choose output folder",
   "未选择目录": "No folder selected",
   "壁纸保存成功": "Wallpaper saved",
-  "壁纸保存失败": "Could not save wallpaper"
+  "壁纸保存失败": "Could not save wallpaper",
+  "为桌面添加 Dock": "Add a Dock to the home screen",
+  "需要勾选\"系统框架\"作用域，初次使用需要重启手机": "Enable the \"System Framework\" scope; restart the phone for first use",
+  "Dock 背景材质": "Dock background material",
+  "Dock 入场动画": "Dock entrance animation",
+  "HyperCeiler": "HyperCeiler",
+  "Canary": "Canary",
+  "Apache License 2.0": "Apache License 2.0",
+  "AGPL-3.0/MIT License": "AGPL-3.0/MIT License",
+  "HyperOS 4 Rust 桌面的 Dock 栏相关代码": "Dock code for the HyperOS 4 Rust launcher"
 }

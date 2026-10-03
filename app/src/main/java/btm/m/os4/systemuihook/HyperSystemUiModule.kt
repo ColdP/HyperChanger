@@ -626,6 +626,15 @@ class HyperSystemUiModule : XposedModule() {
                 .onFailure { error -> log(Log.ERROR, TAG, "Could not install desktop Dock WMS hook", error) }
             return
         }
+        if (param.packageName == "com.miui.home") {
+            runCatching {
+                val preferences = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
+                syncHomeRecentsNativeConfig(param, readHomeRecentsSettings(preferences))
+            }.onFailure { error ->
+                log(Log.ERROR, TAG, "Could not sync native desktop recents config", error)
+            }
+            return
+        }
         if (param.packageName == "com.xiaomi.shop" || param.packageName == "com.mipay.wallet" ||
             param.packageName == "com.mi.health" || param.packageName == "com.apple.android.music" ||
             param.packageName == "com.sina.weibo" || param.packageName == "com.xingin.xhs" ||
