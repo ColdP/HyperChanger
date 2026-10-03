@@ -347,7 +347,6 @@ public final class ShadeLayer {
             frame.setClipChildren(true);
             frame.setClickable(false);
             frame.setFocusable(false);
-            frame.setEnabled(false);
             // The curtain is a SHAPE, not a rectangle: see CURTAIN_OUTLINE.
             frame.setClipToOutline(true);
             frame.setOutlineProvider(CURTAIN_OUTLINE);
@@ -359,7 +358,6 @@ public final class ShadeLayer {
             final ImageView wp = new ImageView(ctx);
             wp.setClickable(false);
             wp.setFocusable(false);
-            wp.setEnabled(false);
             wp.setScaleType(ImageView.ScaleType.CENTER_CROP);
             frame.addView(wp, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
