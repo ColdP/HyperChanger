@@ -98,11 +98,9 @@ public final class IosNotificationCenterPresentation {
     }
 
     static float stackOffset(View view, float nativeStackY) {
-        if (!isActive() || view != stack || panel == null || clock == null) return 0f;
-        float desired = desiredNotificationTop();
-        float limit = Math.max(nativeStackY, view.getHeight() -
-                160f * panel.getResources().getDisplayMetrics().density);
-        return Math.max(0f, Math.min(limit, desired) - nativeStackY) * progress;
+        // updateTopPadding is the native list-boundary path. Applying another
+        // mStackY offset here doubles the displacement during layout passes.
+        return 0f;
     }
 
     static void captureHeader(View view) {
@@ -228,6 +226,8 @@ public final class IosNotificationCenterPresentation {
         View header = byId(capturedHeader, "normal_notification_header_view");
         if (header == null) header = byId(window, "normal_notification_header_view");
         if (header == null) return;
+        // Hide the notification header's own date. The separately hosted OEM
+        // lockscreen clock supplies the complete date/accessory information.
         View[] views = {byId(header, "big_time"), byId(header, "date_time"),
                 byId(header, "horizontal_time")};
         if (oldHeader != null && oldHeader[0] == views[0]) return;
@@ -274,6 +274,7 @@ public final class IosNotificationCenterPresentation {
             clockInfo = findClockInfo();
             if (clockInfo != null) clockInfoBaseTranslation = clockInfo.getTranslationY();
         }
+        syncClockMetadata();
         if (clockInfo == null || clockInfo.getHeight() == 0) return;
         if (clockInfo instanceof TextView && ((TextView) clockInfo).length() == 0) {
             long minute = System.currentTimeMillis() / 60000L;
@@ -305,6 +306,47 @@ public final class IosNotificationCenterPresentation {
         if (Math.abs(offset - clockInfoOffset) > .5f) {
             clockInfoOffset = offset;
             clockInfo.setTranslationY(clockInfoBaseTranslation + offset);
+        }
+    }
+
+    /** Keep all lockscreen date/lunar/weather/health slots supplied by the OEM clock. */
+    private static void syncClockMetadata() {
+        try {
+            Object controller = Xp.getObjectField(clock, "mMiuiClockController");
+            Object face = Xp.getObjectField(controller, "mClockView");
+            Class<?> type = Class.forName("com.miui.clock.module.ClockViewType", false,
+                    clock.getClass().getClassLoader());
+            Method getter = face.getClass().getMethod("getIClockView", type);
+            String[] names = {"NOTIFICATION_DATE", "NOTIFICATION_DATA_INFO", "FULL_DATE_WEEK",
+                    "DATE", "WEEK", "WEATHER", "MAGAZINE_INFO", "TEXT_AREA", "TEXT_AREA2"};
+            for (String name : names) {
+                try {
+                    Object view = getter.invoke(face, type.getField(name).get(null));
+                    if (view instanceof View && isClockInfo((View) view)) {
+                        View candidate = (View) view;
+                        if (candidate.getVisibility() != View.VISIBLE
+                                && (!(candidate instanceof TextView)
+                                || ((TextView) candidate).length() > 0)) {
+                            candidate.setVisibility(View.VISIBLE);
+                        }
+                    }
+                } catch (Throwable ignored) {
+                    // Clock templates do not expose every slot.
+                }
+            }
+            // Classic clocks keep these lockscreen-only fields outside the enum
+            // slots. Reuse them as well when the selected template provides them.
+            for (String field : new String[]{"mCurrentDate", "mLunarCalendarInfo", "mOwnerInfo"}) {
+                try {
+                    Object value = Xp.getObjectField(face, field);
+                    if (value instanceof View && isClockInfo((View) value)
+                            && (!(value instanceof TextView) || ((TextView) value).length() > 0)) {
+                        ((View) value).setVisibility(View.VISIBLE);
+                    }
+                } catch (Throwable ignored) {}
+            }
+        } catch (Throwable ignored) {
+            // Older clock modules expose only getNotificationClockTopView().
         }
     }
 
@@ -413,7 +455,7 @@ public final class IosNotificationCenterPresentation {
         int[] stackPoint = new int[2];
         panel.getLocationInWindow(panelPoint);
         stack.getLocationInWindow(stackPoint);
-        float gap = 16f * panel.getResources().getDisplayMetrics().density;
+        float gap = 28f * panel.getResources().getDisplayMetrics().density;
         return clockBottom() + host.getTranslationY() + gap -
                 (stackPoint[1] - panelPoint[1]);
     }
@@ -430,25 +472,19 @@ public final class IosNotificationCenterPresentation {
     }
 
     private static float clockBottom() {
+        float apiBottom = 0f;
         try {
             Object value = clock.getClass().getMethod("getClockBottom").invoke(clock);
             if (value instanceof Number) {
                 float top = ((Number) value).floatValue();
-                if (top > 0f && top < panel.getHeight()) return top;
+                if (top > 0f && top < panel.getHeight()) apiBottom = top;
             }
         } catch (Throwable ignored) {}
-        Rect bounds = new Rect();
-        ViewGroup group = (ViewGroup) clock;
-        float bottom = 0f;
-        for (int i = 0; i < group.getChildCount(); i++) {
-            View child = group.getChildAt(i);
-            if (child.getVisibility() != View.VISIBLE || child.getHeight() >= panel.getHeight()) continue;
-            if (child.getGlobalVisibleRect(bounds)) {
-                int[] point = new int[2];
-                panel.getLocationOnScreen(point);
-                bottom = Math.max(bottom, bounds.bottom - point[1]);
-            }
-        }
+        float bottom = visibleClockBottom(clock);
+        // Some OEM clock templates report the notification baseline above the
+        // rendered accessory/date views. Never let that baseline move cards over
+        // the pixels that are actually visible on screen.
+        bottom = Math.max(bottom, apiBottom);
         if (bottom > 0f) return bottom;
         float density = panel.getResources().getDisplayMetrics().density;
         try {
@@ -458,6 +494,26 @@ public final class IosNotificationCenterPresentation {
             }
         } catch (Throwable ignored) {}
         return 220f * density;
+    }
+
+    private static float visibleClockBottom(View view) {
+        if (view == null || view.getVisibility() != View.VISIBLE) return 0f;
+        Rect bounds = new Rect();
+        float bottom = 0f;
+        if (view.getGlobalVisibleRect(bounds)) {
+            int[] point = new int[2];
+            panel.getLocationOnScreen(point);
+            if (view != clock || view.getHeight() < panel.getHeight()) {
+                bottom = bounds.bottom - point[1];
+            }
+        }
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                bottom = Math.max(bottom, visibleClockBottom(group.getChildAt(i)));
+            }
+        }
+        return bottom;
     }
 
     private static void releasePresentation() {
