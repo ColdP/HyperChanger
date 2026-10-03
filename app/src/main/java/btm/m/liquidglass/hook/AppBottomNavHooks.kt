@@ -22,6 +22,8 @@ import android.widget.TextView
 import android.view.TextureView
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -106,7 +108,7 @@ object AppBottomNavHooks {
         barResourceName = "main_radio",
         anchorResourceName = null,
         requiredTabs = setOf(TabKey.HOME, TabKey.DISCOVER, TabKey.MESSAGES, TabKey.PROFILE),
-        targetVersion = "16.5.3 (7982)",
+        targetVersion = "16.10.0 (8202)",
         navigationLayerResourceNames = setOf("iv_bottom_shadow")
     )
 
@@ -645,7 +647,7 @@ object AppBottomNavHooks {
         private var attempts = 0
         private var originalBar: ViewGroup? = null
         private var detectedTabs = emptyList<DetectedTab>()
-        private var navigationTabs = emptyList<DetectedTab>()
+        private var navigationTabs by mutableStateOf(emptyList<DetectedTab>())
         private var nav: ComposeView? = null
         private var lifecycleOwner: InjectedLifecycleOwner? = null
         private var guardRoot: ViewGroup? = null
@@ -2893,6 +2895,15 @@ object AppBottomNavHooks {
                 config.navigationLayerResourceNames.forEach { rememberResourceView(content, it) }
             }
             detectedTabs = detected.tabs
+            if (config === weibo && navigationTabs != detected.tabs) {
+                val selectedKey = navigationTabs.getOrNull(selectedIndex.intValue)?.key
+                navigationTabs = detected.tabs
+                selectedIndex.intValue = detected.tabs.indexOfFirst { it.key == selectedKey }
+                    .takeIf { it >= 0 }
+                    ?: detected.tabs.indexOfFirst { isSelectedRecursively(it.view) }
+                        .takeIf { it >= 0 }
+                    ?: 0
+            }
             return detected
         }
 
@@ -2919,6 +2930,7 @@ object AppBottomNavHooks {
         }
 
         private fun parseDirectTabs(candidate: ViewGroup): List<DetectedTab>? {
+            if (config === weibo) return parseWeiboTabs(candidate)
             val tabs = (0 until candidate.childCount).mapNotNull { index ->
                 val child = candidate.getChildAt(index)
                 val key = canonicalTab(semanticText(child)) ?: return@mapNotNull null
@@ -2936,6 +2948,48 @@ object AppBottomNavHooks {
                 val clickTarget = findClickable(child) ?: return null
                 DetectedTab(key, displayLabel(key, semanticText(child)), child, clickTarget)
             }
+        }
+
+        private fun parseWeiboTabs(candidate: ViewGroup): List<DetectedTab>? {
+            if (resourceEntryName(candidate) != "main_radio" || candidate.childCount != 5) return null
+            val tabs = (0 until candidate.childCount).map { index ->
+                val child = candidate.getChildAt(index)
+                val clickTarget = findClickable(child) ?: return null
+                val tag = clickTarget.tag as? Enum<*> ?: return null
+                if (tag.javaClass.name != "com.sina.weibo.tab.l") return null
+                val key = when (tag.name) {
+                    "Home" -> TabKey.HOME
+                    "Video" -> TabKey.VIDEO
+                    "SuperGroup" -> TabKey.SUPERGROUP
+                    "Find" -> TabKey.FIND
+                    "Featured" -> TabKey.FEATURED
+                    "Playlet" -> TabKey.SHORT_DRAMA
+                    "Discover" -> TabKey.DISCOVER
+                    "Message" -> TabKey.MESSAGES
+                    "Me" -> TabKey.PROFILE
+                    else -> return null
+                }
+                DetectedTab(key, weiboDisplayLabel(key), child, clickTarget)
+            }
+            val keys = tabs.map { it.key }
+            if (keys.toSet().size != 5 || !keys.containsAll(config.requiredTabs) ||
+                keys.count { it in setOf(TabKey.VIDEO, TabKey.SUPERGROUP, TabKey.FIND,
+                    TabKey.FEATURED, TabKey.SHORT_DRAMA) } != 1
+            ) return null
+            return tabs.sortedBy { IntArray(2).also(it.view::getLocationInWindow)[0] }
+        }
+
+        private fun weiboDisplayLabel(key: TabKey): String = when (key) {
+            TabKey.HOME -> tr("首页", "首页")
+            TabKey.VIDEO -> tr("视频", "视频")
+            TabKey.SUPERGROUP -> tr("超话", "超话")
+            TabKey.FIND -> tr("找人", "找人")
+            TabKey.FEATURED -> tr("精选", "精选")
+            TabKey.SHORT_DRAMA -> tr("短剧", "短剧")
+            TabKey.DISCOVER -> tr("发现", "发现")
+            TabKey.MESSAGES -> tr("消息", "消息")
+            TabKey.PROFILE -> tr("我的", "我的")
+            else -> displayLabel(key)
         }
 
         private fun semanticText(view: View): String {
@@ -3044,6 +3098,9 @@ object AppBottomNavHooks {
             TabKey.CART -> "\u8d2d\u7269\u8f66"
             TabKey.SAVINGS -> "\u7701\u94b1"
             TabKey.SHORT_DRAMA -> "\u77ed\u5267"
+            TabKey.SUPERGROUP -> tr("超话", "超话")
+            TabKey.FIND -> tr("找人", "找人")
+            TabKey.FEATURED -> tr("精选", "精选")
             TabKey.LOAN -> "\u501f\u94b1"
             TabKey.PROFILE -> "\u6211\u7684"
         }
@@ -3138,7 +3195,7 @@ object AppBottomNavHooks {
 
     private enum class TabKey {
         FACE_HOME, FACE_CATEGORY, FACE_MINE, HEALTH, WORKOUT, DEVICE, HOME, COFFEE_MENU, ENJOY, MEMBERSHIP, CATEGORY, MARKET, PUBLISH, MESSAGES, CONTACTS, FOLLOWING, VIDEO, MUSIC_DISCOVER, STARLIGHT,
-        DISCOVER, DYNAMIC, SERVICE, CART, SAVINGS, SHORT_DRAMA, LOAN, PROFILE, LISTEN_NOW, BROWSE, RADIO,
+        DISCOVER, DYNAMIC, SERVICE, CART, SAVINGS, SHORT_DRAMA, SUPERGROUP, FIND, FEATURED, LOAN, PROFILE, LISTEN_NOW, BROWSE, RADIO,
         LIBRARY, MUSIC_SEARCH, COMMUNITIES, CHAT, INBOX
     }
 

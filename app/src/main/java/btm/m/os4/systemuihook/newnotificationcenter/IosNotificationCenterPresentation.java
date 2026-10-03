@@ -6,6 +6,7 @@ import android.graphics.Rect;
 import android.graphics.RenderEffect;
 import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
+import android.animation.ValueAnimator;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.MotionEvent;
@@ -62,6 +63,9 @@ public final class IosNotificationCenterPresentation {
     private static float clearButtonAlpha = 1f;
     private static int lastBlur = -1;
     private static int lastStatusBlur = -1;
+    private static boolean switching;
+    private static boolean gestureActive;
+    private static ValueAnimator headerExitAnimator;
 
     private IosNotificationCenterPresentation() {}
 
@@ -73,15 +77,15 @@ public final class IosNotificationCenterPresentation {
     }
 
     public static void update(float fraction, float layoutFraction, boolean enabled, View sheet) {
-        float previous = progress;
         float previousLayout = layoutProgress;
         progress = enabled ? Math.max(0f, Math.min(1f, fraction)) : 0f;
         layoutProgress = enabled ? Math.max(0f, Math.min(1f, layoutFraction)) : 0f;
         wallpaperSheet = sheet;
         if (progress <= 0f) {
-            View previousStack = stack;
-            releasePresentation();
-            if (previous > 0f) requestStackUpdate(previousStack);
+            if (host != null) host.setAlpha(0f);
+            IosNotificationStackHooks.restoreStackedRows();
+            if (notificationHeader == null || oldHeader == null) findHeader();
+            hideNativeHeader();
             return;
         }
         if (host == null && (clockUnavailable || !create())) return;
@@ -92,8 +96,27 @@ public final class IosNotificationCenterPresentation {
     }
 
     public static void release() {
+        switching = false;
+        gestureActive = false;
+        if (headerExitAnimator != null) headerExitAnimator.cancel();
         releasePresentation();
         window = null;
+    }
+
+    public static void setGestureActive(boolean active) {
+        gestureActive = active;
+    }
+
+    public static void setSwitching(boolean value) {
+        switching = value;
+        if (value) {
+            if (notificationHeader == null || oldHeader == null) findHeader();
+            hideNativeHeader();
+        } else if (progress <= 0f) {
+            finishPresentation();
+        } else {
+            sync();
+        }
     }
 
     public static boolean isActive() {
@@ -106,6 +129,49 @@ public final class IosNotificationCenterPresentation {
 
     public static boolean isDrivingHostedClock() {
         return Boolean.TRUE.equals(DRIVING_HOSTED_CLOCK.get());
+    }
+
+    /** Called once the native panel reports that the notification center is actually hidden. */
+    public static void finishPresentation() {
+        switching = false;
+        gestureActive = false;
+        if (oldHeader == null && notificationHeader == null) {
+            releasePresentation();
+            return;
+        }
+        final View[] views = oldHeader;
+        final float[] targets = oldHeaderAlpha;
+        final View container = notificationHeader;
+        final float containerTarget = notificationHeaderAlpha;
+        if (headerExitAnimator != null) headerExitAnimator.cancel();
+        restoreHeaderChromeVisibility();
+        if (views == null && container == null) {
+            releasePresentation();
+            return;
+        }
+        final float radius = panel == null ? 18f
+                : 18f * panel.getResources().getDisplayMetrics().density;
+        headerExitAnimator = ValueAnimator.ofFloat(0f, 1f);
+        headerExitAnimator.setDuration(180L);
+        headerExitAnimator.setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f));
+        headerExitAnimator.addUpdateListener(animation -> {
+            float amount = (Float) animation.getAnimatedValue();
+            if (container != null) container.setAlpha(containerTarget * amount);
+            for (int i = 0; views != null && i < views.length; i++) {
+                View view = views[i];
+                if (view == null) continue;
+                view.setAlpha((targets == null ? 1f : targets[i]) * amount);
+                view.setRenderEffect(amount >= 0.999f ? null : RenderEffect.createBlurEffect(
+                        radius * (1f - amount), radius * (1f - amount), Shader.TileMode.CLAMP));
+            }
+        });
+        headerExitAnimator.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator animation) {
+                if (headerExitAnimator == animation) headerExitAnimator = null;
+                releasePresentation();
+            }
+        });
+        headerExitAnimator.start();
     }
 
     public static void setHideClearButton(boolean hide) {
@@ -276,22 +342,17 @@ public final class IosNotificationCenterPresentation {
             }
         }
         if (oldHeader == null) findHeader();
-        if (notificationHeader != null && notificationHeader.getAlpha() != 0f) {
-            notificationHeader.setAlpha(0f);
-        }
-        hideHeaderGradient();
-        for (int i = 0; oldHeader != null && i < oldHeader.length; i++) {
-            View original = oldHeader[i];
-            if (original != null && original.getAlpha() != 0f) {
-                oldHeaderAlpha[i] = original.getAlpha();
-                original.setAlpha(0f);
-            }
-        }
+        hideNativeHeader();
         syncDepth();
         syncStatus();
         syncClearButton();
         syncEmptyText();
-        int blur = Math.round(28f * panel.getResources().getDisplayMetrics().density * (1f - progress));
+        // Ease the clock from a soft, blurred entrance to a crisp resting state. Using the
+        // same smooth-step curve as the sheet alpha avoids a sharp focus jump near the end of
+        // an upward swipe when native expansion reports uneven frame deltas.
+        float clockVisual = progress * progress * (3f - 2f * progress);
+        int blur = Math.round(28f * panel.getResources().getDisplayMetrics().density
+                * (1f - clockVisual));
         if (blur != lastBlur) {
             host.setRenderEffect(blur == 0 ? null : RenderEffect.createBlurEffect(
                     blur, blur, Shader.TileMode.CLAMP));
@@ -305,6 +366,26 @@ public final class IosNotificationCenterPresentation {
         }
         syncNotifications();
         syncClockInfo();
+    }
+
+    private static void hideNativeHeader() {
+        if (notificationHeader != null && notificationHeader.getAlpha() != 0f) {
+            notificationHeader.setAlpha(0f);
+        }
+        hideHeaderGradient();
+        for (int i = 0; oldHeader != null && i < oldHeader.length; i++) {
+            View original = oldHeader[i];
+            if (original != null && original.getAlpha() != 0f) {
+                oldHeaderAlpha[i] = original.getAlpha();
+                original.setAlpha(0f);
+            }
+        }
+    }
+
+    private static void restoreHeaderChromeVisibility() {
+        if (headerGradient != null) headerGradient.setVisibility(headerGradientVisibility);
+        if (headerForeground != null) headerForeground.setVisibility(headerForegroundVisibility);
+        if (headerShadow != null) headerShadow.setVisibility(headerShadowVisibility);
     }
 
     private static void findHeader() {

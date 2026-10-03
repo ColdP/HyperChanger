@@ -92,6 +92,7 @@ public final class ShadeLayer {
     public static void onRawExpansion(float height, float threshold, boolean tracking, boolean animate) {
         if (!sIosEnabled || IOS.controlCenter || IOS.switching) return;
         float target = IOS.gestureTarget(height, threshold, tracking);
+        IosNotificationCenterPresentation.setGestureActive(tracking);
         if (tracking) {
             cancelIosSettle();
             IOS.move(target);
@@ -132,6 +133,7 @@ public final class ShadeLayer {
         if (visible) {
             cancelIosSettle();
             hideIosLayer();
+            IosNotificationCenterPresentation.finishPresentation();
         }
     }
 
@@ -152,6 +154,7 @@ public final class ShadeLayer {
         IOS.gestureTarget(0f, 1f, false);
         IOS.move(0f);
         if (sIosEnabled) hideIosLayer();
+        IosNotificationCenterPresentation.finishPresentation();
     }
 
     public static void onSwitchDriverAvailable() {
@@ -162,6 +165,7 @@ public final class ShadeLayer {
      * also fire when the opposite panel collapses, so they cannot determine ownership. */
     public static void onSwitchProgress(float progress, boolean switching) {
         if (!IOS.switchProgress(progress, switching)) return;
+        IosNotificationCenterPresentation.setSwitching(IOS.switching);
         if (!sIosEnabled) return;
         cancelIosSettle();
         applyIosProgress();

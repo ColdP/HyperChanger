@@ -232,6 +232,10 @@ internal object ExtractedNavIcons {
         "reddit:CHAT" -> RedditChat
         "reddit:INBOX" -> RedditInbox
         "weibo:HOME" -> WeiboHome
+        "weibo:VIDEO", "weibo:SHORT_DRAMA" -> QqmusicVideo
+        "weibo:SUPERGROUP" -> RedditCommunities
+        "weibo:FIND" -> WeiboDiscover
+        "weibo:FEATURED" -> QqmusicStarlight
         "weibo:DISCOVER" -> WeiboDiscover
         "weibo:MESSAGES" -> WeiboMessages
         "weibo:PROFILE" -> WeiboProfile
