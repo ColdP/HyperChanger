@@ -26,6 +26,7 @@ public final class IosNotificationCenterPresentation {
     private static FrameLayout host;
     private static View clock;
     private static View clockInfo;
+    private static View clockAnimation;
     private static float clockInfoOffset;
     private static float clockInfoBaseTranslation;
     private static long clockInfoRefreshMinute = -1L;
@@ -253,6 +254,7 @@ public final class IosNotificationCenterPresentation {
 
     private static final ViewTreeObserver.OnPreDrawListener FRAME = () -> {
         sync();
+        IosShadeMaterial.refreshInitialRows(progress >= .99f && layoutProgress >= .99f);
         return true;
     };
 
@@ -288,7 +290,6 @@ public final class IosNotificationCenterPresentation {
         syncDepth();
         syncStatus();
         syncClearButton();
-        syncClockInfo();
         syncEmptyText();
         int blur = Math.round(28f * panel.getResources().getDisplayMetrics().density * (1f - progress));
         if (blur != lastBlur) {
@@ -303,6 +304,7 @@ public final class IosNotificationCenterPresentation {
             lastStatusBlur = statusBlur;
         }
         syncNotifications();
+        syncClockInfo();
     }
 
     private static void findHeader() {
@@ -407,11 +409,15 @@ public final class IosNotificationCenterPresentation {
         if (clockInfo != null && !isClockInfo(clockInfo)) {
             clockInfo.setTranslationY(clockInfoBaseTranslation);
             clockInfo = null;
+            clockAnimation = null;
             clockInfoOffset = 0f;
         }
         if (clockInfo == null) {
             clockInfo = findClockInfo();
-            if (clockInfo != null) clockInfoBaseTranslation = clockInfo.getTranslationY();
+            if (clockInfo != null) {
+                clockInfoBaseTranslation = clockInfo.getTranslationY();
+                clockAnimation = findClockAnimation(clockInfo);
+            }
         }
         syncClockMetadata();
         if (clockInfo == null || clockInfo.getHeight() == 0) return;
@@ -427,6 +433,27 @@ public final class IosNotificationCenterPresentation {
         if (clockInfo.getVisibility() != View.VISIBLE) {
             if (!(clockInfo instanceof TextView) || ((TextView) clockInfo).length() == 0) return;
             clockInfo.setVisibility(View.VISIBLE);
+        }
+        if (clockAnimation != null) {
+            boolean insideAnimation = false;
+            for (android.view.ViewParent parent = clockInfo.getParent(); parent instanceof View;
+                    parent = ((View) parent).getParent()) {
+                if (parent == clockAnimation) {
+                    insideAnimation = true;
+                    break;
+                }
+            }
+            float offset = insideAnimation ? 0f : clockAnimation.getTranslationY();
+            ViewGroup.LayoutParams params = clockInfo.getLayoutParams();
+            if (params instanceof ViewGroup.MarginLayoutParams) {
+                // The OEM updates the date margin with the VF clock rect before layout catches up.
+                offset += ((ViewGroup.MarginLayoutParams) params).topMargin - clockInfo.getTop();
+            }
+            if (Math.abs(offset - clockInfoOffset) > .5f) {
+                clockInfoOffset = offset;
+                clockInfo.setTranslationY(clockInfoBaseTranslation + offset);
+            }
+            return;
         }
         float top = 0f;
         try {
@@ -601,6 +628,22 @@ public final class IosNotificationCenterPresentation {
         }
     }
 
+    private static View findClockAnimation(View info) {
+        try {
+            Object controller = Xp.getObjectField(clock, "mMiuiClockController");
+            Object face = Xp.getObjectField(controller, "mClockView");
+            Object top = face.getClass().getMethod("getNotificationClockTopView").invoke(face);
+            if (top != info) return null;
+            Object animation = face.getClass().getMethod("getAnimationContainer").invoke(face);
+            if (animation instanceof View && isClockInfo((View) animation)) {
+                return (View) animation;
+            }
+        } catch (Throwable ignored) {
+            // Other clock families keep their existing placement.
+        }
+        return null;
+    }
+
     /** Returns the top of the first real notification in panel coordinates, including scroll. */
     private static float firstNotificationTop(View currentStack, int[] panelPoint) {
         if (!(currentStack instanceof ViewGroup)) return Float.NaN;
@@ -699,6 +742,7 @@ public final class IosNotificationCenterPresentation {
             clockInfo.setTranslationY(clockInfoBaseTranslation);
         }
         clockInfo = null;
+        clockAnimation = null;
         clockInfoOffset = 0f;
         clockInfoBaseTranslation = 0f;
         clockInfoRefreshMinute = -1L;
