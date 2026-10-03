@@ -4256,6 +4256,15 @@ private fun Shade(
                             iosSettings = iosStore.settings
                         },
                     )
+                    SwitchPreference(
+                        title = tr("iosNotificationHideClear", "隐藏通知中心清除按钮"),
+                        summary = tr("iosNotificationHideClearSummary", "隐藏通知中心底部的清除按钮"),
+                        checked = iosSettings.hideClearButton,
+                        onCheckedChange = { hidden ->
+                            iosStore.update(service) { it.copy(hideClearButton = hidden) }
+                            iosSettings = iosStore.settings
+                        },
+                    )
                 }
             }
         }

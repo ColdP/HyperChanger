@@ -5,7 +5,9 @@
   "strings": {
     "iosNotificationCenter": "iOS風通知センター",
     "iosNotificationCenterSummary": "スワイプで丸みのある壁紙パネルを開き、ロック画面の時計と被写界深度効果を表示します。ライブ壁紙は現在未対応です。",
-    "iosNotificationWallpaper": "通知センターの壁紙ソース",
+  "iosNotificationWallpaper": "通知センターの壁紙ソース",
+  "iosNotificationHideClear": "通知センターの消去ボタンを隠す",
+  "iosNotificationHideClearSummary": "通知センター下部の消去ボタンを隠します",
     "iosNotificationLockWallpaper": "ロック画面の壁紙",
     "iosNotificationHomeWallpaper": "ホーム画面の壁紙",
     "进入 OOBE": "OOBE を開く",

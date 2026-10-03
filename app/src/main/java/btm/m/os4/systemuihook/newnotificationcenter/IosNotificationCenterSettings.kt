@@ -9,11 +9,13 @@ import btm.m.os4.systemuihook.REMOTE_PREFERENCE_GROUP
 
 const val KEY_IOS_NOTIFICATION_CENTER = "ios_notification_center"
 const val KEY_IOS_NOTIFICATION_WALLPAPER = "ios_notification_wallpaper"
+const val KEY_IOS_NOTIFICATION_HIDE_CLEAR = "ios_notification_hide_clear"
 
 data class IosNotificationCenterSettings(
     val enabled: Boolean = false,
     // 0 = lock wallpaper, 1 = home wallpaper.
     val wallpaper: Int = 0,
+    val hideClearButton: Boolean = false,
 )
 
 class IosNotificationCenterSettingsStore(context: Context) {
@@ -35,12 +37,14 @@ class IosNotificationCenterSettingsStore(context: Context) {
     private fun read(prefs: SharedPreferences) = IosNotificationCenterSettings(
         enabled = prefs.getBoolean(KEY_IOS_NOTIFICATION_CENTER, false),
         wallpaper = prefs.getInt(KEY_IOS_NOTIFICATION_WALLPAPER, 0).coerceIn(0, 1),
+        hideClearButton = prefs.getBoolean(KEY_IOS_NOTIFICATION_HIDE_CLEAR, false),
     )
 
     private fun write(prefs: SharedPreferences, value: IosNotificationCenterSettings) {
         prefs.edit()
             .putBoolean(KEY_IOS_NOTIFICATION_CENTER, value.enabled)
             .putInt(KEY_IOS_NOTIFICATION_WALLPAPER, value.wallpaper)
+            .putBoolean(KEY_IOS_NOTIFICATION_HIDE_CLEAR, value.hideClearButton)
             .apply()
     }
 }

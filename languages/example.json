@@ -5,7 +5,9 @@
   "strings": {
     "iosNotificationCenter": "iOS-style Notification Center",
     "iosNotificationCenterSummary": "Pull down a rounded wallpaper sheet with the lock screen clock and depth effect. Live wallpapers are not supported yet.",
-    "iosNotificationWallpaper": "Notification Center wallpaper source",
+  "iosNotificationWallpaper": "Notification Center wallpaper source",
+  "iosNotificationHideClear": "Hide Notification Center clear button",
+  "iosNotificationHideClearSummary": "Hide the clear button at the bottom of Notification Center",
     "iosNotificationLockWallpaper": "Lock screen wallpaper",
     "iosNotificationHomeWallpaper": "Home screen wallpaper",
     "进入 OOBE": "Enter OOBE",

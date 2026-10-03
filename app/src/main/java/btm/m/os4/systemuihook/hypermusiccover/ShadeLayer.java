@@ -208,7 +208,8 @@ public final class ShadeLayer {
     private static final android.content.SharedPreferences.OnSharedPreferenceChangeListener PREFS_CHANGED =
             (prefs, key) -> {
                 if (btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_CENTER.equals(key)
-                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_WALLPAPER.equals(key)) {
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_WALLPAPER.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_HIDE_CLEAR.equals(key)) {
                     UI.post(() -> readPreferences(prefs));
                 }
             };
@@ -224,6 +225,9 @@ public final class ShadeLayer {
                 btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_CENTER, false);
         int source = Math.max(0, Math.min(1, prefs.getInt(
                 btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_WALLPAPER, 0)));
+        boolean hideClear = prefs.getBoolean(
+                btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_HIDE_CLEAR, false);
+        IosNotificationCenterPresentation.setHideClearButton(hideClear);
         if (enabled == sIosEnabled && source == sIosWallpaper) return;
         reset();
         if (sEffectOn) Main.setCardBlurActive(false);
@@ -341,6 +345,9 @@ public final class ShadeLayer {
             final Context ctx = root.getContext();
             final FrameLayout frame = new FrameLayout(ctx);
             frame.setClipChildren(true);
+            frame.setClickable(false);
+            frame.setFocusable(false);
+            frame.setEnabled(false);
             // The curtain is a SHAPE, not a rectangle: see CURTAIN_OUTLINE.
             frame.setClipToOutline(true);
             frame.setOutlineProvider(CURTAIN_OUTLINE);
@@ -350,6 +357,9 @@ public final class ShadeLayer {
             frame.setVisibility(View.GONE);
 
             final ImageView wp = new ImageView(ctx);
+            wp.setClickable(false);
+            wp.setFocusable(false);
+            wp.setEnabled(false);
             wp.setScaleType(ImageView.ScaleType.CENTER_CROP);
             frame.addView(wp, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));

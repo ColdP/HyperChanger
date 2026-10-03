@@ -36,6 +36,10 @@ public final class IosNotificationCenterPresentation {
     private static View emptyText;
     private static float emptyTextAlpha;
     private static View capturedHeader;
+    private static View notificationHeader;
+    private static float notificationHeaderAlpha = 1f;
+    private static View headerGradient;
+    private static int headerGradientVisibility = View.VISIBLE;
     private static View[] oldHeader;
     private static float[] oldHeaderAlpha;
     private static float nativeTopPadding = Float.NaN;
@@ -46,6 +50,10 @@ public final class IosNotificationCenterPresentation {
     private static ViewTreeObserver observer;
     private static boolean clockUnavailable;
     private static View wallpaperSheet;
+    private static boolean hideClearButton;
+    private static View clearButton;
+    private static int clearButtonVisibility = View.VISIBLE;
+    private static float clearButtonAlpha = 1f;
     private static int lastBlur = -1;
     private static int lastStatusBlur = -1;
 
@@ -82,6 +90,11 @@ public final class IosNotificationCenterPresentation {
 
     public static boolean isActive() {
         return host != null && progress > 0f;
+    }
+
+    public static void setHideClearButton(boolean hide) {
+        hideClearButton = hide;
+        syncClearButton();
     }
 
     static float adjustTopPadding(View view, float nativeTop) {
@@ -196,6 +209,7 @@ public final class IosNotificationCenterPresentation {
             }
         }
         if (oldHeader == null) findHeader();
+        hideHeaderGradient();
         for (int i = 0; oldHeader != null && i < oldHeader.length; i++) {
             View original = oldHeader[i];
             if (original != null && original.getAlpha() != 0f) {
@@ -205,6 +219,7 @@ public final class IosNotificationCenterPresentation {
         }
         syncDepth();
         syncStatus();
+        syncClearButton();
         syncClockInfo();
         syncEmptyText();
         int blur = Math.round(28f * panel.getResources().getDisplayMetrics().density * (1f - progress));
@@ -226,6 +241,14 @@ public final class IosNotificationCenterPresentation {
         View header = byId(capturedHeader, "normal_notification_header_view");
         if (header == null) header = byId(window, "normal_notification_header_view");
         if (header == null) return;
+        if (notificationHeader != header) {
+            notificationHeader = header;
+            notificationHeaderAlpha = header.getAlpha();
+        }
+        // The native header carries a gradient blur layer which sits above the
+        // mirrored status bar. The hosted lockscreen clock replaces its content.
+        header.setAlpha(0f);
+        hideHeaderGradient();
         // Hide the notification header's own date. The separately hosted OEM
         // lockscreen clock supplies the complete date/accessory information.
         View[] views = {byId(header, "big_time"), byId(header, "date_time"),
@@ -239,6 +262,16 @@ public final class IosNotificationCenterPresentation {
                 views[i].setAlpha(0f);
             }
         }
+    }
+
+    private static void hideHeaderGradient() {
+        if (window == null) return;
+        if (headerGradient == null) {
+            headerGradient = byId(window, "header_clip");
+            if (headerGradient == null) headerGradient = byId(window, "header_gradient_blur");
+            if (headerGradient != null) headerGradientVisibility = headerGradient.getVisibility();
+        }
+        if (headerGradient != null) headerGradient.setVisibility(View.GONE);
     }
 
     private static void syncDepth() {
@@ -261,6 +294,31 @@ public final class IosNotificationCenterPresentation {
                 status.source = source;
                 status.invalidate();
             }
+        }
+    }
+
+    private static void syncClearButton() {
+        if (window == null) return;
+        if (!hideClearButton) {
+            if (clearButton != null) {
+                clearButton.setVisibility(clearButtonVisibility);
+                clearButton.setAlpha(clearButtonAlpha);
+            }
+            return;
+        }
+        if (clearButton == null) {
+            String[] ids = {"clear_all", "clear_all_button", "notification_clear_all", "dismiss_button"};
+            for (String id : ids) {
+                clearButton = byId(window, id);
+                if (clearButton != null) break;
+            }
+            if (clearButton == null) clearButton = findViewByClass(window, "NotificationDismissView");
+            if (clearButton == null) clearButton = findViewByClass(window, "DismissView");
+        }
+        if (clearButton != null) {
+            if (clearButton.getVisibility() != View.GONE) clearButtonVisibility = clearButton.getVisibility();
+            clearButtonAlpha = clearButton.getAlpha();
+            clearButton.setVisibility(View.GONE);
         }
     }
 
@@ -455,7 +513,7 @@ public final class IosNotificationCenterPresentation {
         int[] stackPoint = new int[2];
         panel.getLocationInWindow(panelPoint);
         stack.getLocationInWindow(stackPoint);
-        float gap = 28f * panel.getResources().getDisplayMetrics().density;
+        float gap = 10f * panel.getResources().getDisplayMetrics().density;
         return clockBottom() + host.getTranslationY() + gap -
                 (stackPoint[1] - panelPoint[1]);
     }
@@ -504,7 +562,7 @@ public final class IosNotificationCenterPresentation {
             int[] point = new int[2];
             panel.getLocationOnScreen(point);
             if (view != clock || view.getHeight() < panel.getHeight()) {
-                bottom = bounds.bottom - point[1];
+                bottom = bounds.bottom - point[1] - host.getTranslationY();
             }
         }
         if (view instanceof ViewGroup) {
@@ -526,6 +584,10 @@ public final class IosNotificationCenterPresentation {
         }
         oldHeader = null;
         oldHeaderAlpha = null;
+        if (notificationHeader != null) notificationHeader.setAlpha(notificationHeaderAlpha);
+        notificationHeader = null;
+        if (headerGradient != null) headerGradient.setVisibility(headerGradientVisibility);
+        headerGradient = null;
         if (emptyText != null) emptyText.setAlpha(emptyTextAlpha);
         emptyText = null;
         if (clockInfo != null && clockInfoOffset != 0f) {
@@ -548,6 +610,11 @@ public final class IosNotificationCenterPresentation {
         if (status != null && status.getParent() instanceof ViewGroup) {
             ((ViewGroup) status.getParent()).removeView(status);
         }
+        if (clearButton != null) {
+            clearButton.setVisibility(clearButtonVisibility);
+            clearButton.setAlpha(clearButtonAlpha);
+        }
+        clearButton = null;
         host = null;
         panel = null;
         clock = null;
@@ -586,6 +653,19 @@ public final class IosNotificationCenterPresentation {
         if (root == null) return null;
         int id = root.getResources().getIdentifier(name, "id", "com.android.systemui");
         return id == 0 ? null : root.findViewById(id);
+    }
+
+    private static View findViewByClass(View root, String simpleName) {
+        if (root == null) return null;
+        if (root.getClass().getName().endsWith(simpleName)) return root;
+        if (root instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) root;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View found = findViewByClass(group.getChildAt(i), simpleName);
+                if (found != null) return found;
+            }
+        }
+        return null;
     }
 
     private static final class MirrorView extends View {
