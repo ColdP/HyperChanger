@@ -23,18 +23,15 @@ public final class IosShadeMaterial {
     };
     private static final Method[] METHODS = new Method[SETTERS.length];
     private static final Method[] READERS = new Method[SETTERS.length];
-    private static Method viewBlurSetter;
     private static final WeakHashMap<View, Object[]> SAVED = new WeakHashMap<>();
     private static final WeakHashMap<View, Boolean> CONTAIN_REQUESTS = new WeakHashMap<>();
     private static final WeakHashMap<View, Boolean> MEDIA = new WeakHashMap<>();
-    private static final WeakHashMap<View, Integer> VIEW_BLUR_MODES = new WeakHashMap<>();
     private static final ThreadLocal<Boolean> WRITING = new ThreadLocal<>();
     private static boolean active;
     private static ViewGroup root;
     private static View clockRoot;
     private static ViewTreeObserver observer;
     private static boolean loggedFailure;
-    private static int openingFrames;
     private static final ViewTreeObserver.OnGlobalLayoutListener LAYOUT = () -> {
         if (active && root != null) scan(root);
     };
@@ -76,16 +73,11 @@ public final class IosShadeMaterial {
         // New or rebound rows need their local blur even after the opening edge has passed.
         try {
             Method setViewBlur = View.class.getDeclaredMethod("setMiViewBlurMode", int.class);
-            setViewBlur.setAccessible(true);
-            viewBlurSetter = setViewBlur;
             Xp.api().hook(setViewBlur)
                     .setExceptionMode(io.github.libxposed.api.XposedInterface.ExceptionMode.PROTECTIVE)
                     .intercept(chain -> {
                         Object result = chain.proceed();
                         View view = (View) chain.getThisObject();
-                        if (!Boolean.TRUE.equals(WRITING.get())) {
-                            VIEW_BLUR_MODES.put(view, (Integer) chain.getArgs().get(0));
-                        }
                         if (active && !Boolean.TRUE.equals(WRITING.get()) && !SAVED.containsKey(view) && target(view)
                                 && view.getRootView() == root) apply(view);
                         return result;
@@ -101,7 +93,6 @@ public final class IosShadeMaterial {
         root = window;
         active = enabled && window != null;
         if (!active) return;
-        openingFrames = 0;
         observer = window.getViewTreeObserver();
         observer.addOnGlobalLayoutListener(LAYOUT);
         scan(window);
@@ -110,39 +101,6 @@ public final class IosShadeMaterial {
     public static void registerClock(View view) {
         clockRoot = view;
         if (active && view != null) scanClock(view);
-    }
-
-    public static void refreshInitialRows(boolean fullyExpanded) {
-        if (!active || !fullyExpanded) {
-            if (openingFrames < 2) openingFrames = 0;
-            return;
-        }
-        if (openingFrames >= 2) return;
-        if (++openingFrames < 2) {
-            root.postInvalidateOnAnimation();
-            return;
-        }
-        Method setter = viewBlurSetter;
-        if (setter == null) return;
-        scan(root);
-        WRITING.set(true);
-        try {
-            for (View view : new ArrayList<>(SAVED.keySet())) {
-                if (view == null || !view.isShown() || view.getRootView() != root
-                        || !Integer.valueOf(1).equals(VIEW_BLUR_MODES.get(view))
-                        || (!view.getClass().getName().endsWith(".NotificationBackgroundView")
-                        && !MEDIA.containsKey(view))) continue;
-                try {
-                    setter.invoke(view, 0);
-                    setter.invoke(view, 1);
-                    view.invalidate();
-                } catch (Throwable ignored) {
-                    // One unsupported view should not prevent the other rows from refreshing.
-                }
-            }
-        } finally {
-            WRITING.remove();
-        }
     }
 
     private static boolean isClock(View view) {
@@ -273,7 +231,6 @@ public final class IosShadeMaterial {
 
     private static void restore() {
         active = false;
-        openingFrames = 0;
         clockRoot = null;
         if (observer != null && observer.isAlive()) observer.removeOnGlobalLayoutListener(LAYOUT);
         observer = null;

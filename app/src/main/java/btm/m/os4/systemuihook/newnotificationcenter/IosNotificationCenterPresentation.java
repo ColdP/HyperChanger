@@ -254,7 +254,7 @@ public final class IosNotificationCenterPresentation {
 
     private static final ViewTreeObserver.OnPreDrawListener FRAME = () -> {
         sync();
-        IosShadeMaterial.refreshInitialRows(progress >= .99f && layoutProgress >= .99f);
+        IosNotificationStackHooks.clipStackedRows(stack, progress >= .99f && layoutProgress >= .99f);
         return true;
     };
 
@@ -719,6 +719,7 @@ public final class IosNotificationCenterPresentation {
     }
 
     private static void releasePresentation() {
+        IosNotificationStackHooks.restoreStackedRows();
         if (observer != null && observer.isAlive()) observer.removeOnPreDrawListener(FRAME);
         observer = null;
         if (oldHeader != null) {

@@ -205,6 +205,23 @@ object AppBottomNavHooks {
         coordinateTabSurface = true
     )
 
+    private val luckinCoffee = AppConfig(
+        displayName = "LuckinCoffee",
+        packageName = "com.lucky.luckyclient",
+        activityName = "com.lucky.luckincoffee.MainActivity",
+        barResourceName = "c_bottom_tab",
+        anchorResourceName = null,
+        requiredTabs = setOf(
+            TabKey.HOME, TabKey.COFFEE_MENU, TabKey.ENJOY, TabKey.MEMBERSHIP, TabKey.PROFILE
+        ),
+        targetVersion = "5.5.92 (5592)",
+        navigationLayerResourceNames = setOf("iv_tab_bg"),
+        fallbackTabOrder = listOf(
+            TabKey.HOME, TabKey.COFFEE_MENU, TabKey.ENJOY, TabKey.MEMBERSHIP, TabKey.PROFILE
+        ),
+        pageContentResourceName = "fl_page_container"
+    )
+
     private val sessions = WeakHashMap<Activity, Session>()
 
     @JvmStatic
@@ -362,6 +379,51 @@ object AppBottomNavHooks {
         advancedMaterial: Boolean,
         colorMode: String
     ) = install(module, loader, xiaomiHealthWatchFaceMarket, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode)
+
+    @JvmStatic
+    @Throws(ReflectiveOperationException::class)
+    fun installLuckinCoffee(
+        module: XposedModule,
+        loader: ClassLoader,
+        blurRadius: Int,
+        labelMode: String,
+        navigationStyle: String,
+        advancedMaterial: Boolean,
+        colorMode: String
+    ) {
+        if (runCatching {
+                install(module, loader, luckinCoffee, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode)
+            }.isSuccess
+        ) return
+        val loadClass = ClassLoader::class.java.getDeclaredMethod(
+            "loadClass", String::class.java, Boolean::class.javaPrimitiveType
+        ).apply { isAccessible = true }
+        var installed = false
+        module.hook(loadClass)
+            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+            .intercept { chain ->
+                val result = chain.proceed()
+                if (!installed && chain.getArg(0) == luckinCoffee.activityName &&
+                    result is Class<*>
+                ) {
+                    synchronized(luckinCoffee) {
+                        if (!installed) {
+                            runCatching {
+                                install(
+                                    module, result.classLoader, luckinCoffee,
+                                    blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode
+                                )
+                            }.onSuccess { installed = true }
+                                .onFailure { error ->
+                                    module.log(Log.WARN, TAG, "LuckinCoffee class loader not ready", error)
+                                }
+                        }
+                    }
+                }
+                result
+            }
+        module.log(Log.INFO, TAG, "Waiting for LuckinCoffee protected activity class")
+    }
 
     @JvmStatic
     @Throws(ReflectiveOperationException::class)
@@ -1283,6 +1345,8 @@ object AppBottomNavHooks {
                 releaseRedditPageNavigationInset(content)
             } else if (config === xiaomiStore) {
                 releaseXiaomiStorePageNavigationInset(content)
+            } else if (config === luckinCoffee) {
+                releaseLuckinCoffeePageNavigationInset(content)
             } else if (config === xiaohongshu) {
                 val pager = descendants(content).firstOrNull {
                     it.javaClass.simpleName == "ExploreScrollableViewPager"
@@ -1552,6 +1616,43 @@ object AppBottomNavHooks {
                     originalContentBottomMargins.putIfAbsent(view, params.bottomMargin)
                     params.bottomMargin = 0
                     view.layoutParams = params
+                }
+            }
+        }
+
+        /** Luckin's platform tab frame reserves its fixed 56dp tab height as a page margin. */
+        private fun releaseLuckinCoffeePageNavigationInset(content: ViewGroup) {
+            val page = findResourceView(content, config.pageContentResourceName ?: return) ?: return
+            val params = page.layoutParams as? ViewGroup.MarginLayoutParams ?: return
+            val reservedTabHeight = runCatching {
+                page.resources.getDimensionPixelSize(
+                    page.resources.getIdentifier("platformTabHeight", "dimen", config.packageName)
+                )
+            }.getOrDefault(0)
+            if (reservedTabHeight > 0 && params.bottomMargin == reservedTabHeight) {
+                originalContentBottomMargins.putIfAbsent(page, params.bottomMargin)
+                params.bottomMargin = 0
+                page.layoutParams = params
+                page.requestLayout()
+            }
+            val navigationInset = navigationBarInset()
+            if (navigationInset <= 0) return
+            descendants(page).forEach { view ->
+                if (!view.isShown || view is ComposeView ||
+                    view.height < navigationInset * 4 || view.width < page.width * 3 / 4
+                ) return@forEach
+                if (view.paddingBottom == navigationInset) {
+                    originalContentPaddings.putIfAbsent(
+                        view,
+                        intArrayOf(view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom)
+                    )
+                    view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, 0)
+                }
+                val childParams = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return@forEach
+                if (childParams.bottomMargin == navigationInset) {
+                    originalContentBottomMargins.putIfAbsent(view, childParams.bottomMargin)
+                    childParams.bottomMargin = 0
+                    view.layoutParams = childParams
                 }
             }
         }
@@ -2865,6 +2966,10 @@ object AppBottomNavHooks {
                 value.contains("workout", ignoreCase = true) -> TabKey.WORKOUT
             value.contains("\u8bbe\u5907") || value.contains("device", ignoreCase = true) -> TabKey.DEVICE
             value.contains("\u9996\u9875") || value.contains("home", ignoreCase = true) -> TabKey.HOME
+            value.contains("\u83dc\u5355") || value.contains("coffee", ignoreCase = true) -> TabKey.COFFEE_MENU
+            value.contains("\u5373\u4eab") || value.contains("enjoy", ignoreCase = true) -> TabKey.ENJOY
+            value.contains("\u4f1a\u5458\u5361") || value.contains("membership", ignoreCase = true) ||
+                value.contains("card", ignoreCase = true) -> TabKey.MEMBERSHIP
             value.contains("\u5206\u7c7b") || value.contains("category", ignoreCase = true) -> TabKey.CATEGORY
             value.contains("\u5e02\u96c6") || value.contains("store", ignoreCase = true) -> TabKey.MARKET
             value.contains("\u53d1\u5e03") || value.contains("publish", ignoreCase = true) -> TabKey.PUBLISH
@@ -2909,6 +3014,9 @@ object AppBottomNavHooks {
             TabKey.WORKOUT -> "\u8fd0\u52a8"
             TabKey.DEVICE -> "\u8bbe\u5907"
             TabKey.HOME -> "\u9996\u9875"
+            TabKey.COFFEE_MENU -> "\u83dc\u5355"
+            TabKey.ENJOY -> "\u5373\u4eab"
+            TabKey.MEMBERSHIP -> "\u4f1a\u5458\u5361"
             TabKey.CATEGORY -> "\u5206\u7c7b"
             TabKey.MARKET -> "\u5e02\u96c6"
             TabKey.PUBLISH -> "+"
@@ -3029,7 +3137,7 @@ object AppBottomNavHooks {
     }
 
     private enum class TabKey {
-        FACE_HOME, FACE_CATEGORY, FACE_MINE, HEALTH, WORKOUT, DEVICE, HOME, CATEGORY, MARKET, PUBLISH, MESSAGES, CONTACTS, FOLLOWING, VIDEO, MUSIC_DISCOVER, STARLIGHT,
+        FACE_HOME, FACE_CATEGORY, FACE_MINE, HEALTH, WORKOUT, DEVICE, HOME, COFFEE_MENU, ENJOY, MEMBERSHIP, CATEGORY, MARKET, PUBLISH, MESSAGES, CONTACTS, FOLLOWING, VIDEO, MUSIC_DISCOVER, STARLIGHT,
         DISCOVER, DYNAMIC, SERVICE, CART, SAVINGS, SHORT_DRAMA, LOAN, PROFILE, LISTEN_NOW, BROWSE, RADIO,
         LIBRARY, MUSIC_SEARCH, COMMUNITIES, CHAT, INBOX
     }
@@ -3048,7 +3156,8 @@ object AppBottomNavHooks {
         val miniPlayerResourceName: String? = null,
         val fallbackTabOrder: List<TabKey>? = null,
         val coordinateTabSurface: Boolean = false,
-        val concealHostBottomBar: Boolean = false
+        val concealHostBottomBar: Boolean = false,
+        val pageContentResourceName: String? = null
     )
 
     private data class DetectedBar(val container: ViewGroup, val tabs: List<DetectedTab>)

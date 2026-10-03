@@ -1222,7 +1222,7 @@ private fun HyperFloatingNavigationBar(
 private fun hyperIcon(label: String): ImageVector = when {
     label == "+" -> HyperIcons.Add
     label.contains("\u9996\u9875") || label.contains("\u5065\u5eb7") -> HyperIcons.Home
-    label.contains("\u5206\u7c7b") || label.contains("\u6d4f\u89c8") ||
+    label.contains("\u5206\u7c7b") || label.contains("\u83dc\u5355") || label.contains("\u6d4f\u89c8") ||
         label.contains("\u8d44\u6599\u5e93") || label.contains("\u8bbe\u5907") -> HyperIcons.Category
     label.contains("\u670d\u52a1") -> HyperIcons.Service
     label.contains("\u8d2d\u7269\u8f66") -> HyperIcons.Cart
@@ -1235,6 +1235,7 @@ private fun hyperIcon(label: String): ImageVector = when {
     label.contains("\u6d88\u606f") || label.contains("\u804a\u5929") ||
         label.contains("\u6536\u4ef6\u7bb1") -> HyperIcons.Messages
     label.contains("\u8054\u7cfb") || label.contains("\u793e\u533a") -> HyperIcons.Contacts
+    label.contains("\u5373\u4eab") || label.contains("\u4f1a\u5458\u5361") -> HyperIcons.Channels
     label.contains("\u9891\u9053") || label.contains("\u5e7f\u64ad") ||
         label.contains("\u7acb\u5373\u8046\u542c") || label.contains("\u8fd0\u52a8") -> HyperIcons.Channels
     else -> HyperIcons.Dynamic
@@ -1768,7 +1769,7 @@ private fun TabIcon(label: String, color: Color) {
                     close()
                 }, color, style = stroke)
             }
-            label.contains("\u5206\u7c7b") || label.contains("\u6d4f\u89c8") ||
+            label.contains("\u5206\u7c7b") || label.contains("\u83dc\u5355") || label.contains("\u6d4f\u89c8") ||
                 label.contains("\u8d44\u6599\u5e93") || label.contains("\u8bbe\u5907") -> {
                 val cell = 6.dp.toPx()
                 val gap = 3.dp.toPx()
@@ -1891,6 +1892,11 @@ private fun TabIcon(label: String, color: Color) {
                     moveTo(center.x - 8.dp.toPx(), center.y + 9.dp.toPx())
                     quadraticTo(center.x, center.y, center.x + 8.dp.toPx(), center.y + 9.dp.toPx())
                 }, color, style = stroke)
+            }
+            label.contains("\u5373\u4eab") || label.contains("\u4f1a\u5458\u5361") -> {
+                drawCircle(color, 9.dp.toPx(), center, style = stroke)
+                drawLine(color, center - Offset(5.dp.toPx(), 0f), center + Offset(5.dp.toPx(), 0f), strokeWidth = stroke.width, cap = StrokeCap.Round)
+                drawLine(color, center - Offset(0f, 5.dp.toPx()), center + Offset(0f, 5.dp.toPx()), strokeWidth = stroke.width, cap = StrokeCap.Round)
             }
             label.contains("\u9891\u9053") || label.contains("\u5e7f\u64ad") ||
                 label.contains("\u7acb\u5373\u8046\u542c") || label.contains("\u8fd0\u52a8") -> {

@@ -114,4 +114,5 @@ enum class ScopeApplication(val title: String, val packageName: String) {
     XIAOMI_STORE("小米商城", "com.xiaomi.shop"),
     XIAOMI_WALLET("小米钱包", "com.mipay.wallet"),
     XIAOMI_HEALTH("小米运动健康", "com.mi.health"),
+    LUCKIN_COFFEE("瑞幸咖啡", "com.lucky.luckyclient"),
 }

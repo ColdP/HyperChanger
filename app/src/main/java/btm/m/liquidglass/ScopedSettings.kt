@@ -33,7 +33,8 @@ object ScopedSettings {
         ScopeApp("微博", "com.sina.weibo"),
         ScopeApp("小米商城", "com.xiaomi.shop"),
         ScopeApp("小米钱包", "com.mipay.wallet"),
-        ScopeApp("小米运动健康", "com.mi.health")
+        ScopeApp("小米运动健康", "com.mi.health"),
+        ScopeApp("瑞幸咖啡", "com.lucky.luckyclient")
     )
 
     @JvmStatic
