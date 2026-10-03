@@ -1,7 +1,6 @@
 package btm.m.os4.systemuihook.newnotificationcenter;
 
 import android.content.Context;
-import android.graphics.Color;
 import android.graphics.Canvas;
 import android.graphics.Rect;
 import android.graphics.RenderEffect;
@@ -26,12 +25,16 @@ public final class IosNotificationCenterPresentation {
     private static FrameLayout panel;
     private static FrameLayout host;
     private static View clock;
-    private static TextView date;
-    private static TextView dateSource;
+    private static View clockInfo;
+    private static float clockInfoOffset;
+    private static float clockInfoBaseTranslation;
+    private static long clockInfoRefreshMinute = -1L;
     private static ImageView depth;
     private static MirrorView status;
     private static View stack;
     private static View capturedStack;
+    private static View emptyText;
+    private static float emptyTextAlpha;
     private static View capturedHeader;
     private static View[] oldHeader;
     private static float[] oldHeaderAlpha;
@@ -45,7 +48,6 @@ public final class IosNotificationCenterPresentation {
     private static View wallpaperSheet;
     private static int lastBlur = -1;
     private static int lastStatusBlur = -1;
-    private static long dateMinute = -1L;
 
     private IosNotificationCenterPresentation() {}
 
@@ -141,17 +143,6 @@ public final class IosNotificationCenterPresentation {
             allowBackdropSampling(container);
             allowBackdropSampling(nativeClock);
             container.addView(nativeClock, new FrameLayout.LayoutParams(-1, -1));
-            TextView lockDate = new TextView(context);
-            lockDate.setGravity(android.view.Gravity.CENTER);
-            lockDate.setTextColor(Color.WHITE);
-            int dateSize = context.getResources().getIdentifier(
-                    "miui_common_unlock_screen_date_text_size", "dimen", "com.android.systemui");
-            lockDate.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, dateSize == 0
-                    ? 16f * context.getResources().getDisplayMetrics().scaledDensity
-                    : context.getResources().getDimension(dateSize));
-            lockDate.setClickable(false);
-            container.addView(lockDate, new FrameLayout.LayoutParams(-1,
-                    Math.round(42f * context.getResources().getDisplayMetrics().density)));
             ImageView foreground = new ImageView(context);
             foreground.setScaleType(ImageView.ScaleType.FIT_XY);
             foreground.setClickable(false);
@@ -163,7 +154,6 @@ public final class IosNotificationCenterPresentation {
             panel = target;
             host = container;
             clock = nativeClock;
-            date = lockDate;
             IosShadeMaterial.registerClock(nativeClock);
             depth = foreground;
             status = statusMirror;
@@ -217,7 +207,8 @@ public final class IosNotificationCenterPresentation {
         }
         syncDepth();
         syncStatus();
-        syncDate();
+        syncClockInfo();
+        syncEmptyText();
         int blur = Math.round(28f * panel.getResources().getDisplayMetrics().density * (1f - progress));
         if (blur != lastBlur) {
             host.setRenderEffect(blur == 0 ? null : RenderEffect.createBlurEffect(
@@ -273,84 +264,111 @@ public final class IosNotificationCenterPresentation {
         }
     }
 
-    private static void syncDate() {
-        if (date == null || clock == null) return;
-        if (dateSource == null) dateSource = lockscreenDateSource();
-        if (dateSource != null && dateSource.getText().length() > 0) {
-            if (!dateSource.getText().toString().contentEquals(date.getText())) {
-                date.setText(dateSource.getText());
-            }
-            if (date.getCurrentTextColor() != dateSource.getCurrentTextColor()) {
-                date.setTextColor(dateSource.getCurrentTextColor());
-            }
-            if (date.getTypeface() != dateSource.getTypeface()) {
-                date.setTypeface(dateSource.getTypeface());
-            }
-            if (date.getTextSize() != dateSource.getTextSize()) {
-                date.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, dateSource.getTextSize());
-            }
-        } else {
+    private static void syncClockInfo() {
+        if (clockInfo != null && !isClockInfo(clockInfo)) {
+            clockInfo.setTranslationY(clockInfoBaseTranslation);
+            clockInfo = null;
+            clockInfoOffset = 0f;
+        }
+        if (clockInfo == null) {
+            clockInfo = findClockInfo();
+            if (clockInfo != null) clockInfoBaseTranslation = clockInfo.getTranslationY();
+        }
+        if (clockInfo == null || clockInfo.getHeight() == 0) return;
+        if (clockInfo instanceof TextView && ((TextView) clockInfo).length() == 0) {
             long minute = System.currentTimeMillis() / 60000L;
-            if (minute != dateMinute) {
-                dateMinute = minute;
+            if (clockInfoRefreshMinute != minute) {
+                clockInfoRefreshMinute = minute;
                 try {
-                    Context context = date.getContext();
-                    boolean hour24 = android.text.format.DateFormat.is24HourFormat(context);
-                    int id = context.getResources().getIdentifier(hour24
-                            ? "miui_lock_screen_date" : "miui_lock_screen_date_12",
-                            "string", "com.android.systemui");
-                    String pattern = context.getString(id);
-                    Class<?> calendarType = Class.forName("miuix.pickerwidget.date.Calendar", false,
-                            context.getClassLoader());
-                    Object calendar = calendarType.getConstructor().newInstance();
-                    calendarType.getMethod("setTimeInMillis", long.class)
-                            .invoke(calendar, System.currentTimeMillis());
-                    date.setText((CharSequence) calendarType.getMethod("format", Context.class, String.class)
-                            .invoke(calendar, context, pattern));
-                } catch (Throwable ignored) {
-                    java.text.DateFormat format = java.text.DateFormat.getDateInstance(
-                            java.text.DateFormat.FULL, date.getResources().getConfiguration().getLocales().get(0));
-                    date.setText(format.format(new java.util.Date()));
-                }
+                    clock.getClass().getMethod("updateTime").invoke(clock);
+                } catch (Throwable ignored) {}
             }
         }
-        int height = date.getLayoutParams().height;
+        if (clockInfo.getVisibility() != View.VISIBLE) {
+            if (!(clockInfo instanceof TextView) || ((TextView) clockInfo).length() == 0) return;
+            clockInfo.setVisibility(View.VISIBLE);
+        }
         float top = 0f;
         try {
             Object value = clock.getClass().getMethod("getNotificationClockTop").invoke(clock);
             if (value instanceof Number) top = ((Number) value).floatValue();
         } catch (Throwable ignored) {}
-        float density = date.getResources().getDisplayMetrics().density;
-        float y = Math.max(64f * density, top - height - 8f * density);
-        if (date.getTranslationY() != y) date.setTranslationY(y);
+        int[] infoPoint = new int[2];
+        int[] clockPoint = new int[2];
+        clockInfo.getLocationInWindow(infoPoint);
+        clock.getLocationInWindow(clockPoint);
+        float density = clock.getResources().getDisplayMetrics().density;
+        float current = infoPoint[1] - clockPoint[1] - clockInfoOffset;
+        if (top <= 0f) return;
+        float desired = Math.max(64f * density, top - clockInfo.getHeight() - 8f * density);
+        float offset = desired - current;
+        if (Math.abs(offset - clockInfoOffset) > .5f) {
+            clockInfoOffset = offset;
+            clockInfo.setTranslationY(clockInfoBaseTranslation + offset);
+        }
     }
 
-    private static TextView lockscreenDateSource() {
+    private static View findClockInfo() {
+        try {
+            Object controller = Xp.getObjectField(clock, "mMiuiClockController");
+            Object face = Xp.getObjectField(controller, "mClockView");
+            Method topGetter = face.getClass().getMethod("getNotificationClockTopView");
+            Object topView = topGetter.invoke(face);
+            if (topView instanceof View && isClockInfo((View) topView)) return (View) topView;
+            Class<?> type = Class.forName("com.miui.clock.module.ClockViewType", false,
+                    clock.getClass().getClassLoader());
+            Method getter = face.getClass().getMethod("getIClockView", type);
+            for (String name : new String[]{"TEXT_AREA", "FULL_DATE_WEEK", "DATE"}) {
+                Object kind = type.getField(name).get(null);
+                Object view = getter.invoke(face, kind);
+                if (view instanceof View && isClockInfo((View) view)
+                        && ((View) view).getVisibility() == View.VISIBLE
+                        && (!(view instanceof TextView) || ((TextView) view).length() > 0)) {
+                    return (View) view;
+                }
+            }
+        } catch (Throwable ignored) {}
         try {
             Object controller = Xp.getObjectField(clock, "mMiuiClockController");
             Object face = Xp.getObjectField(controller, "mClockView");
             Object source = Xp.getObjectField(face, "mCurrentDate");
-            if (source instanceof TextView) return (TextView) source;
+            if (source instanceof View && isClockInfo((View) source)) return (View) source;
         } catch (Throwable ignored) {}
-        return findDateText(clock);
+        return null;
     }
 
-    private static TextView findDateText(View view) {
-        if (view instanceof TextView && view.getId() != View.NO_ID) {
-            try {
-                if (view.getResources().getResourceEntryName(view.getId()).contains("date")) {
-                    return (TextView) view;
+    private static boolean isClockInfo(View candidate) {
+        if (clock == null || candidate == clock) return false;
+        android.view.ViewParent parent = candidate.getParent();
+        while (parent instanceof View && parent != clock) parent = ((View) parent).getParent();
+        return parent == clock;
+    }
+
+    private static void syncEmptyText() {
+        if (stack == null) return;
+        if (emptyText == null) {
+            View row = byId(stack, "empty_shade_view");
+            if (row == null && stack instanceof ViewGroup) {
+                ViewGroup group = (ViewGroup) stack;
+                for (int i = 0; i < group.getChildCount(); i++) {
+                    View child = group.getChildAt(i);
+                    if (child.getClass().getName().endsWith(".EmptyShadeView")) {
+                        row = child;
+                        break;
+                    }
                 }
-            } catch (Throwable ignored) {}
-        }
-        if (view instanceof ViewGroup) {
-            ViewGroup group = (ViewGroup) view;
-            for (int i = 0; i < group.getChildCount(); i++) {
-                TextView found = findDateText(group.getChildAt(i));
-                if (found != null) return found;
+            }
+            if (row != null) {
+                try {
+                    Object value = Xp.getObjectField(row, "mEmptyText");
+                    if (value instanceof View) {
+                        emptyText = (View) value;
+                        emptyTextAlpha = emptyText.getAlpha();
+                    }
+                } catch (Throwable ignored) {}
             }
         }
-        return null;
+        if (emptyText != null && emptyText.getAlpha() != 0f) emptyText.setAlpha(0f);
     }
 
     private static void syncNotifications() {
@@ -452,6 +470,15 @@ public final class IosNotificationCenterPresentation {
         }
         oldHeader = null;
         oldHeaderAlpha = null;
+        if (emptyText != null) emptyText.setAlpha(emptyTextAlpha);
+        emptyText = null;
+        if (clockInfo != null && clockInfoOffset != 0f) {
+            clockInfo.setTranslationY(clockInfoBaseTranslation);
+        }
+        clockInfo = null;
+        clockInfoOffset = 0f;
+        clockInfoBaseTranslation = 0f;
+        clockInfoRefreshMinute = -1L;
         if (stack != null && !Float.isNaN(nativeTopPadding)) {
             writeTopPadding(stack, nativeTopPadding);
         }
@@ -468,14 +495,11 @@ public final class IosNotificationCenterPresentation {
         host = null;
         panel = null;
         clock = null;
-        date = null;
-        dateSource = null;
         depth = null;
         status = null;
         wallpaperSheet = null;
         lastBlur = -1;
         lastStatusBlur = -1;
-        dateMinute = -1L;
     }
 
     private static int getPadding(View view) {
