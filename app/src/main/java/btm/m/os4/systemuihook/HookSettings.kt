@@ -60,10 +60,6 @@ private const val KEY_STATUS_BAR_SCALE_ABSOLUTE_MIGRATED =
 private const val KEY_STATUS_BAR_SCALE_ABSOLUTE_MIGRATED_V2 =
     "status_bar_scale_absolute_migrated_v2"
 
-const val LOCKSCREEN_MEDIA_NOTIFICATION_DO_NOT_HIDE = 0
-const val LOCKSCREEN_MEDIA_NOTIFICATION_ALWAYS_HIDE = 1
-const val LOCKSCREEN_MEDIA_NOTIFICATION_DYNAMIC = 2
-
 data class GlassTuning(
     val blurPercent: Int = 100,
     val opacity: Int = 100,
@@ -242,19 +238,10 @@ data class HookSettings(
     val shortcutSoftGlassBackdropBlurRadius: Int = 80,
     val shortcutSoftGlassBlurRadius: Int = 36,
     val shortcutSoftGlassLuminance: Float = 0.14f,
-    val lockscreenMiniPlayerEnabled: Boolean = false,
     val lockscreenMusicLockscreenEnabled: Boolean = false,
     val lockscreenMusicLyricsEnabled: Boolean = false,
     val lockscreenMusicLyricsHdrEnabled: Boolean = false,
     val lockscreenMusicLyricsKeepScreenOn: Boolean = false,
-    val lockscreenMiniPlayerLyricsEnabled: Boolean = false,
-    val lockscreenMiniPlayerMediaNotificationMode: Int = LOCKSCREEN_MEDIA_NOTIFICATION_DO_NOT_HIDE,
-    val lockscreenMiniPlayerBackgroundMode: Int = 0,
-    val lockscreenMiniPlayerWidth: Float = 240f,
-    // This is the same unit as the lockscreen shortcut circle radius. The rendered card is
-    // twice this value, so a shortcut radius of 10dp is matched by entering 10dp here.
-    val lockscreenMiniPlayerHeight: Float = 36f,
-    val lockscreenMiniPlayerArtworkCornerRadius: Float = 12f,
     val lockscreenWidgetEnabled: Boolean = false,
     val lockscreenWidgetHideOnAod: Boolean = false,
     /** Empty means use the current ro.product.marketname value. */
@@ -288,16 +275,6 @@ data class HookSettings(
     /** Percentage of the 142x64dp signature card's available content size. */
     val lockscreenWidgetSignatureScale: Int = 100,
     val lockscreenWidgetSignatureBackground: Boolean = true,
-    val miniPlayerPureColor: Int = 0x73000000,
-    val miniPlayerAdvancedMaterialColor: Int = 0xFFFFFFFF.toInt(),
-    val miniPlayerAdvancedMaterialOpacity: Int = 14,
-    val miniPlayerAdvancedMaterialBlurRadius: Int = 80,
-    val miniPlayerAdvancedMaterialHighlight: Boolean = false,
-    val miniPlayerSoftGlassColor: Int = 0xFFFFFFFF.toInt(),
-    val miniPlayerSoftGlassOpacity: Int = 10,
-    val miniPlayerSoftGlassBackdropBlurRadius: Int = 80,
-    val miniPlayerSoftGlassBlurRadius: Int = 36,
-    val miniPlayerSoftGlassLuminance: Float = 0.14f,
     val keepSoftGlassAfterGlobalTheme: Boolean = false,
     val headsUpNotificationSoftGlass: Boolean = false,
     val removeClockMaterialLimit: Boolean = false,
@@ -590,24 +567,11 @@ private const val KEY_SHORTCUT_SOFT_GLASS_OPACITY = "shortcut_soft_glass_opacity
 private const val KEY_SHORTCUT_SOFT_GLASS_BACKDROP_BLUR_RADIUS = "shortcut_soft_glass_backdrop_blur_radius"
 private const val KEY_SHORTCUT_SOFT_GLASS_BLUR_RADIUS = "shortcut_soft_glass_blur_radius"
 private const val KEY_SHORTCUT_SOFT_GLASS_LUMINANCE = "shortcut_soft_glass_luminance"
-private const val KEY_LOCKSCREEN_MINI_PLAYER_ENABLED = "lockscreen_mini_player_enabled"
 private const val KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED = "lockscreen_music_lockscreen_enabled"
 private const val KEY_LOCKSCREEN_MUSIC_LYRICS_ENABLED = "lockscreen_music_lyrics_enabled"
 private const val KEY_LOCKSCREEN_MUSIC_LYRICS_HDR_ENABLED = "lockscreen_music_lyrics_hdr_enabled"
 private const val KEY_LOCKSCREEN_MUSIC_LYRICS_KEEP_SCREEN_ON =
     "lockscreen_music_lyrics_keep_screen_on"
-private const val KEY_LOCKSCREEN_MINI_PLAYER_LYRICS_ENABLED = "lockscreen_mini_player_lyrics_enabled"
-private const val KEY_LOCKSCREEN_MINI_PLAYER_HIDE_MEDIA_NOTIFICATION =
-    "lockscreen_mini_player_hide_media_notification"
-private const val KEY_LOCKSCREEN_MINI_PLAYER_MEDIA_NOTIFICATION_MODE =
-    "lockscreen_mini_player_media_notification_mode"
-private const val KEY_LOCKSCREEN_MINI_PLAYER_BACKGROUND_MODE = "lockscreen_mini_player_background_mode"
-private const val KEY_LOCKSCREEN_MINI_PLAYER_WIDTH = "lockscreen_mini_player_width"
-private const val KEY_LOCKSCREEN_MINI_PLAYER_HEIGHT = "lockscreen_mini_player_height"
-private const val KEY_LOCKSCREEN_MINI_PLAYER_ARTWORK_CORNER_RADIUS =
-    "lockscreen_mini_player_artwork_corner_radius"
-private const val KEY_LOCKSCREEN_MINI_PLAYER_HEIGHT_RADIUS_MIGRATED =
-    "lockscreen_mini_player_height_radius_migrated"
 internal const val KEY_LOCKSCREEN_WIDGET_ENABLED = "lockscreen_widget_enabled"
 internal const val KEY_LOCKSCREEN_WIDGET_HIDE_ON_AOD = "lockscreen_widget_hide_on_aod"
 internal const val KEY_LOCKSCREEN_WIDGET_DEVICE_NAME = "lockscreen_widget_device_name"
@@ -692,19 +656,6 @@ internal const val LOCKSCREEN_WIDGET_COLOR_AUTO = 2
 internal const val LOCKSCREEN_WIDGET_SIGNATURE_NONE = 0
 internal const val LOCKSCREEN_WIDGET_SIGNATURE_PNG = 1
 internal const val LOCKSCREEN_WIDGET_SIGNATURE_VECTOR = 2
-private const val KEY_MINI_PLAYER_PURE_COLOR = "mini_player_pure_color"
-private const val KEY_MINI_PLAYER_ADVANCED_MATERIAL_COLOR = "mini_player_advanced_material_color"
-private const val KEY_MINI_PLAYER_ADVANCED_MATERIAL_OPACITY = "mini_player_advanced_material_opacity"
-private const val KEY_MINI_PLAYER_ADVANCED_MATERIAL_BLUR_RADIUS =
-    "mini_player_advanced_material_blur_radius"
-private const val KEY_MINI_PLAYER_ADVANCED_MATERIAL_HIGHLIGHT =
-    "mini_player_advanced_material_highlight"
-private const val KEY_MINI_PLAYER_SOFT_GLASS_COLOR = "mini_player_soft_glass_color"
-private const val KEY_MINI_PLAYER_SOFT_GLASS_OPACITY = "mini_player_soft_glass_opacity"
-private const val KEY_MINI_PLAYER_SOFT_GLASS_BACKDROP_BLUR_RADIUS =
-    "mini_player_soft_glass_backdrop_blur_radius"
-private const val KEY_MINI_PLAYER_SOFT_GLASS_BLUR_RADIUS = "mini_player_soft_glass_blur_radius"
-private const val KEY_MINI_PLAYER_SOFT_GLASS_LUMINANCE = "mini_player_soft_glass_luminance"
 private const val KEY_KEEP_SOFT_GLASS_AFTER_GLOBAL_THEME = "keep_soft_glass_after_global_theme"
 internal const val KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS = "heads_up_notification_soft_glass"
 private const val KEY_REMOVE_CLOCK_MATERIAL_LIMIT = "remove_clock_material_limit"
@@ -776,24 +727,6 @@ private fun migrateStatusBarScaleToAbsolute(preferences: SharedPreferences) {
     editor.putBoolean(KEY_STATUS_BAR_SCALE_ADJUSTMENT_MIGRATED, true)
     editor.putBoolean(KEY_STATUS_BAR_SCALE_ABSOLUTE_MIGRATED, true)
     editor.putBoolean(KEY_STATUS_BAR_SCALE_ABSOLUTE_MIGRATED_V2, true).apply()
-}
-
-internal fun SharedPreferences.readMiniPlayerHeightRadius(): Float {
-    val raw = getFloat(KEY_LOCKSCREEN_MINI_PLAYER_HEIGHT, 36f)
-    if (contains(KEY_LOCKSCREEN_MINI_PLAYER_HEIGHT) &&
-        !getBoolean(KEY_LOCKSCREEN_MINI_PLAYER_HEIGHT_RADIUS_MIGRATED, false)
-    ) {
-        // Values written by the previous version represented the final card height (48..120dp).
-        // Convert them once so an existing 59dp card remains 59dp after the setting changes to
-        // the shortcut-radius unit (29.5dp -> 59dp rendered height).
-        val converted = if (raw >= 48f) raw / 2f else raw
-        edit()
-            .putFloat(KEY_LOCKSCREEN_MINI_PLAYER_HEIGHT, converted)
-            .putBoolean(KEY_LOCKSCREEN_MINI_PLAYER_HEIGHT_RADIUS_MIGRATED, true)
-            .apply()
-        return converted.coerceIn(10f, 60f)
-    }
-    return raw.coerceIn(10f, 60f)
 }
 
 internal fun SharedPreferences.readLockscreenWidgetItems(): Int {
@@ -1060,10 +993,9 @@ private fun SharedPreferences.toSettings(): HookSettings {
     lockscreenBottomTextMask = if (contains(KEY_LOCKSCREEN_BOTTOM_TEXT_MASK)) {
         getInt(KEY_LOCKSCREEN_BOTTOM_TEXT_MASK, 0).coerceIn(0, 7)
     } else {
-        // The old mini-player switch forcibly wrote this key. Do not carry that implicit state
-        // into the selectable mask; preserve the legacy toggle only when the mini-player is off.
+        // Preserve the legacy charging-text behavior when the capsule is disabled.
         if (getBoolean(KEY_HIDE_LOCKSCREEN_CHARGING_TEXT, false) &&
-            !getBoolean(KEY_LOCKSCREEN_MINI_PLAYER_ENABLED, false)
+            !readLockscreenCapsuleEnabled()
         ) 1 else 0
     },
     lockscreenWhiteBarEnabled = getBoolean(KEY_LOCKSCREEN_WHITE_BAR_ENABLED, false),
@@ -1102,7 +1034,6 @@ private fun SharedPreferences.toSettings(): HookSettings {
     shortcutSoftGlassBackdropBlurRadius = getInt(KEY_SHORTCUT_SOFT_GLASS_BACKDROP_BLUR_RADIUS, 10).coerceIn(0, 40),
     shortcutSoftGlassBlurRadius = getInt(KEY_SHORTCUT_SOFT_GLASS_BLUR_RADIUS, 10).coerceIn(0, 40),
     shortcutSoftGlassLuminance = getFloat(KEY_SHORTCUT_SOFT_GLASS_LUMINANCE, 0.14f).coerceIn(0f, 0.4f),
-    lockscreenMiniPlayerEnabled = getBoolean(KEY_LOCKSCREEN_MINI_PLAYER_ENABLED, false),
     lockscreenMusicLockscreenEnabled = getBoolean(KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED, false),
     lockscreenMusicLyricsEnabled = getBoolean(KEY_LOCKSCREEN_MUSIC_LYRICS_ENABLED, false),
     lockscreenMusicLyricsHdrEnabled = getBoolean(KEY_LOCKSCREEN_MUSIC_LYRICS_HDR_ENABLED, false),
@@ -1110,26 +1041,6 @@ private fun SharedPreferences.toSettings(): HookSettings {
         KEY_LOCKSCREEN_MUSIC_LYRICS_KEEP_SCREEN_ON,
         false,
     ),
-    lockscreenMiniPlayerLyricsEnabled = getBoolean(KEY_LOCKSCREEN_MINI_PLAYER_LYRICS_ENABLED, false),
-    lockscreenMiniPlayerMediaNotificationMode = if (
-        contains(KEY_LOCKSCREEN_MINI_PLAYER_MEDIA_NOTIFICATION_MODE)
-    ) {
-        getInt(KEY_LOCKSCREEN_MINI_PLAYER_MEDIA_NOTIFICATION_MODE, LOCKSCREEN_MEDIA_NOTIFICATION_DO_NOT_HIDE)
-            .coerceIn(LOCKSCREEN_MEDIA_NOTIFICATION_DO_NOT_HIDE, LOCKSCREEN_MEDIA_NOTIFICATION_DYNAMIC)
-    } else if (getBoolean(KEY_LOCKSCREEN_MINI_PLAYER_HIDE_MEDIA_NOTIFICATION, false)) {
-        LOCKSCREEN_MEDIA_NOTIFICATION_ALWAYS_HIDE
-    } else {
-        LOCKSCREEN_MEDIA_NOTIFICATION_DO_NOT_HIDE
-    },
-    lockscreenMiniPlayerBackgroundMode = getInt(KEY_LOCKSCREEN_MINI_PLAYER_BACKGROUND_MODE, 0)
-        .coerceIn(0, 3),
-    lockscreenMiniPlayerWidth = getFloat(KEY_LOCKSCREEN_MINI_PLAYER_WIDTH, 240f)
-        .coerceIn(160f, 360f),
-    lockscreenMiniPlayerHeight = readMiniPlayerHeightRadius(),
-    lockscreenMiniPlayerArtworkCornerRadius = getFloat(
-        KEY_LOCKSCREEN_MINI_PLAYER_ARTWORK_CORNER_RADIUS,
-        12f,
-    ).coerceIn(0f, 60f),
     lockscreenWidgetEnabled = getBoolean(KEY_LOCKSCREEN_WIDGET_ENABLED, false),
     lockscreenWidgetHideOnAod = getBoolean(KEY_LOCKSCREEN_WIDGET_HIDE_ON_AOD, false),
     lockscreenWidgetDeviceName = getString(KEY_LOCKSCREEN_WIDGET_DEVICE_NAME, "")
@@ -1214,29 +1125,6 @@ private fun SharedPreferences.toSettings(): HookSettings {
     lockscreenWidgetSignatureColor = getInt(KEY_LOCKSCREEN_WIDGET_SIGNATURE_COLOR, 0xFFFFFFFF.toInt()),
     lockscreenWidgetSignatureScale = getInt(KEY_LOCKSCREEN_WIDGET_SIGNATURE_SCALE, 100).coerceIn(25, 200),
     lockscreenWidgetSignatureBackground = getBoolean(KEY_LOCKSCREEN_WIDGET_SIGNATURE_BACKGROUND, true),
-    miniPlayerPureColor = getInt(KEY_MINI_PLAYER_PURE_COLOR, 0x73000000),
-    miniPlayerAdvancedMaterialColor = getInt(
-        KEY_MINI_PLAYER_ADVANCED_MATERIAL_COLOR,
-        0xFFFFFFFF.toInt(),
-    ),
-    miniPlayerAdvancedMaterialOpacity = getInt(KEY_MINI_PLAYER_ADVANCED_MATERIAL_OPACITY, 14)
-        .coerceIn(0, 100),
-    miniPlayerAdvancedMaterialBlurRadius = getInt(KEY_MINI_PLAYER_ADVANCED_MATERIAL_BLUR_RADIUS, 10)
-        .coerceIn(0, 40),
-    miniPlayerAdvancedMaterialHighlight = getBoolean(
-        KEY_MINI_PLAYER_ADVANCED_MATERIAL_HIGHLIGHT,
-        false,
-    ),
-    miniPlayerSoftGlassColor = getInt(KEY_MINI_PLAYER_SOFT_GLASS_COLOR, 0xFFFFFFFF.toInt()),
-    miniPlayerSoftGlassOpacity = getInt(KEY_MINI_PLAYER_SOFT_GLASS_OPACITY, 10).coerceIn(0, 100),
-    miniPlayerSoftGlassBackdropBlurRadius = getInt(
-        KEY_MINI_PLAYER_SOFT_GLASS_BACKDROP_BLUR_RADIUS,
-        10,
-    ).coerceIn(0, 40),
-    miniPlayerSoftGlassBlurRadius = getInt(KEY_MINI_PLAYER_SOFT_GLASS_BLUR_RADIUS, 10)
-        .coerceIn(0, 40),
-    miniPlayerSoftGlassLuminance = getFloat(KEY_MINI_PLAYER_SOFT_GLASS_LUMINANCE, 0.14f)
-        .coerceIn(0f, 0.4f),
     keepSoftGlassAfterGlobalTheme = getBoolean(KEY_KEEP_SOFT_GLASS_AFTER_GLOBAL_THEME, false),
     headsUpNotificationSoftGlass = getBoolean(KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS, false),
     removeClockMaterialLimit = getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false),
@@ -1664,31 +1552,6 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putInt(KEY_SHORTCUT_SOFT_GLASS_BACKDROP_BLUR_RADIUS, value.shortcutSoftGlassBackdropBlurRadius)
         .putInt(KEY_SHORTCUT_SOFT_GLASS_BLUR_RADIUS, value.shortcutSoftGlassBlurRadius)
         .putFloat(KEY_SHORTCUT_SOFT_GLASS_LUMINANCE, value.shortcutSoftGlassLuminance)
-        .putBoolean(KEY_LOCKSCREEN_MINI_PLAYER_ENABLED, value.lockscreenMiniPlayerEnabled)
-        .putBoolean(KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED, value.lockscreenMusicLockscreenEnabled)
-        .putBoolean(KEY_LOCKSCREEN_MUSIC_LYRICS_ENABLED, value.lockscreenMusicLyricsEnabled)
-        .putBoolean(KEY_LOCKSCREEN_MUSIC_LYRICS_HDR_ENABLED, value.lockscreenMusicLyricsHdrEnabled)
-        .putBoolean(
-            KEY_LOCKSCREEN_MUSIC_LYRICS_KEEP_SCREEN_ON,
-            value.lockscreenMusicLyricsKeepScreenOn,
-        )
-        .putBoolean(KEY_LOCKSCREEN_MINI_PLAYER_LYRICS_ENABLED, value.lockscreenMiniPlayerLyricsEnabled)
-        .putInt(
-            KEY_LOCKSCREEN_MINI_PLAYER_MEDIA_NOTIFICATION_MODE,
-            value.lockscreenMiniPlayerMediaNotificationMode.coerceIn(
-                LOCKSCREEN_MEDIA_NOTIFICATION_DO_NOT_HIDE,
-                LOCKSCREEN_MEDIA_NOTIFICATION_DYNAMIC,
-            ),
-        )
-        .remove(KEY_LOCKSCREEN_MINI_PLAYER_HIDE_MEDIA_NOTIFICATION)
-        .putInt(KEY_LOCKSCREEN_MINI_PLAYER_BACKGROUND_MODE, value.lockscreenMiniPlayerBackgroundMode)
-        .putFloat(KEY_LOCKSCREEN_MINI_PLAYER_WIDTH, value.lockscreenMiniPlayerWidth)
-        .putFloat(KEY_LOCKSCREEN_MINI_PLAYER_HEIGHT, value.lockscreenMiniPlayerHeight)
-        .putFloat(
-            KEY_LOCKSCREEN_MINI_PLAYER_ARTWORK_CORNER_RADIUS,
-            value.lockscreenMiniPlayerArtworkCornerRadius.coerceIn(0f, 60f),
-        )
-        .putBoolean(KEY_LOCKSCREEN_MINI_PLAYER_HEIGHT_RADIUS_MIGRATED, true)
         .putBoolean(KEY_LOCKSCREEN_WIDGET_ENABLED, value.lockscreenWidgetEnabled)
         .putBoolean(KEY_LOCKSCREEN_WIDGET_HIDE_ON_AOD, value.lockscreenWidgetHideOnAod)
         .putString(KEY_LOCKSCREEN_WIDGET_DEVICE_NAME, value.lockscreenWidgetDeviceName.take(64))
@@ -1776,19 +1639,6 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putInt(KEY_LOCKSCREEN_WIDGET_SIGNATURE_COLOR, value.lockscreenWidgetSignatureColor)
         .putInt(KEY_LOCKSCREEN_WIDGET_SIGNATURE_SCALE, value.lockscreenWidgetSignatureScale.coerceIn(25, 200))
         .putBoolean(KEY_LOCKSCREEN_WIDGET_SIGNATURE_BACKGROUND, value.lockscreenWidgetSignatureBackground)
-        .putInt(KEY_MINI_PLAYER_PURE_COLOR, value.miniPlayerPureColor)
-        .putInt(KEY_MINI_PLAYER_ADVANCED_MATERIAL_COLOR, value.miniPlayerAdvancedMaterialColor)
-        .putInt(KEY_MINI_PLAYER_ADVANCED_MATERIAL_OPACITY, value.miniPlayerAdvancedMaterialOpacity)
-        .putInt(KEY_MINI_PLAYER_ADVANCED_MATERIAL_BLUR_RADIUS, value.miniPlayerAdvancedMaterialBlurRadius)
-        .putBoolean(KEY_MINI_PLAYER_ADVANCED_MATERIAL_HIGHLIGHT, value.miniPlayerAdvancedMaterialHighlight)
-        .putInt(KEY_MINI_PLAYER_SOFT_GLASS_COLOR, value.miniPlayerSoftGlassColor)
-        .putInt(KEY_MINI_PLAYER_SOFT_GLASS_OPACITY, value.miniPlayerSoftGlassOpacity)
-        .putInt(
-            KEY_MINI_PLAYER_SOFT_GLASS_BACKDROP_BLUR_RADIUS,
-            value.miniPlayerSoftGlassBackdropBlurRadius,
-        )
-        .putInt(KEY_MINI_PLAYER_SOFT_GLASS_BLUR_RADIUS, value.miniPlayerSoftGlassBlurRadius)
-        .putFloat(KEY_MINI_PLAYER_SOFT_GLASS_LUMINANCE, value.miniPlayerSoftGlassLuminance)
         .putBoolean(KEY_KEEP_SOFT_GLASS_AFTER_GLOBAL_THEME, value.keepSoftGlassAfterGlobalTheme)
         .putBoolean(KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS, value.headsUpNotificationSoftGlass)
         .putBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, value.removeClockMaterialLimit)

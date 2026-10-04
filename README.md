@@ -50,7 +50,7 @@ HyperChanger is an experimental, community-developed LSPosed module and is not a
 - Customize compatible Dynamic Island and focus-notification behavior.
 - Adjust status-bar presentation where supported by the target build.
 - Control selected lock-screen effects, including charging text and shortcut appearance.
-- Customize the lock-screen editor background, clock, widgets, mini music player, music cover, and lyrics; manage local lyrics in the lyrics library.
+- Customize the lock-screen editor background, clock, widgets, lockscreen capsule, music cover, and lyrics; manage local lyrics in the lyrics library.
 - Configure raster wallpaper and lock-screen widget backgrounds.
 - Keep System UI soft-glass effects after applying a global theme.
 - Remove the OTA conversion limit for glass and overlay AOD clock materials.

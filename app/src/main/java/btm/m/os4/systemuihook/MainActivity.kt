@@ -196,6 +196,7 @@ import kotlin.math.roundToInt
 class MainActivity : ComponentActivity() {
     private val hookStore by lazy { HookSettingsStore(this) }
     private val navigationStore by lazy { ModuleNavigationSettingsStore(this) }
+    private val lockscreenCapsuleStore by lazy { LockscreenCapsuleSettingsStore(this) }
     private val cameraStore by lazy { CameraSettingsStore(this) }
     private val deviceProfileStore by lazy { DeviceProfileStore(this) }
     private val appearanceStore by lazy { SettingsAppearanceStore(this) }
@@ -205,7 +206,7 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = Color.TRANSPARENT
         window.navigationBarColor = Color.TRANSPARENT
-        setContent { Root(hookStore, navigationStore, cameraStore, deviceProfileStore, appearanceStore) }
+        setContent { Root(hookStore, navigationStore, lockscreenCapsuleStore, cameraStore, deviceProfileStore, appearanceStore) }
     }
 }
 
@@ -267,7 +268,7 @@ private enum class PageId {
     SHADE_NOTIFICATION_BACKGROUND,
     SHADE_CONTROL_CENTER_BACKGROUND,
     GESTURE_HANDLE_STYLE, DESKTOP,
-    ISLAND, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, DEVICE_PROFILE,
+    ISLAND, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
     SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, OTHER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION,
@@ -331,6 +332,7 @@ private fun suggestedScopesForHookChange(before: HookSettings, after: HookSettin
 private fun Root(
     hooks: HookSettingsStore,
     navigation: ModuleNavigationSettingsStore,
+    lockscreenCapsules: LockscreenCapsuleSettingsStore,
     cameras: CameraSettingsStore,
     deviceProfiles: DeviceProfileStore,
     appearances: SettingsAppearanceStore,
@@ -338,6 +340,7 @@ private fun Root(
     val service by HookApplication.service.collectAsStateWithLifecycle()
     var settings by remember { mutableStateOf(hooks.settings) }
     var navigationSettings by remember { mutableStateOf(navigation.settings) }
+    var lockscreenCapsuleSettings by remember { mutableStateOf(lockscreenCapsules.settings) }
     var cameraSettings by remember { mutableStateOf(cameras.settings) }
     var deviceProfile by remember { mutableStateOf(deviceProfiles.settings) }
     var appearance by remember { mutableStateOf(appearances.settings) }
@@ -528,6 +531,7 @@ private fun Root(
     }
     fun importModulePresetPayload(payload: String) {
         val previousSettings = hooks.settings
+        val previousLockscreenCapsule = lockscreenCapsules.settings
         val previousCameras = cameras.settings
         val previousDeviceProfile = deviceProfiles.settings
         val previousAppearance = appearances.settings
@@ -536,6 +540,7 @@ private fun Root(
         runCatching {
             ModulePresetCodec.import(context, service, payload)
             hooks.reload()
+            lockscreenCapsules.reload()
             cameras.reload()
             deviceProfiles.reload()
             appearances.reload()
@@ -543,6 +548,7 @@ private fun Root(
             dockStore.reload()
             homeRecentsStore.reload()
             settings = hooks.settings
+            lockscreenCapsuleSettings = lockscreenCapsules.settings
             cameraSettings = cameras.settings
             deviceProfile = deviceProfiles.settings
             appearance = appearances.settings
@@ -551,6 +557,9 @@ private fun Root(
             homeRecentsSettings = homeRecentsStore.settings
         }.onSuccess {
             markRestartTargets(suggestedScopesForHookChange(previousSettings, settings))
+            if (previousLockscreenCapsule != lockscreenCapsuleSettings) {
+                markRestartTargets(setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.AOD))
+            }
             if (previousCameras != cameraSettings) markRestartTargets(
                 setOf(ScopeApplication.CAMERA, ScopeApplication.GALLERY, ScopeApplication.MEDIA_EDITOR),
             )
@@ -616,6 +625,7 @@ private fun Root(
         service?.let {
             hooks.syncRemote(it)
             navigation.syncRemote(it)
+            lockscreenCapsules.syncRemote(it)
             cameras.syncRemote(it)
             deviceProfiles.syncRemote(it)
             appearances.syncRemote(it)
@@ -624,6 +634,7 @@ private fun Root(
             homeRecentsStore.syncRemote(it)
             settings = hooks.settings
             navigationSettings = navigation.settings
+            lockscreenCapsuleSettings = lockscreenCapsules.settings
             cameraSettings = cameras.settings
             deviceProfile = deviceProfiles.settings
             appearance = appearances.settings
@@ -676,13 +687,21 @@ private fun Root(
             )
         } else {
         Shell(
-            settings, navigationSettings, cameraSettings, deviceProfile, appearance, musicWhitelist, screenRecorder,
+            settings, navigationSettings, lockscreenCapsuleSettings, cameraSettings, deviceProfile, appearance, musicWhitelist, screenRecorder,
             dockSettings, homeRecentsSettings, service,
             update = { transform ->
                 val before = hooks.settings
                 hooks.update(service, transform)
                 settings = hooks.settings
                 markRestartTargets(suggestedScopesForHookChange(before, settings))
+            },
+            updateLockscreenCapsule = { transform ->
+                val before = lockscreenCapsules.settings
+                lockscreenCapsules.update(service, transform)
+                lockscreenCapsuleSettings = lockscreenCapsules.settings
+                if (before != lockscreenCapsuleSettings) {
+                    markRestartTargets(setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.AOD))
+                }
             },
             updateNavigation = { transform ->
                 navigation.update(service, transform)
@@ -859,6 +878,7 @@ private fun ApplySystemBarAppearance() {
 private fun Shell(
     settings: HookSettings,
     navigationSettings: ModuleNavigationSettings,
+    lockscreenCapsuleSettings: LockscreenCapsuleSettings,
     cameras: CameraSettings,
     deviceProfile: DeviceProfileSettings,
     appearance: SettingsAppearanceSettings,
@@ -868,6 +888,7 @@ private fun Shell(
     homeRecentsSettings: HomeRecentsSettings,
     service: XposedService?,
     update: ((HookSettings) -> HookSettings) -> Unit,
+    updateLockscreenCapsule: ((LockscreenCapsuleSettings) -> LockscreenCapsuleSettings) -> Unit,
     updateNavigation: ((ModuleNavigationSettings) -> ModuleNavigationSettings) -> Unit,
     updateDock: ((DockSettings) -> DockSettings) -> Unit,
     updateHomeRecents: ((HomeRecentsSettings) -> HomeRecentsSettings) -> Unit,
@@ -996,8 +1017,8 @@ private fun Shell(
             LocalPageBackSuppressed provides if (isTop) ({ value -> suppressPageBack = value }) else ({ }),
         ) {
             Detail(
-                detailPage, settings, cameras, deviceProfile, appearance, musicWhitelist, dockSettings, homeRecentsSettings,
-                update, updateDock, updateHomeRecents, updateCamera,
+                detailPage, settings, lockscreenCapsuleSettings, cameras, deviceProfile, appearance, musicWhitelist, dockSettings, homeRecentsSettings,
+                update, updateLockscreenCapsule, updateDock, updateHomeRecents, updateCamera,
                 updateDeviceProfile, updateAppearance, updateMusicWhitelist, presetActions,
                 openPage = openNestedPage, back = dismissPage,
                 onDebugMode = { showDebug = true }, captcha = captcha,
@@ -3446,6 +3467,7 @@ private fun Entry(title: String, enabled: Boolean = true, click: () -> Unit) {
 private fun Detail(
     page: PageId,
     settings: HookSettings,
+    lockscreenCapsuleSettings: LockscreenCapsuleSettings,
     cameras: CameraSettings,
     deviceProfile: DeviceProfileSettings,
     appearance: SettingsAppearanceSettings,
@@ -3453,6 +3475,7 @@ private fun Detail(
     dockSettings: DockSettings,
     homeRecentsSettings: HomeRecentsSettings,
     update: ((HookSettings) -> HookSettings) -> Unit,
+    updateLockscreenCapsule: ((LockscreenCapsuleSettings) -> LockscreenCapsuleSettings) -> Unit,
     updateDock: ((DockSettings) -> DockSettings) -> Unit,
     updateHomeRecents: ((HomeRecentsSettings) -> HomeRecentsSettings) -> Unit,
     updateCamera: ((CameraSettings) -> CameraSettings) -> Unit,
@@ -3529,7 +3552,8 @@ private fun Detail(
         PageId.STATUS_SIGNAL_CUSTOMIZATION -> StatusSignalCustomization(settings, update, openPage, back)
         PageId.STATUS_SIGNAL_TUNING -> StatusSignalTuning(settings, update, back)
         PageId.CONTROL -> Control(settings, update, back)
-        PageId.LOCK -> Lock(settings, update, openPage, back)
+        PageId.LOCK -> Lock(settings, lockscreenCapsuleSettings, update, openPage, back)
+        PageId.LOCKSCREEN_CAPSULE -> LockscreenCapsule(lockscreenCapsuleSettings, updateLockscreenCapsule, back)
         PageId.LOCKSCREEN_WIDGET_EDITOR -> LockscreenWidgetEditor(settings, update, back)
         PageId.LOCKSCREEN_WIDGET_BACKGROUND -> LockscreenWidgetBackgroundSettings(settings, update, back)
         PageId.LYRIC_LIBRARY -> LyricLibraryPage(back)
@@ -5715,6 +5739,7 @@ private fun Control(s: HookSettings, update: ((HookSettings) -> HookSettings) ->
 @Composable
 private fun Lock(
     s: HookSettings,
+    capsule: LockscreenCapsuleSettings,
     update: ((HookSettings) -> HookSettings) -> Unit,
     open: (PageId) -> Unit,
     back: () -> Unit,
@@ -5917,6 +5942,15 @@ OverlayDropdownPreference(
             }
         }
         item {
+            Group(tr("锁屏胶囊", "锁屏胶囊")) {
+                ArrowPreference(
+                    title = tr("锁屏胶囊", "锁屏胶囊"),
+                    summary = if (capsule.enabled) tr("已开启", "已开启") else tr("未开启", "未开启"),
+                    onClick = { open(PageId.LOCKSCREEN_CAPSULE) },
+                )
+            }
+        }
+        item {
             Group(tr("\u9501\u5c4f\u5c0f\u7ec4\u4ef6", "\u9501\u5c4f\u5c0f\u7ec4\u4ef6")) {
                 SwitchPreference(
                     title = tr("\u5f00\u542f\u9501\u5c4f\u5c0f\u7ec4\u4ef6", "\u5f00\u542f\u9501\u5c4f\u5c0f\u7ec4\u4ef6"),
@@ -6004,18 +6038,6 @@ OverlayDropdownPreference(
         item {
             Group(tr("\u9501\u5c4f\u5a92\u4f53\u4e0e\u6b4c\u8bcd", "\u9501\u5c4f\u5a92\u4f53\u4e0e\u6b4c\u8bcd")) {
         SwitchPreference(
-            title = tr("\u9501\u5c4f\u8ff7\u4f60\u97f3\u4e50\u64ad\u653e\u5668", "\u9501\u5c4f\u8ff7\u4f60\u97f3\u4e50\u64ad\u653e\u5668"),
-            summary = tr("\u663e\u793a\u5728\u5e95\u90e8\u5feb\u6377\u6309\u94ae\u4e4b\u95f4\uff0c\u8ddf\u968f\u5f53\u524d\u5a92\u4f53\u4f1a\u8bdd", "\u663e\u793a\u5728\u5e95\u90e8\u5feb\u6377\u6309\u94ae\u4e4b\u95f4\uff0c\u8ddf\u968f\u5f53\u524d\u5a92\u4f53\u4f1a\u8bdd"),
-            checked = s.lockscreenMiniPlayerEnabled,
-            onCheckedChange = { value ->
-                update {
-                    it.copy(
-                        lockscreenMiniPlayerEnabled = value,
-                    )
-                }
-            },
-        )
-        SwitchPreference(
             title = tr("\u97f3\u4e50\u9501\u5c4f", "\u97f3\u4e50\u9501\u5c4f"),
             summary = tr(
                 "\u9700\u8981\u540c\u65f6\u91cd\u542f\u201c\u7cfb\u7edf\u754c\u9762\u201d\u548c\u201c\u58c1\u7eb8\u201d\u5e94\u7528",
@@ -6078,99 +6100,6 @@ OverlayDropdownPreference(
         }
         }
         }
-        }
-        AnimatedVisibility(
-            visible = s.lockscreenMiniPlayerEnabled,
-            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
-            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
-        ) {
-            Column {
-                OverlayDropdownPreference(
-                    title = "\u9501\u5c4f\u5a92\u4f53\u901a\u77e5",
-                    items = listOf(tr("\u4e0d\u9690\u85cf", "\u4e0d\u9690\u85cf"), tr("\u59cb\u7ec8\u9690\u85cf", "\u59cb\u7ec8\u9690\u85cf"), tr("\u52a8\u6001\u663e\u793a", "\u52a8\u6001\u663e\u793a")),
-                    selectedIndex = s.lockscreenMiniPlayerMediaNotificationMode,
-                    onSelectedIndexChange = { value ->
-                        update { it.copy(lockscreenMiniPlayerMediaNotificationMode = value) }
-                    },
-                )
-OverlayDropdownPreference(
-                    title = tr("\u8ff7\u4f60\u64ad\u653e\u5668\u80cc\u666f", "\u8ff7\u4f60\u64ad\u653e\u5668\u80cc\u666f"),
-                    items = listOf(tr("\u8ddf\u968f\u5feb\u6377\u529f\u80fd\u80cc\u666f", "\u8ddf\u968f\u5feb\u6377\u529f\u80fd\u80cc\u666f"), tr("\u7eaf\u8272", "\u7eaf\u8272"), tr("\u9ad8\u7ea7\u6750\u8d28", "\u9ad8\u7ea7\u6750\u8d28"), tr("\u67d4\u5149\u73bb\u7483", "\u67d4\u5149\u73bb\u7483")),
-                    selectedIndex = s.lockscreenMiniPlayerBackgroundMode,
-                    onSelectedIndexChange = { value ->
-                        update { it.copy(lockscreenMiniPlayerBackgroundMode = value) }
-                    },
-                )
-                FloatSlide(tr("\u64ad\u653e\u5668\u5bbd\u5ea6 (dp)", "\u64ad\u653e\u5668\u5bbd\u5ea6 (dp)"), s.lockscreenMiniPlayerWidth, 160f..360f, defaultValue = 240f) { value ->
-                    update { it.copy(lockscreenMiniPlayerWidth = value) }
-                }
-                FloatSlide(tr("\u64ad\u653e\u5668\u9ad8\u5ea6 (dp)", "\u64ad\u653e\u5668\u9ad8\u5ea6 (dp)"), s.lockscreenMiniPlayerHeight, 10f..60f, defaultValue = 36f) { value ->
-                    update { it.copy(lockscreenMiniPlayerHeight = value) }
-                }
-                FloatSlide(tr("\u5a92\u4f53\u5c01\u9762\u5706\u89d2 (dp)", "\u5a92\u4f53\u5c01\u9762\u5706\u89d2 (dp)"), s.lockscreenMiniPlayerArtworkCornerRadius, 0f..60f, defaultValue = 12f) { value ->
-                    update { it.copy(lockscreenMiniPlayerArtworkCornerRadius = value) }
-                }
-            }
-        }
-        AnimatedVisibility(
-            visible = s.lockscreenMiniPlayerEnabled && s.lockscreenMiniPlayerBackgroundMode == 1,
-            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
-            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
-        ) {
-            ShortcutBackgroundColorPreference(
-                title = tr("\u64ad\u653e\u5668\u80cc\u666f\u989c\u8272", "\u64ad\u653e\u5668\u80cc\u666f\u989c\u8272"),
-                color = s.miniPlayerPureColor,
-                onColorChange = { value -> update { it.copy(miniPlayerPureColor = value) } },
-            )
-        }
-        AnimatedVisibility(
-            visible = s.lockscreenMiniPlayerEnabled && s.lockscreenMiniPlayerBackgroundMode == 2,
-            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
-            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
-        ) {
-            Column {
-                ShortcutBackgroundColorPreference(
-                    title = tr("\u64ad\u653e\u5668\u6df7\u8272\u989c\u8272", "\u64ad\u653e\u5668\u6df7\u8272\u989c\u8272"),
-                    color = s.miniPlayerAdvancedMaterialColor,
-                    onColorChange = { value -> update { it.copy(miniPlayerAdvancedMaterialColor = value) } },
-                )
-                ParameterIntSlide(tr("\u64ad\u653e\u5668\u4e0d\u900f\u660e\u5ea6", "\u64ad\u653e\u5668\u4e0d\u900f\u660e\u5ea6"), s.miniPlayerAdvancedMaterialOpacity, 0..100, "%", defaultValue = 14) { value ->
-                    update { it.copy(miniPlayerAdvancedMaterialOpacity = value) }
-                }
-                ParameterIntSlide(tr("\u64ad\u653e\u5668\u80cc\u666f\u6a21\u7cca\u5ea6", "\u64ad\u653e\u5668\u80cc\u666f\u6a21\u7cca\u5ea6"), s.miniPlayerAdvancedMaterialBlurRadius, 0..40, defaultValue = 40) { value ->
-                    update { it.copy(miniPlayerAdvancedMaterialBlurRadius = value) }
-                }
-                SwitchPreference(
-                    title = tr("\u64ad\u653e\u5668\u663e\u793a\u9ad8\u5149", "\u64ad\u653e\u5668\u663e\u793a\u9ad8\u5149"),
-                    checked = s.miniPlayerAdvancedMaterialHighlight,
-                    onCheckedChange = { value -> update { it.copy(miniPlayerAdvancedMaterialHighlight = value) } },
-                    )
-                }
-            }
-        AnimatedVisibility(
-            visible = s.lockscreenMiniPlayerEnabled && s.lockscreenMiniPlayerBackgroundMode == 3,
-            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
-            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
-        ) {
-            Column {
-                ShortcutBackgroundColorPreference(
-                    title = tr("\u64ad\u653e\u5668\u6df7\u8272\u989c\u8272", "\u64ad\u653e\u5668\u6df7\u8272\u989c\u8272"),
-                    color = s.miniPlayerSoftGlassColor,
-                    onColorChange = { value -> update { it.copy(miniPlayerSoftGlassColor = value) } },
-                )
-                ParameterIntSlide(tr("\u64ad\u653e\u5668\u4e0d\u900f\u660e\u5ea6", "\u64ad\u653e\u5668\u4e0d\u900f\u660e\u5ea6"), s.miniPlayerSoftGlassOpacity, 0..100, "%", defaultValue = 10) { value ->
-                    update { it.copy(miniPlayerSoftGlassOpacity = value) }
-                }
-                ParameterIntSlide(tr("\u64ad\u653e\u5668\u80cc\u666f\u6a21\u7cca\u5ea6", "\u64ad\u653e\u5668\u80cc\u666f\u6a21\u7cca\u5ea6"), s.miniPlayerSoftGlassBackdropBlurRadius, 0..40, defaultValue = 40) { value ->
-                    update { it.copy(miniPlayerSoftGlassBackdropBlurRadius = value) }
-                }
-                ParameterIntSlide(tr("\u64ad\u653e\u5668 Glass \u6a21\u7cca\u5ea6", "\u64ad\u653e\u5668 Glass \u6a21\u7cca\u5ea6"), s.miniPlayerSoftGlassBlurRadius, 0..40, defaultValue = 36) { value ->
-                    update { it.copy(miniPlayerSoftGlassBlurRadius = value) }
-                }
-                ParameterFloatSlide(tr("\u64ad\u653e\u5668\u67d4\u5149\u5f3a\u5ea6", "\u64ad\u653e\u5668\u67d4\u5149\u5f3a\u5ea6"), s.miniPlayerSoftGlassLuminance, 0f..0.4f, defaultValue = .14f) { value ->
-                    update { it.copy(miniPlayerSoftGlassLuminance = value) }
-                }
-            }
         }
             }
         }
@@ -6692,6 +6621,90 @@ private fun LyricLibraryPage(back: () -> Unit) {
                         },
                         modifier = Modifier.weight(1f),
                     ) { Text(tr("删除", "删除"), color = ComposeColor(0xFFD32F2F)) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LockscreenCapsule(
+    capsule: LockscreenCapsuleSettings,
+    update: ((LockscreenCapsuleSettings) -> LockscreenCapsuleSettings) -> Unit,
+    back: () -> Unit,
+) = AppPage(tr("锁屏胶囊", "锁屏胶囊"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.AOD)) { p, scroll ->
+    AppList(p, scroll, 28) {
+        item {
+            Group(tr("锁屏胶囊", "锁屏胶囊")) {
+                SwitchPreference(
+                    title = tr("开启锁屏胶囊", "开启锁屏胶囊"),
+                    summary = tr("显示在底部快捷按钮之间，跟随当前媒体会话", "显示在底部快捷按钮之间，跟随当前媒体会话"),
+                    checked = capsule.enabled,
+                    onCheckedChange = { value -> update { it.copy(enabled = value) } },
+                )
+                AnimatedVisibility(
+                    visible = capsule.enabled,
+                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                ) {
+                    Column {
+                        SwitchPreference(
+                            title = tr("锁屏胶囊歌词", "锁屏胶囊歌词"),
+                            checked = capsule.lyricsEnabled,
+                            onCheckedChange = { value -> update { it.copy(lyricsEnabled = value) } },
+                        )
+                        OverlayDropdownPreference(
+                            title = tr("锁屏媒体通知", "锁屏媒体通知"),
+                            items = listOf(tr("不隐藏", "不隐藏"), tr("始终隐藏", "始终隐藏"), tr("动态显示", "动态显示")),
+                            selectedIndex = capsule.mediaNotificationMode,
+                            onSelectedIndexChange = { value -> update { it.copy(mediaNotificationMode = value) } },
+                        )
+                        OverlayDropdownPreference(
+                            title = tr("锁屏胶囊背景", "锁屏胶囊背景"),
+                            items = listOf(tr("跟随快捷功能背景", "跟随快捷功能背景"), tr("纯色", "纯色"), tr("高级材质", "高级材质"), tr("柔光玻璃", "柔光玻璃")),
+                            selectedIndex = capsule.backgroundMode,
+                            onSelectedIndexChange = { value -> update { it.copy(backgroundMode = value) } },
+                        )
+                        FloatSlide(tr("锁屏胶囊宽度 (dp)", "锁屏胶囊宽度 (dp)"), capsule.width, 160f..360f, defaultValue = 240f) { value -> update { it.copy(width = value) } }
+                        FloatSlide(tr("锁屏胶囊高度 (dp)", "锁屏胶囊高度 (dp)"), capsule.height, 10f..60f, defaultValue = 36f) { value -> update { it.copy(height = value) } }
+                        FloatSlide(tr("媒体封面圆角 (dp)", "媒体封面圆角 (dp)"), capsule.artworkCornerRadius, 0f..60f, defaultValue = 12f) { value -> update { it.copy(artworkCornerRadius = value) } }
+                    }
+                }
+                AnimatedVisibility(visible = capsule.enabled && capsule.backgroundMode == 1) {
+                    ShortcutBackgroundColorPreference(
+                        title = tr("锁屏胶囊背景颜色", "锁屏胶囊背景颜色"),
+                        color = capsule.pureColor,
+                        onColorChange = { value -> update { it.copy(pureColor = value) } },
+                    )
+                }
+                AnimatedVisibility(visible = capsule.enabled && capsule.backgroundMode == 2) {
+                    Column {
+                        ShortcutBackgroundColorPreference(
+                            title = tr("锁屏胶囊混色颜色", "锁屏胶囊混色颜色"),
+                            color = capsule.advancedMaterialColor,
+                            onColorChange = { value -> update { it.copy(advancedMaterialColor = value) } },
+                        )
+                        ParameterIntSlide(tr("锁屏胶囊不透明度", "锁屏胶囊不透明度"), capsule.advancedMaterialOpacity, 0..100, "%", defaultValue = 14) { value -> update { it.copy(advancedMaterialOpacity = value) } }
+                        ParameterIntSlide(tr("锁屏胶囊背景模糊度", "锁屏胶囊背景模糊度"), capsule.advancedMaterialBlurRadius, 0..40, defaultValue = 40) { value -> update { it.copy(advancedMaterialBlurRadius = value) } }
+                        SwitchPreference(
+                            title = tr("锁屏胶囊显示高光", "锁屏胶囊显示高光"),
+                            checked = capsule.advancedMaterialHighlight,
+                            onCheckedChange = { value -> update { it.copy(advancedMaterialHighlight = value) } },
+                        )
+                    }
+                }
+                AnimatedVisibility(visible = capsule.enabled && capsule.backgroundMode == 3) {
+                    Column {
+                        ShortcutBackgroundColorPreference(
+                            title = tr("锁屏胶囊混色颜色", "锁屏胶囊混色颜色"),
+                            color = capsule.softGlassColor,
+                            onColorChange = { value -> update { it.copy(softGlassColor = value) } },
+                        )
+                        ParameterIntSlide(tr("锁屏胶囊不透明度", "锁屏胶囊不透明度"), capsule.softGlassOpacity, 0..100, "%", defaultValue = 10) { value -> update { it.copy(softGlassOpacity = value) } }
+                        ParameterIntSlide(tr("锁屏胶囊背景模糊度", "锁屏胶囊背景模糊度"), capsule.softGlassBackdropBlurRadius, 0..40, defaultValue = 40) { value -> update { it.copy(softGlassBackdropBlurRadius = value) } }
+                        ParameterIntSlide(tr("锁屏胶囊 Glass 模糊度", "锁屏胶囊 Glass 模糊度"), capsule.softGlassBlurRadius, 0..40, defaultValue = 36) { value -> update { it.copy(softGlassBlurRadius = value) } }
+                        ParameterFloatSlide(tr("锁屏胶囊柔光强度", "锁屏胶囊柔光强度"), capsule.softGlassLuminance, 0f..0.4f, defaultValue = .14f) { value -> update { it.copy(softGlassLuminance = value) } }
+                    }
                 }
             }
         }
