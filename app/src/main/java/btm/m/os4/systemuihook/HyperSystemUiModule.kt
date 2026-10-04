@@ -586,11 +586,11 @@ class HyperSystemUiModule : XposedModule() {
                 settingsContext.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY)
             }.getOrNull()
             attachModuleResources(settingsContext)
-            val settingsIcon = moduleContext?.resources?.getIdentifier(
-                "ic_hyperchanger_settings_entry",
-                "drawable",
-                BuildConfig.APPLICATION_ID,
-            )?.takeIf { it != 0 } ?: android.R.drawable.ic_menu_manage
+            val settingsIcon = if (moduleContext != null) {
+                R.drawable.ic_hyperchanger_settings_entry
+            } else {
+                android.R.drawable.ic_menu_manage
+            }
             setIntField(header, "iconRes", settingsIcon)
             val label = runCatching {
                 (moduleContext ?: settingsContext).applicationInfo.loadLabel(settingsContext.packageManager).toString()
