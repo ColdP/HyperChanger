@@ -635,6 +635,8 @@ private fun Root(
             airDrop.syncRemote(it)
             ControlCenterHeaderHeightSettingsStore(context).syncRemote(it)
             ControlCenterCarrierSettingsStore(context).syncRemote(it)
+            ControlCenterClockSettingsStore(context).syncRemote(it)
+            IslandSmoothingSettingsStore(context).syncRemote(it)
             musicStore.syncRemote(it)
             dockStore.syncRemote(it)
             homeRecentsStore.syncRemote(it)
@@ -3520,8 +3522,10 @@ private fun DeviceProfileFieldDialog(
     onDismiss: () -> Unit,
     onSave: (String) -> Unit,
     inputLabel: String? = null,
+    validationError: ((String) -> String?)? = null,
 ) {
     var value by remember(title, current) { mutableStateOf(current) }
+    val error = validationError?.invoke(value.trim())
     WindowDialog(show = true, onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(title, style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
@@ -3539,9 +3543,11 @@ private fun DeviceProfileFieldDialog(
                 GlassDialogButton(
                     onClick = { onSave(value.trim()) },
                     modifier = Modifier.weight(1f),
+                    enabled = error == null,
                     colors = ButtonDefaults.buttonColorsPrimary(),
                 ) { Text(tr("保存", "保存")) }
             }
+            if (error != null) Text(error, color = ComposeColor(0xFFE05353), style = MiuixTheme.textStyles.body2)
         }
     }
 }
@@ -5245,6 +5251,18 @@ private fun Island(
 ) { p, scroll ->
     var showNormalNotificationDialog by remember { mutableStateOf(false) }
     var showFocusNotificationDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    val smoothingStore = remember(context) { IslandSmoothingSettingsStore(context) }
+    var smoothingSettings by remember { mutableStateOf(smoothingStore.settings) }
+    fun updateSmoothing(transform: (IslandSmoothingSettings) -> IslandSmoothingSettings) {
+        smoothingStore.update(service, transform)
+        smoothingSettings = smoothingStore.settings
+    }
+    LaunchedEffect(service) {
+        service?.let(smoothingStore::syncRemote)
+        smoothingSettings = smoothingStore.settings
+    }
 
     AppList(p, scroll, 28) {
         item {
@@ -5283,6 +5301,20 @@ private fun Island(
         }
         item {
             Group(tr("\u8d85\u7ea7\u5c9b\u80cc\u666f\u8c03\u6574", "\u8d85\u7ea7\u5c9b\u80cc\u666f\u8c03\u6574")) {
+                SwitchPreference(
+                    title = tr("islandCollapsedSmoothing", "平滑收起时的超级岛背景"),
+                    checked = smoothingSettings.enabled,
+                    onCheckedChange = { enabled -> updateSmoothing { it.copy(enabled = enabled) } },
+                )
+                AnimatedVisibility(visible = smoothingSettings.enabled) {
+                    ParameterIntSlide(
+                        title = tr("islandCollapsedSmoothingPercent", "收起时的超级岛背景平滑度"),
+                        value = smoothingSettings.percent,
+                        range = 0..100,
+                        suffix = "%",
+                        defaultValue = ISLAND_SMOOTHING_DEFAULT_PERCENT,
+                    ) { percent -> updateSmoothing { it.copy(percent = percent) } }
+                }
                 SwitchPreference(
                     title = tr("\u5c55\u5f00\u6001\u4e0b\u7684\u8d85\u7ea7\u5c9b\u80cc\u666f\u8c03\u6574", "\u5c55\u5f00\u6001\u4e0b\u7684\u8d85\u7ea7\u5c9b\u80cc\u666f\u8c03\u6574"),
                     checked = s.expandedIslandBackgroundEnabled,
@@ -5436,6 +5468,13 @@ private fun Status(
     val carrierStore = remember(context) { ControlCenterCarrierSettingsStore(context) }
     var carrierSettings by remember { mutableStateOf(carrierStore.settings) }
     var showCarrierTextDialog by remember { mutableStateOf(false) }
+    val controlCenterClockStore = remember(context) { ControlCenterClockSettingsStore(context) }
+    var controlCenterClockSettings by remember { mutableStateOf(controlCenterClockStore.settings) }
+    var showControlCenterClockFormatDialog by remember { mutableStateOf(false) }
+    fun updateControlCenterClock(transform: (ControlCenterClockSettings) -> ControlCenterClockSettings) {
+        controlCenterClockStore.update(service, transform)
+        controlCenterClockSettings = controlCenterClockStore.settings
+    }
     fun updateCarrier(transform: (ControlCenterCarrierSettings) -> ControlCenterCarrierSettings) {
         carrierStore.update(service, transform)
         carrierSettings = carrierStore.settings
@@ -5445,6 +5484,8 @@ private fun Status(
         headerHeightOffset = headerHeightStore.offsetDp
         service?.let(carrierStore::syncRemote)
         carrierSettings = carrierStore.settings
+        service?.let(controlCenterClockStore::syncRemote)
+        controlCenterClockSettings = controlCenterClockStore.settings
     }
     AppList(p, scroll, 28) {
         item { Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
@@ -5484,6 +5525,37 @@ private fun Status(
                         headerHeightOffset = headerHeightStore.offsetDp
                     },
                 )
+                SwitchPreference(
+                    title = tr("controlCenterBigClock", "在控制中心顶栏日期之上添加大时钟"),
+                    checked = controlCenterClockSettings.enabled,
+                    onCheckedChange = { enabled -> updateControlCenterClock { it.copy(enabled = enabled) } },
+                )
+                AnimatedVisibility(visible = controlCenterClockSettings.enabled) {
+                    Column {
+                        ArrowPreference(
+                            title = tr("controlCenterClockFormat", "大时钟格式"),
+                            summary = controlCenterClockSettings.format,
+                            onClick = { showControlCenterClockFormatDialog = true },
+                        )
+                        ParameterFloatSlide(
+                            title = tr("controlCenterClockSize", "大时钟大小"),
+                            value = controlCenterClockSettings.sizeSp,
+                            range = 8f..64f,
+                            defaultValue = 48f,
+                        ) { value -> updateControlCenterClock { it.copy(sizeSp = value) } }
+                        ParameterFloatSlide(
+                            title = tr("controlCenterClockGap", "大时钟与日期行间距"),
+                            value = controlCenterClockSettings.gapDp,
+                            range = -20f..40f,
+                            defaultValue = 8f,
+                        ) { value -> updateControlCenterClock { it.copy(gapDp = value) } }
+                        SwitchPreference(
+                            title = tr("controlCenterClockRedOne", "一加红\"1\""),
+                            checked = controlCenterClockSettings.redOne,
+                            onCheckedChange = { enabled -> updateControlCenterClock { it.copy(redOne = enabled) } },
+                        )
+                    }
+                }
                 OverlayDropdownPreference(
                     title = tr("controlCenterCarrierNetworkMarker", "运营商网络标识"),
                     items = listOf(
@@ -5682,6 +5754,20 @@ private fun Status(
                 }
             }
         }
+    }
+    if (showControlCenterClockFormatDialog && controlCenterClockSettings.enabled) {
+        val invalidFormatText = tr("controlCenterClockInvalidFormat", "请输入有效的时间格式，例如 HH:mm:ss")
+        DeviceProfileFieldDialog(
+            title = tr("controlCenterClockFormat", "大时钟格式"),
+            current = controlCenterClockSettings.format,
+            inputLabel = tr("controlCenterClockFormat", "大时钟格式"),
+            validationError = { pattern -> if (isValidControlCenterClockFormat(pattern)) null else invalidFormatText },
+            onDismiss = { showControlCenterClockFormatDialog = false },
+            onSave = { pattern ->
+                updateControlCenterClock { it.copy(format = pattern) }
+                showControlCenterClockFormatDialog = false
+            },
+        )
     }
     if (showCarrierTextDialog) {
         DeviceProfileFieldDialog(
@@ -9679,6 +9765,13 @@ private fun openProjects() = listOf(
     OpenProject("Compose Multiplatform", "1.11.x", tr("\u58f0\u660e\u5f0f\u754c\u9762\u3001\u5e03\u5c40\u4e0e\u52a8\u753b", "\u58f0\u660e\u5f0f\u754c\u9762\u3001\u5e03\u5c40\u4e0e\u52a8\u753b"), "https://github.com/JetBrains/compose-multiplatform"),
     OpenProject("AndroidX", tr("\u591a\u4e2a\u7ec4\u4ef6", "\u591a\u4e2a\u7ec4\u4ef6"), tr("Activity\u3001Lifecycle\u3001Core \u7b49 Android \u57fa\u7840\u5e93", "Activity\u3001Lifecycle\u3001Core \u7b49 Android \u57fa\u7840\u5e93"), "https://github.com/androidx/androidx"),
     OpenProject(tr("HyperMusicCover", "HyperMusicCover"), tr("0.0.9", "0.0.9"), tr("\u97f3\u4e50\u9501\u5c4f\u90e8\u5206\u76f8\u5173\u4ee3\u7801", "\u97f3\u4e50\u9501\u5c4f\u90e8\u5206\u76f8\u5173\u4ee3\u7801"), "https://github.com/zyl6932/HyperMusicCover"),
+    OpenProject(
+        tr("HyperIsland", "HyperIsland"),
+        tr("3.1.8", "3.1.8"),
+        tr("hyperIslandSmoothingAttribution", "平滑超级岛相关代码"),
+        "https://github.com/1812z/HyperIsland",
+        tr("MIT License", "MIT License"),
+    ),
     OpenProject(
         tr("HyperCeiler", "HyperCeiler"),
         tr("Canary", "Canary"),

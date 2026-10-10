@@ -80,6 +80,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
     implementation("androidx.core:core-ktx:1.17.0")
+    implementation("androidx.graphics:graphics-shapes:1.1.0")
     implementation("com.google.zxing:core:3.5.3")
     implementation("org.luckypray:dexkit:2.2.0")
     implementation("org.lsposed.hiddenapibypass:hiddenapibypass:6.1")

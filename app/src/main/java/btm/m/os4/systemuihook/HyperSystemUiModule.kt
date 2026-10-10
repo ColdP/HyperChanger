@@ -297,6 +297,8 @@ private val gestureMaterialOverlays = Collections.synchronizedMap(WeakHashMap<Vi
 class HyperSystemUiModule : XposedModule() {
     private val controlCenterHeaderHeightHook by lazy { ControlCenterHeaderHeightHook(this) }
     private val controlCenterCarrierHook by lazy { ControlCenterCarrierHook(this) }
+    private val controlCenterClockHook by lazy { ControlCenterClockHook(this) }
+    private val islandSmoothingHook by lazy { IslandSmoothingHook(this) }
     internal fun installHook(member: java.lang.reflect.Executable) = hook(member)
 
     override fun onSystemServerStarting(param: SystemServerStartingParam) {
@@ -754,6 +756,8 @@ class HyperSystemUiModule : XposedModule() {
                 SYSTEM_UI, SYSTEM_UI_PLUGIN -> {
                     controlCenterHeaderHeightHook.install(param.defaultClassLoader, preferences)
                     controlCenterCarrierHook.install(param.defaultClassLoader, preferences)
+                    controlCenterClockHook.install(param.defaultClassLoader, preferences)
+                    islandSmoothingHook.install(param.defaultClassLoader, preferences)
                     installCustomTileHooks(param.defaultClassLoader, preferences)
                     if (param.packageName == SYSTEM_UI) {
                         synchronized(controlCenterButtonsLock) {
@@ -1257,6 +1261,8 @@ class HyperSystemUiModule : XposedModule() {
             handler.postDelayed({
                 controlCenterHeaderHeightHook.install(classLoader, preferences)
                 controlCenterCarrierHook.install(classLoader, preferences)
+                controlCenterClockHook.install(classLoader, preferences)
+                islandSmoothingHook.install(classLoader, preferences)
                 val complete = controlCenterEditButtonHookInstalled &&
                     controlCenterTopButtonsHookInstalled &&
                     controlCenterMainPanelHookInstalled
@@ -4736,6 +4742,8 @@ class HyperSystemUiModule : XposedModule() {
                 try {
                 controlCenterHeaderHeightHook.onClassLoaded(loadedClass, preferences)
                 controlCenterCarrierHook.onClassLoaded(loadedClass, preferences)
+                controlCenterClockHook.onClassLoaded(loadedClass, preferences)
+                islandSmoothingHook.onClassLoaded(loadedClass, preferences)
                 if ((loadedClass.name == CONTROL_CENTER_EDIT_BUTTON_CONTROLLER_CLASS ||
                     loadedClass.name == CONTROL_CENTER_CONTENT_DISTRIBUTOR_CLASS ||
                     loadedClass.name == CONTROL_CENTER_MAIN_PANEL_CONTROLLER_CLASS ||
