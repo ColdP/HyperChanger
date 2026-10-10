@@ -84,8 +84,10 @@ public final class IosNotificationCenterPresentation {
     public static void update(float fraction, float layoutFraction, boolean enabled, View sheet) {
         float previousProgress = progress;
         float previousLayout = layoutProgress;
+        boolean wasHoldingRows = IosNotificationExitState.isHolding();
         progress = enabled ? Math.max(0f, Math.min(1f, fraction)) : 0f;
         layoutProgress = enabled ? Math.max(0f, Math.min(1f, layoutFraction)) : 0f;
+        IosNotificationExitState.updateProgress(previousProgress, progress);
         wallpaperSheet = sheet;
         if (progress <= 0f) {
             if (host != null) host.setAlpha(0f);
@@ -103,11 +105,20 @@ public final class IosNotificationCenterPresentation {
             hideNativeHeader();
             return;
         }
+        // An interrupted header restore must not release a newly reopened presentation.
+        if (headerExitAnimator != null) {
+            ValueAnimator previousExit = headerExitAnimator;
+            headerExitAnimator = null;
+            previousExit.cancel();
+        }
         if (host == null && (clockUnavailable || !create())) return;
         host.setAlpha(progress);
         if (status != null) status.setAlpha(progress * progress * (3f - 2f * progress));
         sync();
-        if (layoutProgress != previousLayout) requestStackUpdate(stack);
+        if (!IosNotificationExitState.isHolding()
+                && (layoutProgress != previousLayout || wasHoldingRows)) {
+            requestStackUpdate(stack);
+        }
     }
 
     public static void release() {
@@ -177,7 +188,6 @@ public final class IosNotificationCenterPresentation {
         final float[] targets = oldHeaderAlpha;
         final View container = notificationHeader;
         final float containerTarget = notificationHeaderAlpha;
-        if (headerExitAnimator != null) headerExitAnimator.cancel();
         restoreHeaderChromeVisibility();
         if (views == null && container == null) {
             releasePresentation();
@@ -223,12 +233,12 @@ public final class IosNotificationCenterPresentation {
 
     static float stackOffset(View view, float nativeStackY) {
         if (!isActive() || view != stack || panel == null || stack.getHeight() == 0) return 0f;
-        float reserve = IosNotificationStackHooks.specialRowsExtent(view);
+        float reserve = IosNotificationStackHooks.restingRowsExtent(view);
         if (reserve <= 0f) reserve = 160f * panel.getResources().getDisplayMetrics().density;
-        float limit = Math.max(nativeStackY, viewportBottom(view) - reserve);
-        // The list already moves with the sheet. Keep its local clock clearance constant
-        // throughout the drag instead of adding a second progress-driven movement.
-        return Math.max(0f, Math.min(limit, desiredNotificationTop()) - nativeStackY);
+        // Anchor the first full card and the OEM stack peeks above the bottom safe area.
+        // Full-height focus/media cards are included in the reservation.
+        float top = Math.max(nativeStackY, viewportBottom(view) - reserve);
+        return Math.max(0f, top - nativeStackY);
     }
 
     /** Stable local viewport; native container bounds shrink ahead of the hosted exit. */
@@ -373,6 +383,7 @@ public final class IosNotificationCenterPresentation {
     private static final ViewTreeObserver.OnPreDrawListener FRAME = () -> {
         sync();
         IosNotificationStackHooks.enforceUnstackedRows(stack);
+        IosNotificationExitState.apply(stack);
         IosNotificationStackHooks.clipStackedRows(stack, ownsStack(stack));
         return true;
     };
@@ -829,62 +840,8 @@ public final class IosNotificationCenterPresentation {
         return top;
     }
 
-    private static float desiredNotificationTop() {
-        int[] panelPoint = new int[2];
-        int[] stackPoint = new int[2];
-        panel.getLocationInWindow(panelPoint);
-        stack.getLocationInWindow(stackPoint);
-        float gap = 10f * panel.getResources().getDisplayMetrics().density;
-        return clockBottom() + host.getTranslationY() + gap -
-                (stackPoint[1] - panelPoint[1]);
-    }
-
-    private static float clockBottom() {
-        float apiBottom = 0f;
-        try {
-            Object value = clock.getClass().getMethod("getClockBottom").invoke(clock);
-            if (value instanceof Number) {
-                float top = ((Number) value).floatValue();
-                if (top > 0f && top < panel.getHeight()) apiBottom = top;
-            }
-        } catch (Throwable ignored) {}
-        float bottom = visibleClockBottom(clock);
-        // Some OEM clock templates report the notification baseline above the
-        // rendered accessory/date views. Never let that baseline move cards over
-        // the pixels that are actually visible on screen.
-        bottom = Math.max(bottom, apiBottom);
-        if (bottom > 0f) return bottom;
-        float density = panel.getResources().getDisplayMetrics().density;
-        try {
-            Object value = clock.getClass().getMethod("getNotificationClockTop").invoke(clock);
-            if (value instanceof Number) {
-                return Math.max(220f * density, ((Number) value).floatValue() + 140f * density);
-            }
-        } catch (Throwable ignored) {}
-        return 220f * density;
-    }
-
-    private static float visibleClockBottom(View view) {
-        if (view == null || view.getVisibility() != View.VISIBLE) return 0f;
-        Rect bounds = new Rect();
-        float bottom = 0f;
-        if (view.getGlobalVisibleRect(bounds)) {
-            int[] point = new int[2];
-            panel.getLocationOnScreen(point);
-            if (view != clock || view.getHeight() < panel.getHeight()) {
-                bottom = bounds.bottom - point[1] - host.getTranslationY();
-            }
-        }
-        if (view instanceof ViewGroup) {
-            ViewGroup group = (ViewGroup) view;
-            for (int i = 0; i < group.getChildCount(); i++) {
-                bottom = Math.max(bottom, visibleClockBottom(group.getChildAt(i)));
-            }
-        }
-        return bottom;
-    }
-
     private static void releasePresentation() {
+        IosNotificationExitState.clear();
         restoreStackTransform();
         IosNotificationStackHooks.restoreStackedRows();
         IosNotificationStackHooks.restoreExpandedRows(stack);

@@ -194,6 +194,52 @@ final class IosNotificationStackHooks {
         return reserved;
     }
 
+    /** Natural special-card block, followed by one full ordinary card and stack peeks. */
+    static float restingRowsExtent(View stack) {
+        if (!(stack instanceof ViewGroup)) return 0f;
+        ViewGroup group = (ViewGroup) stack;
+        int lastSpecial = -1;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View row = group.getChildAt(i);
+            if (row.getVisibility() != View.GONE && isFocusOrMediaNotification(row)) lastSpecial = i;
+        }
+        float extent = specialRowsExtent(stack);
+        float density = stack.getResources().getDisplayMetrics().density;
+        float padding = 8f * density;
+        float tail = 48f * density;
+        try {
+            Object algorithm = Xp.getObjectField(stack, "mStackScrollAlgorithm");
+            padding = ((Number) Xp.getObjectField(algorithm, "mPaddingBetweenElements")).floatValue();
+            if (lastSpecial < 0) {
+                extent += ((Number) Xp.callMethod(algorithm, "getScrimTopPaddingOrZero",
+                        Xp.getObjectField(stack, "mAmbientState"))).floatValue();
+            }
+        } catch (Throwable ignored) {}
+        int ordinaryCount = 0;
+        for (int i = lastSpecial + 1; i < group.getChildCount(); i++) {
+            View row = group.getChildAt(i);
+            if (row.getVisibility() == View.GONE || !isNotificationRow(row)
+                    || isFocusOrMediaNotification(row)) continue;
+            if (ordinaryCount++ != 0) continue;
+            try {
+                extent += ((Number) Xp.callMethod(row, "getIntrinsicHeight")).floatValue();
+                Object calculator = Xp.getObjectField(Xp.callMethod(row, "getInjector"),
+                        "stackingInfoCalculator");
+                tail = ((Number) Xp.getObjectField(calculator, "stackingHeight1")).floatValue()
+                        + ((Number) Xp.getObjectField(calculator, "stackingHeight2")).floatValue();
+            } catch (Throwable ignored) {
+                if (extent <= 0f) extent = Math.max(row.getHeight(), 96f * density);
+            }
+            if (lastSpecial >= 0) extent += padding;
+        }
+        if (ordinaryCount > 0) extent += Math.max(0f, tail);
+        return extent;
+    }
+
+    static boolean isNotificationRow(View view) {
+        return hasType(view, ".ExpandableNotificationRow") || hasType(view, ".MiuiMediaHeaderView");
+    }
+
     /** Only layout inputs are borrowed. Always return OEM state to its actual lifecycle. */
     private static final class LayoutInputs implements AutoCloseable {
         final Object ambient;
@@ -271,12 +317,9 @@ final class IosNotificationStackHooks {
         maskedStack = group;
         STACK_MASKS.clear();
         ArrayList<RowPosition> rows = new ArrayList<>();
-        int[] point = new int[2];
-        int[] stackPoint = new int[2];
-        group.getLocationInWindow(stackPoint);
         for (int i = 0; i < group.getChildCount(); i++) {
             View child = group.getChildAt(i);
-            if (!child.isShown() || child.getAlpha() <= 0f || child.getWidth() <= 0
+            if (!child.isShown() || child.getWidth() <= 0
                     || (!hasType(child, ".ExpandableNotificationRow")
                     && !hasType(child, ".MiuiMediaHeaderView"))) continue;
             if (isFocusOrMediaNotification(child)) continue;
@@ -284,18 +327,26 @@ final class IosNotificationStackHooks {
                 int height = ((Number) Xp.callMethod(child, "getActualHeight")).intValue();
                 float scaleX = ((Number) Xp.callMethod(child, "getSuperScaleX")).floatValue();
                 float scaleY = ((Number) Xp.callMethod(child, "getSuperScaleY")).floatValue();
-                if (height <= 0 || scaleX <= 0f || scaleY <= 0f) continue;
-                child.getLocationInWindow(point);
+                float alpha = ((Number) Xp.callMethod(child, "getSuperAlpha")).floatValue();
+                if (height <= 0 || scaleX <= 0f || scaleY <= 0f || alpha <= 0f) continue;
                 Rect bounds = child.getClipBounds();
                 int clipBottom = ((Number) Xp.callMethod(child, "getClipBottomAmount")).intValue();
                 int stackBottom = ((Number) Xp.callMethod(child, "getExtClipBottomAmount")).intValue();
                 int bottom = height - Math.max(clipBottom, stackBottom);
                 if (bounds != null) bottom = Math.min(bottom, bounds.bottom);
-                float left = point[0] - stackPoint[0];
-                float top = point[1] - stackPoint[1];
+                // Window coordinates round each translated card independently. Local float
+                // coordinates keep the mask fixed to its card during fractional sheet motion.
+                float left = child.getLeft()
+                        + ((Number) Xp.callMethod(child, "getSuperTranslationX")).floatValue()
+                        + child.getPivotX() * (1f - scaleX);
+                float top = child.getTop()
+                        + ((Number) Xp.callMethod(child, "getSuperTranslationY")).floatValue()
+                        + child.getPivotY() * (1f - scaleY);
+                int clipTop = ((Number) Xp.callMethod(child, "getClipTopAmount")).intValue();
+                if (bounds != null) clipTop = Math.max(clipTop, bounds.top);
                 float radius = ((Number) Xp.callMethod(child, "getBgRadius")).floatValue()
                         * Math.min(scaleX, scaleY);
-                rows.add(new RowPosition(child, left, top, left + child.getWidth() * scaleX,
+                rows.add(new RowPosition(child, left, top + clipTop * scaleY, left + child.getWidth() * scaleX,
                         top + Math.max(0, bottom) * scaleY, radius));
             } catch (Throwable ignored) {
                 // Leave unsupported OEM row variants untouched.
@@ -440,6 +491,14 @@ final class IosNotificationStackHooks {
                 }
                 return chain.proceed(args);
             });
+            Xp.hookAll(stack, "updateVisibility$5", chain -> {
+                View view = (View) chain.getThisObject();
+                if (IosNotificationCenterPresentation.ownsStack(view)) {
+                    if (view.getVisibility() != View.VISIBLE) view.setVisibility(View.VISIBLE);
+                    return null;
+                }
+                return chain.proceed();
+            });
             IosNotificationAnimationHooks.deoptimize(stack, "setAlpha", "updateVisibility$5");
         } catch (Throwable error) {
             Xp.log("[IOSShade] notification scroll range unavailable: " + error);
@@ -452,14 +511,19 @@ final class IosNotificationStackHooks {
                 // visibility first, including notifications inside expanded groups.
                 enforceUnstackedRows((View) chain.getThisObject());
                 View view = (View) chain.getThisObject();
+                IosNotificationExitState.apply(view);
                 if (!IosNotificationCenterPresentation.ownsStack(view)
                         || chain.getArgs().isEmpty() || !(chain.getArgs().get(0) instanceof Canvas)) {
                     return chain.proceed();
                 }
+                IosNotificationExitState.rememberFrame(view);
                 clipStackedRows(view, true);
                 Canvas canvas = (Canvas) chain.getArgs().get(0);
                 int save = canvas.save();
-                try {
+                try (LayoutInputs foregroundBlur = new LayoutInputs(view)) {
+                    // The sheet already blurs the entire list. The OEM pass switches to a
+                    // second RenderNode and redraws heads-up rows separately during collapse.
+                    foregroundBlur.set("mBlurEffect", null);
                     canvas.clipRect(0f, 0f, view.getWidth(),
                             IosNotificationCenterPresentation.viewportBottom(view));
                     return chain.proceed();
@@ -470,6 +534,7 @@ final class IosNotificationStackHooks {
                 // It also covers ROMs which inline the OEM property/calculator methods.
                 if (chain.getArgs().size() >= 2 && chain.getArgs().get(1) instanceof View) {
                     enforceUnstackedRow((View) chain.getArgs().get(1));
+                    IosNotificationExitState.applyRow((View) chain.getArgs().get(1));
                 }
                 if (chain.getThisObject() != maskedStack || chain.getArgs().size() < 2
                         || !(chain.getArgs().get(0) instanceof Canvas)

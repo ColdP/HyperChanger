@@ -117,6 +117,7 @@ final class IosNotificationAnimationHooks {
                     Object result = chain.proceed();
                     if (chain.getThisObject() instanceof View) {
                         IosNotificationStackHooks.enforceUnstackedRow((View) chain.getThisObject());
+                        IosNotificationExitState.applyRow((View) chain.getThisObject());
                     }
                     return result;
                 } finally {
