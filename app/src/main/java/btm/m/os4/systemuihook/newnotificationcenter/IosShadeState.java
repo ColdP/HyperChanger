@@ -2,33 +2,36 @@ package btm.m.os4.systemuihook.newnotificationcenter;
 
 /** Gesture state independent of the header's delayed Folme animation and render caches. */
 public final class IosShadeState {
-    private static final float GESTURE_DISTANCE_SCALE = 1.2f;
     private boolean dragging;
-    private float nativeFraction;
-    private float dragStartNative;
-    private float dragStartProgress;
+    private float nativeHeight;
+    private float nativeThreshold;
+    private float dragDistance;
     public float progress;
     public boolean controlCenter;
     public boolean switching;
     public float switchFraction = 1f;
 
-    public float gestureTarget(float height, float threshold, boolean tracking) {
-        // Keep overscroll until AFTER the gesture distance is scaled. Clamping here
-        // parks the sheet at 1 / scale even though the finger keeps moving.
-        float next = Float.isFinite(height) && Float.isFinite(threshold) && threshold > 0f
-                ? height / threshold : 0f;
+    public float gestureTarget(float height, float threshold, float panelHeight, boolean tracking) {
+        if (Float.isFinite(threshold) && threshold > 0f) nativeThreshold = threshold;
+        float next = Float.isFinite(height) ? height : nativeHeight;
         if (tracking) {
             if (!dragging) {
-                dragStartNative = nativeFraction;
-                dragStartProgress = progress;
+                // The OEM uses a 200px threshold even on a full-screen panel. Use the
+                // measured sheet height instead: one physical pixel of drag moves its edge
+                // by one pixel. Freeze the distance for the duration of this gesture.
+                dragDistance = Float.isFinite(panelHeight) && panelHeight > 0f
+                        ? panelHeight : threshold;
             }
             dragging = true;
-            nativeFraction = next;
-            return fraction(dragStartProgress + (next - dragStartNative) / GESTURE_DISTANCE_SCALE, 1f);
+            float target = progress + (dragDistance > 0f ? (next - nativeHeight) / dragDistance : 0f);
+            nativeHeight = next;
+            // Consume overscroll on every frame, including when already at an endpoint.
+            // Reversing the finger then responds immediately instead of retracing overscroll.
+            return fraction(target, 1f);
         }
         dragging = false;
-        nativeFraction = fraction(next, 1f);
-        return nativeFraction; // Release still reaches the native open/closed endpoint.
+        nativeHeight = next;
+        return fraction(next, threshold); // Release reaches the native open/closed endpoint.
     }
 
     public boolean switchProgress(float value, boolean inSwitch) {
@@ -37,9 +40,9 @@ public final class IosShadeState {
         switching = inSwitch;
         switchFraction = next;
         controlCenter(!inSwitch && next <= 0f);
+        if (!inSwitch && next >= 1f) nativeHeight = nativeThreshold;
         if (inSwitch) {
             dragging = false;
-            nativeFraction = 1f;
             move(1f);
         }
         return true;
@@ -59,12 +62,13 @@ public final class IosShadeState {
         if (visible) {
             progress = 0f;
             dragging = false;
-            nativeFraction = 0f;
+            nativeHeight = 0f;
         }
     }
 
     public void notification() {
         controlCenter = false;
+        nativeHeight = nativeThreshold;
     }
 
     public void clear() {
@@ -73,6 +77,8 @@ public final class IosShadeState {
         switching = false;
         switchFraction = 1f;
         dragging = false;
-        nativeFraction = 0f;
+        nativeHeight = 0f;
+        nativeThreshold = 0f;
+        dragDistance = 0f;
     }
 }

@@ -12,9 +12,10 @@ import java.util.WeakHashMap;
 
 import btm.m.os4.systemuihook.hypermusiccover.Xp;
 
-/** Retains OEM notification stacking without changing the shade's keyguard state. */
+/** Keeps focus/media cards expanded while retaining OEM stacking for ordinary notifications. */
 final class IosNotificationStackHooks {
     private static final WeakHashMap<View, ArrayList<Path>> STACK_MASKS = new WeakHashMap<>();
+    private static final WeakHashMap<View, Boolean> SYSTEM_EXPANSION = new WeakHashMap<>();
     private static ViewGroup maskedStack;
 
     private static final class RowPosition {
@@ -37,6 +38,25 @@ final class IosNotificationStackHooks {
 
     private IosNotificationStackHooks() {}
 
+    /**
+     * The OEM uses this exact predicate for lock-screen stacking.  Media and focus rows are
+     * always laid out at their full height and never used as a stack mask source or target.
+     */
+    static boolean isFocusOrMediaNotification(View view) {
+        if (view == null) return false;
+        String name = view.getClass().getName();
+        if (name.endsWith(".MiuiMediaHeaderView")) return true;
+        if (!name.endsWith(".ExpandableNotificationRow")) return false;
+        try {
+            Object injector = Xp.callMethod(view, "getInjector");
+            return Boolean.TRUE.equals(Xp.callMethod(injector, "isFocusNotification"));
+        } catch (Throwable ignored) {
+            // Older SystemUI builds do not expose the injector method. Keep the row in the
+            // normal path there instead of making a whole notification stack unrenderable.
+            return false;
+        }
+    }
+
     static void clipStackedRows(View stack, boolean active) {
         if (!active || !(stack instanceof ViewGroup)) {
             restoreStackedRows();
@@ -55,6 +75,7 @@ final class IosNotificationStackHooks {
             if (!child.isShown() || child.getAlpha() <= 0f || child.getWidth() <= 0
                     || (!name.endsWith(".ExpandableNotificationRow")
                     && !name.endsWith(".MiuiMediaHeaderView"))) continue;
+            if (isFocusOrMediaNotification(child)) continue;
             try {
                 int height = ((Number) Xp.callMethod(child, "getActualHeight")).intValue();
                 float scaleX = ((Number) Xp.callMethod(child, "getSuperScaleX")).floatValue();
@@ -101,7 +122,72 @@ final class IosNotificationStackHooks {
         STACK_MASKS.clear();
     }
 
+    static void restoreExpandedRows(View stack) {
+        for (View row : new ArrayList<>(SYSTEM_EXPANSION.keySet())) {
+            try {
+                Xp.callMethod(row, "setSystemExpanded", SYSTEM_EXPANSION.get(row));
+                Xp.callMethod(row, "scheduleUpdateProperties");
+            } catch (Throwable ignored) {}
+        }
+        SYSTEM_EXPANSION.clear();
+        if (stack instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) stack;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View row = group.getChildAt(i);
+                if (!isFocusOrMediaNotification(row)) continue;
+                try {
+                    Xp.callMethod(row, "scheduleUpdateProperties");
+                } catch (Throwable ignored) {}
+            }
+        }
+    }
+
+    private static void expandSpecialRows(ViewGroup stack) {
+        for (int i = 0; i < stack.getChildCount(); i++) {
+            View row = stack.getChildAt(i);
+            if (!row.getClass().getName().endsWith(".ExpandableNotificationRow")) continue;
+            try {
+                if (isFocusOrMediaNotification(row)) {
+                    if (!SYSTEM_EXPANSION.containsKey(row)) {
+                        SYSTEM_EXPANSION.put(row,
+                                Boolean.TRUE.equals(Xp.getObjectField(row, "mIsSystemExpanded")));
+                    }
+                    // System expansion supplies the default while preserving a user's
+                    // explicit expand/collapse choice; never write mUserExpanded.
+                    if (!Boolean.TRUE.equals(Xp.getObjectField(row, "mIsSystemExpanded"))) {
+                        Xp.callMethod(row, "setSystemExpanded", true);
+                        // resetViewStates consumes the injector's cached height.
+                        Xp.callMethod(row, "getIntrinsicHeight");
+                    }
+                } else if (SYSTEM_EXPANSION.containsKey(row)) {
+                    Xp.callMethod(row, "setSystemExpanded", SYSTEM_EXPANSION.remove(row));
+                }
+            } catch (Throwable ignored) {}
+        }
+    }
+
     static void install(ClassLoader loader) {
+        // EMPTY is the OEM's neutral stacking result: no translation, shrink, clipping or
+        // dimming. Intercept the calculator so every downstream property uses the same result.
+        try {
+            Class<?> info = Xp.findClass(
+                    "com.miui.systemui.notification.view.NotificationRowStackingInfo", loader);
+            Object unstacked = info.getField("EMPTY").get(null);
+            Class<?> interactor = Xp.findClass(
+                    "com.miui.systemui.notification.domain.interactor.NotificationStackingInteractor", loader);
+            io.github.libxposed.api.XposedInterface.Hooker specialRows = chain -> {
+                if (IosNotificationCenterPresentation.isActive() && !chain.getArgs().isEmpty()
+                        && chain.getArgs().get(0) instanceof View
+                        && isFocusOrMediaNotification((View) chain.getArgs().get(0))) return unstacked;
+                return chain.proceed();
+            };
+            Xp.hookAll(interactor, "calculateStackingInfo", specialRows);
+            Xp.hookAll(interactor, "updateParentStackingInfo", specialRows);
+            Xp.hookAll(interactor, "updateChildStackingInfo", specialRows);
+            Xp.log("[IOSShade] focus/media notification stacking excluded");
+        } catch (Throwable error) {
+            Xp.log("[IOSShade] focus/media notification stacking unavailable: " + error);
+        }
         try {
             Class<?> stack = Xp.findClass(
                     "com.android.systemui.statusbar.notification.stack.NotificationStackScrollLayout", loader);
@@ -145,6 +231,9 @@ final class IosNotificationStackHooks {
                 Object ambient = chain.getArgs().get(0);
                 Object host = Xp.getObjectField(chain.getThisObject(), "mHostView");
                 if (!(host instanceof android.view.View)) return chain.proceed();
+                if (IosNotificationCenterPresentation.isActive() && host instanceof ViewGroup) {
+                    expandSpecialRows((ViewGroup) host);
+                }
                 float original = ((Number) Xp.getObjectField(ambient, "mStackY")).floatValue();
                 float offset = IosNotificationCenterPresentation.stackOffset((android.view.View) host, original);
                 if (offset <= .5f) return chain.proceed();

@@ -90,8 +90,13 @@ public final class ShadeLayer {
     }
 
     public static void onRawExpansion(float height, float threshold, boolean tracking, boolean animate) {
-        if (!sIosEnabled || IOS.controlCenter || IOS.switching) return;
-        float target = IOS.gestureTarget(height, threshold, tracking);
+        if (!sIosEnabled) return;
+        float panelHeight = sRoot != null ? sRoot.getHeight() : 0f;
+        if (IOS.controlCenter || IOS.switching) {
+            IOS.gestureTarget(height, threshold, panelHeight, false);
+            return;
+        }
+        float target = IOS.gestureTarget(height, threshold, panelHeight, tracking);
         IosNotificationCenterPresentation.setGestureActive(tracking);
         if (tracking) {
             cancelIosSettle();
@@ -100,6 +105,12 @@ public final class ShadeLayer {
             return;
         }
         // Only the release is animated. A new drag cancels this before its first write.
+        if (!animate) {
+            cancelIosSettle();
+            IOS.move(target);
+            applyIosProgress();
+            return;
+        }
         if (sIosSettle != null && sIosSettleTarget == target) return;
         cancelIosSettle();
         if (Math.abs(IOS.progress - target) < 0.001f) {
@@ -151,7 +162,7 @@ public final class ShadeLayer {
     public static void onNotificationHidden() {
         if (IOS.switching) return;
         cancelIosSettle();
-        IOS.gestureTarget(0f, 1f, false);
+        IOS.gestureTarget(0f, 0f, 0f, false);
         IOS.move(0f);
         if (sIosEnabled) hideIosLayer();
         IosNotificationCenterPresentation.finishPresentation();

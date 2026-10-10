@@ -77,6 +77,7 @@ public final class IosNotificationCenterPresentation {
     }
 
     public static void update(float fraction, float layoutFraction, boolean enabled, View sheet) {
+        float previousProgress = progress;
         float previousLayout = layoutProgress;
         progress = enabled ? Math.max(0f, Math.min(1f, fraction)) : 0f;
         layoutProgress = enabled ? Math.max(0f, Math.min(1f, layoutFraction)) : 0f;
@@ -84,6 +85,7 @@ public final class IosNotificationCenterPresentation {
         if (progress <= 0f) {
             if (host != null) host.setAlpha(0f);
             IosNotificationStackHooks.restoreStackedRows();
+            if (previousProgress > 0f) IosNotificationStackHooks.restoreExpandedRows(stack);
             if (notificationHeader == null || oldHeader == null) findHeader();
             hideNativeHeader();
             return;
@@ -92,7 +94,7 @@ public final class IosNotificationCenterPresentation {
         host.setAlpha(progress);
         if (status != null) status.setAlpha(progress * progress * (3f - 2f * progress));
         sync();
-        if (Math.abs(layoutProgress - previousLayout) > .01f) requestStackUpdate(stack);
+        if (layoutProgress != previousLayout) requestStackUpdate(stack);
     }
 
     public static void release() {
@@ -801,6 +803,7 @@ public final class IosNotificationCenterPresentation {
 
     private static void releasePresentation() {
         IosNotificationStackHooks.restoreStackedRows();
+        IosNotificationStackHooks.restoreExpandedRows(stack);
         if (observer != null && observer.isAlive()) observer.removeOnPreDrawListener(FRAME);
         observer = null;
         if (oldHeader != null) {
