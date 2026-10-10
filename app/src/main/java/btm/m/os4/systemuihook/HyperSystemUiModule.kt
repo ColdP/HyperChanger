@@ -82,6 +82,8 @@ import org.json.JSONObject
 
 private enum class NotificationMaterialType { NORMAL, MEDIA, FOCUS }
 
+private data class ClockHorizontalDrag(val downX: Float, val initialOffset: Float)
+
 private data class VolumeTuningSnapshot(
     val blurRadius: Int,
     val glassStrength: Int,
@@ -293,6 +295,7 @@ private const val CONTROL_CENTER_POWER_PATH =
 private val gestureMaterialOverlays = Collections.synchronizedMap(WeakHashMap<View, View>())
 
 class HyperSystemUiModule : XposedModule() {
+    private val controlCenterHeaderHeightHook by lazy { ControlCenterHeaderHeightHook(this) }
     internal fun installHook(member: java.lang.reflect.Executable) = hook(member)
 
     override fun onSystemServerStarting(param: SystemServerStartingParam) {
@@ -353,6 +356,86 @@ class HyperSystemUiModule : XposedModule() {
             }
             log(Log.INFO, TAG, "Installed app navigation hooks for $packageName")
         }.onFailure { error -> log(Log.ERROR, TAG, "Could not install app navigation hooks for $packageName", error) }
+    }
+
+    /** Override MiShare's app-side AirDrop availability checks when enabled for its scope. */
+    private fun installAirDropForceEnableHooks(param: PackageLoadedParam) {
+        val preferences = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
+        if (!preferences.getBoolean(KEY_AIRDROP_FORCE_ENABLE, false)) return
+        installAirDropDeviceProfileHooks()
+        val availability = param.defaultClassLoader.loadClass(AIRDROP_AVAILABILITY_CLASS)
+        listOf("c", "e").forEach { methodName ->
+            val method = availability.getDeclaredMethod(methodName).apply { isAccessible = true }
+            hook(method)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("hyperchanger:airdrop-force-enable:$methodName")
+                .intercept { true }
+        }
+        // The settings entry immediately goes through AirDropCtaGateActivity. When the
+        // force-enable switch is on, allow that gate to continue to the actual Mi Share page;
+        // the transfer implementation and its runtime capability checks remain untouched.
+        val ctaGate = param.defaultClassLoader.loadClass("com.miui.mishare.connectivity.R0")
+        val ctaMethod = ctaGate.getDeclaredMethod("p", android.content.Context::class.java)
+            .apply { isAccessible = true }
+        hook(ctaMethod)
+            .setExceptionMode(ExceptionMode.PROTECTIVE)
+            .setId("hyperchanger:airdrop-force-enable:cta")
+            .intercept { true }
+        log(Log.INFO, TAG, "Installed MiShare AirDrop availability hooks in ${param.packageName}")
+    }
+
+    /** Keep the Xiaomi 18 Pro Max / madrid identity local to the Mi Share process. */
+    private fun installAirDropDeviceProfileHooks() {
+        val spoofedProperties = mapOf(
+            "ro.product.model" to "Xiaomi 18 Pro Max",
+            "ro.product.marketname" to "Xiaomi 18 Pro Max",
+            "ro.product.device" to "madrid",
+            "ro.product.name" to "madrid",
+            "ro.build.product" to "madrid",
+            "ro.product.brand" to "Xiaomi",
+            "ro.product.manufacturer" to "Xiaomi",
+        )
+        runCatching {
+            val properties = Class.forName("android.os.SystemProperties", false, null)
+            properties.declaredMethods
+                .filter { method ->
+                    java.lang.reflect.Modifier.isStatic(method.modifiers) &&
+                        method.name in setOf("get", "getBoolean", "getInt", "getLong") &&
+                        method.parameterTypes.firstOrNull() == String::class.java
+                }
+                .forEach { method ->
+                    method.isAccessible = true
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("hyperchanger:mishare-device-profile:${method.name}:${method.parameterTypes.size}")
+                        .intercept { chain ->
+                            val value = spoofedProperties[chain.getArg(0) as? String]
+                                ?: return@intercept chain.proceed()
+                            when (method.name) {
+                                "get" -> value
+                                "getBoolean" -> value.equals("true", ignoreCase = true)
+                                "getInt" -> value.toIntOrNull() ?: 0
+                                "getLong" -> value.toLongOrNull() ?: 0L
+                                else -> chain.proceed()
+                            }
+                        }
+                }
+        }.onFailure { error -> log(Log.WARN, TAG, "Could not install Mi Share property spoof", error) }
+
+        runCatching {
+            mapOf(
+                "MODEL" to "Xiaomi 18 Pro Max",
+                "DEVICE" to "madrid",
+                "PRODUCT" to "madrid",
+                "BRAND" to "Xiaomi",
+                "MANUFACTURER" to "Xiaomi",
+            ).forEach { (fieldName, value) ->
+                android.os.Build::class.java.getDeclaredField(fieldName).apply {
+                    isAccessible = true
+                    set(null, value)
+                }
+            }
+        }.onFailure { error -> log(Log.WARN, TAG, "Could not update Mi Share Build identity", error) }
     }
 
     private fun installXiaomiHealthWatchFaceTrialBypass(loader: ClassLoader) {
@@ -649,6 +732,11 @@ class HyperSystemUiModule : XposedModule() {
             }.onFailure { error -> log(Log.ERROR, TAG, "Could not install Settings app entry hook", error) }
             return
         }
+        if (param.packageName == AIRDROP_PACKAGE) {
+            runCatching { installAirDropForceEnableHooks(param) }
+                .onFailure { error -> log(Log.ERROR, TAG, "Could not install MiShare AirDrop hooks", error) }
+            return
+        }
         if (param.packageName == LOCKSCREEN_WALLPAPER) {
             // HyperMusicCover's original Java WallpaperProbe is registered separately through
             // java_init.list and owns this process's GL upload hook.
@@ -663,6 +751,7 @@ class HyperSystemUiModule : XposedModule() {
             val preferences = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
             when (param.packageName) {
                 SYSTEM_UI, SYSTEM_UI_PLUGIN -> {
+                    controlCenterHeaderHeightHook.install(param.defaultClassLoader, preferences)
                     installCustomTileHooks(param.defaultClassLoader, preferences)
                     if (param.packageName == SYSTEM_UI) {
                         synchronized(controlCenterButtonsLock) {
@@ -755,6 +844,10 @@ class HyperSystemUiModule : XposedModule() {
                     if (param.packageName == SYSTEM_UI && !systemUiLockscreenClockWidthHookInstalled) {
                         installLockscreenBigClockWidthHook(param.defaultClassLoader, preferences, "systemui")
                         systemUiLockscreenClockWidthHookInstalled = true
+                    }
+                    if (param.packageName == SYSTEM_UI && !systemUiLockscreenClockHorizontalHookInstalled) {
+                        installLockscreenClockHorizontalRectHook(param.defaultClassLoader, preferences, "systemui")
+                        systemUiLockscreenClockHorizontalHookInstalled = true
                     }
                     if (!lockscreenCarrierHideHookInstalled) {
                         lockscreenCarrierHideHookInstalled = installLockscreenCarrierHideHook(
@@ -869,6 +962,11 @@ class HyperSystemUiModule : XposedModule() {
                         installLockscreenBigClockWidthHook(param.defaultClassLoader, preferences, "aod")
                         installLockscreenBigClockEditorWidthHook(param.defaultClassLoader, preferences)
                         aodLockscreenClockWidthHookInstalled = true
+                    }
+                    if (!aodLockscreenClockHorizontalHookInstalled) {
+                        installLockscreenClockHorizontalRectHook(param.defaultClassLoader, preferences, "aod")
+                        installLockscreenClockHorizontalEditorHook(param.defaultClassLoader, preferences)
+                        aodLockscreenClockHorizontalHookInstalled = true
                     }
                     if (!aodLockscreenTemplateLimitHookInstalled) {
                         installAodLockscreenTemplateLimitHook(param.defaultClassLoader, preferences)
@@ -1155,6 +1253,7 @@ class HyperSystemUiModule : XposedModule() {
         val handler = Handler(Looper.getMainLooper())
         listOf(500L, 1500L, 3000L, 6000L, 10000L, 16000L).forEach { delay ->
             handler.postDelayed({
+                controlCenterHeaderHeightHook.install(classLoader, preferences)
                 val complete = controlCenterEditButtonHookInstalled &&
                     controlCenterTopButtonsHookInstalled &&
                     controlCenterMainPanelHookInstalled
@@ -4632,6 +4731,7 @@ class HyperSystemUiModule : XposedModule() {
                 if (controlCenterClassDiscoveryInProgress.get() == true) return
                 controlCenterClassDiscoveryInProgress.set(true)
                 try {
+                controlCenterHeaderHeightHook.onClassLoaded(loadedClass, preferences)
                 if ((loadedClass.name == CONTROL_CENTER_EDIT_BUTTON_CONTROLLER_CLASS ||
                     loadedClass.name == CONTROL_CENTER_CONTENT_DISTRIBUTOR_CLASS ||
                     loadedClass.name == CONTROL_CENTER_MAIN_PANEL_CONTROLLER_CLASS ||
@@ -5504,6 +5604,355 @@ class HyperSystemUiModule : XposedModule() {
             log(Log.INFO, TAG, "Installed lockscreen big-clock editor width hook")
         }.onFailure { error ->
             log(Log.WARN, TAG, "Could not install lockscreen big-clock editor width hook", error)
+        }
+    }
+
+    private fun installLockscreenClockHorizontalRectHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+        scope: String,
+    ) {
+        runCatching {
+            val baseClass = classLoader.loadClass("com.miui.clock.allInOne.AllInOneBase")
+            val notificationField = baseClass.getDeclaredField("mInNotificationState").apply { isAccessible = true }
+            val method = baseClass
+                .getDeclaredMethod("setClockViewRect", Rect::class.java)
+                .apply { isAccessible = true }
+            hook(method)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("lockscreen-clock-horizontal-rect:$scope")
+                .intercept { chain ->
+                    val clock = chain.thisObject as? View ?: return@intercept chain.proceed()
+                    val sourceRect = chain.getArg(0) as? Rect ?: return@intercept chain.proceed()
+                    val rect = Rect(sourceRect)
+                    val offset = if (preferences.getBoolean(KEY_LOCKSCREEN_CLOCK_HORIZONTAL_MOVE, false) &&
+                        !notificationField.getBoolean(clock)
+                    ) {
+                        clockHorizontalLiveOffsets[clock]
+                            ?: readLockscreenClockHorizontalOffset(clock.context)
+                    } else 0f
+                    synchronized(clockHorizontalRectOffsets) {
+                        val previous = clockHorizontalRectOffsets[clock]
+                        val previousShift = previous?.second ?: 0
+                        // Only undo the old shift when the OEM is reusing the same
+                        // already-shifted rectangle. A newly computed baseline must
+                        // remain untouched, otherwise an untouched clock drifts on
+                        // every layout pass.
+                        if (previous != null && sourceRect == previous.first) {
+                            rect.offset(-previousShift, 0)
+                        }
+                        val screenWidth = clock.resources.displayMetrics.widthPixels.coerceAtLeast(1)
+                        // The editor supplies a full-screen envelope for some clock
+                        // styles, so edge-space clamping would reduce every shift to
+                        // zero. The saved offset is already bounded to a sensible
+                        // horizontal range and is applied symmetrically here.
+                        val shift = (screenWidth * offset).roundToInt()
+                        rect.offset(shift, 0)
+                        clockHorizontalRectOffsets[clock] = Rect(rect) to shift
+                    }
+                    chain.proceed()
+                }
+            log(Log.INFO, TAG, "Installed lockscreen clock horizontal rect hook for $scope")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install lockscreen clock horizontal rect hook for $scope", error)
+        }
+    }
+
+    private fun installLockscreenClockHorizontalEditorHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
+        runCatching {
+            val wallpaperClass = classLoader.loadClass(
+                "com.miui.keyguard.editor.edit.wallpaper.CombinedWallpaperView",
+            )
+            val dispatchTouchMethod = wallpaperClass
+                .getDeclaredMethod("dispatchTouchEvent", MotionEvent::class.java)
+                .apply { isAccessible = true }
+            hook(dispatchTouchMethod)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("lockscreen-clock-horizontal-editor-wallpaper-touch")
+                .intercept { chain ->
+                    val wallpaper = chain.thisObject as? View
+                    val event = chain.getArg(0) as? MotionEvent
+                    val eventX = event?.x
+                    val editor = wallpaper?.let { findAllInOneEditorForWallpaper(it) }
+                        ?: activeLockscreenClockEditor?.get()
+                    if (editor != null) {
+                        activeLockscreenClockEditor = WeakReference(editor)
+                    }
+                    val result = chain.proceed()
+                    val resolvedEditor = editor
+                        ?: wallpaper?.let { findAllInOneEditorForWallpaper(it) }
+                        ?: activeLockscreenClockEditor?.get()
+                    if (resolvedEditor != null && event != null) {
+                        activeLockscreenClockEditor = WeakReference(resolvedEditor)
+                        handleLockscreenClockHorizontalTouch(resolvedEditor, event, preferences, eventX)
+                    }
+                    result
+                }
+            wallpaperClass.getDeclaredMethod(
+                "setObserveTouchClickListener",
+                classLoader.loadClass("com.miui.keyguard.editor.edit.wallpaper.ObserverClickListener"),
+            ).apply { isAccessible = true }.let { setter ->
+                hook(setter)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("lockscreen-clock-horizontal-editor-listener")
+                    .intercept { chain ->
+                        val listener = chain.getArg(0)
+                        findAllInOneEditorInObject(listener, IdentityHashMap(), 0)?.let { editor ->
+                            activeLockscreenClockEditor = WeakReference(editor)
+                        }
+                        chain.proceed()
+                    }
+            }
+            lockscreenClockCombinedTouchHookInstalled = true
+
+            val editorClass = classLoader.loadClass(ALL_IN_ONE_TEMPLATE_VIEW_CLASS)
+            val touchMethod = editorClass.getDeclaredMethod("onObservedTouchEvent", MotionEvent::class.java)
+            hook(touchMethod)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("lockscreen-clock-horizontal-editor-touch")
+                .intercept { chain ->
+                    val view = chain.thisObject as? View
+                    val event = chain.getArg(0) as? MotionEvent
+                    if (view != null) {
+                        activeLockscreenClockEditor = WeakReference(view)
+                    }
+                    val result = chain.proceed()
+                    if (!lockscreenClockCombinedTouchHookInstalled && view != null && event != null) {
+                        handleLockscreenClockHorizontalTouch(view, event, preferences)
+                    }
+                    result
+                }
+            editorClass.declaredMethods.filter { it.name == "onMiuiClockViewCreated" }.forEachIndexed { index, method ->
+                method.isAccessible = true
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("lockscreen-clock-horizontal-editor-create:$index")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        val view = chain.thisObject as? View
+                        if (view != null && preferences.getBoolean(KEY_LOCKSCREEN_CLOCK_HORIZONTAL_MOVE, false)) {
+                            clockHorizontalEditorShifts.remove(view)
+                            clockHorizontalEditorClockShifts.remove(view)
+                            applyEditorClockHorizontalOffset(
+                                view,
+                                readLockscreenClockHorizontalOffset(view.context),
+                            )
+                        }
+                        result
+                    }
+            }
+            editorClass.methods.firstOrNull { it.name == "generateEditFrames" && it.parameterCount == 0 }
+                ?.let { method ->
+                    method.isAccessible = true
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("lockscreen-clock-horizontal-editor-generate-frames")
+                        .intercept { chain ->
+                            val result = chain.proceed()
+                            val view = chain.thisObject as? View
+                            if (view != null && preferences.getBoolean(KEY_LOCKSCREEN_CLOCK_HORIZONTAL_MOVE, false)) {
+                                clockHorizontalEditorShifts.remove(view)
+                                applyEditorClockHorizontalOffset(
+                                    view,
+                                    readLockscreenClockHorizontalOffset(view.context),
+                                )
+                            }
+                            result
+                        }
+                }
+            hook(editorClass.getDeclaredMethod("getFramesComplete"))
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("lockscreen-clock-horizontal-editor-frames")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    val view = chain.thisObject as? View
+                    if (view != null && preferences.getBoolean(KEY_LOCKSCREEN_CLOCK_HORIZONTAL_MOVE, false)) {
+                        applyEditorClockHorizontalOffset(view, readLockscreenClockHorizontalOffset(view.context))
+                    }
+                    result
+                }
+            log(Log.INFO, TAG, "Installed lockscreen clock horizontal editor hook")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install lockscreen clock horizontal editor hook", error)
+        }
+    }
+
+    private fun handleLockscreenClockHorizontalTouch(
+        editor: View,
+        event: MotionEvent,
+        preferences: SharedPreferences,
+        eventX: Float? = null,
+    ) {
+        if (!preferences.getBoolean(KEY_LOCKSCREEN_CLOCK_HORIZONTAL_MOVE, false) ||
+            event.pointerCount != 1
+        ) {
+            if (event.actionMasked == MotionEvent.ACTION_CANCEL ||
+                event.actionMasked == MotionEvent.ACTION_UP
+            ) {
+                clearEditorClockHorizontalPreview(editor)
+                clockHorizontalDrags.remove(editor)
+            }
+            return
+        }
+        val x = eventX?.takeIf { it.isFinite() } ?: event.x
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                clockHorizontalDrags[editor] = ClockHorizontalDrag(
+                    x,
+                    readLockscreenClockHorizontalOffset(editor.context),
+                )
+            }
+            MotionEvent.ACTION_MOVE,
+            MotionEvent.ACTION_UP,
+            -> {
+                val drag = clockHorizontalDrags[editor] ?: return
+                val width = editor.resources.displayMetrics.widthPixels.coerceAtLeast(1)
+                val offset = (drag.initialOffset + (x - drag.downX) / width)
+                    .coerceIn(-0.45f, 0.45f)
+                if (event.actionMasked == MotionEvent.ACTION_MOVE) {
+                    applyEditorClockHorizontalPreview(
+                        editor,
+                        ((offset - drag.initialOffset) * width).roundToInt(),
+                    )
+                    return
+                }
+                clearEditorClockHorizontalPreview(editor)
+                // Commit after the OEM observer has processed the same event so its
+                // vertical drag and resize state remains authoritative.
+                applyEditorClockHorizontalOffset(editor, offset)
+                if (event.actionMasked == MotionEvent.ACTION_UP) {
+                    if (!writeLockscreenClockHorizontalOffset(editor.context, offset)) {
+                        log(Log.WARN, TAG, "Could not save lockscreen clock horizontal position")
+                    }
+                    clockHorizontalDrags.remove(editor)
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> clockHorizontalDrags.remove(editor)
+        }
+    }
+
+    private fun applyEditorClockHorizontalPreview(editor: View, delta: Int) {
+        listOf("mTimeAreaFrame", "mKgTextAreaFrame", "cornerHandleView").forEach { name ->
+            runCatching {
+                findField(editor.javaClass, name)?.get(editor)
+            }.getOrNull()?.let { (it as? View)?.translationX = delta.toFloat() }
+        }
+        runCatching {
+            editor.javaClass.methods.firstOrNull {
+                it.name == "getMKgSignatureAreaFrame" && it.parameterCount == 0
+            }?.invoke(editor)
+        }.getOrNull()?.let { (it as? View)?.translationX = delta.toFloat() }
+        val base = clockHorizontalEditorClockShifts[editor] ?: 0
+        forEachEditorClock(editor) { clock ->
+            clock.translationX = (base + delta).toFloat()
+        }
+    }
+
+    private fun clearEditorClockHorizontalPreview(editor: View) {
+        applyEditorClockHorizontalPreview(editor, 0)
+    }
+
+    private fun findAllInOneEditorForWallpaper(wallpaper: View): View? {
+        val listener = runCatching {
+            wallpaper.javaClass.getDeclaredField("touchClickListener")
+                .apply { isAccessible = true }
+                .get(wallpaper)
+        }.getOrNull() ?: return null
+        return findAllInOneEditorInObject(listener, IdentityHashMap(), 0)
+    }
+
+    private fun findAllInOneEditorInObject(
+        value: Any?,
+        seen: IdentityHashMap<Any, Boolean>,
+        depth: Int,
+    ): View? {
+        if (value == null || depth > 3 || seen.put(value, true) != null) return null
+        if (value is View && value.javaClass.name == ALL_IN_ONE_TEMPLATE_VIEW_CLASS) return value
+        if (value is View) return null
+        var type: Class<*>? = value.javaClass
+        while (type != null && type != Any::class.java) {
+            type.declaredFields.forEach { field ->
+                if (java.lang.reflect.Modifier.isStatic(field.modifiers)) return@forEach
+                runCatching {
+                    field.isAccessible = true
+                    findAllInOneEditorInObject(field.get(value), seen, depth + 1)
+                }.getOrNull()?.let { return it }
+            }
+            type = type.superclass
+        }
+        return null
+    }
+
+    private fun applyEditorClockHorizontalOffset(editor: View, offset: Float) {
+        val shift = (editor.resources.displayMetrics.widthPixels.coerceAtLeast(1) * offset).roundToInt()
+        val previousFrameShift = clockHorizontalEditorShifts[editor] ?: 0
+        val frameDelta = shift - previousFrameShift
+        if (frameDelta != 0) {
+            listOf("mTimeAreaFrame", "mKgTextAreaFrame", "cornerHandleView").forEach { name ->
+                moveEditorFrame(findField(editor.javaClass, name)?.get(editor), frameDelta)
+            }
+            moveEditorFrame(
+                editor.javaClass.methods.firstOrNull { it.name == "getMKgSignatureAreaFrame" && it.parameterCount == 0 }
+                    ?.invoke(editor),
+                frameDelta,
+            )
+        }
+        val previousClockShift = clockHorizontalEditorClockShifts[editor] ?: 0
+        val clockDelta = shift - previousClockShift
+        if (clockDelta != 0) {
+            forEachEditorClock(editor) { clock ->
+                clock.translationX += clockDelta.toFloat()
+            }
+        }
+        clockHorizontalEditorShifts[editor] = shift
+        clockHorizontalEditorClockShifts[editor] = shift
+    }
+
+    private fun forEachEditorClock(editor: View, block: (View) -> Unit) {
+        val seen = Collections.newSetFromMap(IdentityHashMap<View, Boolean>())
+        listOf("getMiuiClockView", "getForeMiuiClockView").forEach { name ->
+            val wrapper = runCatching {
+                editor.javaClass.methods.firstOrNull { it.name == name && it.parameterCount == 0 }
+                    ?.invoke(editor)
+            }.getOrNull() ?: return@forEach
+            val controller = runCatching { findField(wrapper.javaClass, "mMiuiClockController")?.get(wrapper) }
+                .getOrNull() ?: return@forEach
+            val clock = runCatching { findField(controller.javaClass, "mClockView")?.get(controller) as? View }
+                .getOrNull() ?: return@forEach
+            if (isAllInOneClock(clock) && seen.add(clock)) block(clock)
+        }
+    }
+
+    private fun isAllInOneClock(view: View): Boolean {
+        var type: Class<*>? = view.javaClass
+        while (type != null) {
+            if (type.name == "com.miui.clock.allInOne.AllInOneBase") return true
+            type = type.superclass
+        }
+        return false
+    }
+
+    private fun findField(type: Class<*>, name: String): java.lang.reflect.Field? {
+        var current: Class<*>? = type
+        while (current != null) {
+            runCatching {
+                return current.getDeclaredField(name).apply { isAccessible = true }
+            }
+            current = current.superclass
+        }
+        return null
+    }
+
+    private fun moveEditorFrame(frame: Any?, delta: Int) {
+        val view = frame as? View ?: return
+        view.offsetLeftAndRight(delta)
+        runCatching {
+            val param = view.javaClass.getDeclaredField("mParam").apply { isAccessible = true }.get(view)
+            val rect = param?.javaClass?.getDeclaredField("rect")?.apply { isAccessible = true }?.get(param) as? Rect
+            rect?.offset(delta, 0)
         }
     }
 
@@ -8749,6 +9198,11 @@ class HyperSystemUiModule : XposedModule() {
                         applyMiniPlayerMaterial(view, appearance, classLoader)
                     }.onFailure { error ->
                         log(Log.ERROR, TAG, "Could not initialize mini player material", error)
+                    }
+                },
+                onImmersiveRequest = {
+                    synchronized(lockscreenMiniPlayerControllers) {
+                        lockscreenMiniPlayerControllers[parent]?.requestImmersiveForCurrentMedia()
                     }
                 },
             )
@@ -13803,6 +14257,8 @@ class HyperSystemUiModule : XposedModule() {
 
     companion object {
         private const val SETTINGS_PACKAGE = "com.android.settings"
+        private const val AIRDROP_PACKAGE = "com.miui.mishare.connectivity"
+        private const val AIRDROP_AVAILABILITY_CLASS = "com.miui.mishare.connectivity.c"
         private const val SETTINGS_HEADER_ID = 0x4843_0001L
         private const val KEY_SETTINGS_APP_ENTRY_POSITION = "settings_app_entry_position"
         private const val KEY_HIDE_APP_ICON = "hide_app_icon"
@@ -14375,6 +14831,14 @@ private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_d
         private var systemUiNativeClockScalerHookInstalled = false
         private var systemUiLockscreenClockColonHookInstalled = false
         private var systemUiLockscreenClockWidthHookInstalled = false
+        private var systemUiLockscreenClockHorizontalHookInstalled = false
+        private val clockHorizontalRectOffsets = WeakHashMap<View, Pair<Rect, Int>>()
+        private val clockHorizontalLiveOffsets = WeakHashMap<View, Float>()
+        private val clockHorizontalEditorShifts = WeakHashMap<View, Int>()
+        private val clockHorizontalEditorClockShifts = WeakHashMap<View, Int>()
+        private val clockHorizontalDrags = WeakHashMap<View, ClockHorizontalDrag>()
+        @Volatile private var activeLockscreenClockEditor: WeakReference<View>? = null
+        private var lockscreenClockCombinedTouchHookInstalled = false
         private var lockscreenCarrierHideHookInstalled = false
         private var fingerprintIconHookInstalled = false
         private var systemUiDepthHookInstalled = false
@@ -14393,6 +14857,7 @@ private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_d
         private var themeManagerClockMaterialLimitHookInstalled = false
         private var aodLockscreenClockColonHookInstalled = false
         private var aodLockscreenClockWidthHookInstalled = false
+        private var aodLockscreenClockHorizontalHookInstalled = false
         private var aodLockscreenTemplateLimitHookInstalled = false
         private var statusBarVisibilityHookInstalled = false
         private var stackedMobileSignalHookInstalled = false

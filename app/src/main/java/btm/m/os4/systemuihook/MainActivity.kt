@@ -200,13 +200,14 @@ class MainActivity : ComponentActivity() {
     private val cameraStore by lazy { CameraSettingsStore(this) }
     private val deviceProfileStore by lazy { DeviceProfileStore(this) }
     private val appearanceStore by lazy { SettingsAppearanceStore(this) }
+    private val airDropStore by lazy { AirDropSettingsStore(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = Color.TRANSPARENT
         window.navigationBarColor = Color.TRANSPARENT
-        setContent { Root(hookStore, navigationStore, lockscreenCapsuleStore, cameraStore, deviceProfileStore, appearanceStore) }
+        setContent { Root(hookStore, navigationStore, lockscreenCapsuleStore, cameraStore, deviceProfileStore, appearanceStore, airDropStore) }
     }
 }
 
@@ -336,6 +337,7 @@ private fun Root(
     cameras: CameraSettingsStore,
     deviceProfiles: DeviceProfileStore,
     appearances: SettingsAppearanceStore,
+    airDrop: AirDropSettingsStore,
 ) {
     val service by HookApplication.service.collectAsStateWithLifecycle()
     var settings by remember { mutableStateOf(hooks.settings) }
@@ -344,6 +346,7 @@ private fun Root(
     var cameraSettings by remember { mutableStateOf(cameras.settings) }
     var deviceProfile by remember { mutableStateOf(deviceProfiles.settings) }
     var appearance by remember { mutableStateOf(appearances.settings) }
+    var airDropSettings by remember { mutableStateOf(airDrop.settings) }
     var languageRevision by remember { mutableIntStateOf(0) }
     var userPresets by remember { mutableStateOf(hooks.userShadePresets()) }
     val context = LocalContext.current
@@ -629,6 +632,8 @@ private fun Root(
             cameras.syncRemote(it)
             deviceProfiles.syncRemote(it)
             appearances.syncRemote(it)
+            airDrop.syncRemote(it)
+            ControlCenterHeaderHeightSettingsStore(context).syncRemote(it)
             musicStore.syncRemote(it)
             dockStore.syncRemote(it)
             homeRecentsStore.syncRemote(it)
@@ -638,6 +643,7 @@ private fun Root(
             cameraSettings = cameras.settings
             deviceProfile = deviceProfiles.settings
             appearance = appearances.settings
+            airDropSettings = airDrop.settings
             musicWhitelist = musicStore.apps
             dockSettings = dockStore.settings
             homeRecentsSettings = homeRecentsStore.settings
@@ -687,7 +693,7 @@ private fun Root(
             )
         } else {
         Shell(
-            settings, navigationSettings, lockscreenCapsuleSettings, cameraSettings, deviceProfile, appearance, musicWhitelist, screenRecorder,
+            settings, navigationSettings, lockscreenCapsuleSettings, cameraSettings, deviceProfile, appearance, musicWhitelist, screenRecorder, airDropSettings,
             dockSettings, homeRecentsSettings, service,
             update = { transform ->
                 val before = hooks.settings
@@ -756,6 +762,12 @@ private fun Root(
                 if (before != screenRecorder) markRestartTargets(
                     setOf(ScopeApplication.SCREEN_RECORDER, ScopeApplication.XIAOMI_HEALTH),
                 )
+            },
+            updateAirDrop = { transform ->
+                val before = airDrop.settings
+                airDrop.update(service, transform)
+                airDropSettings = airDrop.settings
+                if (before != airDropSettings) markRestartTargets(setOf(ScopeApplication.AIRDROP))
             },
             suggestedRestartTargets = pendingRestartTargets,
             onRestartedTargets = { restarted -> pendingRestartTargets = pendingRestartTargets - restarted },
@@ -884,6 +896,7 @@ private fun Shell(
     appearance: SettingsAppearanceSettings,
     musicWhitelist: Set<String>,
     screenRecorder: ScreenRecorderSettings,
+    airDropSettings: AirDropSettings,
     dockSettings: DockSettings,
     homeRecentsSettings: HomeRecentsSettings,
     service: XposedService?,
@@ -897,6 +910,7 @@ private fun Shell(
     updateAppearance: ((SettingsAppearanceSettings) -> SettingsAppearanceSettings) -> Unit,
     updateMusicWhitelist: (Set<String>) -> Unit,
     updateScreenRecorder: (((ScreenRecorderSettings) -> ScreenRecorderSettings) -> Unit),
+    updateAirDrop: (((AirDropSettings) -> AirDropSettings) -> Unit),
     suggestedRestartTargets: Set<ScopeApplication>,
     onRestartedTargets: (Set<ScopeApplication>) -> Unit,
     onImportModulePreset: () -> Unit,
@@ -1017,9 +1031,9 @@ private fun Shell(
             LocalPageBackSuppressed provides if (isTop) ({ value -> suppressPageBack = value }) else ({ }),
         ) {
             Detail(
-                detailPage, settings, lockscreenCapsuleSettings, cameras, deviceProfile, appearance, musicWhitelist, dockSettings, homeRecentsSettings,
+                detailPage, settings, lockscreenCapsuleSettings, cameras, deviceProfile, appearance, musicWhitelist, dockSettings, homeRecentsSettings, airDropSettings,
                 update, updateLockscreenCapsule, updateDock, updateHomeRecents, updateCamera,
-                updateDeviceProfile, updateAppearance, updateMusicWhitelist, presetActions,
+                updateDeviceProfile, updateAppearance, updateMusicWhitelist, presetActions, updateAirDrop,
                 openPage = openNestedPage, back = dismissPage,
                 onDebugMode = { showDebug = true }, captcha = captcha,
                 onPickRasterImages = onPickRasterImages, onApplyRasterWallpaper = onApplyRasterWallpaper,
@@ -1262,6 +1276,8 @@ private fun CategoryHome(
 
 @Composable
 private fun OtherPage(
+    airDropSettings: AirDropSettings,
+    updateAirDrop: (((AirDropSettings) -> AirDropSettings) -> Unit),
     screenRecorder: ScreenRecorderSettings,
     update: (((ScreenRecorderSettings) -> ScreenRecorderSettings) -> Unit),
     open: (PageId) -> Unit,
@@ -1286,7 +1302,7 @@ private fun OtherPage(
     AppPage(
     tr("其他", "其他"),
     back,
-    restartScopes = setOf(ScopeApplication.SCREEN_RECORDER, ScopeApplication.XIAOMI_HEALTH),
+    restartScopes = setOf(ScopeApplication.SCREEN_RECORDER, ScopeApplication.XIAOMI_HEALTH, ScopeApplication.AIRDROP),
 ) { padding, scroll ->
     var showSavePathDialog by remember { mutableStateOf(false) }
     var pathDraft by remember(screenRecorder.savePath) { mutableStateOf(screenRecorder.savePath) }
@@ -1338,6 +1354,11 @@ private fun OtherPage(
                             enabled,
                         ).apply()
                     },
+                )
+                SwitchPreference(
+                    title = tr("强制启用隔空投送", "强制启用隔空投送"),
+                    checked = airDropSettings.forceEnable,
+                    onCheckedChange = { enabled -> updateAirDrop { it.copy(forceEnable = enabled) } },
                 )
             }
         }
@@ -1478,6 +1499,34 @@ private fun RearScreen(
     ScopeApplication.THEME_MANAGER,
     ScopeApplication.PERSONAL_ASSISTANT,
 )) { padding, scroll ->
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsState()
+    val rearScreenThemeApplyStore = remember(context) { RearScreenThemeApplySettingsStore(context) }
+    var rearScreenThemeApplyFix by remember { mutableStateOf(rearScreenThemeApplyStore.enabled) }
+    val wallpaperLimitStore = remember(context) { RearScreenWallpaperLimitSettingsStore(context) }
+    var wallpaperLimit by remember { mutableStateOf(wallpaperLimitStore.settings) }
+    var showWallpaperLimitDialog by remember { mutableStateOf(false) }
+    fun updateWallpaperLimit(transform: (RearScreenWallpaperLimitSettings) -> RearScreenWallpaperLimitSettings) {
+        wallpaperLimitStore.update(service, transform)
+        wallpaperLimit = wallpaperLimitStore.settings
+    }
+    LaunchedEffect(service) {
+        service?.let {
+            rearScreenThemeApplyStore.syncRemote(it)
+            rearScreenThemeApplyFix = rearScreenThemeApplyStore.enabled
+            wallpaperLimitStore.syncRemote(it)
+            wallpaperLimit = wallpaperLimitStore.settings
+        }
+    }
+    RearScreenWallpaperLimitDialog(
+        show = showWallpaperLimitDialog && wallpaperLimit.enabled,
+        current = wallpaperLimit.custom,
+        onDismiss = { showWallpaperLimitDialog = false },
+        onSave = { value ->
+            updateWallpaperLimit { it.copy(custom = value) }
+            showWallpaperLimitDialog = false
+        },
+    )
     val apps = rememberRearApps()
     AppList(padding, scroll, 28) {
         item {
@@ -1499,6 +1548,66 @@ private fun RearScreen(
                     summary = tr("查看和管理已导入的自定义背屏应用", "查看和管理已导入的自定义背屏应用"),
                     onClick = { open(PageId.REAR_CUSTOM_CENTER) },
                 )
+            }
+        }
+        item {
+            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                SwitchPreference(
+                    title = tr("主题破解后应用失败", "主题破解后应用失败"),
+                    summary = tr(
+                        "修复主题破解与背屏主题、壁纸授权流程的冲突，保留普通主题破解。需勾选主题壁纸作用域，重启主题壁纸后生效。",
+                        "修复主题破解与背屏主题、壁纸授权流程的冲突，保留普通主题破解。需勾选主题壁纸作用域，重启主题壁纸后生效。",
+                    ),
+                    checked = rearScreenThemeApplyFix,
+                    onCheckedChange = { enabled ->
+                        rearScreenThemeApplyStore.update(service, enabled)
+                        rearScreenThemeApplyFix = enabled
+                    },
+                )
+            }
+        }
+        item {
+            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                SwitchPreference(
+                    title = tr("自定义背屏壁纸上限", "自定义背屏壁纸上限"),
+                    summary = tr(
+                        "系统默认最多 15 张，NFC 卡片不计入。需勾选主题壁纸作用域，重启主题壁纸后生效。",
+                        "系统默认最多 15 张，NFC 卡片不计入。需勾选主题壁纸作用域，重启主题壁纸后生效。",
+                    ),
+                    checked = wallpaperLimit.enabled,
+                    onCheckedChange = { value ->
+                        updateWallpaperLimit { it.copy(enabled = value) }
+                        if (!value) showWallpaperLimitDialog = false
+                    },
+                )
+                AnimatedVisibility(
+                    visible = wallpaperLimit.enabled,
+                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                ) {
+                    Column {
+                        OverlayDropdownPreference(
+                            title = tr("背屏壁纸数量上限", "背屏壁纸数量上限"),
+                            items = listOf(
+                                tr("50", "50"), tr("60", "60"), tr("80", "80"), tr("100", "100"),
+                                tr("自定义", "自定义"),
+                            ),
+                            selectedIndex = wallpaperLimit.mode,
+                            onSelectedIndexChange = { value -> updateWallpaperLimit { it.copy(mode = value) } },
+                        )
+                        AnimatedVisibility(
+                            visible = wallpaperLimit.mode == REAR_WALLPAPER_LIMIT_CUSTOM_MODE,
+                            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                        ) {
+                            ArrowPreference(
+                                title = tr("自定义背屏壁纸数量", "自定义背屏壁纸数量"),
+                                summary = tr("%d 张", "%d 张").format(wallpaperLimit.custom),
+                                onClick = { showWallpaperLimitDialog = true },
+                            )
+                        }
+                    }
+                }
             }
         }
         item {
@@ -3474,6 +3583,7 @@ private fun Detail(
     musicWhitelist: Set<String>,
     dockSettings: DockSettings,
     homeRecentsSettings: HomeRecentsSettings,
+    airDropSettings: AirDropSettings,
     update: ((HookSettings) -> HookSettings) -> Unit,
     updateLockscreenCapsule: ((LockscreenCapsuleSettings) -> LockscreenCapsuleSettings) -> Unit,
     updateDock: ((DockSettings) -> DockSettings) -> Unit,
@@ -3483,6 +3593,7 @@ private fun Detail(
     updateAppearance: ((SettingsAppearanceSettings) -> SettingsAppearanceSettings) -> Unit,
     updateMusicWhitelist: (Set<String>) -> Unit,
     presetActions: ShadePresetActions,
+    updateAirDrop: (((AirDropSettings) -> AirDropSettings) -> Unit),
     onDebugMode: () -> Unit,
     captcha: String,
     onPickRasterImages: () -> Unit,
@@ -3582,7 +3693,7 @@ private fun Detail(
         PageId.REAR_SCREEN -> RearScreen(settings, update, musicWhitelist, updateMusicWhitelist, openPage, back)
         PageId.REAR_CUSTOM_CENTER -> CustomRearScreenCenter(back)
         PageId.REAR_MUSIC_APPS -> RearMusicApps(musicWhitelist, updateMusicWhitelist, back)
-        PageId.OTHER -> OtherPage(screenRecorder, updateScreenRecorder, openPage, back)
+        PageId.OTHER -> OtherPage(airDropSettings, updateAirDrop, screenRecorder, updateScreenRecorder, openPage, back)
         PageId.APP_NAVIGATION -> AppNavigationPage(back)
         PageId.RESTART_SCOPES -> RestartScopesPage(
             suggestedTargets = suggestedRestartTargets,
@@ -5315,6 +5426,15 @@ private fun Status(
     open: (PageId) -> Unit,
     back: () -> Unit,
 ) = AppPage(tr("\u72b6\u6001\u680f\u4e0e\u63a7\u5236\u4e2d\u5fc3", "\u72b6\u6001\u680f\u4e0e\u63a7\u5236\u4e2d\u5fc3"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI)) { p, scroll ->
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    val headerHeightStore = remember(context) { ControlCenterHeaderHeightSettingsStore(context) }
+    var headerHeightOffset by remember { mutableIntStateOf(headerHeightStore.offsetDp) }
+    var headerHeightSlider by remember(headerHeightOffset) { mutableFloatStateOf(headerHeightOffset.toFloat()) }
+    LaunchedEffect(service) {
+        service?.let(headerHeightStore::syncRemote)
+        headerHeightOffset = headerHeightStore.offsetDp
+    }
     AppList(p, scroll, 28) {
         item { Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
         Dim(tr("\u65f6\u949f\u5927\u5c0f", "\u65f6\u949f\u5927\u5c0f"), s.clockEnabled, { v -> update { it.copy(clockEnabled = v) } }, s.clockSize, 10f..24f, defaultValue = 14.8f) { v -> update { it.copy(clockSize = v) } }
@@ -5338,6 +5458,21 @@ private fun Status(
         }
         item {
             Group(tr("\u63a7\u5236\u4e2d\u5fc3", "\u63a7\u5236\u4e2d\u5fc3")) {
+                EditableSliderPreference(
+                    title = tr("controlCenterHeaderHeight", "自定义控制中心顶栏高度"),
+                    value = headerHeightSlider,
+                    valueText = tr("controlCenterHeaderHeightValue", "%s dp").format(
+                        headerHeightSlider.roundToInt().let { if (it > 0) "+$it" else it.toString() },
+                    ),
+                    valueRange = -30f..30f,
+                    steps = 59,
+                    defaultValue = 0f,
+                    onValueChange = { headerHeightSlider = it },
+                    onValueChangeFinished = {
+                        headerHeightStore.update(service, headerHeightSlider.roundToInt())
+                        headerHeightOffset = headerHeightStore.offsetDp
+                    },
+                )
                 OverlayDropdownPreference(
                     title = tr("控制中心 5G 开关磁贴", "控制中心 5G 开关磁贴"),
                     items = listOf(
@@ -5753,6 +5888,15 @@ private fun Lock(
     ),
 ) { p, scroll ->
     val context = LocalContext.current
+    val clockHorizontalStore = remember(context) { LockscreenClockHorizontalSettingsStore(context) }
+    val clockHorizontalService by HookApplication.service.collectAsStateWithLifecycle()
+    var clockHorizontalEnabled by remember { mutableStateOf(clockHorizontalStore.enabled) }
+    LaunchedEffect(clockHorizontalService) {
+        clockHorizontalService?.let {
+            clockHorizontalStore.syncRemote(it)
+            clockHorizontalEnabled = clockHorizontalStore.enabled
+        }
+    }
     var showSaveWallpaperDialog by remember { mutableStateOf(false) }
     val pickEditorBackground = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -5873,6 +6017,14 @@ private fun Lock(
         }
         item {
             Group(tr("\u65f6\u949f\u4e0e\u72b6\u6001\u680f", "\u65f6\u949f\u4e0e\u72b6\u6001\u680f")) {
+                SwitchPreference(
+                    title = tr("去除时钟的水平位置移动限制", "去除时钟的水平位置移动限制"),
+                    checked = clockHorizontalEnabled,
+                    onCheckedChange = { value ->
+                        clockHorizontalStore.update(clockHorizontalService, value)
+                        clockHorizontalEnabled = value
+                    },
+                )
                 SwitchPreference(
                     title = tr("\u9501\u5c4f\u5927\u65f6\u949f\u5f3a\u5236\u663e\u793a\u5192\u53f7", "\u9501\u5c4f\u5927\u65f6\u949f\u5f3a\u5236\u663e\u793a\u5192\u53f7"),
                     checked = s.lockscreenClockColonForceVisible,
@@ -6749,6 +6901,43 @@ private fun LockscreenTemplateLimitDialog(
                 ) {
                     Text(tr("\u4fdd\u5b58", "\u4fdd\u5b58"))
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RearScreenWallpaperLimitDialog(
+    show: Boolean,
+    current: Int,
+    onDismiss: () -> Unit,
+    onSave: (Int) -> Unit,
+) {
+    var value by remember(show, current) { mutableStateOf(current.toString()) }
+    WindowDialog(show = show, onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                tr("自定义背屏壁纸数量", "自定义背屏壁纸数量"),
+                style = MiuixTheme.textStyles.title3,
+                fontWeight = FontWeight.Bold,
+            )
+            TextField(
+                value = value,
+                onValueChange = { value = it.filter(Char::isDigit).take(3) },
+                label = tr("数量（20-200）", "数量（20-200）"),
+                useLabelAsPlaceholder = true,
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                cornerRadius = 999.dp,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GlassDialogButton(onDismiss, Modifier.weight(1f)) { Text(tr("取消", "取消")) }
+                GlassDialogButton(
+                    onClick = { onSave(value.toIntOrNull()?.coerceIn(20, 200) ?: current.coerceIn(20, 200)) },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColorsPrimary(),
+                ) { Text(tr("保存", "保存")) }
             }
         }
     }

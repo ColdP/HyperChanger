@@ -744,6 +744,10 @@ public class Main extends XposedModule {
     public void onPackageLoaded(PackageLoadedParam param) {
         Xp.attach(this);
         String pkg = param.getPackageName();
+        if ("com.autonavi.minimap".equals(pkg)) {
+            AmapCapsuleBridge.handle(param.getDefaultClassLoader());
+            return;
+        }
         if ("com.miui.miwallpaper".equals(pkg)) {
             WallpaperProbe.handle(param);
             return;

@@ -230,6 +230,7 @@ internal class LockscreenMiniPlayerController(
     private val mediaNotificationMode: () -> Int,
     private val appearance: () -> MiniPlayerAppearance,
     private val applyPlatformMaterial: (ImageView, MiniPlayerAppearance) -> Unit,
+    private val onImmersiveRequest: () -> Unit = {},
 ) : LockscreenMediaPresentationListener {
     private val context: Context = host.context
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -250,6 +251,7 @@ internal class LockscreenMiniPlayerController(
     private var customizationVisible = false
     private var customizationMenuVisible = false
     private var mediaPresentationExitAnimating = false
+    private var immersiveHost: LockscreenCapsuleImmersiveHost? = null
     private val globalLayoutListener = ViewTreeObserver.OnGlobalLayoutListener {
         updateCustomizationLift()
     }
@@ -271,6 +273,7 @@ internal class LockscreenMiniPlayerController(
         // container's measured bounds. Keep the configured dp height from being clipped.
         host.clipChildren = false
         host.clipToPadding = false
+        immersiveHost = LockscreenCapsuleImmersiveHost(host.rootView as? ViewGroup ?: host)
         host.rootView.viewTreeObserver.addOnGlobalLayoutListener(globalLayoutListener)
         LockscreenCustomizationMenuBridge.register(this)
         LockscreenMediaPresentationBridge.register(this)
@@ -294,6 +297,8 @@ internal class LockscreenMiniPlayerController(
         runCatching { activeController?.unregisterCallback(controllerCallback) }
         runCatching { player?.let(host::removeView) }
         runCatching { lyricsCard?.let(host::removeView) }
+        immersiveHost?.destroy()
+        immersiveHost = null
         lyricSubscriber?.destroy()
         activeController = null
         player = null
@@ -364,6 +369,7 @@ internal class LockscreenMiniPlayerController(
                     scheduleInitialIslandPositionCorrections()
                 }
             } else {
+                immersiveHost?.setShown(false)
                 animateMiniPlayerOut()
             }
         }
@@ -501,6 +507,7 @@ internal class LockscreenMiniPlayerController(
         val controller = activeController
         val state = controller?.playbackState
         if (!enabled() || controller == null || !isUsable(controller)) {
+            immersiveHost?.setShown(false)
             player?.visibility = View.GONE
             lyricsCard?.visibility = View.GONE
             return
@@ -538,9 +545,22 @@ internal class LockscreenMiniPlayerController(
             onSkipToPrevious = { skipTrackSafely(next = false) },
             onSkipToNext = { skipTrackSafely(next = true) },
             onShowSystemMediaNotification = {
-                LockscreenMediaPresentationBridge.setPresentation(
-                    LockscreenMediaPresentation.SYSTEM_MEDIA,
-                )
+                val current = player
+                if (current != null && current.visibility == View.VISIBLE) {
+                    LockscreenCapsuleCardMorph.run(
+                        source = current,
+                        target = findNativeMediaHeader(),
+                        toNative = true,
+                    ) {
+                        LockscreenMediaPresentationBridge.setPresentation(
+                            LockscreenMediaPresentation.SYSTEM_MEDIA,
+                        )
+                    }
+                } else {
+                    LockscreenMediaPresentationBridge.setPresentation(
+                        LockscreenMediaPresentation.SYSTEM_MEDIA,
+                    )
+                }
             },
             onShowMusicLockscreen = {
                 if (musicLockscreenEnabled()) {
@@ -549,9 +569,22 @@ internal class LockscreenMiniPlayerController(
                     )
                 }
             },
+            onShowImmersive = onImmersiveRequest,
         )
         bindLyrics(currentAppearance, showMiniPlayer)
         position()
+    }
+
+    internal fun showImmersivePage() {
+        immersiveHost?.setShown(true)
+    }
+
+    internal fun requestImmersiveForCurrentMedia() {
+        if (activeController?.packageName == "com.autonavi.minimap") showImmersivePage()
+    }
+
+    internal fun toggleImmersiveOverview() {
+        immersiveHost?.toggleOverview()
     }
 
     private fun bindLyrics(appearance: MiniPlayerAppearance, showMiniPlayer: Boolean) {
@@ -759,6 +792,24 @@ internal class LockscreenMiniPlayerController(
         lyricsBaseTranslationY = lyricTop - view.top
         view.translationX = lyricsBaseTranslationX
         view.translationY = lyricsBaseTranslationY + customizationLift
+    }
+
+    private fun findNativeMediaHeader(): View? {
+        val root = host.rootView as? ViewGroup ?: return null
+        fun visit(view: View): View? {
+            if (view === player || view === lyricsCard || view.visibility == View.GONE) return null
+            val id = runCatching { view.resources.getResourceEntryName(view.id) }.getOrDefault("")
+            val name = view.javaClass.name
+            if (name.contains("MiuiMediaHeaderView") ||
+                id.contains("media_header", ignoreCase = true) ||
+                id.contains("media_notification", ignoreCase = true)
+            ) return view
+            if (view is ViewGroup) {
+                for (index in 0 until view.childCount) visit(view.getChildAt(index))?.let { return it }
+            }
+            return null
+        }
+        return visit(root)
     }
 
     private fun dp(value: Float): Int = (value * context.resources.displayMetrics.density + .5f).toInt()
@@ -1024,13 +1075,22 @@ private class LockscreenMiniPlayerView(context: Context) : FrameLayout(context) 
     private var onSkipToNext: (() -> Unit)? = null
     private var onShowSystemMediaNotification: (() -> Unit)? = null
     private var onShowMusicLockscreen: (() -> Unit)? = null
+    private var onShowImmersive: (() -> Unit)? = null
     private var downX = 0f
     private var downY = 0f
     private var trackingSwipe = false
     private var longPressTriggered = false
+    private var dragOffsetX = 0f
+    private var dragOffsetY = 0f
+    private var gestureBaseTranslationX = 0f
+    private var gestureBaseTranslationY = 0f
+    private var dragging = false
+    private val pressMotion = LockscreenCapsulePress(this)
     private val longPressRunnable = Runnable {
         if (trackingSwipe) {
             longPressTriggered = true
+            trackingSwipe = false
+            pressMotion.press(false)
             onShowSystemMediaNotification?.invoke()
         }
     }
@@ -1100,7 +1160,13 @@ private class LockscreenMiniPlayerView(context: Context) : FrameLayout(context) 
                 downX = event.x
                 downY = event.y
                 trackingSwipe = true
+                dragging = false
+                dragOffsetX = 0f
+                dragOffsetY = 0f
+                gestureBaseTranslationX = translationX
+                gestureBaseTranslationY = translationY
                 longPressTriggered = false
+                pressMotion.press(true)
                 postDelayed(longPressRunnable, ViewConfiguration.getLongPressTimeout().toLong())
                 // NotificationPanelView recognizes horizontal lockscreen gestures before its
                 // children. Keep this pointer stream with the player once it starts inside the
@@ -1116,13 +1182,31 @@ private class LockscreenMiniPlayerView(context: Context) : FrameLayout(context) 
                 if (horizontalDistance > touchSlop && horizontalDistance > verticalDistance) {
                     // Intercept only after a clearly horizontal movement so the toggle remains
                     // clickable and vertical lockscreen gestures keep their normal behavior.
+                    dragging = true
+                    dragOffsetX = (event.x - downX).coerceIn(-width * .34f, width * .34f)
+                    translationX = gestureBaseTranslationX + dragOffsetX * .16f
+                    scaleX = 1f - .025f * (abs(dragOffsetX) / width.coerceAtLeast(1))
+                    scaleY = 1f - .045f * (abs(dragOffsetX) / width.coerceAtLeast(1))
+                    return true
+                }
+                if (verticalDistance > touchSlop && verticalDistance > horizontalDistance) {
+                    dragging = true
+                    dragOffsetY = (event.y - downY).coerceIn(-height * .38f, height * .38f)
+                    translationY = gestureBaseTranslationY + dragOffsetY * .12f
+                    scaleX = 1f - .018f * (abs(dragOffsetY) / height.coerceAtLeast(1))
+                    scaleY = 1f - .035f * (abs(dragOffsetY) / height.coerceAtLeast(1))
                     return true
                 }
             }
-            MotionEvent.ACTION_UP,
+            MotionEvent.ACTION_UP -> {
+                removeCallbacks(longPressRunnable)
+                parent?.requestDisallowInterceptTouchEvent(false)
+            }
             MotionEvent.ACTION_CANCEL -> {
                 trackingSwipe = false
                 removeCallbacks(longPressRunnable)
+                pressMotion.press(false)
+                springBack()
                 parent?.requestDisallowInterceptTouchEvent(false)
             }
         }
@@ -1135,7 +1219,13 @@ private class LockscreenMiniPlayerView(context: Context) : FrameLayout(context) 
                 downX = event.x
                 downY = event.y
                 trackingSwipe = true
+                dragging = false
+                dragOffsetX = 0f
+                dragOffsetY = 0f
+                gestureBaseTranslationX = translationX
+                gestureBaseTranslationY = translationY
                 longPressTriggered = false
+                pressMotion.press(true)
                 postDelayed(longPressRunnable, ViewConfiguration.getLongPressTimeout().toLong())
             }
             MotionEvent.ACTION_UP -> {
@@ -1143,22 +1233,45 @@ private class LockscreenMiniPlayerView(context: Context) : FrameLayout(context) 
                 val horizontalDistance = event.x - downX
                 val verticalDistance = event.y - downY
                 val minimumSwipeDistance = max(dp(48).toFloat(), width * .15f)
+                val verticalSwipe = event.y - downY
                 if (trackingSwipe &&
                     abs(horizontalDistance) >= minimumSwipeDistance &&
                     abs(horizontalDistance) > abs(verticalDistance)
                 ) {
                     if (horizontalDistance < 0f) onSkipToNext?.invoke() else onSkipToPrevious?.invoke()
+                } else if (!longPressTriggered && trackingSwipe && verticalSwipe < -dp(28f)) {
+                    onShowImmersive?.invoke()
                 } else if (!longPressTriggered && trackingSwipe &&
                     abs(horizontalDistance) <= touchSlop && abs(verticalDistance) <= touchSlop
                 ) {
                     onShowMusicLockscreen?.invoke()
                 }
                 trackingSwipe = false
+                springBack()
                 parent?.requestDisallowInterceptTouchEvent(false)
+            }
+            MotionEvent.ACTION_MOVE -> if (trackingSwipe) {
+                val dx = event.x - downX
+                val dy = event.y - downY
+                if (abs(dx) > touchSlop && abs(dx) > abs(dy)) {
+                    dragging = true
+                    dragOffsetX = dx.coerceIn(-width * .34f, width * .34f)
+                    translationX = gestureBaseTranslationX + dragOffsetX * .16f
+                    scaleX = 1f - .025f * (abs(dragOffsetX) / width.coerceAtLeast(1))
+                    scaleY = 1f - .045f * (abs(dragOffsetX) / width.coerceAtLeast(1))
+                } else if (abs(dy) > touchSlop && abs(dy) > abs(dx)) {
+                    dragging = true
+                    dragOffsetY = dy.coerceIn(-height * .38f, height * .38f)
+                    translationY = gestureBaseTranslationY + dragOffsetY * .12f
+                    scaleX = 1f - .018f * (abs(dragOffsetY) / height.coerceAtLeast(1))
+                    scaleY = 1f - .035f * (abs(dragOffsetY) / height.coerceAtLeast(1))
+                }
             }
             MotionEvent.ACTION_CANCEL -> {
                 trackingSwipe = false
                 removeCallbacks(longPressRunnable)
+                pressMotion.press(false)
+                springBack()
                 parent?.requestDisallowInterceptTouchEvent(false)
             }
         }
@@ -1177,6 +1290,7 @@ private class LockscreenMiniPlayerView(context: Context) : FrameLayout(context) 
         onSkipToNext: () -> Unit,
         onShowSystemMediaNotification: () -> Unit,
         onShowMusicLockscreen: () -> Unit,
+        onShowImmersive: () -> Unit = {},
     ) {
         if (lastAppearance != appearance) {
             lastAppearance = appearance
@@ -1195,6 +1309,23 @@ private class LockscreenMiniPlayerView(context: Context) : FrameLayout(context) 
         this.onSkipToNext = onSkipToNext
         this.onShowSystemMediaNotification = onShowSystemMediaNotification
         this.onShowMusicLockscreen = onShowMusicLockscreen
+        this.onShowImmersive = onShowImmersive
+        pressMotion.setBaseScale(1f, 1f)
+    }
+
+    private fun springBack() {
+        animate().cancel()
+        animate().translationX(gestureBaseTranslationX)
+            .translationY(gestureBaseTranslationY)
+            .scaleX(1f)
+            .scaleY(1f)
+            .setDuration(260L)
+            .setInterpolator(android.view.animation.PathInterpolator(.18f, .9f, .22f, 1f))
+            .withEndAction {
+                dragOffsetX = 0f
+                dragOffsetY = 0f
+            }
+            .start()
     }
 
     private fun applyAppearance(
