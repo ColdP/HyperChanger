@@ -111,11 +111,17 @@ final class IosNotificationAnimationHooks {
                     "com.miui.systemui.notification.row.ExpandableViewBase", loader);
             Xp.hookAll(row, "onPropertiesUpdate", chain -> {
                 if (chain.getThisObject() instanceof View) neutralizePanelTransform(chain.getThisObject());
-                Object result = chain.proceed();
-                if (chain.getThisObject() instanceof View) {
-                    IosNotificationStackHooks.enforceUnstackedRow((View) chain.getThisObject());
+                Object origin = chain.getThisObject() instanceof View
+                        ? IosNotificationStackHooks.restingStackOrigin((View) chain.getThisObject()) : null;
+                try {
+                    Object result = chain.proceed();
+                    if (chain.getThisObject() instanceof View) {
+                        IosNotificationStackHooks.enforceUnstackedRow((View) chain.getThisObject());
+                    }
+                    return result;
+                } finally {
+                    IosNotificationStackHooks.restoreStackOrigin(origin);
                 }
-                return result;
             });
             // Stacking setters are small and can be inlined into this final property pass.
             // Deoptimize the caller so EMPTY also reaches clipping/dimming/visibility.

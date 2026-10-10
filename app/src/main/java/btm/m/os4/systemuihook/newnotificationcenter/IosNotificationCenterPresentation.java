@@ -11,6 +11,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.MotionEvent;
 import android.view.ViewTreeObserver;
+import android.view.WindowInsets;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -88,7 +89,14 @@ public final class IosNotificationCenterPresentation {
         wallpaperSheet = sheet;
         if (progress <= 0f) {
             if (host != null) host.setAlpha(0f);
-            restoreStackTransform();
+            // The native window hide is deferred until this endpoint. Restoring alpha here
+            // would expose the list for a frame before that hide reaches the view pipeline.
+            if (transformedStack != null &&
+                    btm.m.os4.systemuihook.hypermusiccover.ShadeLayer.iosNotificationPanelEnabled()) {
+                transformedStack.setAlpha(0f);
+            } else {
+                restoreStackTransform();
+            }
             IosNotificationStackHooks.restoreStackedRows();
             if (previousProgress > 0f) IosNotificationStackHooks.restoreExpandedRows(stack);
             if (notificationHeader == null || oldHeader == null) findHeader();
@@ -160,6 +168,11 @@ public final class IosNotificationCenterPresentation {
             releasePresentation();
             return;
         }
+        if (headerExitAnimator != null) {
+            ValueAnimator previousExit = headerExitAnimator;
+            headerExitAnimator = null;
+            previousExit.cancel();
+        }
         final View[] views = oldHeader;
         final float[] targets = oldHeaderAlpha;
         final View container = notificationHeader;
@@ -188,7 +201,8 @@ public final class IosNotificationCenterPresentation {
         });
         headerExitAnimator.addListener(new android.animation.AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(android.animation.Animator animation) {
-                if (headerExitAnimator == animation) headerExitAnimator = null;
+                if (headerExitAnimator != animation) return;
+                headerExitAnimator = null;
                 releasePresentation();
             }
         });
@@ -209,11 +223,29 @@ public final class IosNotificationCenterPresentation {
 
     static float stackOffset(View view, float nativeStackY) {
         if (!isActive() || view != stack || panel == null || stack.getHeight() == 0) return 0f;
-        float limit = Math.max(nativeStackY, stack.getHeight() -
-                160f * panel.getResources().getDisplayMetrics().density);
+        float reserve = IosNotificationStackHooks.specialRowsExtent(view);
+        if (reserve <= 0f) reserve = 160f * panel.getResources().getDisplayMetrics().density;
+        float limit = Math.max(nativeStackY, viewportBottom(view) - reserve);
         // The list already moves with the sheet. Keep its local clock clearance constant
         // throughout the drag instead of adding a second progress-driven movement.
         return Math.max(0f, Math.min(limit, desiredNotificationTop()) - nativeStackY);
+    }
+
+    /** Stable local viewport; native container bounds shrink ahead of the hosted exit. */
+    static float viewportBottom(View view) {
+        float inset = 16f * view.getResources().getDisplayMetrics().density;
+        WindowInsets insets = view.getRootWindowInsets();
+        if (insets != null) inset = Math.max(inset,
+                insets.getInsetsIgnoringVisibility(WindowInsets.Type.navigationBars()).bottom);
+        return Math.max(0f, view.getHeight() - inset);
+    }
+
+    static float panelStackAlpha(View view, float nativeAlpha) {
+        if (view != transformedStack || host == null ||
+                !btm.m.os4.systemuihook.hypermusiccover.ShadeLayer.iosNotificationPanelEnabled()) {
+            return nativeAlpha;
+        }
+        return host.getAlpha();
     }
 
     static int extraScrollRange(View view) {
@@ -221,10 +253,7 @@ public final class IosNotificationCenterPresentation {
         if (clearance <= .5f) return 0;
         try {
             float contentHeight = ((Number) Xp.getObjectField(view, "mContentHeight")).floatValue();
-            Object controller = Xp.getObjectField(view, "mController");
-            Object injector = Xp.getObjectField(controller, "mNsslControllerInjector");
-            float bottom = ((Number) Xp.getObjectField(injector, "stackingBottom")).floatValue();
-            if (bottom <= 0f) bottom = view.getHeight();
+            float bottom = viewportBottom(view);
             float addedOverflow = Math.max(0f, contentHeight + clearance - bottom)
                     - Math.max(0f, contentHeight - bottom);
             return Math.max(0, (int) Math.ceil(Math.min(clearance, addedOverflow)));
@@ -344,7 +373,7 @@ public final class IosNotificationCenterPresentation {
     private static final ViewTreeObserver.OnPreDrawListener FRAME = () -> {
         sync();
         IosNotificationStackHooks.enforceUnstackedRows(stack);
-        IosNotificationStackHooks.clipStackedRows(stack, progress >= .99f && layoutProgress >= .99f);
+        IosNotificationStackHooks.clipStackedRows(stack, ownsStack(stack));
         return true;
     };
 
@@ -700,17 +729,18 @@ public final class IosNotificationCenterPresentation {
         }
         float y = stackBaseTranslationY + host.getTranslationY();
         if (stack.getTranslationY() != y) stack.setTranslationY(y);
-        float alpha = stackBaseAlpha * host.getAlpha();
+        float alpha = host.getAlpha();
         if (stack.getAlpha() != alpha) stack.setAlpha(alpha);
     }
 
     private static void restoreStackTransform() {
         if (transformedStack == null) return;
-        transformedStack.setTranslationY(stackBaseTranslationY);
-        transformedStack.setAlpha(stackBaseAlpha);
-        transformedStack.setRenderEffect(null);
-        lastStackBlur = -1;
+        View original = transformedStack;
         transformedStack = null;
+        original.setTranslationY(stackBaseTranslationY);
+        original.setAlpha(stackBaseAlpha);
+        original.setRenderEffect(null);
+        lastStackBlur = -1;
     }
 
     private static void syncNotifications() {
@@ -720,10 +750,11 @@ public final class IosNotificationCenterPresentation {
         int[] stackPoint = new int[2];
         panel.getLocationInWindow(panelPoint);
         currentStack.getLocationInWindow(stackPoint);
-        float maxTop = Math.max(0f, currentStack.getHeight() -
-                160f * panel.getResources().getDisplayMetrics().density);
+        float nativeTop = 0f;
+        try { nativeTop = ((Number) Xp.callMethod(currentStack, "getTopPadding")).floatValue(); }
+        catch (Throwable ignored) {}
         float notificationY = stackPoint[1] - panelPoint[1]
-                + Math.min(maxTop, desiredNotificationTop()) - host.getTranslationY();
+                + nativeTop + stackOffset(currentStack, nativeTop) - host.getTranslationY();
         if (layoutProgress >= .95f && progress >= .95f) {
             if (Float.isNaN(restingNotificationY)) restingNotificationY = notificationY;
             int scrollY = 0;
