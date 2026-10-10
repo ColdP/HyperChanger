@@ -3,11 +3,14 @@ package btm.m.os4.systemuihook.newnotificationcenter;
 import android.graphics.Canvas;
 import android.graphics.Path;
 import android.graphics.Rect;
+import android.graphics.drawable.Drawable;
 import android.view.View;
 import android.view.ViewGroup;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.WeakHashMap;
 
 import btm.m.os4.systemuihook.hypermusiccover.Xp;
@@ -17,6 +20,7 @@ final class IosNotificationStackHooks {
     private static final WeakHashMap<View, ArrayList<Path>> STACK_MASKS = new WeakHashMap<>();
     private static final WeakHashMap<View, Boolean> SYSTEM_EXPANSION = new WeakHashMap<>();
     private static ViewGroup maskedStack;
+    private static Method resetGroupBackground;
 
     private static final class RowPosition {
         final View view;
@@ -50,13 +54,101 @@ final class IosNotificationStackHooks {
             if (Boolean.TRUE.equals(Xp.callMethod(injector, "isFocusNotification"))) return true;
         } catch (Throwable ignored) {}
         if (hasType(view, ".MiuiMediaHeaderView")) return true;
-        // Some row variants expose the legacy entry but not the injector predicate.
+        // Use the legacy entry as well: refactored rows can lack getEntry().
+        Object entry = null;
         try {
-            Object entry = Xp.callMethod(view, "getEntry");
-            Object sbn = Xp.getObjectField(entry, "mSbn");
-            return Boolean.TRUE.equals(Xp.getObjectField(sbn, "mIsFocusNotification"));
+            entry = Xp.callMethod(Xp.callMethod(view, "getInjector"), "getLegacyEntry");
+        } catch (Throwable ignored) {}
+        if (entry == null) {
+            try { entry = Xp.callMethod(view, "getEntry"); } catch (Throwable ignored) {}
+        }
+        Object sbn = null;
+        if (entry != null) {
+            try { sbn = Xp.getObjectField(entry, "mSbn"); } catch (Throwable ignored) {}
+            if (sbn == null) {
+                try { sbn = Xp.callMethod(entry, "getSbn"); } catch (Throwable ignored) {}
+            }
+        }
+        if (sbn == null) return false;
+        // Keep these checks independent so a missing vendor field cannot skip media detection.
+        try {
+            if (Boolean.TRUE.equals(Xp.getObjectField(sbn, "mIsFocusNotification"))) return true;
+        } catch (Throwable ignored) {}
+        try {
+            if (Boolean.TRUE.equals(Xp.getObjectField(sbn, "isMediaNotification"))) return true;
+        } catch (Throwable ignored) {}
+        try {
+            android.app.Notification notification = (android.app.Notification) Xp.callMethod(sbn, "getNotification");
+            return Boolean.TRUE.equals(Xp.callMethod(notification, "isMediaNotification"))
+                    || notification.extras.containsKey("android.mediaSession")
+                    || android.app.Notification.CATEGORY_TRANSPORT.equals(notification.category);
         } catch (Throwable ignored) {}
         return false;
+    }
+
+    /** Apply after OEM property composition, including compiled/inlined stacking paths. */
+    static void enforceUnstackedRow(View row) {
+        if (!IosNotificationCenterPresentation.ownsRow(row) || !isFocusOrMediaNotification(row)) return;
+        try {
+            Object injector = Xp.callMethod(row, "getInjector");
+            Xp.setObjectField(injector, "stackingProgress", 0f);
+            Xp.setObjectField(injector, "shouldHideDueToStacking", false);
+            // Ext transforms contain unrelated swipe/heads-up effects. Only remove the
+            // extra stacking transform applied on top of those base values.
+            float y = ((Number) Xp.callMethod(row, "getExtTranslationY")).floatValue();
+            float sx = ((Number) Xp.callMethod(row, "getExtScaleX")).floatValue();
+            float sy = ((Number) Xp.callMethod(row, "getExtScaleY")).floatValue();
+            Xp.callMethod(row, "setSuperTranslationY", row.getTranslationY() + y);
+            Xp.callMethod(row, "setSuperScaleX", row.getScaleX() * sx);
+            Xp.callMethod(row, "setSuperScaleY", row.getScaleY() * sy);
+            if (((Number) Xp.callMethod(row, "getExtClipBottomAmount")).intValue() != 0) {
+                Xp.callMethod(row, "setExtClipBottomAmount", 0);
+            }
+            float alpha = ((Number) Xp.callMethod(row, "getExtAlpha")).floatValue();
+            Xp.callMethod(row, "setSuperAlpha", row.getAlpha() * alpha);
+            Object dim = Xp.getObjectField(injector, "dimForeground");
+            if (dim instanceof Drawable && ((Drawable) dim).getAlpha() != 0) ((Drawable) dim).setAlpha(0);
+            Object state = Xp.callMethod(row, "getViewState");
+            if (!Boolean.TRUE.equals(Xp.getObjectField(state, "hidden"))
+                    && !Boolean.TRUE.equals(Xp.getObjectField(state, "gone"))
+                    && row.getAlpha() > 0f && alpha > 0f
+                    && row.getVisibility() == View.INVISIBLE) row.setVisibility(View.VISIBLE);
+        } catch (Throwable ignored) {}
+        try {
+            if (resetGroupBackground != null && hasType(row, ".ExpandableNotificationRow")
+                    && (Boolean.TRUE.equals(Xp.callMethod(row, "isGroupParent"))
+                    || Boolean.TRUE.equals(Xp.callMethod(row, "isChildInGroup")))) {
+                Object background = Xp.callMethod(Xp.callMethod(row, "getInjector"), "getBackgroundNormal");
+                if (background instanceof View) {
+                    View bg = (View) background;
+                    Object bgInjector = Xp.getObjectField(bg, "mNotificationBackgroundViewInjector");
+                    if (((Number) Xp.getObjectField(bgInjector, "extClipBottomAmount")).intValue() != 0
+                            || ((Number) Xp.callMethod(bg, "getSuperTranslationY")).floatValue() != bg.getTranslationY()
+                            || ((Number) Xp.callMethod(bg, "getSuperScaleX")).floatValue() != bg.getScaleX()
+                            || ((Number) Xp.callMethod(bg, "getSuperScaleY")).floatValue() != bg.getScaleY()) {
+                        resetGroupBackground.invoke(null, row);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    static void enforceUnstackedRows(View stack) {
+        if (!IosNotificationCenterPresentation.ownsStack(stack) || !(stack instanceof ViewGroup)) return;
+        ViewGroup group = (ViewGroup) stack;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View row = group.getChildAt(i);
+            enforceUnstackedRow(row);
+            if (!hasType(row, ".ExpandableNotificationRow")) continue;
+            try {
+                Object children = Xp.callMethod(row, "getAttachedChildren");
+                if (children instanceof List<?>) {
+                    for (Object child : (List<?>) children) {
+                        if (child instanceof View) enforceUnstackedRow((View) child);
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
     }
 
     private static boolean hasType(Object object, String suffix) {
@@ -185,6 +277,13 @@ final class IosNotificationStackHooks {
             Object unstacked = info.getField("EMPTY").get(null);
             Class<?> injector = Xp.findClass(
                     "com.android.systemui.statusbar.notification.row.ExpandableViewInjector", loader);
+            for (Method method : injector.getDeclaredMethods()) {
+                if (method.getName().equals("resetGroupBackgroundStackingInfo")) {
+                    method.setAccessible(true);
+                    resetGroupBackground = method;
+                    break;
+                }
+            }
             Xp.hookAll(injector, "applyViewStackingInfo", chain -> {
                 Object[] args = chain.getArgs().toArray();
                 if (IosNotificationCenterPresentation.isActive() && args.length >= 2
@@ -236,7 +335,18 @@ final class IosNotificationStackHooks {
         try {
             Class<?> stack = Xp.findClass(
                     "com.android.systemui.statusbar.notification.stack.NotificationStackScrollLayout", loader);
+            Xp.hookAll(stack, "dispatchDraw", chain -> {
+                // Android filters INVISIBLE children before drawChild. Clear stale stacking
+                // visibility first, including notifications inside expanded groups.
+                enforceUnstackedRows((View) chain.getThisObject());
+                return chain.proceed();
+            });
             Xp.hookAll(stack, "drawChild", chain -> {
+                // This is the last boundary before Android records the child's RenderNode.
+                // It also covers ROMs which inline the OEM property/calculator methods.
+                if (chain.getArgs().size() >= 2 && chain.getArgs().get(1) instanceof View) {
+                    enforceUnstackedRow((View) chain.getArgs().get(1));
+                }
                 if (chain.getThisObject() != maskedStack || chain.getArgs().size() < 2
                         || !(chain.getArgs().get(0) instanceof Canvas)
                         || !(chain.getArgs().get(1) instanceof View)) return chain.proceed();
@@ -257,6 +367,16 @@ final class IosNotificationStackHooks {
         try {
             Class<?> algorithm = Xp.findClass(
                     "com.android.systemui.statusbar.notification.stack.StackScrollAlgorithm", loader);
+            Class<?> stack = Xp.findClass(
+                    "com.android.systemui.statusbar.notification.stack.NotificationStackScrollLayout", loader);
+            // Resolve the real listener type from the field; JADX renames anonymous classes.
+            // Otherwise AOT-inlined resetViewStates can bypass our appearance/offset hook.
+            try {
+                IosNotificationAnimationHooks.deoptimize(
+                        stack.getDeclaredField("mChildrenUpdater").getType(), "onPreDraw");
+            } catch (Throwable error) {
+                Xp.log("[IOSShade] stack pre-draw deoptimization unavailable: " + error);
+            }
             Xp.hookAll(algorithm, "resetViewStates", chain -> {
                 if (chain.getArgs().isEmpty()) return chain.proceed();
                 Object ambient = chain.getArgs().get(0);
@@ -267,12 +387,23 @@ final class IosNotificationStackHooks {
                 }
                 float original = ((Number) Xp.getObjectField(ambient, "mStackY")).floatValue();
                 float offset = IosNotificationCenterPresentation.stackOffset((android.view.View) host, original);
-                if (offset <= .5f) return chain.proceed();
+                boolean own = IosNotificationCenterPresentation.ownsStack((View) host);
+                if (!own && offset <= .5f) return chain.proceed();
+                boolean appeared = Boolean.TRUE.equals(Xp.getObjectField(ambient, "panelAppeared"));
+                boolean visible = Boolean.TRUE.equals(Xp.getObjectField(ambient, "panelVisible"));
+                if (own) {
+                    // OEM resets row alpha to .001 as soon as appearance becomes false.
+                    // Our list alpha, translation and blur now supply the exit instead.
+                    Xp.setObjectField(ambient, "panelAppeared", true);
+                    Xp.setObjectField(ambient, "panelVisible", true);
+                }
                 Xp.setObjectField(ambient, "mStackY", original + offset);
                 try {
                     return chain.proceed();
                 } finally {
                     Xp.setObjectField(ambient, "mStackY", original);
+                    Xp.setObjectField(ambient, "panelAppeared", appeared);
+                    Xp.setObjectField(ambient, "panelVisible", visible);
                 }
             });
         } catch (Throwable error) {

@@ -37,6 +37,7 @@ public final class IosNotificationCenterPresentation {
     private static View transformedStack;
     private static float stackBaseTranslationY;
     private static float stackBaseAlpha;
+    private static int lastStackBlur = -1;
     private static View capturedStack;
     private static View emptyText;
     private static float emptyTextAlpha;
@@ -127,6 +128,20 @@ public final class IosNotificationCenterPresentation {
 
     public static boolean isActive() {
         return host != null && progress > 0f;
+    }
+
+    static boolean ownsStack(View view) {
+        return view != null && isActive() && view == stack
+                && btm.m.os4.systemuihook.hypermusiccover.ShadeLayer.iosNotificationPanelEnabled();
+    }
+
+    static boolean ownsRow(View view) {
+        if (!ownsStack(stack) || view == null) return false;
+        for (android.view.ViewParent parent = view.getParent(); parent instanceof View;
+                parent = parent.getParent()) {
+            if (parent == stack) return true;
+        }
+        return false;
     }
 
     public static boolean isHostedClock(View view) {
@@ -328,6 +343,7 @@ public final class IosNotificationCenterPresentation {
 
     private static final ViewTreeObserver.OnPreDrawListener FRAME = () -> {
         sync();
+        IosNotificationStackHooks.enforceUnstackedRows(stack);
         IosNotificationStackHooks.clipStackedRows(stack, progress >= .99f && layoutProgress >= .99f);
         return true;
     };
@@ -366,6 +382,11 @@ public final class IosNotificationCenterPresentation {
             host.setRenderEffect(blur == 0 ? null : RenderEffect.createBlurEffect(
                     blur, blur, Shader.TileMode.CLAMP));
             lastBlur = blur;
+        }
+        if (stack != null && blur != lastStackBlur) {
+            stack.setRenderEffect(blur == 0 ? null : RenderEffect.createBlurEffect(
+                    blur, blur, Shader.TileMode.CLAMP));
+            lastStackBlur = blur;
         }
         int statusBlur = Math.round(12f * panel.getResources().getDisplayMetrics().density * (1f - progress));
         if (status != null && statusBlur != lastStatusBlur) {
@@ -687,6 +708,8 @@ public final class IosNotificationCenterPresentation {
         if (transformedStack == null) return;
         transformedStack.setTranslationY(stackBaseTranslationY);
         transformedStack.setAlpha(stackBaseAlpha);
+        transformedStack.setRenderEffect(null);
+        lastStackBlur = -1;
         transformedStack = null;
     }
 

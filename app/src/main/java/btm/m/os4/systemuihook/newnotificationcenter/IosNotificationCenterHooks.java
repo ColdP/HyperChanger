@@ -5,6 +5,8 @@ import btm.m.os4.systemuihook.hypermusiccover.Xp;
 
 /** Hooks the OEM's raw shade gesture and notification/control-center ownership. */
 public final class IosNotificationCenterHooks {
+    private static Object deferredHideController;
+    private static boolean finishingDeferredHide;
     private static float switchDownX;
     private static float switchDownY;
     private static boolean switchFromEmptyArea;
@@ -91,10 +93,18 @@ public final class IosNotificationCenterHooks {
                 return result;
             });
             Xp.hookAll(expand, "setVisible$2", chain -> {
+                boolean visible = Boolean.TRUE.equals(chain.getArgs().get(0));
+                if (!visible && !finishingDeferredHide && ShadeLayer.shouldDeferNotificationHide()) {
+                    // Keep the native window alive until our longer gesture/release finishes.
+                    deferredHideController = chain.getThisObject();
+                    return null;
+                }
+                deferredHideController = null;
                 Object result = chain.proceed();
                 if (Boolean.FALSE.equals(chain.getArgs().get(0))) ShadeLayer.onNotificationHidden();
                 return result;
             });
+            IosNotificationAnimationHooks.deoptimize(expand, "hide", "access$updatePanelVisible");
             ShadeLayer.onRawControllerAvailable();
             Xp.log("[IOSShade] raw notification height and visibility hooked");
         } catch (Throwable error) {
@@ -129,6 +139,21 @@ public final class IosNotificationCenterHooks {
             Xp.log("[IOSShade] notification/control-centre ownership hooked");
         } catch (Throwable error) {
             Xp.log("[IOSShade] panel ownership hooks unavailable: " + error);
+        }
+    }
+
+    public static void finishDeferredHide() {
+        Object controller = deferredHideController;
+        deferredHideController = null;
+        if (controller != null) {
+            finishingDeferredHide = true;
+            try {
+                Xp.callMethod(controller, "setVisible$2", false);
+            } catch (Throwable error) {
+                Xp.log("[IOSShade] deferred panel hide unavailable: " + error);
+            } finally {
+                finishingDeferredHide = false;
+            }
         }
     }
 

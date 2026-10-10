@@ -94,6 +94,10 @@ public final class ShadeLayer {
         return sIosEnabled && !IOS.controlCenter && effectActive();
     }
 
+    public static boolean shouldDeferNotificationHide() {
+        return iosNotificationPanelEnabled() && !IOS.switching && IOS.progress > 0f;
+    }
+
     public static void onRawExpansion(float height, float threshold, boolean tracking, boolean animate) {
         if (!sIosEnabled) return;
         float panelHeight = sRoot != null ? sRoot.getHeight() : 0f;
@@ -198,6 +202,7 @@ public final class ShadeLayer {
             sFrame.setTranslationY(0f);
         }
         sLastAlpha = Float.NaN;
+        btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterHooks.finishDeferredHide();
     }
 
     private static void applyIosProgress() {
@@ -1360,6 +1365,7 @@ public final class ShadeLayer {
         cancelIosSettle();
         IOS.clear();
         IosNotificationCenterPresentation.update(0f, 0f, false, null);
+        btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterHooks.finishDeferredHide();
         IosShadeMaterial.setActive(false, sRoot);
         if (sEffectOn) Main.setCardBlurActive(false);
         sEffectOn = false;

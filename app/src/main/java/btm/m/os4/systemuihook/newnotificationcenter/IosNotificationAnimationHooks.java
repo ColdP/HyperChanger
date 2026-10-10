@@ -111,18 +111,24 @@ final class IosNotificationAnimationHooks {
                     "com.miui.systemui.notification.row.ExpandableViewBase", loader);
             Xp.hookAll(row, "onPropertiesUpdate", chain -> {
                 if (chain.getThisObject() instanceof View) neutralizePanelTransform(chain.getThisObject());
-                return chain.proceed();
+                Object result = chain.proceed();
+                if (chain.getThisObject() instanceof View) {
+                    IosNotificationStackHooks.enforceUnstackedRow((View) chain.getThisObject());
+                }
+                return result;
             });
             // Stacking setters are small and can be inlined into this final property pass.
             // Deoptimize the caller so EMPTY also reaches clipping/dimming/visibility.
-            deoptimize(row, "onPropertiesUpdate");
+            deoptimize(row, "onPropertiesUpdate", "dispatchPropertiesUpdate");
+            deoptimize(Xp.findClass("com.miui.systemui.widget.PropertiesFrameLayout", loader),
+                    "dispatchPropertiesUpdate");
             Xp.log("[IOSShade] notifications follow the hosted sheet; OEM panel transforms disabled");
         } catch (Throwable error) {
             Xp.log("[IOSShade] notification property hook unavailable: " + error);
         }
     }
 
-    private static void deoptimize(Class<?> type, String... names) {
+    static void deoptimize(Class<?> type, String... names) {
         for (Method method : type.getDeclaredMethods()) {
             for (String name : names) {
                 if (method.getName().equals(name)) {
