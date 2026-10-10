@@ -757,6 +757,10 @@ public final class IosNotificationCenterPresentation {
     private static void syncNotifications() {
         View currentStack = stack;
         if (currentStack == null || currentStack.getHeight() == 0 || clock == null) return;
+        // The exiting cards retain their last drawn positions. Keep the clock's matching
+        // notification baseline too, until a cancelled exit reaches the open endpoint.
+        // Native padding/scroll geometry below no longer describes those retained cards.
+        if (IosNotificationExitState.isHolding() && !Float.isNaN(lastNotificationY)) return;
         int[] panelPoint = new int[2];
         int[] stackPoint = new int[2];
         panel.getLocationInWindow(panelPoint);
