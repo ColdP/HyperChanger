@@ -5,7 +5,9 @@
   "strings": {
     "islandCollapsedSmoothing": "平滑收起时的超级岛背景",
     "islandCollapsedSmoothingPercent": "收起时的超级岛背景平滑度",
-    "hyperIslandSmoothingAttribution": "平滑超级岛相关代码",
+    "hyperIslandSmoothingAttribution": "超级岛相关代码",
+    "islandSpacingEnabled": "自定义大小岛间距",
+    "islandSpacingOffset": "大小岛间距调整",
     "HyperIsland": "HyperIsland",
     "3.1.8": "3.1.8",
     "MIT License": "MIT License",

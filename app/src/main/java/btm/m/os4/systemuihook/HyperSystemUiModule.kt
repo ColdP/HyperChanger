@@ -14100,6 +14100,7 @@ class HyperSystemUiModule : XposedModule() {
             (preferences.getInt(KEY_VOLUME_PANEL_GLASS_STRENGTH, 50).coerceIn(0, 100) * 1.2f)
         "big_island_min_width" -> preferences.takeIf { it.getBoolean(KEY_ISLAND_ENABLED, false) }
             ?.getInt(KEY_ISLAND_WIDTH, 108)?.coerceIn(108, 190)?.toFloat()
+        "island_space" -> islandSpacingDp(originalDp, readIslandSpacingSettings(preferences))
         "notification_item_bg_radius" -> preferences.getInt(KEY_NOTIFICATION_CORNER_RADIUS_OFFSET, 0)
             .coerceIn(-30, 30)
             .takeIf { it != 0 }

@@ -42,6 +42,7 @@ internal class IslandSmoothingHook(private val module: XposedModule) {
     private var listener: SharedPreferences.OnSharedPreferenceChangeListener? = null
     private var outlineHookInstalled = false
     private var loggedDrawFallback = false
+    @Volatile private var bionicsActive: Method? = null
     private val smoothSetter = runCatching { View::class.java.getDeclaredMethod("setSmoothCornerEnabled", Boolean::class.javaPrimitiveType).apply { isAccessible = true } }.getOrNull()
     private val smoothGetter = listOf("isSmoothCornerEnabled", "getSmoothCornerEnabled").firstNotNullOfOrNull { name ->
         runCatching { View::class.java.getDeclaredMethod(name).apply { isAccessible = true } }.getOrNull()
@@ -59,6 +60,12 @@ internal class IslandSmoothingHook(private val module: XposedModule) {
         if (clazz.name !in setOf(BACKGROUND, BASE_CONTENT) || !installed.add(clazz)) return
         runCatching {
             settings = readIslandSmoothingSettings(preferences)
+            // Material children are often framework FrameLayouts, whose own loader
+            // cannot resolve plugin classes. Resolve the native mode via the plugin.
+            if (bionicsActive == null) bionicsActive = runCatching {
+                clazz.classLoader?.loadClass("miui.systemui.util.MiBackgroundStyle")
+                    ?.getMethod("isBionicsActive", Context::class.java)
+            }.getOrNull()
             installOutlineHook()
             if (clazz.name == BACKGROUND) installDrawHook(clazz) else installMaterialTargets(clazz)
             if (listener == null) {
@@ -159,8 +166,7 @@ internal class IslandSmoothingHook(private val module: XposedModule) {
         val setter = smoothSetter ?: return
         if (nativeSmoothFlags.containsKey(view)) return
         val original = runCatching { smoothGetter?.invoke(view) as? Boolean }.getOrNull()
-            ?: runCatching { view.javaClass.classLoader.loadClass("miui.systemui.util.MiBackgroundStyle")
-                .getMethod("isBionicsActive", Context::class.java).invoke(null, view.context) as Boolean }.getOrDefault(false)
+            ?: runCatching { bionicsActive?.invoke(null, view.context) as? Boolean }.getOrNull() ?: false
         nativeSmoothFlags[view] = original
         changingSmoothFlag.set(true)
         try {

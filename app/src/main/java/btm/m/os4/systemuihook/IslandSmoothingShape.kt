@@ -17,6 +17,19 @@ internal fun isCollapsedIslandCapsule(width: Float, height: Float, radius: Float
 internal fun islandSmoothingAlpha(color: Int, alpha: Int): Int =
     (color and 0x00FFFFFF) or (((color ushr 24) * alpha.coerceIn(0, 255) / 255) shl 24)
 
+/** Pure curve geometry is shared by the material outline and the solid background. */
+internal fun islandSmoothingPolygon(width: Float, height: Float, radius: Float, percent: Int): RoundedPolygon {
+    val halfWidth = width / 2f
+    val halfHeight = height / 2f
+    return RoundedPolygon(
+        vertices = floatArrayOf(-halfWidth, -halfHeight, halfWidth, -halfHeight,
+            halfWidth, halfHeight, -halfWidth, halfHeight),
+        rounding = CornerRounding(radius.coerceIn(0f, min(halfWidth, halfHeight)), percent.coerceIn(0, 100) / 100f),
+        centerX = 0f,
+        centerY = 0f,
+    )
+}
+
 internal class IslandSmoothingShape {
     private data class ShapeKey(val width: Float, val height: Float, val radius: Float, val percent: Int)
     private val cache = object : LinkedHashMap<ShapeKey, Path>(32, .75f, true) {
@@ -27,15 +40,7 @@ internal class IslandSmoothingShape {
     fun path(width: Float, height: Float, radius: Float, percent: Int): Path {
         val key = ShapeKey(width, height, radius, percent.coerceIn(0, 100))
         return cache.getOrPut(key) {
-            val halfWidth = width / 2f
-            val halfHeight = height / 2f
-            RoundedPolygon(
-                vertices = floatArrayOf(-halfWidth, -halfHeight, halfWidth, -halfHeight,
-                    halfWidth, halfHeight, -halfWidth, halfHeight),
-                rounding = CornerRounding(radius.coerceIn(0f, min(halfWidth, halfHeight)), key.percent / 100f),
-                centerX = 0f,
-                centerY = 0f,
-            ).toPath()
+            islandSmoothingPolygon(width, height, radius, key.percent).toPath()
         }
     }
 

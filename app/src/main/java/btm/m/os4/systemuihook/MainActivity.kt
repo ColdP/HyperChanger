@@ -637,6 +637,7 @@ private fun Root(
             ControlCenterCarrierSettingsStore(context).syncRemote(it)
             ControlCenterClockSettingsStore(context).syncRemote(it)
             IslandSmoothingSettingsStore(context).syncRemote(it)
+            IslandSpacingSettingsStore(context).syncRemote(it)
             musicStore.syncRemote(it)
             dockStore.syncRemote(it)
             homeRecentsStore.syncRemote(it)
@@ -5255,6 +5256,12 @@ private fun Island(
     val service by HookApplication.service.collectAsStateWithLifecycle()
     val smoothingStore = remember(context) { IslandSmoothingSettingsStore(context) }
     var smoothingSettings by remember { mutableStateOf(smoothingStore.settings) }
+    val spacingStore = remember(context) { IslandSpacingSettingsStore(context) }
+    var spacingSettings by remember { mutableStateOf(spacingStore.settings) }
+    fun updateSpacing(transform: (IslandSpacingSettings) -> IslandSpacingSettings) {
+        spacingStore.update(service, transform)
+        spacingSettings = spacingStore.settings
+    }
     fun updateSmoothing(transform: (IslandSmoothingSettings) -> IslandSmoothingSettings) {
         smoothingStore.update(service, transform)
         smoothingSettings = smoothingStore.settings
@@ -5262,6 +5269,8 @@ private fun Island(
     LaunchedEffect(service) {
         service?.let(smoothingStore::syncRemote)
         smoothingSettings = smoothingStore.settings
+        service?.let(spacingStore::syncRemote)
+        spacingSettings = spacingStore.settings
     }
 
     AppList(p, scroll, 28) {
@@ -5281,6 +5290,20 @@ private fun Island(
                 )
                 SwitchPreference(title = tr("\u81ea\u5b9a\u4e49\u8d85\u7ea7\u5c9b\u957f\u5ea6", "\u81ea\u5b9a\u4e49\u8d85\u7ea7\u5c9b\u957f\u5ea6"), checked = s.islandEnabled, onCheckedChange = { v -> update { it.copy(islandEnabled = v) } })
                 if (s.islandEnabled) IntSlide(tr("\u6700\u5c0f\u5bbd\u5ea6", "\u6700\u5c0f\u5bbd\u5ea6"), s.islandWidth, 108..190, defaultValue = 108) { v -> update { it.copy(islandWidth = v) } }
+                SwitchPreference(
+                    title = tr("islandSpacingEnabled", "自定义大小岛间距"),
+                    checked = spacingSettings.enabled,
+                    onCheckedChange = { enabled -> updateSpacing { it.copy(enabled = enabled) } },
+                )
+                AnimatedVisibility(visible = spacingSettings.enabled) {
+                    ParameterIntSlide(
+                        title = tr("islandSpacingOffset", "大小岛间距调整"),
+                        value = spacingSettings.offsetDp,
+                        range = ISLAND_SPACING_RANGE,
+                        suffix = " dp",
+                        defaultValue = ISLAND_SPACING_DEFAULT_OFFSET,
+                    ) { offset -> updateSpacing { it.copy(offsetDp = offset) } }
+                }
             }
         }
         item {
@@ -9768,7 +9791,7 @@ private fun openProjects() = listOf(
     OpenProject(
         tr("HyperIsland", "HyperIsland"),
         tr("3.1.8", "3.1.8"),
-        tr("hyperIslandSmoothingAttribution", "平滑超级岛相关代码"),
+        tr("hyperIslandSmoothingAttribution", "超级岛相关代码"),
         "https://github.com/1812z/HyperIsland",
         tr("MIT License", "MIT License"),
     ),

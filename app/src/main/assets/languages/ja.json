@@ -5,7 +5,9 @@
   "strings": {
     "islandCollapsedSmoothing": "折りたたみ時のスーパーアイランド背景を滑らかにする",
     "islandCollapsedSmoothingPercent": "折りたたみ時のスーパーアイランド背景の滑らかさ",
-    "hyperIslandSmoothingAttribution": "スーパーアイランドの平滑化関連コード",
+    "hyperIslandSmoothingAttribution": "スーパーアイランド関連コード",
+    "islandSpacingEnabled": "大・小アイランドの間隔をカスタマイズ",
+    "islandSpacingOffset": "大・小アイランドの間隔調整",
     "HyperIsland": "HyperIsland",
     "3.1.8": "3.1.8",
     "MIT License": "MIT License",

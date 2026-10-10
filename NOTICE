@@ -19,7 +19,8 @@ https://github.com/zyl6932/HyperMusicCover
 The imported implementation is licensed under the Apache License, Version 2.0.
 
 Collapsed island smoothing (IslandSmoothingHook.kt and IslandSmoothingShape.kt)
-is adapted from HyperIsland 3.1.8 by 1812z.
+and large-small island spacing (IslandSpacingHook.kt)
+are adapted from HyperIsland 3.1.8 by 1812z.
 https://github.com/1812z/HyperIsland
 Copyright (c) 2026 1812z
 Licensed under the MIT License; the complete notice is distributed in

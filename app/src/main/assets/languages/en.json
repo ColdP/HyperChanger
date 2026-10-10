@@ -5,7 +5,9 @@
   "strings": {
     "islandCollapsedSmoothing": "Smooth collapsed island background",
     "islandCollapsedSmoothingPercent": "Collapsed island background smoothing",
-    "hyperIslandSmoothingAttribution": "Island smoothing code",
+    "hyperIslandSmoothingAttribution": "Island-related code",
+    "islandSpacingEnabled": "Customize large-small island spacing",
+    "islandSpacingOffset": "Large-small island spacing adjustment",
     "HyperIsland": "HyperIsland",
     "3.1.8": "3.1.8",
     "MIT License": "MIT License",
