@@ -89,6 +89,11 @@ public final class ShadeLayer {
         return sIosEnabled;
     }
 
+    /** Includes the first native panel frame, before the hosted clock has been attached. */
+    public static boolean iosNotificationPanelEnabled() {
+        return sIosEnabled && !IOS.controlCenter && effectActive();
+    }
+
     public static void onRawExpansion(float height, float threshold, boolean tracking, boolean animate) {
         if (!sIosEnabled) return;
         float panelHeight = sRoot != null ? sRoot.getHeight() : 0f;

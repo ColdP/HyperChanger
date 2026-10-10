@@ -34,6 +34,9 @@ public final class IosNotificationCenterPresentation {
     private static ImageView depth;
     private static MirrorView status;
     private static View stack;
+    private static View transformedStack;
+    private static float stackBaseTranslationY;
+    private static float stackBaseAlpha;
     private static View capturedStack;
     private static View emptyText;
     private static float emptyTextAlpha;
@@ -84,6 +87,7 @@ public final class IosNotificationCenterPresentation {
         wallpaperSheet = sheet;
         if (progress <= 0f) {
             if (host != null) host.setAlpha(0f);
+            restoreStackTransform();
             IosNotificationStackHooks.restoreStackedRows();
             if (previousProgress > 0f) IosNotificationStackHooks.restoreExpandedRows(stack);
             if (notificationHeader == null || oldHeader == null) findHeader();
@@ -192,7 +196,9 @@ public final class IosNotificationCenterPresentation {
         if (!isActive() || view != stack || panel == null || stack.getHeight() == 0) return 0f;
         float limit = Math.max(nativeStackY, stack.getHeight() -
                 160f * panel.getResources().getDisplayMetrics().density);
-        return Math.max(0f, Math.min(limit, desiredNotificationTop()) - nativeStackY) * layoutProgress;
+        // The list already moves with the sheet. Keep its local clock clearance constant
+        // throughout the drag instead of adding a second progress-driven movement.
+        return Math.max(0f, Math.min(limit, desiredNotificationTop()) - nativeStackY);
     }
 
     static int extraScrollRange(View view) {
@@ -344,6 +350,7 @@ public final class IosNotificationCenterPresentation {
             }
         }
         if (oldHeader == null) findHeader();
+        syncStackTransform();
         hideNativeHeader();
         syncDepth();
         syncStatus();
@@ -662,6 +669,27 @@ public final class IosNotificationCenterPresentation {
         if (emptyText != null && emptyText.getAlpha() != 0f) emptyText.setAlpha(0f);
     }
 
+    private static void syncStackTransform() {
+        if (stack == null || host == null) return;
+        if (transformedStack != stack) {
+            restoreStackTransform();
+            transformedStack = stack;
+            stackBaseTranslationY = stack.getTranslationY();
+            stackBaseAlpha = stack.getAlpha();
+        }
+        float y = stackBaseTranslationY + host.getTranslationY();
+        if (stack.getTranslationY() != y) stack.setTranslationY(y);
+        float alpha = stackBaseAlpha * host.getAlpha();
+        if (stack.getAlpha() != alpha) stack.setAlpha(alpha);
+    }
+
+    private static void restoreStackTransform() {
+        if (transformedStack == null) return;
+        transformedStack.setTranslationY(stackBaseTranslationY);
+        transformedStack.setAlpha(stackBaseAlpha);
+        transformedStack = null;
+    }
+
     private static void syncNotifications() {
         View currentStack = stack;
         if (currentStack == null || currentStack.getHeight() == 0 || clock == null) return;
@@ -672,7 +700,7 @@ public final class IosNotificationCenterPresentation {
         float maxTop = Math.max(0f, currentStack.getHeight() -
                 160f * panel.getResources().getDisplayMetrics().density);
         float notificationY = stackPoint[1] - panelPoint[1]
-                + Math.min(maxTop, desiredNotificationTop());
+                + Math.min(maxTop, desiredNotificationTop()) - host.getTranslationY();
         if (layoutProgress >= .95f && progress >= .95f) {
             if (Float.isNaN(restingNotificationY)) restingNotificationY = notificationY;
             int scrollY = 0;
@@ -682,6 +710,7 @@ public final class IosNotificationCenterPresentation {
             } catch (Throwable ignored) {}
             if (scrollY > 0) {
                 float firstTop = firstNotificationTop(currentStack, panelPoint);
+                if (!Float.isNaN(firstTop)) firstTop -= host.getTranslationY();
                 if (!Float.isNaN(firstTop)) {
                     float lower = restingNotificationY - scrollY
                             - 16f * panel.getResources().getDisplayMetrics().density;
@@ -802,6 +831,7 @@ public final class IosNotificationCenterPresentation {
     }
 
     private static void releasePresentation() {
+        restoreStackTransform();
         IosNotificationStackHooks.restoreStackedRows();
         IosNotificationStackHooks.restoreExpandedRows(stack);
         if (observer != null && observer.isAlive()) observer.removeOnPreDrawListener(FRAME);

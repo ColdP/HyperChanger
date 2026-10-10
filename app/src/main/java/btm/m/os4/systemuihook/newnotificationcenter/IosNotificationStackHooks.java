@@ -44,17 +44,27 @@ final class IosNotificationStackHooks {
      */
     static boolean isFocusOrMediaNotification(View view) {
         if (view == null) return false;
-        String name = view.getClass().getName();
-        if (name.endsWith(".MiuiMediaHeaderView")) return true;
-        if (!name.endsWith(".ExpandableNotificationRow")) return false;
         try {
             Object injector = Xp.callMethod(view, "getInjector");
-            return Boolean.TRUE.equals(Xp.callMethod(injector, "isFocusNotification"));
-        } catch (Throwable ignored) {
-            // Older SystemUI builds do not expose the injector method. Keep the row in the
-            // normal path there instead of making a whole notification stack unrenderable.
-            return false;
+            if (hasType(injector, ".MiuiMediaHeaderViewInjector")) return true;
+            if (Boolean.TRUE.equals(Xp.callMethod(injector, "isFocusNotification"))) return true;
+        } catch (Throwable ignored) {}
+        if (hasType(view, ".MiuiMediaHeaderView")) return true;
+        // Some row variants expose the legacy entry but not the injector predicate.
+        try {
+            Object entry = Xp.callMethod(view, "getEntry");
+            Object sbn = Xp.getObjectField(entry, "mSbn");
+            return Boolean.TRUE.equals(Xp.getObjectField(sbn, "mIsFocusNotification"));
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
+    private static boolean hasType(Object object, String suffix) {
+        if (object == null) return false;
+        for (Class<?> type = object.getClass(); type != null; type = type.getSuperclass()) {
+            if (type.getName().endsWith(suffix)) return true;
         }
+        return false;
     }
 
     static void clipStackedRows(View stack, boolean active) {
@@ -71,10 +81,9 @@ final class IosNotificationStackHooks {
         group.getLocationInWindow(stackPoint);
         for (int i = 0; i < group.getChildCount(); i++) {
             View child = group.getChildAt(i);
-            String name = child.getClass().getName();
             if (!child.isShown() || child.getAlpha() <= 0f || child.getWidth() <= 0
-                    || (!name.endsWith(".ExpandableNotificationRow")
-                    && !name.endsWith(".MiuiMediaHeaderView"))) continue;
+                    || (!hasType(child, ".ExpandableNotificationRow")
+                    && !hasType(child, ".MiuiMediaHeaderView"))) continue;
             if (isFocusOrMediaNotification(child)) continue;
             try {
                 int height = ((Number) Xp.callMethod(child, "getActualHeight")).intValue();
@@ -145,7 +154,7 @@ final class IosNotificationStackHooks {
     private static void expandSpecialRows(ViewGroup stack) {
         for (int i = 0; i < stack.getChildCount(); i++) {
             View row = stack.getChildAt(i);
-            if (!row.getClass().getName().endsWith(".ExpandableNotificationRow")) continue;
+            if (!hasType(row, ".ExpandableNotificationRow")) continue;
             try {
                 if (isFocusOrMediaNotification(row)) {
                     if (!SYSTEM_EXPANSION.containsKey(row)) {
@@ -167,12 +176,34 @@ final class IosNotificationStackHooks {
     }
 
     static void install(ClassLoader loader) {
-        // EMPTY is the OEM's neutral stacking result: no translation, shrink, clipping or
-        // dimming. Intercept the calculator so every downstream property uses the same result.
+        IosNotificationAnimationHooks.install(loader);
+        // EMPTY neutralizes translation, shrink, clipping and dimming. Intercept the final
+        // application as well as the calculator: group/transition paths can reuse old results.
         try {
             Class<?> info = Xp.findClass(
                     "com.miui.systemui.notification.view.NotificationRowStackingInfo", loader);
             Object unstacked = info.getField("EMPTY").get(null);
+            Class<?> injector = Xp.findClass(
+                    "com.android.systemui.statusbar.notification.row.ExpandableViewInjector", loader);
+            Xp.hookAll(injector, "applyViewStackingInfo", chain -> {
+                Object[] args = chain.getArgs().toArray();
+                if (IosNotificationCenterPresentation.isActive() && args.length >= 2
+                        && args[0] instanceof View && isFocusOrMediaNotification((View) args[0])) {
+                    args[1] = unstacked;
+                    return chain.proceed(args);
+                }
+                return chain.proceed();
+            });
+            Xp.hookAll(injector, "updateDimmingAndVisible", chain -> {
+                Object target = chain.getThisObject();
+                Object row = Xp.getObjectField(target, "view");
+                if (IosNotificationCenterPresentation.isActive() && row instanceof View
+                        && isFocusOrMediaNotification((View) row)) {
+                    Xp.setObjectField(target, "stackingProgress", 0f);
+                    return chain.proceed(new Object[]{unstacked});
+                }
+                return chain.proceed();
+            });
             Class<?> interactor = Xp.findClass(
                     "com.miui.systemui.notification.domain.interactor.NotificationStackingInteractor", loader);
             io.github.libxposed.api.XposedInterface.Hooker specialRows = chain -> {
