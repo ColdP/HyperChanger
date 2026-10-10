@@ -296,6 +296,7 @@ private val gestureMaterialOverlays = Collections.synchronizedMap(WeakHashMap<Vi
 
 class HyperSystemUiModule : XposedModule() {
     private val controlCenterHeaderHeightHook by lazy { ControlCenterHeaderHeightHook(this) }
+    private val controlCenterCarrierHook by lazy { ControlCenterCarrierHook(this) }
     internal fun installHook(member: java.lang.reflect.Executable) = hook(member)
 
     override fun onSystemServerStarting(param: SystemServerStartingParam) {
@@ -752,6 +753,7 @@ class HyperSystemUiModule : XposedModule() {
             when (param.packageName) {
                 SYSTEM_UI, SYSTEM_UI_PLUGIN -> {
                     controlCenterHeaderHeightHook.install(param.defaultClassLoader, preferences)
+                    controlCenterCarrierHook.install(param.defaultClassLoader, preferences)
                     installCustomTileHooks(param.defaultClassLoader, preferences)
                     if (param.packageName == SYSTEM_UI) {
                         synchronized(controlCenterButtonsLock) {
@@ -1254,6 +1256,7 @@ class HyperSystemUiModule : XposedModule() {
         listOf(500L, 1500L, 3000L, 6000L, 10000L, 16000L).forEach { delay ->
             handler.postDelayed({
                 controlCenterHeaderHeightHook.install(classLoader, preferences)
+                controlCenterCarrierHook.install(classLoader, preferences)
                 val complete = controlCenterEditButtonHookInstalled &&
                     controlCenterTopButtonsHookInstalled &&
                     controlCenterMainPanelHookInstalled
@@ -4732,6 +4735,7 @@ class HyperSystemUiModule : XposedModule() {
                 controlCenterClassDiscoveryInProgress.set(true)
                 try {
                 controlCenterHeaderHeightHook.onClassLoaded(loadedClass, preferences)
+                controlCenterCarrierHook.onClassLoaded(loadedClass, preferences)
                 if ((loadedClass.name == CONTROL_CENTER_EDIT_BUTTON_CONTROLLER_CLASS ||
                     loadedClass.name == CONTROL_CENTER_CONTENT_DISTRIBUTOR_CLASS ||
                     loadedClass.name == CONTROL_CENTER_MAIN_PANEL_CONTROLLER_CLASS ||

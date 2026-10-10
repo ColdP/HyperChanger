@@ -3,6 +3,13 @@
   "creator": "btm_m",
   "locale": "en",
   "strings": {
+    "controlCenterCarrierNetworkMarker": "运营商网络标识",
+    "controlCenterCarrierHideHd": "隐藏 HD",
+    "controlCenterCarrierRealNetworkType": "替换为真实数据网络类型",
+    "controlCenterCarrierCustom": "自定义运营商文本",
+    "controlCenterCarrierText": "运营商文本",
+    "controlCenterCarrierHide": "隐藏运营商",
+    "controlCenterCarrierHideNonData": "隐藏非上网卡",
     "controlCenterHeaderHeight": "自定义控制中心顶栏高度",
     "controlCenterHeaderHeightValue": "%s dp",
     "iosNotificationCenter": "iOS-style Notification Center",

@@ -3,6 +3,13 @@
   "creator": "btm_m",
   "locale": "ja",
   "strings": {
+    "controlCenterCarrierNetworkMarker": "通信事業者のネットワーク表示",
+    "controlCenterCarrierHideHd": "HD を非表示",
+    "controlCenterCarrierRealNetworkType": "実際のモバイルネットワーク種別に置き換える",
+    "controlCenterCarrierCustom": "通信事業者のテキストをカスタマイズ",
+    "controlCenterCarrierText": "通信事業者のテキスト",
+    "controlCenterCarrierHide": "通信事業者を非表示",
+    "controlCenterCarrierHideNonData": "データ通信を使用しない SIM を非表示",
     "controlCenterHeaderHeight": "コントロールセンターのヘッダーの高さをカスタマイズ",
     "controlCenterHeaderHeightValue": "%s dp",
     "iosNotificationCenter": "iOS風通知センター",

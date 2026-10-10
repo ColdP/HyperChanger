@@ -634,6 +634,7 @@ private fun Root(
             appearances.syncRemote(it)
             airDrop.syncRemote(it)
             ControlCenterHeaderHeightSettingsStore(context).syncRemote(it)
+            ControlCenterCarrierSettingsStore(context).syncRemote(it)
             musicStore.syncRemote(it)
             dockStore.syncRemote(it)
             homeRecentsStore.syncRemote(it)
@@ -3518,6 +3519,7 @@ private fun DeviceProfileFieldDialog(
     current: String,
     onDismiss: () -> Unit,
     onSave: (String) -> Unit,
+    inputLabel: String? = null,
 ) {
     var value by remember(title, current) { mutableStateOf(current) }
     WindowDialog(show = true, onDismissRequest = onDismiss) {
@@ -3526,7 +3528,7 @@ private fun DeviceProfileFieldDialog(
             TextField(
                 value = value,
                 onValueChange = { value = it.take(256) },
-                label = tr("参数值", "参数值"),
+                label = inputLabel ?: tr("参数值", "参数值"),
                 useLabelAsPlaceholder = true,
                 singleLine = true,
                 cornerRadius = 999.dp,
@@ -5431,9 +5433,18 @@ private fun Status(
     val headerHeightStore = remember(context) { ControlCenterHeaderHeightSettingsStore(context) }
     var headerHeightOffset by remember { mutableIntStateOf(headerHeightStore.offsetDp) }
     var headerHeightSlider by remember(headerHeightOffset) { mutableFloatStateOf(headerHeightOffset.toFloat()) }
+    val carrierStore = remember(context) { ControlCenterCarrierSettingsStore(context) }
+    var carrierSettings by remember { mutableStateOf(carrierStore.settings) }
+    var showCarrierTextDialog by remember { mutableStateOf(false) }
+    fun updateCarrier(transform: (ControlCenterCarrierSettings) -> ControlCenterCarrierSettings) {
+        carrierStore.update(service, transform)
+        carrierSettings = carrierStore.settings
+    }
     LaunchedEffect(service) {
         service?.let(headerHeightStore::syncRemote)
         headerHeightOffset = headerHeightStore.offsetDp
+        service?.let(carrierStore::syncRemote)
+        carrierSettings = carrierStore.settings
     }
     AppList(p, scroll, 28) {
         item { Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
@@ -5472,6 +5483,41 @@ private fun Status(
                         headerHeightStore.update(service, headerHeightSlider.roundToInt())
                         headerHeightOffset = headerHeightStore.offsetDp
                     },
+                )
+                OverlayDropdownPreference(
+                    title = tr("controlCenterCarrierNetworkMarker", "运营商网络标识"),
+                    items = listOf(
+                        tr("不隐藏", "不隐藏"),
+                        tr("controlCenterCarrierHideHd", "隐藏 HD"),
+                        tr("controlCenterCarrierRealNetworkType", "替换为真实数据网络类型"),
+                    ),
+                    selectedIndex = carrierSettings.hdMode,
+                    onSelectedIndexChange = { mode -> updateCarrier { it.copy(hdMode = mode) } },
+                )
+                SwitchPreference(
+                    title = tr("controlCenterCarrierCustom", "自定义运营商文本"),
+                    checked = carrierSettings.customEnabled,
+                    onCheckedChange = { enabled -> updateCarrier { it.copy(customEnabled = enabled) } },
+                )
+                AnimatedVisibility(visible = carrierSettings.customEnabled) {
+                    ArrowPreference(
+                        title = tr("controlCenterCarrierText", "运营商文本"),
+                        summary = carrierSettings.customText.ifBlank { tr("未设置", "未设置") },
+                        onClick = { showCarrierTextDialog = true },
+                    )
+                }
+                OverlayDropdownPreference(
+                    title = tr("controlCenterCarrierHide", "隐藏运营商"),
+                    items = listOf(
+                        tr("不隐藏", "不隐藏"),
+                        tr("隐藏卡1", "隐藏卡1"),
+                        tr("隐藏卡2", "隐藏卡2"),
+                        tr("controlCenterCarrierHideNonData", "隐藏非上网卡"),
+                        tr("隐藏上网卡", "隐藏上网卡"),
+                        tr("全部隐藏", "全部隐藏"),
+                    ),
+                    selectedIndex = carrierSettings.hideMode,
+                    onSelectedIndexChange = { mode -> updateCarrier { it.copy(hideMode = mode) } },
                 )
                 OverlayDropdownPreference(
                     title = tr("控制中心 5G 开关磁贴", "控制中心 5G 开关磁贴"),
@@ -5636,6 +5682,18 @@ private fun Status(
                 }
             }
         }
+    }
+    if (showCarrierTextDialog) {
+        DeviceProfileFieldDialog(
+            title = tr("controlCenterCarrierCustom", "自定义运营商文本"),
+            current = carrierSettings.customText,
+            inputLabel = tr("controlCenterCarrierText", "运营商文本"),
+            onDismiss = { showCarrierTextDialog = false },
+            onSave = { text ->
+                updateCarrier { it.copy(customText = text) }
+                showCarrierTextDialog = false
+            },
+        )
     }
 }
 

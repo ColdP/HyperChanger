@@ -3,6 +3,13 @@
   "creator": "btm_m",
   "locale": "en",
   "strings": {
+    "controlCenterCarrierNetworkMarker": "Carrier network indicator",
+    "controlCenterCarrierHideHd": "Hide HD",
+    "controlCenterCarrierRealNetworkType": "Replace with actual mobile network type",
+    "controlCenterCarrierCustom": "Custom carrier text",
+    "controlCenterCarrierText": "Carrier text",
+    "controlCenterCarrierHide": "Hide carriers",
+    "controlCenterCarrierHideNonData": "Hide non-data SIM",
     "controlCenterHeaderHeight": "Custom Control Center header height",
     "controlCenterHeaderHeightValue": "%s dp",
     "iosNotificationCenter": "iOS-style Notification Center",
