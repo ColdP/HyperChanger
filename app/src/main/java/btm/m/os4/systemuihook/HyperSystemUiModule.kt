@@ -299,6 +299,7 @@ class HyperSystemUiModule : XposedModule() {
     private val controlCenterCarrierHook by lazy { ControlCenterCarrierHook(this) }
     private val controlCenterClockHook by lazy { ControlCenterClockHook(this) }
     private val islandSmoothingHook by lazy { IslandSmoothingHook(this) }
+    private val lockscreenFaceUnlockHook by lazy { LockscreenFaceUnlockHook(this) }
     internal fun installHook(member: java.lang.reflect.Executable) = hook(member)
 
     override fun onSystemServerStarting(param: SystemServerStartingParam) {
@@ -758,6 +759,9 @@ class HyperSystemUiModule : XposedModule() {
                     controlCenterCarrierHook.install(param.defaultClassLoader, preferences)
                     controlCenterClockHook.install(param.defaultClassLoader, preferences)
                     islandSmoothingHook.install(param.defaultClassLoader, preferences)
+                    if (param.packageName == SYSTEM_UI) {
+                        lockscreenFaceUnlockHook.install(param.defaultClassLoader, preferences)
+                    }
                     installCustomTileHooks(param.defaultClassLoader, preferences)
                     if (param.packageName == SYSTEM_UI) {
                         synchronized(controlCenterButtonsLock) {

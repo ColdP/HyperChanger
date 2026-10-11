@@ -8,6 +8,8 @@
     "hyperIslandSmoothingAttribution": "超级岛相关代码",
     "islandSpacingEnabled": "自定义大小岛间距",
     "islandSpacingOffset": "大小岛间距调整",
+    "disableFaceUnlockIcon": "禁用系统的人脸解锁图标",
+    "faceUnlockIsland": "人脸解锁岛",
     "HyperIsland": "HyperIsland",
     "3.1.8": "3.1.8",
     "MIT License": "MIT License",

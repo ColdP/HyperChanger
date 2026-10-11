@@ -638,6 +638,7 @@ private fun Root(
             ControlCenterClockSettingsStore(context).syncRemote(it)
             IslandSmoothingSettingsStore(context).syncRemote(it)
             IslandSpacingSettingsStore(context).syncRemote(it)
+            LockscreenFaceUnlockSettingsStore(context).syncRemote(it)
             musicStore.syncRemote(it)
             dockStore.syncRemote(it)
             homeRecentsStore.syncRemote(it)
@@ -6058,11 +6059,22 @@ private fun Lock(
     val clockHorizontalStore = remember(context) { LockscreenClockHorizontalSettingsStore(context) }
     val clockHorizontalService by HookApplication.service.collectAsStateWithLifecycle()
     var clockHorizontalEnabled by remember { mutableStateOf(clockHorizontalStore.enabled) }
+    val faceUnlockStore = remember(context) { LockscreenFaceUnlockSettingsStore(context) }
+    val faceUnlockService by HookApplication.service.collectAsStateWithLifecycle()
+    var faceUnlockSettings by remember { mutableStateOf(faceUnlockStore.settings) }
+    fun updateFaceUnlock(transform: (LockscreenFaceUnlockSettings) -> LockscreenFaceUnlockSettings) {
+        faceUnlockStore.update(faceUnlockService, transform)
+        faceUnlockSettings = faceUnlockStore.settings
+    }
     LaunchedEffect(clockHorizontalService) {
         clockHorizontalService?.let {
             clockHorizontalStore.syncRemote(it)
             clockHorizontalEnabled = clockHorizontalStore.enabled
         }
+    }
+    LaunchedEffect(faceUnlockService) {
+        faceUnlockService?.let(faceUnlockStore::syncRemote)
+        faceUnlockSettings = faceUnlockStore.settings
     }
     var showSaveWallpaperDialog by remember { mutableStateOf(false) }
     val pickEditorBackground = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -6242,7 +6254,7 @@ private fun Lock(
             }
         }
         item {
-            Group(tr("\u901a\u77e5\u4e0b\u6c89", "\u901a\u77e5\u4e0b\u6c89")) {
+            Group(tr("\u901a\u77e5\u4e0e\u8d85\u7ea7\u5c9b", "\u901a\u77e5\u4e0e\u8d85\u7ea7\u5c9b")) {
                 SwitchPreference(
                     title = tr("\u53bb\u9664\u901a\u77e5\u4e0b\u6c89\u4f4d\u7f6e\u9650\u5236", "\u53bb\u9664\u901a\u77e5\u4e0b\u6c89\u4f4d\u7f6e\u9650\u5236"),
                     checked = s.notificationFodPositionLimitRemoved,
@@ -6257,6 +6269,16 @@ OverlayDropdownPreference(
                     onSelectedIndexChange = { value ->
                         update { it.copy(fingerprintHideMode = value) }
                     },
+                )
+                SwitchPreference(
+                    title = tr("disableFaceUnlockIcon", "禁用系统的人脸解锁图标"),
+                    checked = faceUnlockSettings.disableIcon,
+                    onCheckedChange = { value -> updateFaceUnlock { it.copy(disableIcon = value) } },
+                )
+                SwitchPreference(
+                    title = tr("faceUnlockIsland", "人脸解锁岛"),
+                    checked = faceUnlockSettings.unlockIsland,
+                    onCheckedChange = { value -> updateFaceUnlock { it.copy(unlockIsland = value) } },
                 )
             }
         }

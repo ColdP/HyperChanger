@@ -8,6 +8,8 @@
     "hyperIslandSmoothingAttribution": "スーパーアイランド関連コード",
     "islandSpacingEnabled": "大・小アイランドの間隔をカスタマイズ",
     "islandSpacingOffset": "大・小アイランドの間隔調整",
+    "disableFaceUnlockIcon": "システムの顔認証ロック解除アイコンを無効化",
+    "faceUnlockIsland": "顔認証ロック解除アイランド",
     "HyperIsland": "HyperIsland",
     "3.1.8": "3.1.8",
     "MIT License": "MIT License",

@@ -8,6 +8,8 @@
     "hyperIslandSmoothingAttribution": "Island-related code",
     "islandSpacingEnabled": "Customize large-small island spacing",
     "islandSpacingOffset": "Large-small island spacing adjustment",
+    "disableFaceUnlockIcon": "Disable the system face unlock icon",
+    "faceUnlockIsland": "Face unlock island",
     "HyperIsland": "HyperIsland",
     "3.1.8": "3.1.8",
     "MIT License": "MIT License",
