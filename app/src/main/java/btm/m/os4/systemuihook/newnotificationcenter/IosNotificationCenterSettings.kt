@@ -15,7 +15,7 @@ const val KEY_IOS_NOTIFICATION_GLASS_HDR = "ios_notification_glass_hdr"
 
 data class IosNotificationCenterSettings(
     val enabled: Boolean = false,
-    // 0 = lock wallpaper, 1 = home wallpaper.
+    // 0 = lock wallpaper, 1 = home wallpaper, 2 = keep the system background.
     val wallpaper: Int = 0,
     val hideClearButton: Boolean = false,
     val glassRefraction: Boolean = true,
@@ -33,14 +33,14 @@ class IosNotificationCenterSettingsStore(context: Context) {
     }
 
     fun update(service: XposedService?, transform: (IosNotificationCenterSettings) -> IosNotificationCenterSettings) {
-        settings = transform(settings).let { it.copy(wallpaper = it.wallpaper.coerceIn(0, 1)) }
+        settings = transform(settings).let { it.copy(wallpaper = it.wallpaper.coerceIn(0, 2)) }
         write(local, settings)
         service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.let { write(it, settings) }
     }
 
     private fun read(prefs: SharedPreferences) = IosNotificationCenterSettings(
         enabled = prefs.getBoolean(KEY_IOS_NOTIFICATION_CENTER, false),
-        wallpaper = prefs.getInt(KEY_IOS_NOTIFICATION_WALLPAPER, 0).coerceIn(0, 1),
+        wallpaper = prefs.getInt(KEY_IOS_NOTIFICATION_WALLPAPER, 0).coerceIn(0, 2),
         hideClearButton = prefs.getBoolean(KEY_IOS_NOTIFICATION_HIDE_CLEAR, false),
         glassRefraction = prefs.getBoolean(KEY_IOS_NOTIFICATION_GLASS_REFRACTION, true),
         glassHdr = prefs.getBoolean(KEY_IOS_NOTIFICATION_GLASS_HDR, false),

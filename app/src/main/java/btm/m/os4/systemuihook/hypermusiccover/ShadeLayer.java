@@ -89,6 +89,10 @@ public final class ShadeLayer {
         return sIosEnabled;
     }
 
+    public static boolean iosWallpaperEnabled() {
+        return sIosEnabled && sIosWallpaper != 2;
+    }
+
     /** Includes the first native panel frame, before the hosted clock has been attached. */
     public static boolean iosNotificationPanelEnabled() {
         return sIosEnabled && !IOS.controlCenter && effectActive();
@@ -213,12 +217,14 @@ public final class ShadeLayer {
         }
         ensurePlacement();
         syncShown();
+        boolean showWallpaper = iosWallpaperEnabled();
+        IosNotificationCenterPresentation.setWallpaperEnabled(showWallpaper);
         float visual = IOS.progress * IOS.switchFraction;
         // Both effects are driven by the finger/native switch animator, without another spring.
         float opacity = visual * visual * (3f - 2f * visual);
         sFrame.setAlpha(opacity);
         sFrame.setVisibility(View.VISIBLE);
-        sEffectOn = true;
+        sEffectOn = showWallpaper;
         boolean landscape = isLandscapeFrame();
         // Landscape uses a deliberately quiet background: zoom the wallpaper slightly so the
         // whole source image is not presented edge-to-edge, then keep a soft Gaussian blur even
@@ -238,7 +244,7 @@ public final class ShadeLayer {
             sLastWpBlur = blur;
         }
         applyCurtain(IOS.progress);
-        IosShadeMaterial.setActive(true, sRoot);
+        IosShadeMaterial.setActive(showWallpaper, sRoot);
         IosNotificationCenterPresentation.update(visual, IOS.progress, true, sFrame);
     }
 
@@ -253,6 +259,7 @@ public final class ShadeLayer {
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_WALLPAPER.equals(key)
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_HIDE_CLEAR.equals(key)
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_GLASS_REFRACTION.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationBottomOffsetSettingsKt.KEY_IOS_NOTIFICATION_BOTTOM_OFFSET.equals(key)
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_GLASS_HDR.equals(key)) {
                     UI.post(() -> readPreferences(prefs));
                 }
@@ -267,7 +274,7 @@ public final class ShadeLayer {
     private static void readPreferences(android.content.SharedPreferences prefs) {
         boolean enabled = prefs.getBoolean(
                 btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_CENTER, false);
-        int source = Math.max(0, Math.min(1, prefs.getInt(
+        int source = Math.max(0, Math.min(2, prefs.getInt(
                 btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_WALLPAPER, 0)));
         boolean hideClear = prefs.getBoolean(
                 btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_HIDE_CLEAR, false);
@@ -276,6 +283,9 @@ public final class ShadeLayer {
         boolean glassHdr = prefs.getBoolean(
                 btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_GLASS_HDR, false);
         IosNotificationCenterPresentation.setHideClearButton(hideClear);
+        IosNotificationCenterPresentation.setNotificationBottomOffset(
+                btm.m.os4.systemuihook.newnotificationcenter.IosNotificationBottomOffsetSettingsKt
+                        .readIosNotificationBottomOffset(prefs));
         IosNotificationCenterPresentation.setGlassFeatures(glassRefraction, glassHdr);
         if (enabled == sIosEnabled && source == sIosWallpaper) return;
         reset();
@@ -283,9 +293,10 @@ public final class ShadeLayer {
         sEffectOn = false;
         sIosEnabled = enabled;
         sIosWallpaper = source;
+        IosNotificationCenterPresentation.setWallpaperEnabled(source != 2);
         Main.invalidateShadeWallpaper();
         if (enabled) {
-            Main.requestShadeWallpaper();
+            if (source != 2) Main.requestShadeWallpaper();
             if (sFrame != null) {
                 ensurePlacement();
                 sFrame.setVisibility(View.INVISIBLE);
@@ -602,6 +613,7 @@ public final class ShadeLayer {
         if (!Main.screenOnCached()) return false;
         if (Main.keyguardLocked()) return false;
         if (sIosEnabled) {
+            if (sIosWallpaper == 2) return true;
             // Until an eligible wallpaper is ready, keep the platform background intact.
             if (sWallpaper == null) Main.requestShadeWallpaper();
             return sWallpaper != null && !sWallpaper.isRecycled();
@@ -625,6 +637,7 @@ public final class ShadeLayer {
      */
     private static android.graphics.Bitmap background() {
         if (sIosEnabled) {
+            if (sIosWallpaper == 2) return null;
             if (sWallpaper == null) Main.requestShadeWallpaper();
             return sWallpaper;
         }

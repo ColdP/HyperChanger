@@ -6293,6 +6293,7 @@ public class Main extends XposedModule {
 
     /** Asked for by the shade layer when mode 1 wants a background and has none. */
     static void requestShadeWallpaper() {
+        if (ShadeLayer.iosEnabled() && !ShadeLayer.iosWallpaperEnabled()) return;
         final Context ctx = sAppCtx;
         if (ctx == null || sShadeWpLoading) return;
         if (android.os.SystemClock.uptimeMillis() < sShadeWpRetryAt) return;

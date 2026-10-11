@@ -3,6 +3,7 @@
 package btm.m.os4.systemuihook
 
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsStore
+import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationBottomOffsetSettingsStore
 
 import android.app.Activity
 import android.app.DownloadManager
@@ -634,6 +635,7 @@ private fun Root(
             appearances.syncRemote(it)
             airDrop.syncRemote(it)
             ControlCenterHeaderHeightSettingsStore(context).syncRemote(it)
+            IosNotificationBottomOffsetSettingsStore(context).syncRemote(it)
             ControlCenterCarrierSettingsStore(context).syncRemote(it)
             ControlCenterClockSettingsStore(context).syncRemote(it)
             IslandSmoothingSettingsStore(context).syncRemote(it)
@@ -4436,7 +4438,10 @@ private fun Shade(
     val gesturePrefs = remember(context) { context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE) }
     val iosStore = remember(context) { IosNotificationCenterSettingsStore(context) }
     var iosSettings by remember { mutableStateOf(iosStore.settings) }
+    val iosOffsetStore = remember(context) { IosNotificationBottomOffsetSettingsStore(context) }
+    var iosOffsetDp by remember { mutableStateOf(iosOffsetStore.offsetDp) }
     LaunchedEffect(service) { service?.let(iosStore::syncRemote) }
+    LaunchedEffect(service) { service?.let(iosOffsetStore::syncRemote) }
     var hideGlobalGestureHandle by remember { mutableStateOf(gesturePrefs.getBoolean(KEY_HIDE_GLOBAL_GESTURE_HANDLE, false)) }
     LaunchedEffect(service) {
         service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.edit()
@@ -4494,7 +4499,11 @@ private fun Shade(
                 if (iosSettings.enabled) {
                     OverlayDropdownPreference(
                         title = tr("iosNotificationWallpaper", "通知中心壁纸来源"),
-                        items = listOf(tr("iosNotificationLockWallpaper", "锁屏壁纸"), tr("iosNotificationHomeWallpaper", "桌面壁纸")),
+                        items = listOf(
+                            tr("iosNotificationLockWallpaper", "锁屏壁纸"),
+                            tr("iosNotificationHomeWallpaper", "桌面壁纸"),
+                            tr("iosNotificationNoWallpaper", "不显示壁纸"),
+                        ),
                         selectedIndex = iosSettings.wallpaper,
                         onSelectedIndexChange = { source ->
                             iosStore.update(service) { it.copy(wallpaper = source) }
@@ -4509,6 +4518,17 @@ private fun Shade(
                             iosStore.update(service) { it.copy(hideClearButton = hidden) }
                             iosSettings = iosStore.settings
                         },
+                    )
+                    EditableSliderPreference(
+                        title = tr("iosNotificationBottomOffset", "通知下沉底部偏移"),
+                        value = iosOffsetDp.toFloat(),
+                        valueText = if (iosOffsetDp > 0) "+$iosOffsetDp dp" else "$iosOffsetDp dp",
+                        valueRange = -30f..60f,
+                        steps = 89,
+                        defaultValue = 0f,
+                        centerValue = 0f,
+                        onValueChange = { iosOffsetDp = it.roundToInt().coerceIn(-30, 60) },
+                        onValueChangeFinished = { iosOffsetStore.update(service, iosOffsetDp) },
                     )
                 }
             }
@@ -8776,16 +8796,31 @@ private fun EditableSliderPreference(
     defaultValue: Float = valueRange.start,
     enabled: Boolean = true,
     modifier: Modifier = Modifier,
+    centerValue: Float? = null,
 ) {
     var showValueDialog by remember { mutableStateOf(false) }
+    // Asymmetric signed ranges still place their neutral value at the physical midpoint.
+    val center = centerValue?.takeIf { it > valueRange.start && it < valueRange.endInclusive }
+    val sliderValue = if (center == null) value else if (value <= center) {
+        .5f * (value - valueRange.start) / (center - valueRange.start)
+    } else {
+        .5f + .5f * (value - center) / (valueRange.endInclusive - center)
+    }
     MiuixSliderPreference(
-        value = value,
-        onValueChange = onValueChange,
+        value = sliderValue,
+        onValueChange = { position ->
+            val adjusted = if (center == null) position else if (position <= .5f) {
+                valueRange.start + position * 2f * (center - valueRange.start)
+            } else {
+                center + (position - .5f) * 2f * (valueRange.endInclusive - center)
+            }
+            onValueChange(if (center == null) adjusted else normalizeSliderValue(adjusted, valueRange, steps))
+        },
         onValueChangeFinished = onValueChangeFinished,
         title = title,
         valueText = valueText,
-        valueRange = valueRange,
-        steps = steps,
+        valueRange = if (center == null) valueRange else 0f..1f,
+        steps = if (center == null) steps else 0,
         enabled = enabled,
         modifier = modifier,
         onClick = if (enabled) ({ showValueDialog = true }) else null,

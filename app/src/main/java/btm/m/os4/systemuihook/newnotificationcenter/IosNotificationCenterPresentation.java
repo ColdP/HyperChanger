@@ -74,6 +74,7 @@ public final class IosNotificationCenterPresentation {
     private static boolean clockUnavailable;
     private static View wallpaperSheet;
     private static boolean hideClearButton;
+    private static int notificationBottomOffsetDp;
     private static View clearButton;
     private static int clearButtonVisibility = View.VISIBLE;
     private static float clearButtonAlpha = 1f;
@@ -82,6 +83,7 @@ public final class IosNotificationCenterPresentation {
     private static boolean switching;
     private static boolean gestureActive;
     private static boolean glassRefractionEnabled = true;
+    private static boolean wallpaperEnabled = true;
     private static boolean glassHdrEnabled;
     private static ValueAnimator headerExitAnimator;
 
@@ -152,7 +154,20 @@ public final class IosNotificationCenterPresentation {
         glassHdrEnabled = hdr;
         if (glassEdge != null) {
             glassEdge.setHdrEnabled(hdr);
-            glassEdge.setTransitionActive(refraction && progress > .01f && progress < .995f);
+            glassEdge.setTransitionActive(wallpaperEnabled && refraction && progress > .01f && progress < .995f);
+        }
+    }
+
+    public static void setWallpaperEnabled(boolean enabled) {
+        if (wallpaperEnabled == enabled) return;
+        wallpaperEnabled = enabled;
+        if (depth != null) {
+            depth.setVisibility(View.GONE);
+            lastDepthDrawable = null;
+        }
+        if (glassEdge != null) {
+            glassEdge.setTransitionActive(enabled && glassRefractionEnabled
+                    && progress > .01f && progress < .995f);
         }
     }
 
@@ -247,6 +262,15 @@ public final class IosNotificationCenterPresentation {
         syncClearButton();
     }
 
+    public static void setNotificationBottomOffset(int offsetDp) {
+        int bounded = Math.max(-30, Math.min(60, offsetDp));
+        if (notificationBottomOffsetDp == bounded) return;
+        notificationBottomOffsetDp = bounded;
+        restingNotificationY = Float.NaN;
+        lastNotificationY = Float.NaN;
+        requestStackUpdate(stack);
+    }
+
     static void captureStack(View view) {
         capturedStack = view;
         if (panel != null && stack == null && view.getRootView() == panel.getRootView()) {
@@ -270,7 +294,10 @@ public final class IosNotificationCenterPresentation {
         WindowInsets insets = view.getRootWindowInsets();
         if (insets != null) inset = Math.max(inset,
                 insets.getInsetsIgnoringVisibility(WindowInsets.Type.navigationBars()).bottom);
-        return Math.max(0f, view.getHeight() - inset);
+        // Shift the resting boundary as well as the origin so the OEM stacking calculator
+        // and special media/focus rows use the same bottom, instead of cancelling the offset.
+        float offset = notificationBottomOffsetDp * view.getResources().getDisplayMetrics().density;
+        return Math.max(0f, view.getHeight() - inset - offset);
     }
 
     static float panelStackAlpha(View view, float nativeAlpha) {
@@ -391,7 +418,7 @@ public final class IosNotificationCenterPresentation {
             depth = foreground;
             glassEdge = edge;
             edge.setHdrEnabled(glassHdrEnabled);
-            edge.setTransitionActive(glassRefractionEnabled && progress > .01f && progress < .995f);
+            edge.setTransitionActive(wallpaperEnabled && glassRefractionEnabled && progress > .01f && progress < .995f);
             status = statusMirror;
             stack = byId(target, "notification_stack_scroller");
             if (stack == null) stack = byId(root, "notification_stack_scroller");
@@ -468,7 +495,7 @@ public final class IosNotificationCenterPresentation {
         }
         if (glassEdge != null) {
             glassEdge.setHdrEnabled(glassHdrEnabled);
-            glassEdge.setTransitionActive(glassRefractionEnabled
+            glassEdge.setTransitionActive(wallpaperEnabled && glassRefractionEnabled
                     && progress > .01f && progress < .995f);
         }
         syncNotifications();
@@ -479,7 +506,8 @@ public final class IosNotificationCenterPresentation {
         if (notificationHeader != null && notificationHeader.getAlpha() != 0f) {
             notificationHeader.setAlpha(0f);
         }
-        hideHeaderGradient();
+        if (wallpaperEnabled) hideHeaderGradient();
+        else restoreHeaderChromeVisibility();
         for (int i = 0; oldHeader != null && i < oldHeader.length; i++) {
             View original = oldHeader[i];
             if (original != null && original.getAlpha() != 0f) {
@@ -506,7 +534,8 @@ public final class IosNotificationCenterPresentation {
         // The native header carries a gradient blur layer which sits above the
         // mirrored status bar. The hosted lockscreen clock replaces its content.
         header.setAlpha(0f);
-        hideHeaderGradient();
+        if (wallpaperEnabled) hideHeaderGradient();
+        else restoreHeaderChromeVisibility();
         // Hide the notification header's own date. The separately hosted OEM
         // lockscreen clock supplies the complete date/accessory information.
         View[] views = {byId(header, "big_time"), byId(header, "date_time"),
@@ -545,7 +574,7 @@ public final class IosNotificationCenterPresentation {
     }
 
     private static void syncDepth() {
-        if (panel != null && panel.getWidth() > panel.getHeight()) {
+        if (!wallpaperEnabled || (panel != null && panel.getWidth() > panel.getHeight())) {
             // The portrait presentation uses MIUI's deducted subject layer for depth. A
             // landscape split has no meaningful subject-to-clock composition, so hide it and
             // let the cropped/blurred wallpaper provide a quiet backdrop behind both columns.
