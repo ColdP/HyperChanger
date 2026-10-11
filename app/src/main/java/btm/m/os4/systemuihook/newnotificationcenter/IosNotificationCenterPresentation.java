@@ -27,6 +27,7 @@ public final class IosNotificationCenterPresentation {
     private static FrameLayout panel;
     private static FrameLayout host;
     private static View clock;
+    private static IosNotificationGlassEdgeView glassEdge;
     private static View clockInfo;
     private static View clockAnimation;
     private static float clockInfoOffset;
@@ -89,6 +90,7 @@ public final class IosNotificationCenterPresentation {
         layoutProgress = enabled ? Math.max(0f, Math.min(1f, layoutFraction)) : 0f;
         IosNotificationExitState.updateProgress(previousProgress, progress);
         wallpaperSheet = sheet;
+        if (glassEdge != null) glassEdge.setSource(sheet);
         if (progress <= 0f) {
             if (host != null) host.setAlpha(0f);
             // The native window hide is deferred until this endpoint. Restoring alpha here
@@ -347,6 +349,12 @@ public final class IosNotificationCenterPresentation {
             foreground.setFocusable(false);
             foreground.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             container.addView(foreground, new FrameLayout.LayoutParams(-1, -1));
+            IosNotificationGlassEdgeView edge = new IosNotificationGlassEdgeView(context);
+            edge.setSource(wallpaperSheet);
+            int edgeHeight = Math.round(76f * context.getResources().getDisplayMetrics().density);
+            FrameLayout.LayoutParams edgeParams = new FrameLayout.LayoutParams(-1, edgeHeight);
+            edgeParams.gravity = android.view.Gravity.BOTTOM;
+            container.addView(edge, edgeParams);
             MirrorView statusMirror = new MirrorView(context);
             statusMirror.setClickable(false);
             statusMirror.setFocusable(false);
@@ -361,6 +369,7 @@ public final class IosNotificationCenterPresentation {
             host = container;
             IosShadeMaterial.registerClock(nativeClock);
             depth = foreground;
+            glassEdge = edge;
             status = statusMirror;
             stack = byId(target, "notification_stack_scroller");
             if (stack == null) stack = byId(root, "notification_stack_scroller");
@@ -434,6 +443,7 @@ public final class IosNotificationCenterPresentation {
                     statusBlur, statusBlur, Shader.TileMode.CLAMP));
             lastStatusBlur = statusBlur;
         }
+        if (glassEdge != null) glassEdge.setSource(wallpaperSheet);
         syncNotifications();
         syncClockInfo();
     }
@@ -887,6 +897,13 @@ public final class IosNotificationCenterPresentation {
         if (status != null && status.getParent() instanceof ViewGroup) {
             ((ViewGroup) status.getParent()).removeView(status);
         }
+        if (glassEdge != null) {
+            glassEdge.release();
+            if (glassEdge.getParent() instanceof ViewGroup) {
+                ((ViewGroup) glassEdge.getParent()).removeView(glassEdge);
+            }
+        }
+        glassEdge = null;
         if (clearButton != null) {
             clearButton.setVisibility(clearButtonVisibility);
             clearButton.setAlpha(clearButtonAlpha);
