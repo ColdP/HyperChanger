@@ -4501,12 +4501,11 @@ private fun Shade(
                         title = tr("iosNotificationWallpaper", "通知中心壁纸来源"),
                         items = listOf(
                             tr("iosNotificationLockWallpaper", "锁屏壁纸"),
-                            tr("iosNotificationHomeWallpaper", "桌面壁纸"),
                             tr("iosNotificationNoWallpaper", "不显示壁纸"),
                         ),
-                        selectedIndex = iosSettings.wallpaper,
+                        selectedIndex = if (iosSettings.wallpaper == 2) 1 else 0,
                         onSelectedIndexChange = { source ->
-                            iosStore.update(service) { it.copy(wallpaper = source) }
+                            iosStore.update(service) { it.copy(wallpaper = if (source == 1) 2 else 0) }
                             iosSettings = iosStore.settings
                         },
                     )

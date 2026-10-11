@@ -274,8 +274,9 @@ public final class ShadeLayer {
     private static void readPreferences(android.content.SharedPreferences prefs) {
         boolean enabled = prefs.getBoolean(
                 btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_CENTER, false);
-        int source = Math.max(0, Math.min(2, prefs.getInt(
-                btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_WALLPAPER, 0)));
+        int source = btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt
+                .normalizeIosNotificationWallpaper(prefs.getInt(
+                btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_WALLPAPER, 0));
         boolean hideClear = prefs.getBoolean(
                 btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_HIDE_CLEAR, false);
         boolean glassRefraction = prefs.getBoolean(
