@@ -5,14 +5,17 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.ColorSpace;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.RuntimeShader;
 import android.graphics.Shader;
+import android.hardware.HardwareBuffer;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
+import android.view.SurfaceControl;
 import android.view.View;
 
 import java.lang.reflect.Method;
@@ -225,7 +228,6 @@ final class IosNotificationGlassEdgeView extends View {
         private final Object service;
         private final Method captureDisplay;
         private final Method createListener;
-        private final Class<?> builderClass;
         private final java.lang.reflect.Constructor<?> builderConstructor;
         private final Method build;
         private final Method setCrop;
@@ -235,18 +237,19 @@ final class IosNotificationGlassEdgeView extends View {
         private final Method setMode;
         private final Method setMiMode;
         private final Method setExcludeLayers;
-        private final Method setLayerNames;
         private final Object excludedLayers;
+        private final Method getBuffer;
+        private final Method getHardwareBuffer;
+        private final Method getColorSpace;
 
         private CaptureAccess(Object service, Method captureDisplay, Method createListener,
-                Class<?> builderClass, java.lang.reflect.Constructor<?> builderConstructor,
+                java.lang.reflect.Constructor<?> builderConstructor,
                 Method build, Method setCrop, Method setSize, Method setScale, Method setScale2, Method setMode,
-                Method setMiMode, Method setExcludeLayers, Method setLayerNames,
-                Object excludedLayers) {
+                Method setMiMode, Method setExcludeLayers, Object excludedLayers,
+                Method getBuffer, Method getHardwareBuffer, Method getColorSpace) {
             this.service = service;
             this.captureDisplay = captureDisplay;
             this.createListener = createListener;
-            this.builderClass = builderClass;
             this.builderConstructor = builderConstructor;
             this.build = build;
             this.setCrop = setCrop;
@@ -256,8 +259,10 @@ final class IosNotificationGlassEdgeView extends View {
             this.setMode = setMode;
             this.setMiMode = setMiMode;
             this.setExcludeLayers = setExcludeLayers;
-            this.setLayerNames = setLayerNames;
             this.excludedLayers = excludedLayers;
+            this.getBuffer = getBuffer;
+            this.getHardwareBuffer = getHardwareBuffer;
+            this.getColorSpace = getColorSpace;
         }
 
         static CaptureAccess create(View view) throws Exception {
@@ -273,29 +278,11 @@ final class IosNotificationGlassEdgeView extends View {
             Method createListener = find(captureClass, "createSyncCaptureListener");
             Object service = find(Class.forName("android.view.WindowManagerGlobal"),
                     "getWindowManagerService").invoke(null);
-            Method captureDisplay = null;
             Class<?> captureArgs = Class.forName(captureClass.getName() + "$CaptureArgs");
-            for (Method method : service.getClass().getMethods()) {
-                if ("captureDisplay".equals(method.getName()) && method.getParameterTypes().length == 3
-                        && method.getParameterTypes()[0] == int.class
-                        && method.getParameterTypes()[1].isAssignableFrom(captureArgs)) {
-                    method.setAccessible(true);
-                    captureDisplay = method;
-                    break;
-                }
-            }
-            if (captureDisplay == null) {
-                for (Method method : service.getClass().getDeclaredMethods()) {
-                    if ("captureDisplay".equals(method.getName()) && method.getParameterTypes().length == 3
-                            && method.getParameterTypes()[0] == int.class
-                            && method.getParameterTypes()[1].isAssignableFrom(captureArgs)) {
-                        method.setAccessible(true);
-                        captureDisplay = method;
-                        break;
-                    }
-                }
-            }
-            if (captureDisplay == null) throw new IllegalStateException("captureDisplay unavailable");
+            Class<?> listenerClass = Class.forName(captureClass.getName() + "$ScreenCaptureListener");
+            Method captureDisplay = Class.forName("android.view.IWindowManager")
+                    .getMethod("captureDisplay", int.class, captureArgs, listenerClass);
+            captureDisplay.setAccessible(true);
             Class<?>[] intTypes = {int.class, int.class};
             Method setCrop = find(builderClass, "setSourceCrop", Rect.class);
             Method setSize = findOptional(builderClass, "setSize", intTypes);
@@ -303,24 +290,25 @@ final class IosNotificationGlassEdgeView extends View {
             Method setScale2 = findOptional(builderClass, "setFrameScale", float.class, float.class);
             Method setMode = findOptional(builderClass, "setCaptureMode", int.class);
             Method setMiMode = findOptional(builderClass, "setMiCaptureMode", int.class);
-            Method setNames = findOptional(builderClass, "setExcludeOrIncludeLayerNames", String[].class);
-            Method exclude = null;
-            for (Method method : builderClass.getMethods()) {
-                if ("setExcludeLayers".equals(method.getName()) && method.getParameterTypes().length == 1) {
-                    method.setAccessible(true);
-                    exclude = method;
-                    break;
-                }
-            }
+            Method exclude = findOptional(builderClass, "setExcludeLayers", SurfaceControl[].class);
             Object excluded = currentExcludeLayers(view);
             if (setCrop == null || (setSize == null && setScale == null && setScale2 == null)) {
                 throw new IllegalStateException("capture crop unavailable");
             }
-            if (exclude == null && setNames == null) {
-                throw new IllegalStateException("capture exclusion unavailable");
+            // Capturing without excluding this SystemUI window returns the notification sheet's
+            // own wallpaper/composited content. Refuse that path instead of silently producing a
+            // plausible but incorrect backdrop.
+            if (exclude == null || excluded == null) {
+                throw new IllegalStateException("current SystemUI surface cannot be excluded");
             }
-            return new CaptureAccess(service, captureDisplay, createListener, builderClass, constructor,
-                    build, setCrop, setSize, setScale, setScale2, setMode, setMiMode, exclude, setNames, excluded);
+            Class<?> syncListenerClass = Class.forName(captureClass.getName() + "$SynchronousScreenCaptureListener");
+            Method getBuffer = find(syncListenerClass, "getBuffer");
+            Class<?> screenshotBufferClass = Class.forName(captureClass.getName() + "$ScreenshotHardwareBuffer");
+            Method getHardwareBuffer = find(screenshotBufferClass, "getHardwareBuffer");
+            Method getColorSpace = find(screenshotBufferClass, "getColorSpace");
+            return new CaptureAccess(service, captureDisplay, createListener, constructor,
+                    build, setCrop, setSize, setScale, setScale2, setMode, setMiMode, exclude, excluded,
+                    getBuffer, getHardwareBuffer, getColorSpace);
         }
 
         Bitmap capture(Rect region, float scale) throws Exception {
@@ -335,26 +323,44 @@ final class IosNotificationGlassEdgeView extends View {
                 setScale2.invoke(builder, scale, scale);
             }
             if (setMode != null) setMode.invoke(builder, 1);
-            if (setMiMode != null && builderClass.getName().contains("ScreenCaptureInternal")) {
+            if (setMiMode != null && builderConstructor.getDeclaringClass().getName().contains("ScreenCaptureInternal")) {
                 setMiMode.invoke(builder, 1);
             }
-            if (setExcludeLayers != null && excludedLayers != null) setExcludeLayers.invoke(builder, excludedLayers);
-            else if (setLayerNames != null) setLayerNames.invoke(builder, (Object) new String[]{"StatusBar#", "NavigationBar0#"});
+            setExcludeLayers.invoke(builder, excludedLayers);
             Object args = build.invoke(builder);
             Object listener = createListener.invoke(null);
             int displayId = android.view.Display.DEFAULT_DISPLAY;
             captureDisplay.invoke(service, displayId, args, listener);
-            Object buffer = find(listener.getClass(), "getBuffer").invoke(listener);
-            return (Bitmap) find(buffer.getClass(), "asBitmap").invoke(buffer);
+            Object screenshotBuffer = getBuffer.invoke(listener);
+            if (screenshotBuffer == null) throw new IllegalStateException("capture returned no buffer");
+            HardwareBuffer hardwareBuffer = null;
+            try {
+                Object value = getHardwareBuffer.invoke(screenshotBuffer);
+                if (!(value instanceof HardwareBuffer)) {
+                    throw new IllegalStateException("capture returned no HardwareBuffer");
+                }
+                hardwareBuffer = (HardwareBuffer) value;
+                Object colorSpace = getColorSpace.invoke(screenshotBuffer);
+                Bitmap bitmap = Bitmap.wrapHardwareBuffer(hardwareBuffer,
+                        colorSpace instanceof ColorSpace ? (ColorSpace) colorSpace : null);
+                if (bitmap == null) throw new IllegalStateException("cannot wrap captured HardwareBuffer");
+                return bitmap;
+            } finally {
+                if (hardwareBuffer != null) {
+                    try { hardwareBuffer.close(); } catch (Throwable ignored) {}
+                }
+            }
         }
 
         private static Object currentExcludeLayers(View view) {
             try {
                 Class<?> surfaceClass = Class.forName("android.view.SurfaceControl");
                 Object root = view.getRootView();
-                Object viewRoot = find(root.getClass(), "getViewRootImpl").invoke(root);
+                Object viewRoot = View.class.getMethod("getViewRootImpl").invoke(root);
+                if (viewRoot == null) return null;
                 Object surface = find(viewRoot.getClass(), "getSurfaceControl").invoke(viewRoot);
                 if (surface == null || !surfaceClass.isInstance(surface)) return null;
+                if (!(Boolean) find(surfaceClass, "isValid").invoke(surface)) return null;
                 Object array = java.lang.reflect.Array.newInstance(surfaceClass, 1);
                 java.lang.reflect.Array.set(array, 0, surface);
                 return array;

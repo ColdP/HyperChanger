@@ -38,7 +38,17 @@ public final class IosNotificationCenterPresentation {
     private static View stack;
     private static View transformedStack;
     private static float stackBaseTranslationY;
+    private static float stackBaseTranslationX;
     private static float stackBaseAlpha;
+    private static ViewGroup.LayoutParams stackOriginalLayoutParams;
+    private static int stackOriginalWidth;
+    private static int stackOriginalHeight;
+    private static int stackOriginalLeftMargin;
+    private static int stackOriginalTopMargin;
+    private static int stackOriginalRightMargin;
+    private static int stackOriginalBottomMargin;
+    private static boolean stackOriginalHasMargins;
+    private static boolean landscapeLayout;
     private static int lastStackBlur = -1;
     private static View capturedStack;
     private static View emptyText;
@@ -428,6 +438,7 @@ public final class IosNotificationCenterPresentation {
         }
         if (oldHeader == null) findHeader();
         syncStackTransform();
+        syncLandscapeLayout();
         hideNativeHeader();
         syncDepth();
         syncStatus();
@@ -611,6 +622,16 @@ public final class IosNotificationCenterPresentation {
             if (!(clockInfo instanceof TextView) || ((TextView) clockInfo).length() == 0) return;
             clockInfo.setVisibility(View.VISIBLE);
         }
+        // In landscape the clock is an independent left-hand column. Keep the OEM
+        // notification metadata visible, but do not move the date upward or let the
+        // notification-driven clock transition shrink the large clock.
+        if (landscapeLayout) {
+            if (clockInfoOffset != 0f) {
+                clockInfoOffset = 0f;
+                clockInfo.setTranslationY(clockInfoBaseTranslation);
+            }
+            return;
+        }
         if (clockAnimation != null) {
             boolean insideAnimation = false;
             for (android.view.ViewParent parent = clockInfo.getParent(); parent instanceof View;
@@ -756,12 +777,114 @@ public final class IosNotificationCenterPresentation {
         if (emptyText != null && emptyText.getAlpha() != 0f) emptyText.setAlpha(0f);
     }
 
+    /**
+     * The stock shade is a single vertical column. On a wide display, give the hosted clock
+     * its own left column and resize/reposition the native notification scroller into the right
+     * column. Layout params are restored as soon as the display returns to portrait so the OEM
+     * shade keeps its original geometry after rotation or when the presentation is released.
+     */
+    private static void syncLandscapeLayout() {
+        if (panel == null || host == null || panel.getWidth() <= 0 || panel.getHeight() <= 0) return;
+        boolean wantLandscape = panel.getWidth() > panel.getHeight();
+        if (!wantLandscape) {
+            if (landscapeLayout) restoreLandscapeStackLayout();
+            ViewGroup.LayoutParams hostParams = host.getLayoutParams();
+            if (hostParams != null && hostParams.width != ViewGroup.LayoutParams.MATCH_PARENT) {
+                hostParams.width = ViewGroup.LayoutParams.MATCH_PARENT;
+                hostParams.height = ViewGroup.LayoutParams.MATCH_PARENT;
+                host.setLayoutParams(hostParams);
+            }
+            host.setClipChildren(true);
+            return;
+        }
+
+        float density = panel.getResources().getDisplayMetrics().density;
+        int outer = Math.round(16f * density);
+        int divider = Math.round(18f * density);
+        int leftWidth = Math.round(panel.getWidth() * 0.42f);
+        int rightLeft = leftWidth + divider;
+        int rightWidth = panel.getWidth() - rightLeft - outer;
+        if (rightWidth <= Math.round(220f * density)) return;
+
+        if (!landscapeLayout) {
+            landscapeLayout = true;
+            if (stack != null) {
+                ViewGroup.LayoutParams params = stack.getLayoutParams();
+                if (params != null) {
+                    stackOriginalLayoutParams = params;
+                    stackOriginalWidth = params.width;
+                    stackOriginalHeight = params.height;
+                    stackOriginalHasMargins = params instanceof ViewGroup.MarginLayoutParams;
+                    if (stackOriginalHasMargins) {
+                        ViewGroup.MarginLayoutParams margins = (ViewGroup.MarginLayoutParams) params;
+                        stackOriginalLeftMargin = margins.leftMargin;
+                        stackOriginalTopMargin = margins.topMargin;
+                        stackOriginalRightMargin = margins.rightMargin;
+                        stackOriginalBottomMargin = margins.bottomMargin;
+                    }
+                }
+            }
+        }
+
+        ViewGroup.LayoutParams hostParams = host.getLayoutParams();
+        if (hostParams != null && hostParams.width != leftWidth) {
+            hostParams.width = leftWidth;
+            hostParams.height = ViewGroup.LayoutParams.MATCH_PARENT;
+            host.setLayoutParams(hostParams);
+        }
+        host.setClipChildren(true);
+        host.setClipToPadding(true);
+
+        if (stack != null) {
+            ViewGroup.LayoutParams params = stack.getLayoutParams();
+            if (params != null) {
+                boolean changed = params.width != rightWidth;
+                params.width = rightWidth;
+                if (params instanceof ViewGroup.MarginLayoutParams) {
+                    ViewGroup.MarginLayoutParams margins = (ViewGroup.MarginLayoutParams) params;
+                    changed |= margins.leftMargin != rightLeft || margins.rightMargin != outer;
+                    margins.leftMargin = rightLeft;
+                    margins.rightMargin = outer;
+                } else {
+                    float targetX = stackBaseTranslationX + rightLeft;
+                    if (Math.abs(stack.getTranslationX() - targetX) > .5f) {
+                        stack.setTranslationX(targetX);
+                    }
+                }
+                if (changed) stack.setLayoutParams(params);
+            }
+        }
+    }
+
+    private static void restoreLandscapeStackLayout() {
+        if (!landscapeLayout) return;
+        if (stack != null) {
+            ViewGroup.LayoutParams params = stackOriginalLayoutParams;
+            if (params != null) {
+                params.width = stackOriginalWidth;
+                params.height = stackOriginalHeight;
+                if (stackOriginalHasMargins && params instanceof ViewGroup.MarginLayoutParams) {
+                    ViewGroup.MarginLayoutParams margins = (ViewGroup.MarginLayoutParams) params;
+                    margins.leftMargin = stackOriginalLeftMargin;
+                    margins.topMargin = stackOriginalTopMargin;
+                    margins.rightMargin = stackOriginalRightMargin;
+                    margins.bottomMargin = stackOriginalBottomMargin;
+                }
+                stack.setLayoutParams(params);
+            }
+            stack.setTranslationX(stackBaseTranslationX);
+        }
+        stackOriginalLayoutParams = null;
+        landscapeLayout = false;
+    }
+
     private static void syncStackTransform() {
         if (stack == null || host == null) return;
         if (transformedStack != stack) {
             restoreStackTransform();
             transformedStack = stack;
             stackBaseTranslationY = stack.getTranslationY();
+            stackBaseTranslationX = stack.getTranslationX();
             stackBaseAlpha = stack.getAlpha();
         }
         float y = stackBaseTranslationY + host.getTranslationY();
@@ -775,6 +898,7 @@ public final class IosNotificationCenterPresentation {
         View original = transformedStack;
         transformedStack = null;
         original.setTranslationY(stackBaseTranslationY);
+        original.setTranslationX(stackBaseTranslationX);
         original.setAlpha(stackBaseAlpha);
         original.setRenderEffect(null);
         lastStackBlur = -1;
@@ -783,6 +907,7 @@ public final class IosNotificationCenterPresentation {
     private static void syncNotifications() {
         View currentStack = stack;
         if (currentStack == null || currentStack.getHeight() == 0 || clock == null) return;
+        if (landscapeLayout) return;
         // The exiting cards retain their last drawn positions. Keep the clock's matching
         // notification baseline too, until a cancelled exit reaches the open endpoint.
         // Native padding/scroll geometry below no longer describes those retained cards.
@@ -873,6 +998,7 @@ public final class IosNotificationCenterPresentation {
     private static void releasePresentation() {
         IosNotificationExitState.clear();
         restoreStackTransform();
+        restoreLandscapeStackLayout();
         IosNotificationStackHooks.restoreStackedRows();
         IosNotificationStackHooks.restoreExpandedRows(stack);
         if (observer != null && observer.isAlive()) observer.removeOnPreDrawListener(FRAME);
@@ -903,6 +1029,8 @@ public final class IosNotificationCenterPresentation {
         clockInfoBaseTranslation = 0f;
         clockInfoRefreshMinute = -1L;
         stack = null;
+        stackOriginalLayoutParams = null;
+        landscapeLayout = false;
         layoutProgress = 0f;
         lastNotificationY = Float.NaN;
         restingNotificationY = Float.NaN;
