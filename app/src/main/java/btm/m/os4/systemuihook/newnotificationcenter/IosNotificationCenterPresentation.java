@@ -545,6 +545,14 @@ public final class IosNotificationCenterPresentation {
     }
 
     private static void syncDepth() {
+        if (panel != null && panel.getWidth() > panel.getHeight()) {
+            // The portrait presentation uses MIUI's deducted subject layer for depth. A
+            // landscape split has no meaningful subject-to-clock composition, so hide it and
+            // let the cropped/blurred wallpaper provide a quiet backdrop behind both columns.
+            if (depth != null && depth.getVisibility() != View.GONE) depth.setVisibility(View.GONE);
+            lastDepthDrawable = null;
+            return;
+        }
         View source = byId(window, "deducted_image_view");
         if (!(source instanceof ImageView)) return;
         Drawable drawable = ((ImageView) source).getDrawable();
