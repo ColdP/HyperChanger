@@ -33,6 +33,8 @@
   "iosNotificationWallpaper": "通知センターの壁紙ソース",
   "iosNotificationHideClear": "通知センターの消去ボタンを隠す",
   "iosNotificationHideClearSummary": "通知センター下部の消去ボタンを隠します",
+    "iosNotificationGlassRefraction": "リキッドガラスの屈折効果",
+    "iosNotificationGlassHdr": "屈折ハイライト HDR 効果",
     "iosNotificationLockWallpaper": "ロック画面の壁紙",
     "iosNotificationHomeWallpaper": "ホーム画面の壁紙",
     "进入 OOBE": "OOBE を開く",

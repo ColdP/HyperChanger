@@ -33,6 +33,8 @@
   "iosNotificationWallpaper": "Notification Center wallpaper source",
   "iosNotificationHideClear": "Hide Notification Center clear button",
   "iosNotificationHideClearSummary": "Hide the clear button at the bottom of Notification Center",
+    "iosNotificationGlassRefraction": "Liquid Glass Refraction",
+    "iosNotificationGlassHdr": "Refraction HDR Highlights",
     "iosNotificationLockWallpaper": "Lock screen wallpaper",
     "iosNotificationHomeWallpaper": "Home screen wallpaper",
     "进入 OOBE": "Enter OOBE",

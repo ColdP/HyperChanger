@@ -4510,6 +4510,22 @@ private fun Shade(
                             iosSettings = iosStore.settings
                         },
                     )
+                    SwitchPreference(
+                        title = tr("iosNotificationGlassRefraction", "液态玻璃折射效果"),
+                        checked = iosSettings.glassRefraction,
+                        onCheckedChange = { enabled ->
+                            iosStore.update(service) { it.copy(glassRefraction = enabled) }
+                            iosSettings = iosStore.settings
+                        },
+                    )
+                    SwitchPreference(
+                        title = tr("iosNotificationGlassHdr", "折射高光 HDR 效果"),
+                        checked = iosSettings.glassHdr,
+                        onCheckedChange = { enabled ->
+                            iosStore.update(service) { it.copy(glassHdr = enabled) }
+                            iosSettings = iosStore.settings
+                        },
+                    )
                 }
             }
         }

@@ -71,6 +71,8 @@ public final class IosNotificationCenterPresentation {
     private static int lastStatusBlur = -1;
     private static boolean switching;
     private static boolean gestureActive;
+    private static boolean glassRefractionEnabled = true;
+    private static boolean glassHdrEnabled;
     private static ValueAnimator headerExitAnimator;
 
     private IosNotificationCenterPresentation() {}
@@ -90,9 +92,9 @@ public final class IosNotificationCenterPresentation {
         layoutProgress = enabled ? Math.max(0f, Math.min(1f, layoutFraction)) : 0f;
         IosNotificationExitState.updateProgress(previousProgress, progress);
         wallpaperSheet = sheet;
-        if (glassEdge != null) glassEdge.setSource(sheet);
         if (progress <= 0f) {
             if (host != null) host.setAlpha(0f);
+            if (glassEdge != null) glassEdge.setTransitionActive(false);
             // The native window hide is deferred until this endpoint. Restoring alpha here
             // would expose the list for a frame before that hide reaches the view pipeline.
             if (transformedStack != null &&
@@ -133,6 +135,15 @@ public final class IosNotificationCenterPresentation {
 
     public static void setGestureActive(boolean active) {
         gestureActive = active;
+    }
+
+    public static void setGlassFeatures(boolean refraction, boolean hdr) {
+        glassRefractionEnabled = refraction;
+        glassHdrEnabled = hdr;
+        if (glassEdge != null) {
+            glassEdge.setHdrEnabled(hdr);
+            glassEdge.setTransitionActive(refraction && progress > .01f && progress < .995f);
+        }
     }
 
     public static void setSwitching(boolean value) {
@@ -350,7 +361,6 @@ public final class IosNotificationCenterPresentation {
             foreground.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             container.addView(foreground, new FrameLayout.LayoutParams(-1, -1));
             IosNotificationGlassEdgeView edge = new IosNotificationGlassEdgeView(context);
-            edge.setSource(wallpaperSheet);
             int edgeHeight = Math.round(76f * context.getResources().getDisplayMetrics().density);
             FrameLayout.LayoutParams edgeParams = new FrameLayout.LayoutParams(-1, edgeHeight);
             edgeParams.gravity = android.view.Gravity.BOTTOM;
@@ -370,6 +380,8 @@ public final class IosNotificationCenterPresentation {
             IosShadeMaterial.registerClock(nativeClock);
             depth = foreground;
             glassEdge = edge;
+            edge.setHdrEnabled(glassHdrEnabled);
+            edge.setTransitionActive(glassRefractionEnabled && progress > .01f && progress < .995f);
             status = statusMirror;
             stack = byId(target, "notification_stack_scroller");
             if (stack == null) stack = byId(root, "notification_stack_scroller");
@@ -443,7 +455,11 @@ public final class IosNotificationCenterPresentation {
                     statusBlur, statusBlur, Shader.TileMode.CLAMP));
             lastStatusBlur = statusBlur;
         }
-        if (glassEdge != null) glassEdge.setSource(wallpaperSheet);
+        if (glassEdge != null) {
+            glassEdge.setHdrEnabled(glassHdrEnabled);
+            glassEdge.setTransitionActive(glassRefractionEnabled
+                    && progress > .01f && progress < .995f);
+        }
         syncNotifications();
         syncClockInfo();
     }

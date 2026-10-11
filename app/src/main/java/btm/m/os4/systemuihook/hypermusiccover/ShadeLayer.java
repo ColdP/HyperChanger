@@ -234,7 +234,9 @@ public final class ShadeLayer {
             (prefs, key) -> {
                 if (btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_CENTER.equals(key)
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_WALLPAPER.equals(key)
-                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_HIDE_CLEAR.equals(key)) {
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_HIDE_CLEAR.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_GLASS_REFRACTION.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_GLASS_HDR.equals(key)) {
                     UI.post(() -> readPreferences(prefs));
                 }
             };
@@ -252,7 +254,12 @@ public final class ShadeLayer {
                 btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_WALLPAPER, 0)));
         boolean hideClear = prefs.getBoolean(
                 btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_HIDE_CLEAR, false);
+        boolean glassRefraction = prefs.getBoolean(
+                btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_GLASS_REFRACTION, true);
+        boolean glassHdr = prefs.getBoolean(
+                btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_GLASS_HDR, false);
         IosNotificationCenterPresentation.setHideClearButton(hideClear);
+        IosNotificationCenterPresentation.setGlassFeatures(glassRefraction, glassHdr);
         if (enabled == sIosEnabled && source == sIosWallpaper) return;
         reset();
         if (sEffectOn) Main.setCardBlurActive(false);
