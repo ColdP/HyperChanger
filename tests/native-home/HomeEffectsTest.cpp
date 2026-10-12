@@ -2,6 +2,7 @@
 #include "targets/home/home_effects.h"
 #include "targets/home/folder_spacing.h"
 #include <cassert>
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -39,13 +40,14 @@ int main(int argc, char **argv) {
         for (bool enabled : {false, true}) {
             uint32_t length = 0;
             input.read(reinterpret_cast<char *>(&length), 4);
-            assert(length == 212);
+            assert(length == 232);
             std::vector<std::byte> blob(length);
             input.read(reinterpret_cast<char *>(blob.data()), length);
             assert(input);
             const auto decoded = folder_spacing::read_material_settings(blob);
             assert(decoded.enabled == enabled && decoded.dock_enabled == enabled && decoded.dock_offset == offset);
-            for (auto p : decoded.percent) assert(p == percent);
+            for (size_t i = 0; i < 5; ++i) assert(decoded.percent[i] == percent);
+            assert(decoded.percent[5] == std::min(percent, 100U));
             assert(folder_spacing::read_settings(blob).enabled);
             assert(folder_spacing::read_settings(blob).value == 12);
             // No accidental magic scanning: damaged header, count, version,

@@ -44,7 +44,7 @@ data class DockSettings(
     val radius: Int = 30,
 )
 
-class DockSettingsStore(context: Context) {
+class DockSettingsStore(private val context: Context) {
     private val local = context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE)
 
     var settings: DockSettings = read(local)
@@ -59,12 +59,14 @@ class DockSettingsStore(context: Context) {
         settings = if (remote.contains(KEY_DOCK_ENABLED)) read(remote) else settings
         write(local, settings)
         write(remote, settings)
+        stageHomeRecentsNativeConfig(context, readHomeRecentsSettings(local))
     }
 
-    fun update(service: XposedService?, transform: (DockSettings) -> DockSettings) {
+    fun update(service: XposedService?, transform: (DockSettings) -> DockSettings): Boolean {
         settings = transform(settings)
         write(local, settings)
         service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.let { write(it, settings) }
+        return stageHomeRecentsNativeConfig(context, readHomeRecentsSettings(local))
     }
 
     private fun read(prefs: SharedPreferences) = readDockSettings(prefs)
@@ -111,3 +113,10 @@ internal fun readDockSettings(prefs: SharedPreferences) = DockSettings(
         bottom = prefs.getInt(KEY_DOCK_BOTTOM, 15).coerceIn(0, 150),
         radius = prefs.getInt(KEY_DOCK_RADIUS, 30).coerceIn(0, 60),
     )
+
+internal fun readHomeNativeDockSettings(prefs: SharedPreferences) = HomeNativeDockSettings(
+    enabled = prefs.getBoolean(KEY_DOCK_ENABLED, false),
+    glass = prefs.getInt(KEY_DOCK_MATERIAL, 2) != 1,
+    radius = prefs.getInt(KEY_DOCK_RADIUS, 30),
+    padding = prefs.getInt(KEY_DOCK_MARGIN, 25),
+).normalized()

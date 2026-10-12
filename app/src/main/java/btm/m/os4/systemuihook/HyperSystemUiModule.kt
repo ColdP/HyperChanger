@@ -303,9 +303,6 @@ class HyperSystemUiModule : XposedModule() {
     internal fun installHook(member: java.lang.reflect.Executable) = hook(member)
 
     override fun onSystemServerStarting(param: SystemServerStartingParam) {
-        android.util.Log.i("HyperChangerDock", "system server callback entered")
-        runCatching { DockWmsHook.install(this, param.classLoader) }
-            .onFailure { error -> log(Log.ERROR, TAG, "Could not install desktop Dock WMS hook", error) }
     }
 
     private var customTileHookInstalled = false
@@ -709,15 +706,13 @@ class HyperSystemUiModule : XposedModule() {
     override fun onPackageLoaded(param: PackageLoadedParam) {
         if (!OsCompatibility.areHooksAllowed()) return
         if (param.packageName == "android" || param.packageName == "system") {
-            runCatching { DockWmsHook.install(this, param) }
-                .onFailure { error -> log(Log.ERROR, TAG, "Could not install desktop Dock WMS hook", error) }
             return
         }
         if (param.packageName == "com.miui.home") {
             runCatching {
                 val preferences = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
                 syncHomeRecentsNativeConfig(
-                    param, readHomeRecentsSettings(preferences), readHomeFolderSettings(preferences), readHomeMaterialSettings(preferences),
+                    param, readHomeRecentsSettings(preferences), readHomeFolderSettings(preferences), readHomeMaterialSettings(preferences), readHomeNativeDockSettings(preferences),
                 )
             }.onFailure { error ->
                 log(Log.ERROR, TAG, "Could not sync native desktop recents config", error)

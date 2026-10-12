@@ -11,6 +11,7 @@ internal fun buildHomeLauncherBlob(
     folderRowSpacing: Int = 0,
     folderRowSpacingEnabled: Boolean = false,
     material: HomeMaterialSettings = HomeMaterialSettings(),
+    nativeDock: HomeNativeDockSettings = HomeNativeDockSettings(),
 ): ByteArray {
     require(clearMode in 0..2)
     require(folderColumns in 0..15)
@@ -20,7 +21,8 @@ internal fun buildHomeLauncherBlob(
         if (folderColumns != 0) add(16)
     }
     require(material == material.normalized())
-    val output = ByteArrayOutputStream(208)
+    require(nativeDock == nativeDock.normalized())
+    val output = ByteArrayOutputStream(232)
     fun u32(value: Int) {
         output.write(value and 0xff)
         output.write((value ushr 8) and 0xff)
@@ -48,12 +50,18 @@ internal fun buildHomeLauncherBlob(
     u32(folderRowSpacing)
     // Independent glass parameter ratios; no material selector or global gate.
     u32(0x4c52544d) // MTRL
-    u32(3)
+    u32(4)
     u32(if (material.enabled) 1 else 0)
-    listOf(material.blur, material.refraction, material.softLight, material.saturation, material.brightness).forEach(::u32)
+    listOf(material.blur, material.refraction, material.softLight, material.saturation, material.brightness, material.opacity).forEach(::u32)
     u32(0x464f4944) // DIOF
     u32(1)
     u32(if (material.dockIcon.enabled) 1 else 0)
     u32(material.dockIcon.offset)
+    u32(0x4b444e48) // HNDK
+    u32(1)
+    u32(if (nativeDock.enabled) 1 else 0)
+    u32(if (nativeDock.glass) 1 else 2)
+    u32(nativeDock.radius)
+    u32(nativeDock.padding)
     return output.toByteArray()
 }

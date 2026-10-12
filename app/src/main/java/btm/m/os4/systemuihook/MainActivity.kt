@@ -2862,6 +2862,7 @@ private fun HomeMaterialPage(
                 ParameterIntSlide(tr("柔光强度", "柔光强度"), settings.softLight, 0..200, "%", defaultValue = 100) { value -> update { it.copy(softLight = value) } }
                 ParameterIntSlide(tr("背景饱和度", "背景饱和度"), settings.saturation, 0..200, "%", defaultValue = 100) { value -> update { it.copy(saturation = value) } }
                 ParameterIntSlide(tr("背景亮度", "背景亮度"), settings.brightness, 0..200, "%", defaultValue = 100) { value -> update { it.copy(brightness = value) } }
+                ParameterIntSlide(tr("不透明度", "Opacity"), settings.opacity, 0..100, "%", defaultValue = 100) { value -> update { it.copy(opacity = value) } }
             }
         }
     }

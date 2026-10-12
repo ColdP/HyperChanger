@@ -4,7 +4,40 @@
 #include <span>
 #include <cstdint>
 #include <vector>
+#include <algorithm>
 namespace home_effects {
+struct AddressRange { uintptr_t begin; uintptr_t end; };
+// Use actual gaps, including anonymous mappings. Megabyte-spaced mmap hints
+// miss the small holes left by the Rust runtime's densely packed AOT images.
+inline std::vector<uintptr_t> island_candidates(std::vector<AddressRange> ranges,
+        uintptr_t target, size_t page, size_t bytes) {
+    constexpr uintptr_t reach = 128 * 1024 * 1024 - 256;
+    if (page == 0 || bytes == 0 || bytes % page || target > UINTPTR_MAX - reach) return {};
+    const uintptr_t low = target > reach ? target - reach : page;
+    const uintptr_t high = target + reach;
+    std::ranges::sort(ranges, {}, &AddressRange::begin);
+    std::vector<uintptr_t> result;
+    uintptr_t cursor = low;
+    const auto gap = [&](uintptr_t begin, uintptr_t end) {
+        const uintptr_t first = begin + (page - begin % page) % page;
+        if (end <= first || end - first < bytes) return;
+        const uintptr_t last = (end - bytes) / page * page;
+        result.push_back(first);
+        if (last != first) result.push_back(last);
+    };
+    for (const auto &range : ranges) {
+        if (range.end <= cursor) continue;
+        if (range.begin >= high) break;
+        if (range.begin > cursor) gap(cursor, std::min(range.begin, high));
+        cursor = std::max(cursor, range.end);
+        if (cursor >= high) break;
+    }
+    if (cursor < high) gap(cursor, high);
+    std::ranges::sort(result, [&](uintptr_t a, uintptr_t b) {
+        return (a > target ? a - target : target - a) < (b > target ? b - target : target - b);
+    });
+    return result;
+}
 inline constexpr std::array<uint32_t, 122> kGlassShape{
     0xa9bf79fd, 0xaa0f03fd, 0xd10b21ef, 0xaa0203e0, 0xaa0103e3, 0xf81f83a1,
     0xf81f03a2, 0xb800b060, 0x385ff070, 0x385ff011, 0x8a500a30, 0xea5c821f,
@@ -60,20 +93,21 @@ inline bool matches_dock(std::span<const uint32_t> code) {
     return true;
 }
 struct GlassField { size_t index; size_t parameter; uint32_t reg; bool refractive_index; };
-inline constexpr std::array<GlassField, 6> kGlassFields{{
+inline constexpr std::array<GlassField, 7> kGlassFields{{
     {110, 0, 21, false},
     {36, 1, 2, false},
     {68, 1, 9, true},
     {83, 2, 13, false},
     {86, 3, 14, false},
     {89, 4, 15, false},
+    {114, 5, 23, false},
 }};
 inline constexpr size_t kDockReturnIndex = 23;
 // Each island has immutable code and a separate writable data page. These
 // straight-line instructions never call C/C++, allocate Dart objects or retain
 // heap pointers. X16 and the full Q30/Q31 values are restored; NZCV is untouched.
 inline std::vector<uint32_t> island_program(uintptr_t pc, uintptr_t data,
-        uint32_t original, uint32_t reg, bool ior, bool dock, uintptr_t continuation) {
+        uint32_t original, uint32_t reg, bool ior, bool dock, uintptr_t continuation, bool absolute = false) {
     std::vector<uint32_t> code{original, 0xf81f0ff0}; // str x16,[sp,#-16]!
     auto literal = [&](uintptr_t address, uint32_t base) {
         const intptr_t relative = static_cast<intptr_t>(address) - static_cast<intptr_t>(pc + code.size() * 4);
@@ -88,7 +122,10 @@ inline std::vector<uint32_t> island_program(uintptr_t pc, uintptr_t data,
         code.push_back(0x1e6e101e); // 1.0
         code.push_back(0x1e7e3800 | (reg << 5) | reg);
     }
-    code.push_back((dock ? 0x1e7f2800 : 0x1e7f0800) | (reg << 5) | reg);
+    // FMOV D<reg>, D31 for absolute values. The source register is encoded
+    // in Rn (bits 9:5), while the destination is Rd (bits 4:0).
+    code.push_back(absolute ? (0x1e604000 | (31u << 5) | reg)
+                            : (dock ? 0x1e7f2800 : 0x1e7f0800) | (reg << 5) | reg);
     if (ior) code.push_back(0x1e7e2800 | (reg << 5) | reg);
     code.push_back(ior ? 0xacc17ffe : 0x3cc107ff);
     const size_t finish = code.size();

@@ -13,6 +13,7 @@ using Unhook = int (*)(void *);
 using Loaded = void (*)(const char *, void *);
 struct NativeApiEntries { uint32_t version; Hook hook_func; Unhook unhook_func; };
 void start_folder_spacing();
+void refresh_home_effects_on_load();
 
 namespace {
 void (*original_name)(const char *) = nullptr;
@@ -48,7 +49,11 @@ int property_get(const char *name, char *value) {
     start_in_child();
     return original_property != nullptr ? original_property(name, value) : 0;
 }
-void loaded(const char *, void *) { start_in_child(); }
+void loaded(const char *name, void *) {
+    start_in_child();
+    if (name != nullptr && std::string_view(name).ends_with("libapp.so") && launcher()
+        && getuid() >= 10000) refresh_home_effects_on_load();
+}
 }
 
 extern "C" [[gnu::visibility("default")]] [[gnu::used]]

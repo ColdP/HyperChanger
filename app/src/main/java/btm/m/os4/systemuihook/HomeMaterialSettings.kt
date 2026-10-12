@@ -14,6 +14,7 @@ internal fun readHomeMaterialSettings(prefs: SharedPreferences) = HomeMaterialSe
     softLight = prefs.getInt("home_glass_soft_light_factor", 100),
     saturation = prefs.getInt("home_glass_saturation_factor", 100),
     brightness = prefs.getInt("home_glass_brightness_factor", 100),
+    opacity = prefs.getInt("home_glass_opacity_factor", 100),
     dockIcon = readHomeDockIconSettings(prefs),
 ).normalized()
 
@@ -37,6 +38,7 @@ internal class HomeMaterialSettingsStore(private val context: Context) {
             .putInt("home_glass_blur_factor", s.blur).putInt("home_glass_refraction_factor", s.refraction)
             .putInt("home_glass_soft_light_factor", s.softLight).putInt("home_glass_saturation_factor", s.saturation)
             .putInt("home_glass_brightness_factor", s.brightness)
+            .putInt("home_glass_opacity_factor", s.opacity)
         writeHomeDockIconSettings(editor, s.dockIcon)
         editor.apply()
     }

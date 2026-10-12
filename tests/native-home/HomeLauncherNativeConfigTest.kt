@@ -17,7 +17,7 @@ fun main(args: Array<String>) {
         check(wire.int == 18)
         val enabled = wire.int != 0
         val count = wire.int
-        check(blob.size == 204 + 4 * count) // V18 plus spacing, glass and Dock icon extensions
+        check(blob.size == 232 + 4 * count) // V18 plus spacing, glass, Dock icon and native Dock extensions
         val features = List(count) { wire.int }.toSet()
         check(enabled == (clearMode != 0 || columns != 0))
         check((16 in features) == (columns != 0)) {
@@ -45,20 +45,21 @@ fun main(args: Array<String>) {
         // Changing folder controls must not enable any other layout/material feature.
         for (trial in 0..11) check(wire.getInt(base + 44 + trial * 4) == 0)
         check(wire.getInt(extension + 16) == 0x4c52544d)
-        check(wire.getInt(extension + 20) == 3)
+        check(wire.getInt(extension + 20) == 4)
         check(wire.getInt(extension + 24) == 0)
-        repeat(5) { check(wire.getInt(extension + 28 + it * 4) == 100) }
-        check(wire.getInt(extension + 48) == 0x464f4944)
-        check(wire.getInt(extension + 52) == 1)
-        check(wire.getInt(extension + 56) == 0)
+        repeat(6) { check(wire.getInt(extension + 28 + it * 4) == 100) }
+        check(wire.getInt(extension + 52) == 0x464f4944)
+        check(wire.getInt(extension + 56) == 1)
         check(wire.getInt(extension + 60) == 0)
+        check(wire.getInt(extension + 64) == 0)
+        check(wire.getInt(extension + 68) == 0x4b444e48)
         combinations++
     }
     fixtures?.close()
     args.getOrNull(1)?.let { path ->
         java.io.File(path).outputStream().use { out ->
             for (percent in 0..200) for (offset in -60..30) for (enabled in listOf(false, true)) {
-                val material = HomeMaterialSettings(enabled, percent, percent, percent, percent, percent, HomeDockIconSettings(enabled, offset))
+                val material = HomeMaterialSettings(enabled, percent, percent, percent, percent, percent, percent.coerceAtMost(100), HomeDockIconSettings(enabled, offset))
                 val blob = buildHomeLauncherBlob(2, 6, 12, true, material)
                 out.write(ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(blob.size).array())
                 out.write(blob)

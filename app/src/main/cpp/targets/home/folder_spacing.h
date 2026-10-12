@@ -45,9 +45,13 @@ inline Settings read_settings(std::span<const std::byte> bytes) {
 
 struct MaterialSettings {
     bool enabled = false;
-    std::array<uint32_t, 5> percent{100, 100, 100, 100, 100};
+    std::array<uint32_t, 6> percent{100, 100, 100, 100, 100, 100};
     bool dock_enabled = false;
     int32_t dock_offset = 0;
+    bool native_dock_enabled = false;
+    uint32_t native_dock_style = 1;
+    uint32_t native_dock_radius = 30;
+    uint32_t native_dock_padding = 25;
 };
 
 inline MaterialSettings read_material_settings(std::span<const std::byte> bytes) {
@@ -56,18 +60,32 @@ inline MaterialSettings read_material_settings(std::span<const std::byte> bytes)
     if (count > 64) return {};
     const size_t spacing = 140 + size_t(count) * 4;
     const size_t p = spacing + 16;
-    if (bytes.size() != p + 48 || word(bytes, spacing) != 0x53524746 || word(bytes, spacing + 4) != 2
-        || word(bytes, p) != 0x4c52544d || word(bytes, p + 4) != 3 || word(bytes, p + 8) > 1
-        || word(bytes, p + 32) != 0x464f4944 || word(bytes, p + 36) != 1 || word(bytes, p + 40) > 1) return {};
+    if (p > bytes.size() || bytes.size() - p < 8) return {};
+    const uint32_t version = word(bytes, p + 4);
+    const bool legacy = version == 3;
+    if (bytes.size() != p + (legacy ? 48 : 76) || word(bytes, spacing) != 0x53524746 || word(bytes, spacing + 4) != 2
+        || word(bytes, p) != 0x4c52544d || (!legacy && version != 4) || word(bytes, p + 8) > 1) return {};
+    const size_t dock = p + (legacy ? 32 : 36);
+    if (word(bytes, dock) != 0x464f4944 || word(bytes, dock + 4) != 1 || word(bytes, dock + 8) > 1) return {};
     MaterialSettings settings;
     settings.enabled = word(bytes, p + 8) != 0;
-    for (size_t i = 0; i < 5; ++i) {
+    for (size_t i = 0; i < (legacy ? 5U : 6U); ++i) {
         settings.percent[i] = word(bytes, p + 12 + i * 4);
-        if (settings.percent[i] > 200) return {};
+        if (settings.percent[i] > (i == 5 ? 100U : 200U)) return {};
     }
-    settings.dock_enabled = word(bytes, p + 40) != 0;
-    settings.dock_offset = static_cast<int32_t>(word(bytes, p + 44));
+    settings.dock_enabled = word(bytes, dock + 8) != 0;
+    settings.dock_offset = static_cast<int32_t>(word(bytes, dock + 12));
     if (settings.dock_offset < -60 || settings.dock_offset > 30) return {};
+    if (!legacy) {
+        const size_t native = dock + 16;
+        if (word(bytes, native) != 0x4b444e48 || word(bytes, native + 4) != 1 || word(bytes, native + 8) > 1) return {};
+        settings.native_dock_enabled = word(bytes, native + 8) != 0;
+        settings.native_dock_style = word(bytes, native + 12);
+        settings.native_dock_radius = word(bytes, native + 16);
+        settings.native_dock_padding = word(bytes, native + 20);
+        if (settings.native_dock_style < 1 || settings.native_dock_style > 2 || settings.native_dock_radius > 60
+            || settings.native_dock_padding > 150) return {};
+    }
     return settings;
 }
 
