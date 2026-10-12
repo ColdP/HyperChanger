@@ -101,7 +101,7 @@ class HyperCeilerBrandView(context: Context) : FrameLayout(context) {
         content.clipChildren = false
         content.clipToPadding = false
         addView(content, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER))
-        logo.setBlendDrawable(R.drawable.ic_hyperchanger_logo_sp)
+        logo.setBlendDrawable(R.drawable.ic_hyperchanger_sp)
         wordmark.setBlendDrawable(R.drawable.ic_hyperchanger_text_sp)
     }
 
@@ -118,7 +118,7 @@ class HyperCeilerBrandView(context: Context) : FrameLayout(context) {
         content.translationY = -dp(40).toFloat()
         logo.setThemeDark(dark)
         wordmark.setThemeDark(dark)
-        logo.setBlendDrawable(R.drawable.ic_hyperchanger_logo_sp)
+        logo.setBlendDrawable(R.drawable.ic_hyperchanger_sp)
         wordmark.setBlendDrawable(R.drawable.ic_hyperchanger_text_sp)
         logo.layoutParams = LinearLayout.LayoutParams(logoSize, logoSize)
         logo.setOnClickListener { onLogoClick() }

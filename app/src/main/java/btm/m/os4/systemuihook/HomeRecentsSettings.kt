@@ -4,6 +4,7 @@ package btm.m.os4.systemuihook
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import io.github.libxposed.service.XposedService
 import java.io.File
@@ -105,9 +106,13 @@ internal fun stageHomeRecentsNativeConfig(
         it.write(buildHomeLauncherBlob(settings.clearMode.value, folderSettings.columns))
         it.fd.sync()
     }
-    val destination = "/data/adb/hyperpatch.bin"
-    val staged = "$destination.tmp"
-    val command = "cp '${source.absolutePath}' '$staged' && chmod 644 '$staged' && mv '$staged' '$destination'"
+    // The Rust launcher cannot reliably read /data/adb, and its native startup
+    // can precede Java package callbacks. Stage the complete config directly in
+    // its own data directory with the launcher's UID and SELinux file context.
+    val launcherDataDir = context.packageManager.getApplicationInfo(
+        "com.miui.home", PackageManager.ApplicationInfoFlags.of(0),
+    ).dataDir
+    val command = buildHomeLauncherStageCommand(source.absolutePath, launcherDataDir)
     val process = ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()
     val output = process.inputStream.bufferedReader().use { it.readText() }
     check(process.waitFor() == 0) { output }
