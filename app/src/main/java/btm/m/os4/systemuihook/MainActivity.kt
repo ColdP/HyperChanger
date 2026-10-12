@@ -570,7 +570,13 @@ private fun Root(
             homeRecentsSettings = homeRecentsStore.settings
             homeFolderSettings = homeFolderStore.settings
             homeMaterialSettings = homeMaterialStore.settings
-            stageHomeRecentsNativeConfig(context, homeRecentsSettings, homeFolderSettings, homeMaterialSettings)
+            stageHomeRecentsNativeConfig(
+                context,
+                homeRecentsSettings,
+                homeFolderSettings,
+                homeMaterialSettings,
+                readHomeNativeDockSettings(context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE)),
+            )
         }.onSuccess {
             markRestartTargets(suggestedScopesForHookChange(previousSettings, settings))
             if (previousLockscreenCapsule != lockscreenCapsuleSettings) {

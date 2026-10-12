@@ -259,7 +259,7 @@ std::optional<EffectSlot> make_effect(uintptr_t target, const nhk::CodeSource &s
             }
             const auto code = native == 1 ? home_native_dock::class_program(address, address + page_size, original, target)
                 : home_effects::island_program(address, address + page_size,
-                    original, reg, ior, dock, target + 4, native != 0);
+                    original, reg, ior, dock, target + 4, native != 0 || (!dock && parameter == 5));
             std::memcpy(page, code.data(), code.size() * 4);
             __builtin___clear_cache(static_cast<char *>(page), static_cast<char *>(page) + code.size() * 4);
             if (mprotect(page, page_size, PROT_READ | PROT_EXEC) != 0) {
@@ -313,9 +313,15 @@ bool write_native_gate(const NativeGate &gate, bool enabled) {
 void publish_effect(const EffectSlot &slot, const folder_spacing::MaterialSettings &settings) {
     const bool enabled = slot.native_parameter ? settings.native_dock_enabled : slot.dock ? settings.dock_enabled : settings.enabled;
     if (!enabled) __atomic_store_n(slot.data, uint64_t{0}, __ATOMIC_RELEASE);
+    // Brightness uses a direct stock ratio. Four other strength controls use
+    // the opposite direction, with 100% retaining the stock value. The shader's
+    // alpha is transparency, so opacity needs an absolute complement in [0,1].
     const double value = slot.native_parameter == 4 ? settings.native_dock_padding
         : slot.native_parameter ? settings.native_dock_radius
-        : slot.dock ? settings.dock_offset : settings.percent[slot.parameter] / 100.0;
+        : slot.dock ? settings.dock_offset
+        : slot.parameter == 5 ? 1.0 - settings.percent[5] / 100.0
+        : slot.parameter == 4 ? settings.percent[slot.parameter] / 100.0
+        : 2.0 - settings.percent[slot.parameter] / 100.0;
     const uint64_t bits = slot.native_parameter == 1 ? slot.class_headers[settings.native_dock_style - 1] : std::bit_cast<uint64_t>(value);
     __atomic_store_n(slot.data + 1, bits, __ATOMIC_RELEASE);
     if (enabled) __atomic_store_n(slot.data, uint64_t{1}, __ATOMIC_RELEASE);
@@ -356,6 +362,11 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
                 const size_t at = (slot.address - mapping.begin) / 4;
                 if (code[at] == slot.branch) code[at] = slot.original;
             }
+            for (const auto &gate : native_gates) {
+                if (mapping.source_at(gate.address, 4) != gate.source) continue;
+                const size_t at = (gate.address - mapping.begin) / 4;
+                if (code[at] == 0xd503201f) code[at] = gate.original;
+            }
             for (size_t i = 0; i < code.size(); ++i) {
                 const auto candidate = std::span(code).subspan(i);
                 if (need_native && code[i] == home_native_dock::kGateShape[0]
@@ -373,6 +384,10 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
                 }
             }
         }
+        if (need_native)
+            __android_log_print(ANDROID_LOG_INFO, kTag,
+                "Native Dock scan: gates=%zu support=%zu strategies=%zu radius=%zu advanced=%zu padding=%zu",
+                gates.size(), supports.size(), strategies.size(), glass_radii.size(), advanced_radii.size(), paddings.size());
         // Refuse unsupported/ambiguous bodies; never derive an address from
         // load_bias, which includes the ZIP container offset for APK images.
         const auto install = [&](uintptr_t base, auto shape, size_t index,
@@ -438,6 +453,12 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
             std::array<uint32_t,14> gate{};
             if(!nhk::safe_read(strategies[0],std::as_writable_bytes(std::span(strategy)))
                 || !nhk::safe_read(gates[0],std::as_writable_bytes(std::span(gate)))) continue;
+            for (const auto &patched : native_gates) {
+                if (patched.address == gates[0] + 8 && source_at(generation, patched.address) == patched.source
+                    && gate[2] == 0xd503201f) gate[2] = patched.original;
+            }
+            if (!home_native_dock::matches(std::span(strategy), home_native_dock::kStrategyShape)
+                || !home_native_dock::matches(std::span(gate), home_native_dock::kGateShape)) continue;
             // Discover both official class headers from the strategy's allocation
             // calls; class IDs are neither guessed nor pinned to a runtime address.
             const uintptr_t glass_stub=home_native_dock::call_target(strategies[0]+44*4,strategy[44]);
@@ -464,7 +485,9 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
                 if(!slot) return;
                 slot->class_headers={*ah,*bh}; publish_effect(*slot,settings);
                 if(source_at(inventory(),addr)!=source) return;
-                effect_slots.push_back(*slot); write_effect(*slot,true);
+                effect_slots.push_back(*slot);
+                if (write_effect(*slot,true)) __android_log_print(ANDROID_LOG_INFO, kTag,
+                    "Native Dock role=%u installed at %p", role, reinterpret_cast<void *>(addr));
             };
             add_native(stub,old[0],1);
             add_native(glass_radii[0]+22*4,home_native_dock::kGlassRadiusShape[22],2);
@@ -479,17 +502,21 @@ void *worker(void *) {
     int previous = -1000;
     bool previous_glass = false;
     bool previous_dock = false;
+    bool previous_native_dock = false;
     unsigned tick = 0;
     while (true) {
         const auto snapshot = read_config();
         const auto &settings = snapshot.spacing;
         const auto &material = snapshot.material;
-        if (material.enabled != previous_glass || material.dock_enabled != previous_dock) {
+        if (material.enabled != previous_glass || material.dock_enabled != previous_dock
+            || material.native_dock_enabled != previous_native_dock) {
             tick = 0;
-            __android_log_print(ANDROID_LOG_INFO, kTag, "Soft glass enabled=%d; Dock icon offset enabled=%d",
-                material.enabled, material.dock_enabled);
+            __android_log_print(ANDROID_LOG_INFO, kTag,
+                "Soft glass enabled=%d; Dock icon offset enabled=%d; Native Dock enabled=%d style=%u",
+                material.enabled, material.dock_enabled, material.native_dock_enabled, material.native_dock_style);
             previous_glass = material.enabled;
             previous_dock = material.dock_enabled;
+            previous_native_dock = material.native_dock_enabled;
         }
         const int value = settings.enabled ? settings.value : folder_spacing::kDisabledValue;
         folder_spacing_value.store(value, std::memory_order_release);
@@ -498,7 +525,8 @@ void *worker(void *) {
             previous = value;
             tick = 0;
         }
-        if (settings.enabled || !slots.empty() || material.enabled || material.dock_enabled || !effect_slots.empty()) {
+        if (settings.enabled || !slots.empty() || material.enabled || material.dock_enabled
+            || material.native_dock_enabled || !effect_slots.empty() || !native_gates.empty()) {
             const std::lock_guard lock(observer_mutex);
             const auto mappings = inventory();
             for (const auto &slot : slots) {
@@ -524,7 +552,7 @@ void *worker(void *) {
 void refresh_home_effects_on_load() {
     const std::lock_guard lock(observer_mutex);
     const auto snapshot = read_config();
-    if (snapshot.material.enabled || snapshot.material.dock_enabled)
+    if (snapshot.material.enabled || snapshot.material.dock_enabled || snapshot.material.native_dock_enabled)
         update_effects(inventory(), snapshot.material, 0);
 }
 

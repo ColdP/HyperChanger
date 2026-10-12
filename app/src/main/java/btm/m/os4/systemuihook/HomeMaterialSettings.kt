@@ -26,12 +26,24 @@ internal class HomeMaterialSettingsStore(private val context: Context) {
         val remote = service.getRemotePreferences(REMOTE_PREFERENCE_GROUP)
         if (remote.contains(KEY_HOME_MATERIAL_ENABLED) || remote.contains(KEY_HOME_DOCK_ICON_ENABLED)) settings = readHomeMaterialSettings(remote)
         write(local, settings); write(remote, settings)
-        stageHomeRecentsNativeConfig(context, readHomeRecentsSettings(local), readHomeFolderSettings(local), settings)
+        stageHomeRecentsNativeConfig(
+            context,
+            readHomeRecentsSettings(local),
+            readHomeFolderSettings(local),
+            settings,
+            readHomeNativeDockSettings(local),
+        )
     }
     fun update(service: XposedService?, transform: (HomeMaterialSettings) -> HomeMaterialSettings): Boolean {
         settings = transform(settings).normalized()
         write(local, settings); service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.let { write(it, settings) }
-        return stageHomeRecentsNativeConfig(context, readHomeRecentsSettings(local), readHomeFolderSettings(local), settings)
+        return stageHomeRecentsNativeConfig(
+            context,
+            readHomeRecentsSettings(local),
+            readHomeFolderSettings(local),
+            settings,
+            readHomeNativeDockSettings(local),
+        )
     }
     private fun write(p: SharedPreferences, s: HomeMaterialSettings) {
         val editor = p.edit().putBoolean(KEY_HOME_MATERIAL_ENABLED, s.enabled)

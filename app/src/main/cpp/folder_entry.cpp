@@ -51,8 +51,15 @@ int property_get(const char *name, char *value) {
 }
 void loaded(const char *name, void *) {
     start_in_child();
+    // Rust launchers can report the linker callback before setprogname has been
+    // called. Starting here makes the configuration observer independent of the
+    // process-name hook ordering and lets native Dock hooks see the first AOT
+    // image as soon as it is mapped.
     if (name != nullptr && std::string_view(name).ends_with("libapp.so") && launcher()
-        && getuid() >= 10000) refresh_home_effects_on_load();
+        && getuid() >= 10000) {
+        start_folder_spacing();
+        refresh_home_effects_on_load();
+    }
 }
 }
 

@@ -43,14 +43,26 @@ internal class HomeRecentsSettingsStore(private val context: Context) {
         settings = if (remote.contains(KEY_HOME_RECENTS_CLEAR_MODE)) read(remote) else settings
         write(local, settings)
         write(remote, settings)
-        stageHomeRecentsNativeConfig(context, settings)
+        stageHomeRecentsNativeConfig(
+            context,
+            settings,
+            readHomeFolderSettings(local),
+            readHomeMaterialSettings(local),
+            readHomeNativeDockSettings(local),
+        )
     }
 
     fun update(service: XposedService?, transform: (HomeRecentsSettings) -> HomeRecentsSettings): Boolean {
         settings = transform(settings)
         write(local, settings)
         service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.let { write(it, settings) }
-        return stageHomeRecentsNativeConfig(context, settings)
+        return stageHomeRecentsNativeConfig(
+            context,
+            settings,
+            readHomeFolderSettings(local),
+            readHomeMaterialSettings(local),
+            readHomeNativeDockSettings(local),
+        )
     }
 
     private fun read(prefs: SharedPreferences) = readHomeRecentsSettings(prefs)

@@ -74,7 +74,10 @@ inline std::optional<uint64_t> class_header(std::span<const uint32_t> stub) {
     if(stub.size()<3 || (stub[0]&0xffe0001f)!=0xd2800002 || (stub[1]&0xffe0001f)!=0xf2a00002
         || (stub[2]&0xfc000000)!=0x14000000) return {};
     const uint64_t header=((stub[0]>>5)&0xffff) | (uint64_t((stub[1]>>5)&0xffff)<<16);
-    if((header&0xff)!=0x1c || ((header>>12)&15)<2 || ((header>>12)&15)>3) return {};
+    // The allocation size tag occupies bits 11:8. Bits 31:12 are the class
+    // ID, so testing bits 15:12 rejected the stock and advanced constructors.
+    const uint64_t size_tag = (header >> 8) & 15;
+    if((header&0xff)!=0x1c || size_tag<1 || size_tag>3 || (header>>12)==0) return {};
     return header;
 }
 // Replace just the first class-header instruction with one B. The enabled

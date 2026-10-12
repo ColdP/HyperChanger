@@ -50,7 +50,13 @@ internal class HomeFolderSettingsStore(private val context: Context) {
         )
         write(local, settings)
         write(remote, settings)
-        stageHomeRecentsNativeConfig(context, readHomeRecentsSettings(local), settings)
+        stageHomeRecentsNativeConfig(
+            context,
+            readHomeRecentsSettings(local),
+            settings,
+            readHomeMaterialSettings(local),
+            readHomeNativeDockSettings(local),
+        )
     }
 
     fun update(service: XposedService?, transform: (HomeFolderSettings) -> HomeFolderSettings): Boolean {
@@ -62,7 +68,13 @@ internal class HomeFolderSettingsStore(private val context: Context) {
         )
         write(local, settings)
         service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.let { write(it, settings) }
-        return stageHomeRecentsNativeConfig(context, readHomeRecentsSettings(local), settings)
+        return stageHomeRecentsNativeConfig(
+            context,
+            readHomeRecentsSettings(local),
+            settings,
+            readHomeMaterialSettings(local),
+            readHomeNativeDockSettings(local),
+        )
     }
 
     private fun write(prefs: SharedPreferences, value: HomeFolderSettings) {

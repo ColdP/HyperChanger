@@ -59,14 +59,26 @@ class DockSettingsStore(private val context: Context) {
         settings = if (remote.contains(KEY_DOCK_ENABLED)) read(remote) else settings
         write(local, settings)
         write(remote, settings)
-        stageHomeRecentsNativeConfig(context, readHomeRecentsSettings(local))
+        stageHomeRecentsNativeConfig(
+            context,
+            readHomeRecentsSettings(local),
+            readHomeFolderSettings(local),
+            readHomeMaterialSettings(local),
+            readHomeNativeDockSettings(local),
+        )
     }
 
     fun update(service: XposedService?, transform: (DockSettings) -> DockSettings): Boolean {
         settings = transform(settings)
         write(local, settings)
         service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.let { write(it, settings) }
-        return stageHomeRecentsNativeConfig(context, readHomeRecentsSettings(local))
+        return stageHomeRecentsNativeConfig(
+            context,
+            readHomeRecentsSettings(local),
+            readHomeFolderSettings(local),
+            readHomeMaterialSettings(local),
+            readHomeNativeDockSettings(local),
+        )
     }
 
     private fun read(prefs: SharedPreferences) = readDockSettings(prefs)
