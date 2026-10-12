@@ -547,6 +547,7 @@ private fun Root(
         val previousDockSettings = dockStore.settings
         val previousHomeRecentsSettings = homeRecentsStore.settings
         val previousHomeFolderSettings = homeFolderStore.settings
+        val previousHomeMaterialSettings = homeMaterialStore.settings
         runCatching {
             ModulePresetCodec.import(context, service, payload)
             hooks.reload()
@@ -585,7 +586,7 @@ private fun Root(
                 markRestartTargets(setOf(ScopeApplication.SUBSCREEN_CENTER))
             }
             if (previousDockSettings != dockSettings) markRestartTargets(setOf(ScopeApplication.DESKTOP))
-            if (previousHomeRecentsSettings != homeRecentsSettings || previousHomeFolderSettings != homeFolderSettings) {
+            if (previousHomeRecentsSettings != homeRecentsSettings || previousHomeFolderSettings != homeFolderSettings || previousHomeMaterialSettings != homeMaterialSettings) {
                 markRestartTargets(setOf(ScopeApplication.DESKTOP))
             }
             Toast.makeText(context, tr("预设已导入", "预设已导入"), Toast.LENGTH_SHORT).show()
@@ -2663,6 +2664,28 @@ private fun Desktop(
         item {
             Group(tr("Dock 栏", "Dock 栏")) {
                 SwitchPreference(
+                    title = tr("Dock 栏图标垂直偏移", "Dock 栏图标垂直偏移"),
+                    summary = tr("负值向下，正值向上", "负值向下，正值向上"),
+                    checked = homeMaterialSettings.dockIcon.enabled,
+                    onCheckedChange = { enabled -> updateHomeMaterial { it.copy(dockIcon = it.dockIcon.copy(enabled = enabled)) } },
+                )
+                AnimatedVisibility(visible = homeMaterialSettings.dockIcon.enabled) {
+                    var offset by remember(homeMaterialSettings.dockIcon.offset) {
+                        mutableFloatStateOf(homeMaterialSettings.dockIcon.offset.toFloat())
+                    }
+                    EditableSliderPreference(
+                        title = tr("图标垂直偏移", "图标垂直偏移"),
+                        value = offset,
+                        valueText = tr("Dock 图标偏移数值", "%s dp").format(offset.roundToInt()),
+                        valueRange = -60f..30f, steps = 89, centerValue = 0f, defaultValue = 0f,
+                        onValueChange = { offset = it },
+                        onValueChangeFinished = {
+                            updateHomeMaterial { it.copy(dockIcon = it.dockIcon.copy(offset = offset.roundToInt().coerceIn(-60, 30))) }
+                        },
+                    )
+                }
+
+                SwitchPreference(
                     title = tr("为桌面添加 Dock", "为桌面添加 Dock"),
                     summary = tr("需要勾选\"系统框架\"作用域，初次使用需要重启手机", "需要勾选\"系统框架\"作用域，初次使用需要重启手机"),
                     checked = settings.enabled,
@@ -2833,26 +2856,12 @@ private fun HomeMaterialPage(
 ) = AppPage(tr("桌面材质调整", "桌面材质调整"), back, restartScopes = setOf(ScopeApplication.DESKTOP)) { padding, scroll ->
     AppList(padding, scroll) {
         item {
-            Group(tr("材质", "材质")) {
-                OverlayDropdownPreference(
-                    title = tr("桌面材质", "桌面材质"),
-                    items = listOf(tr("柔光玻璃", "柔光玻璃"), tr("高级材质", "高级材质")),
-                    selectedIndex = settings.style,
-                    onSelectedIndexChange = { value -> update { it.copy(style = value) } },
-                )
-                if (settings.style == 0) Column {
-                    ShortcutBackgroundColorPreference(color = settings.glassColor, onColorChange = { value -> update { it.copy(glassColor = value) } })
-                    ParameterIntSlide(tr("不透明度", "不透明度"), settings.glassOpacity, 0..100, "%", defaultValue = 85) { value -> update { it.copy(glassOpacity = value) } }
-                    ParameterIntSlide(tr("背景模糊度", "背景模糊度"), settings.glassBackdropBlur, 0..100, " px", defaultValue = 40) { value -> update { it.copy(glassBackdropBlur = value) } }
-                    ParameterIntSlide(tr("Glass 模糊度", "Glass 模糊度"), settings.glassBlur, 0..100, " px", defaultValue = 30) { value -> update { it.copy(glassBlur = value) } }
-                    ParameterIntSlide(tr("柔光强度", "柔光强度"), settings.glassSoftLight, 0..100, "%", defaultValue = 50) { value -> update { it.copy(glassSoftLight = value) } }
-                    SwitchPreference(title = tr("显示高光", "显示高光"), checked = settings.glassHighlight, onCheckedChange = { value -> update { it.copy(glassHighlight = value) } })
-                } else Column {
-                    ShortcutBackgroundColorPreference(color = settings.advancedColor, onColorChange = { value -> update { it.copy(advancedColor = value) } })
-                    ParameterIntSlide(tr("不透明度", "不透明度"), settings.advancedOpacity, 0..100, "%", defaultValue = 14) { value -> update { it.copy(advancedOpacity = value) } }
-                    ParameterIntSlide(tr("背景模糊度", "背景模糊度"), settings.advancedBlur, 0..100, " px", defaultValue = 40) { value -> update { it.copy(advancedBlur = value) } }
-                    SwitchPreference(title = tr("显示高光", "显示高光"), checked = settings.advancedHighlight, onCheckedChange = { value -> update { it.copy(advancedHighlight = value) } })
-                }
+            Group(tr("柔光玻璃", "柔光玻璃")) {
+                ParameterIntSlide(tr("模糊度", "模糊度"), settings.blur, 0..200, "%", defaultValue = 100) { value -> update { it.copy(blur = value) } }
+                ParameterIntSlide(tr("折射强度", "折射强度"), settings.refraction, 0..200, "%", defaultValue = 100) { value -> update { it.copy(refraction = value) } }
+                ParameterIntSlide(tr("柔光强度", "柔光强度"), settings.softLight, 0..200, "%", defaultValue = 100) { value -> update { it.copy(softLight = value) } }
+                ParameterIntSlide(tr("背景饱和度", "背景饱和度"), settings.saturation, 0..200, "%", defaultValue = 100) { value -> update { it.copy(saturation = value) } }
+                ParameterIntSlide(tr("背景亮度", "背景亮度"), settings.brightness, 0..200, "%", defaultValue = 100) { value -> update { it.copy(brightness = value) } }
             }
         }
     }

@@ -41,13 +41,13 @@ int main(int argc, char **argv) {
             for (int value = -20; value <= 80; ++value) for (bool enabled : {false, true}) {
                 uint32_t length = 0;
                 configs.read(reinterpret_cast<char *>(&length), sizeof(length));
-                assert(configs && length >= 156 && length <= 164);
+                assert(configs && length >= 204 && length <= 212);
                 std::vector<std::byte> blob(length);
                 configs.read(reinterpret_cast<char *>(blob.data()), length);
                 const auto decoded = folder_spacing::read_settings(blob);
                 assert(configs && decoded.value == value && decoded.enabled == enabled);
                 // Old relative extension and invalid enable flags must fail closed.
-                const size_t extension = length - 16;
+                const size_t extension = 140 + folder_spacing::word(blob, 12) * 4;
                 blob[extension + 4] = std::byte{1};
                 assert(!folder_spacing::read_settings(blob).enabled);
                 blob[extension + 4] = std::byte{2};

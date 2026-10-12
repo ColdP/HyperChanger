@@ -976,5 +976,13 @@
   "AGPL-3.0/MIT License": "AGPL-3.0/MIT License",
   "HyperOS 4 Rust 桌面的 Dock 栏相关代码": "Dock code for the HyperOS 4 Rust launcher",
   "主题破解后应用失败": "Fix apply failures after theme unlocking",
-  "修复主题破解与背屏主题、壁纸授权流程的冲突，保留普通主题破解。需勾选主题壁纸作用域，重启主题壁纸后生效。": "Fix conflicts between theme unlocking and rear-screen theme or wallpaper authorization while keeping regular theme unlocking. Enable the Themes scope and restart Themes to apply."
+  "修复主题破解与背屏主题、壁纸授权流程的冲突，保留普通主题破解。需勾选主题壁纸作用域，重启主题壁纸后生效。": "Fix conflicts between theme unlocking and rear-screen theme or wallpaper authorization while keeping regular theme unlocking. Enable the Themes scope and restart Themes to apply.",
+  "模糊度": "模糊度",
+  "折射强度": "折射强度",
+  "背景饱和度": "背景饱和度",
+  "背景亮度": "背景亮度",
+  "Dock 栏图标垂直偏移": "Dock 栏图标垂直偏移",
+  "图标垂直偏移": "图标垂直偏移",
+  "负值向下，正值向上": "负值向下，正值向上",
+  "Dock 图标偏移数值": "%s dp"
 }

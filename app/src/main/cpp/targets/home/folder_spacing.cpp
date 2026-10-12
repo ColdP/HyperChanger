@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "folder_spacing.h"
+#include "home_effects.h"
 #include "nativehook/memory_io.h"
 #include "nativehook/native_image.h"
 
@@ -21,11 +22,7 @@
 
 extern "C" {
 alignas(4) std::atomic<int32_t> folder_spacing_value{folder_spacing::kDisabledValue};
-alignas(1) std::atomic<uint8_t> material_enabled{0};
-alignas(1) std::atomic<uint8_t> material_style{0};
-uintptr_t material_return_continue = 0;
 void folder_spacing_return();
-void material_return_entry();
 }
 static_assert(sizeof(folder_spacing_value) == sizeof(int32_t));
 static_assert(std::atomic<int32_t>::is_always_lock_free);
@@ -39,14 +36,17 @@ struct Slot {
     nhk::CodeSource source;
     uint32_t branch;
 };
-struct MaterialSlot {
-    uintptr_t address = 0;
-    nhk::CodeSource source{};
-    uint32_t branch = 0;
-    uint32_t original = 0;
-};
 std::vector<Slot> slots;
-std::optional<MaterialSlot> material_slot;
+struct EffectSlot {
+    uintptr_t address;
+    nhk::CodeSource source;
+    uint32_t original;
+    uint32_t branch;
+    uint64_t *data;
+    size_t parameter;
+    bool dock;
+};
+std::vector<EffectSlot> effect_slots;
 std::map<std::string, std::optional<std::pair<uint64_t, uint64_t>>> zip_cache;
 
 std::optional<std::span<const std::byte>> read_blob(std::array<std::byte, 512> &buffer, std::streamsize &size) {
@@ -148,52 +148,6 @@ std::optional<uint32_t> allocate_branch(uintptr_t target) {
     return allocate_branch(target, reinterpret_cast<uintptr_t>(folder_spacing_return));
 }
 
-bool write_material_branch(const MaterialSlot &slot, bool enabled) {
-    uint32_t current = 0;
-    if (!nhk::safe_read(slot.address, std::as_writable_bytes(std::span(&current, 1)))) return false;
-    const uint32_t desired = enabled ? slot.branch : slot.original;
-    const uint32_t expected = enabled ? slot.original : slot.branch;
-    if (current == desired) return true;
-    if (current != expected) return false;
-    const uintptr_t page = nhk::page_down(slot.address);
-    const size_t page_size = nhk::host_page_size();
-    if (mprotect(reinterpret_cast<void *>(page), page_size, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) return false;
-    __atomic_store_n(reinterpret_cast<uint32_t *>(slot.address), desired, __ATOMIC_RELEASE);
-    __builtin___clear_cache(reinterpret_cast<char *>(slot.address), reinterpret_cast<char *>(slot.address + 4));
-    return mprotect(reinterpret_cast<void *>(page), page_size, PROT_READ | PROT_EXEC) == 0;
-}
-
-void resolve_material(const std::vector<nhk::ExecutableMapping> &mappings, bool enabled) {
-    if (!enabled && material_slot) {
-        write_material_branch(*material_slot, false);
-        material_slot.reset();
-        material_return_continue = 0;
-    }
-    if (!enabled || material_slot) return;
-    // Verified against launcher-8.01.02.7722: mov x0,x1 immediately before
-    // the shared Dart epilogue of BlurUtilities.isGlassMaterialSupported.
-    constexpr uintptr_t kResultRva = 0xb46658;
-    constexpr uint32_t kOriginal = 0xaa0103e0;
-    for (const auto &generation : nhk::runtime_generations(mappings)) {
-        const auto key = nhk::generation_key(generation.front());
-        if (!key) continue;
-        const uintptr_t address = static_cast<uintptr_t>(key->load_bias) + kResultRva;
-        uint32_t current = 0;
-        if (!nhk::safe_read(address, std::as_writable_bytes(std::span(&current, 1))) || current != kOriginal) continue;
-        const auto source = source_at(mappings, address);
-        if (!source) continue;
-        const auto branch = allocate_branch(address, reinterpret_cast<uintptr_t>(material_return_entry));
-        if (!branch) continue;
-        material_return_continue = address + 4;
-        MaterialSlot candidate{address, *source, *branch, kOriginal};
-        if (write_material_branch(candidate, true)) {
-            material_slot = candidate;
-            __android_log_print(ANDROID_LOG_INFO, kTag, "Desktop material selector installed at %p", reinterpret_cast<void *>(address));
-        }
-        return;
-    }
-}
-
 bool write_branch(const Slot &slot, bool enabled = true) {
     uint32_t current = 0;
     if (!nhk::safe_read(slot.address, std::as_writable_bytes(std::span(&current, 1)))) return false;
@@ -271,17 +225,151 @@ void resolve(const std::vector<nhk::ExecutableMapping> &mappings) {
     }
 }
 
+std::optional<EffectSlot> make_effect(uintptr_t target, const nhk::CodeSource &source,
+        uint32_t original, size_t parameter, uint32_t reg, bool ior, bool dock) {
+    const size_t page_size = nhk::host_page_size();
+    constexpr intptr_t kReach = 128 * 1024 * 1024;
+    for (intptr_t distance = 1024 * 1024; distance < kReach; distance += 1024 * 1024) {
+        for (const intptr_t direction : {-1, 1}) {
+            const intptr_t hint = static_cast<intptr_t>(nhk::page_down(target)) + direction * distance;
+            if (hint <= 0) continue;
+            void *page = mmap(reinterpret_cast<void *>(hint), page_size * 2,
+                PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            if (page == MAP_FAILED) continue;
+            const uintptr_t address = reinterpret_cast<uintptr_t>(page);
+            const intptr_t relative = static_cast<intptr_t>(address) - static_cast<intptr_t>(target);
+            if (relative <= -kReach + 128 || relative >= kReach - 128 || relative % 4 != 0) {
+                munmap(page, page_size * 2);
+                continue;
+            }
+            const auto code = home_effects::island_program(address, address + page_size,
+                original, reg, ior, dock, target + 4);
+            std::memcpy(page, code.data(), code.size() * 4);
+            __builtin___clear_cache(static_cast<char *>(page), static_cast<char *>(page) + code.size() * 4);
+            if (mprotect(page, page_size, PROT_READ | PROT_EXEC) != 0) {
+                munmap(page, page_size * 2);
+                continue;
+            }
+            // Never free an installed island: another Dart thread may still be
+            // executing a pre-disable branch. Its data and continuation survive.
+            return EffectSlot{target, source, original,
+                0x14000000 | (static_cast<uint32_t>(relative / 4) & 0x03ffffff),
+                reinterpret_cast<uint64_t *>(address + page_size), parameter, dock};
+        }
+    }
+    return {};
+}
+
+bool write_effect(const EffectSlot &slot, bool enabled) {
+    uint32_t current = 0;
+    if (!nhk::safe_read(slot.address, std::as_writable_bytes(std::span(&current, 1)))) return false;
+    const uint32_t desired = enabled ? slot.branch : slot.original;
+    if (current == desired) return true;
+    if (current != (enabled ? slot.original : slot.branch)) return false;
+    const uintptr_t page = nhk::page_down(slot.address);
+    const size_t size = nhk::host_page_size();
+    if (mprotect(reinterpret_cast<void *>(page), size, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) return false;
+    __atomic_store_n(reinterpret_cast<uint32_t *>(slot.address), desired, __ATOMIC_RELEASE);
+    __builtin___clear_cache(reinterpret_cast<char *>(slot.address), reinterpret_cast<char *>(slot.address + 4));
+    return mprotect(reinterpret_cast<void *>(page), size, PROT_READ | PROT_EXEC) == 0;
+}
+
+void publish_effect(const EffectSlot &slot, const folder_spacing::MaterialSettings &settings) {
+    const bool enabled = slot.dock ? settings.dock_enabled : settings.enabled;
+    if (!enabled) __atomic_store_n(slot.data, uint64_t{0}, __ATOMIC_RELEASE);
+    const double value = slot.dock ? settings.dock_offset : settings.percent[slot.parameter] / 100.0;
+    __atomic_store_n(slot.data + 1, std::bit_cast<uint64_t>(value), __ATOMIC_RELEASE);
+    if (enabled) __atomic_store_n(slot.data, uint64_t{1}, __ATOMIC_RELEASE);
+}
+
+void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
+        const folder_spacing::MaterialSettings &settings, unsigned tick) {
+    for (const auto &slot : effect_slots) {
+        publish_effect(slot, settings); // disable gate before restoring code
+        if (source_at(mappings, slot.address) == slot.source)
+            write_effect(slot, slot.dock ? settings.dock_enabled : settings.enabled);
+    }
+    if ((!settings.enabled && !settings.dock_enabled) || tick % 10 != 0) return;
+    for (const auto &generation : nhk::runtime_generations(mappings)) {
+        size_t total = 0;
+        for (const auto &mapping : generation) total += mapping.end - mapping.begin;
+        if (total > nhk::kMaxExecutableCodeBytes) continue;
+        const auto known = [&](bool dock) {
+            return std::ranges::count_if(effect_slots, [&](const EffectSlot &slot) {
+                return slot.dock == dock && source_at(generation, slot.address) == slot.source;
+            });
+        };
+        const bool need_glass = settings.enabled && known(false) != 6;
+        const bool need_dock = settings.dock_enabled && known(true) != 1;
+        if (!need_glass && !need_dock) continue;
+        std::vector<uintptr_t> glass, dock;
+        for (const auto &mapping : generation) {
+            std::vector<uint32_t> code((mapping.end - mapping.begin) / 4);
+            if (!nhk::safe_read(mapping.begin, std::as_writable_bytes(std::span(code)))) continue;
+            for (const auto &slot : effect_slots) {
+                if (mapping.source_at(slot.address, 4) != slot.source) continue;
+                const size_t at = (slot.address - mapping.begin) / 4;
+                if (code[at] == slot.branch) code[at] = slot.original;
+            }
+            for (size_t i = 0; i < code.size(); ++i) {
+                if (code[i] != 0xa9bf79fd) continue;
+                const auto candidate = std::span(code).subspan(i);
+                if (need_glass && home_effects::matches_glass(candidate)) glass.push_back(mapping.begin + i * 4);
+                if (need_dock && home_effects::matches_dock(candidate)) dock.push_back(mapping.begin + i * 4);
+            }
+        }
+        // Refuse unsupported/ambiguous bodies; never derive an address from
+        // load_bias, which includes the ZIP container offset for APK images.
+        const auto install = [&](uintptr_t base, auto shape, size_t index,
+                size_t parameter, uint32_t reg, bool ior, bool is_dock) {
+            const uintptr_t address = base + index * 4;
+            const auto source = source_at(generation, address);
+            if (!source || effect_slots.size() >= 64) return;
+            if (std::ranges::any_of(effect_slots, [&](const EffectSlot &s) {
+                return s.address == address && s.source == *source;
+            })) return;
+            const auto fresh = inventory();
+            if (source_at(fresh, address) != source) return;
+            std::vector<uint32_t> live(shape.size());
+            if (!nhk::safe_read(base, std::as_writable_bytes(std::span(live)))) return;
+            for (const auto &s : effect_slots) {
+                if (s.address >= base && s.address < base + live.size() * 4 && source_at(fresh, s.address) == s.source) {
+                    const size_t at = (s.address - base) / 4;
+                    if (live[at] == s.branch) live[at] = s.original;
+                }
+            }
+            if (!(is_dock ? home_effects::matches_dock(live) : home_effects::matches_glass(live))) return;
+            auto slot = make_effect(address, *source, live[index], parameter, reg, ior, is_dock);
+            if (!slot) return;
+            publish_effect(*slot, settings);
+            if (source_at(inventory(), address) != source) return;
+            effect_slots.push_back(*slot);
+            if (write_effect(*slot, true)) __android_log_print(ANDROID_LOG_INFO, kTag,
+                "%s parameter %zu installed at %p", is_dock ? "Dock icon offset" : "Soft glass", parameter, reinterpret_cast<void *>(address));
+        };
+        if (glass.size() == 1) for (const auto &field : home_effects::kGlassFields)
+            install(glass[0], std::span(home_effects::kGlassShape), field.index, field.parameter, field.reg, field.refractive_index, false);
+        if (dock.size() == 1) install(dock[0], std::span(home_effects::kDockShape), home_effects::kDockReturnIndex, 0, 0, false, true);
+    }
+}
+
 void *worker(void *) {
     pthread_setname_np(pthread_self(), "hc-folder");
     int previous = -1000;
-    uint32_t previous_material = UINT32_MAX;
+    bool previous_glass = false;
+    bool previous_dock = false;
     unsigned tick = 0;
     while (true) {
         const auto snapshot = read_config();
         const auto &settings = snapshot.spacing;
         const auto &material = snapshot.material;
-        material_enabled.store(material.enabled ? 1 : 0, std::memory_order_release);
-        material_style.store(static_cast<uint8_t>(material.style > 0 ? 1 : 0), std::memory_order_release);
+        if (material.enabled != previous_glass || material.dock_enabled != previous_dock) {
+            tick = 0;
+            __android_log_print(ANDROID_LOG_INFO, kTag, "Soft glass enabled=%d; Dock icon offset enabled=%d",
+                material.enabled, material.dock_enabled);
+            previous_glass = material.enabled;
+            previous_dock = material.dock_enabled;
+        }
         const int value = settings.enabled ? settings.value : folder_spacing::kDisabledValue;
         folder_spacing_value.store(value, std::memory_order_release);
         if (value != previous) {
@@ -289,12 +377,7 @@ void *worker(void *) {
             previous = value;
             tick = 0;
         }
-        const uint32_t material_state = (material.enabled ? 0x10000u : 0u) | material.style;
-        if (material_state != previous_material) {
-            __android_log_print(ANDROID_LOG_INFO, kTag, "Desktop material enabled=%d style=%u glass=%08x/%08x advanced=%08x/%08x", material.enabled, material.style, material.glass_color, material.glass, material.advanced_color, material.advanced);
-            previous_material = material_state;
-        }
-        if (settings.enabled || !slots.empty() || material.enabled || material_slot) {
+        if (settings.enabled || !slots.empty() || material.enabled || material.dock_enabled || !effect_slots.empty()) {
             const auto mappings = inventory();
             for (const auto &slot : slots) {
                 // Restore discarded COW code only when the original instruction and
@@ -307,7 +390,7 @@ void *worker(void *) {
             if (settings.enabled && slots.empty() && tick % 120 == 0)
                 __android_log_print(ANDROID_LOG_WARN, kTag,
                     "Folder resolver pending: mappings=%zu value=%d", mappings.size(), settings.value);
-            resolve_material(mappings, material.enabled);
+            update_effects(mappings, material, tick);
         }
         ++tick;
         usleep(settings.enabled && slots.empty() ? 50000 : 500000);

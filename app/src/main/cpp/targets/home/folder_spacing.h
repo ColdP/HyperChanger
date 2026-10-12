@@ -31,8 +31,8 @@ inline Settings read_settings(std::span<const std::byte> bytes) {
     const uint32_t count = word(bytes, 12);
     if (count > 64) return {};
     const size_t extension = 140 + size_t(count) * 4;
-    // FGRS may be followed by the independent material extension. Accept both
-    // the spacing-only payload and the current v2 material tail.
+    // FGRS may be followed by independent effect extensions. Spacing stays
+    // compatible with spacing-only payloads and ignores subsequent tails.
     if (bytes.size() < extension + 16 || word(bytes, extension) != 0x53524746
         || word(bytes, extension + 4) != 2 || word(bytes, extension + 8) > 1) return {};
     for (size_t i = 0; i < count; ++i)
@@ -45,35 +45,30 @@ inline Settings read_settings(std::span<const std::byte> bytes) {
 
 struct MaterialSettings {
     bool enabled = false;
-    uint32_t style = 0;
-    uint32_t glass_color = 0xccffffff;
-    uint32_t glass = 0;
-    uint32_t advanced_color = 0x24ffffff;
-    uint32_t advanced = 0;
-    bool glass_highlight = true;
-    bool advanced_highlight = true;
+    std::array<uint32_t, 5> percent{100, 100, 100, 100, 100};
+    bool dock_enabled = false;
+    int32_t dock_offset = 0;
 };
 
 inline MaterialSettings read_material_settings(std::span<const std::byte> bytes) {
-    // MTRL v2 is a fixed ten-word tail. Scan backwards so a future optional
-    // extension after it cannot make the parser silently fall back to stock.
-    constexpr size_t kBytes = 40;
-    if (bytes.size() < kBytes) return {};
-    for (size_t p = 0; p + kBytes <= bytes.size(); ++p) {
-        if (word(bytes, p) != 0x4c52544d || p + kBytes > bytes.size()) continue;
-        if (word(bytes, p + 4) != 2 || word(bytes, p + 8) > 1 || word(bytes, p + 12) > 1)
-            continue;
-        const uint32_t glass = word(bytes, p + 20);
-        const uint32_t advanced = word(bytes, p + 28);
-        if ((glass & 0xffu) > 100 || ((glass >> 8) & 0xffu) > 100
-            || ((glass >> 16) & 0xffu) > 100 || ((glass >> 24) & 0xffu) > 100
-            || (advanced & 0xffu) > 100 || ((advanced >> 8) & 0xffu) > 100
-            || word(bytes, p + 32) > 1 || word(bytes, p + 36) > 1)
-            continue;
-        return {word(bytes, p + 8) != 0, word(bytes, p + 12), word(bytes, p + 16), glass,
-            word(bytes, p + 24), advanced, word(bytes, p + 32) != 0, word(bytes, p + 36) != 0};
+    if (bytes.size() < 204 || word(bytes, 0) != 0x46435048 || word(bytes, 4) != 18) return {};
+    const uint32_t count = word(bytes, 12);
+    if (count > 64) return {};
+    const size_t spacing = 140 + size_t(count) * 4;
+    const size_t p = spacing + 16;
+    if (bytes.size() != p + 48 || word(bytes, spacing) != 0x53524746 || word(bytes, spacing + 4) != 2
+        || word(bytes, p) != 0x4c52544d || word(bytes, p + 4) != 3 || word(bytes, p + 8) > 1
+        || word(bytes, p + 32) != 0x464f4944 || word(bytes, p + 36) != 1 || word(bytes, p + 40) > 1) return {};
+    MaterialSettings settings;
+    settings.enabled = word(bytes, p + 8) != 0;
+    for (size_t i = 0; i < 5; ++i) {
+        settings.percent[i] = word(bytes, p + 12 + i * 4);
+        if (settings.percent[i] > 200) return {};
     }
-    return {};
+    settings.dock_enabled = word(bytes, p + 40) != 0;
+    settings.dock_offset = static_cast<int32_t>(word(bytes, p + 44));
+    if (settings.dock_offset < -60 || settings.dock_offset > 30) return {};
+    return settings;
 }
 
 // Guarded instruction layout from calItemSpacing, rather than a fixed address.

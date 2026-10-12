@@ -19,7 +19,8 @@ internal fun buildHomeLauncherBlob(
         if (clearMode != 0) add(if (clearMode == 1) 18 else 9)
         if (folderColumns != 0) add(16)
     }
-    val output = ByteArrayOutputStream(196)
+    require(material == material.normalized())
+    val output = ByteArrayOutputStream(208)
     fun u32(value: Int) {
         output.write(value and 0xff)
         output.write((value ushr 8) and 0xff)
@@ -45,18 +46,14 @@ internal fun buildHomeLauncherBlob(
     u32(2) // Absolute spacing with an explicit enable flag; v1 offsets are ignored.
     u32(if (folderRowSpacingEnabled) 1 else 0)
     u32(folderRowSpacing)
-    // Material extension: kept separate from the V18 feature words so older
-    // launchers continue to parse the original settings safely. Version 2
-    // carries both colors as well as the packed numeric controls.
+    // Independent glass parameter ratios; no material selector or global gate.
     u32(0x4c52544d) // MTRL
-    u32(2)
+    u32(3)
     u32(if (material.enabled) 1 else 0)
-    u32(material.style)
-    u32(material.glassColor)
-    u32(material.glassOpacity or (material.glassBackdropBlur shl 8) or (material.glassBlur shl 16) or (material.glassSoftLight shl 24))
-    u32(material.advancedColor)
-    u32(material.advancedOpacity or (material.advancedBlur shl 8))
-    u32(if (material.glassHighlight) 1 else 0)
-    u32(if (material.advancedHighlight) 1 else 0)
+    listOf(material.blur, material.refraction, material.softLight, material.saturation, material.brightness).forEach(::u32)
+    u32(0x464f4944) // DIOF
+    u32(1)
+    u32(if (material.dockIcon.enabled) 1 else 0)
+    u32(material.dockIcon.offset)
     return output.toByteArray()
 }
