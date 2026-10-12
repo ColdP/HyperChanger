@@ -12,7 +12,7 @@ val releaseStoreFile = providers.gradleProperty("releaseStoreFile").orNull
 val releaseStorePassword = providers.gradleProperty("releaseStorePassword").orNull
 val releaseKeyAlias = providers.gradleProperty("releaseKeyAlias").orNull
 val releaseKeyPassword = providers.gradleProperty("releaseKeyPassword").orNull
-val buildDate = LocalDate.now().toString()
+val buildDate = LocalDate.now().toString().replace('-', '.')
 
 android {
     namespace = "btm.m.os4.systemuihook"

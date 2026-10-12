@@ -717,7 +717,7 @@ class HyperSystemUiModule : XposedModule() {
             runCatching {
                 val preferences = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
                 syncHomeRecentsNativeConfig(
-                    param, readHomeRecentsSettings(preferences), readHomeFolderSettings(preferences),
+                    param, readHomeRecentsSettings(preferences), readHomeFolderSettings(preferences), readHomeMaterialSettings(preferences),
                 )
             }.onFailure { error ->
                 log(Log.ERROR, TAG, "Could not sync native desktop recents config", error)

@@ -269,7 +269,7 @@ private enum class PageId {
     SHADE_CONTROL_CENTER_ELEMENTS,
     SHADE_NOTIFICATION_BACKGROUND,
     SHADE_CONTROL_CENTER_BACKGROUND,
-    GESTURE_HANDLE_STYLE, DESKTOP,
+    GESTURE_HANDLE_STYLE, DESKTOP, DESKTOP_MATERIAL,
     ISLAND, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
@@ -370,6 +370,8 @@ private fun Root(
     var homeRecentsSettings by remember { mutableStateOf(homeRecentsStore.settings) }
     val homeFolderStore = remember(context) { HomeFolderSettingsStore(context) }
     var homeFolderSettings by remember { mutableStateOf(homeFolderStore.settings) }
+    val homeMaterialStore = remember(context) { HomeMaterialSettingsStore(context) }
+    var homeMaterialSettings by remember { mutableStateOf(homeMaterialStore.settings) }
     var pendingRestartTargets by remember { mutableStateOf(emptySet<ScopeApplication>()) }
     val markRestartTargets: (Set<ScopeApplication>) -> Unit = { targets ->
         if (targets.isNotEmpty()) pendingRestartTargets = pendingRestartTargets + targets
@@ -556,6 +558,7 @@ private fun Root(
             dockStore.reload()
             homeRecentsStore.reload()
             homeFolderStore.reload()
+            homeMaterialStore.reload()
             settings = hooks.settings
             lockscreenCapsuleSettings = lockscreenCapsules.settings
             cameraSettings = cameras.settings
@@ -565,7 +568,8 @@ private fun Root(
             dockSettings = dockStore.settings
             homeRecentsSettings = homeRecentsStore.settings
             homeFolderSettings = homeFolderStore.settings
-            stageHomeRecentsNativeConfig(context, homeRecentsSettings, homeFolderSettings)
+            homeMaterialSettings = homeMaterialStore.settings
+            stageHomeRecentsNativeConfig(context, homeRecentsSettings, homeFolderSettings, homeMaterialSettings)
         }.onSuccess {
             markRestartTargets(suggestedScopesForHookChange(previousSettings, settings))
             if (previousLockscreenCapsule != lockscreenCapsuleSettings) {
@@ -655,6 +659,7 @@ private fun Root(
             dockStore.syncRemote(it)
             homeRecentsStore.syncRemote(it)
             homeFolderStore.syncRemote(it)
+            homeMaterialStore.syncRemote(it)
             settings = hooks.settings
             navigationSettings = navigation.settings
             lockscreenCapsuleSettings = lockscreenCapsules.settings
@@ -666,6 +671,7 @@ private fun Root(
             dockSettings = dockStore.settings
             homeRecentsSettings = homeRecentsStore.settings
             homeFolderSettings = homeFolderStore.settings
+            homeMaterialSettings = homeMaterialStore.settings
         }
     }
     MiuixTheme(controller = controller) {
@@ -713,7 +719,7 @@ private fun Root(
         } else {
         Shell(
             settings, navigationSettings, lockscreenCapsuleSettings, cameraSettings, deviceProfile, appearance, musicWhitelist, screenRecorder, airDropSettings,
-            dockSettings, homeRecentsSettings, homeFolderSettings, service,
+            dockSettings, homeRecentsSettings, homeFolderSettings, homeMaterialSettings, service,
             update = { transform ->
                 val before = hooks.settings
                 hooks.update(service, transform)
@@ -757,6 +763,13 @@ private fun Root(
                 } else if (!staged) {
                     Toast.makeText(context, tr("写入桌面配置失败，请检查 Root 权限", "写入桌面配置失败，请检查 Root 权限"), Toast.LENGTH_LONG).show()
                 }
+            },
+            updateHomeMaterial = { transform ->
+                val before = homeMaterialStore.settings
+                val staged = homeMaterialStore.update(service, transform)
+                homeMaterialSettings = homeMaterialStore.settings
+                if (staged && before != homeMaterialSettings) markRestartTargets(setOf(ScopeApplication.DESKTOP))
+                else if (!staged) Toast.makeText(context, tr("写入桌面配置失败，请检查 Root 权限", "写入桌面配置失败，请检查 Root 权限"), Toast.LENGTH_LONG).show()
             },
             updateCamera = { transform ->
                 val before = cameras.settings
@@ -929,6 +942,7 @@ private fun Shell(
     dockSettings: DockSettings,
     homeRecentsSettings: HomeRecentsSettings,
     homeFolderSettings: HomeFolderSettings,
+    homeMaterialSettings: HomeMaterialSettings,
     service: XposedService?,
     update: ((HookSettings) -> HookSettings) -> Unit,
     updateLockscreenCapsule: ((LockscreenCapsuleSettings) -> LockscreenCapsuleSettings) -> Unit,
@@ -936,6 +950,7 @@ private fun Shell(
     updateDock: ((DockSettings) -> DockSettings) -> Unit,
     updateHomeRecents: ((HomeRecentsSettings) -> HomeRecentsSettings) -> Unit,
     updateHomeFolder: ((HomeFolderSettings) -> HomeFolderSettings) -> Unit,
+    updateHomeMaterial: ((HomeMaterialSettings) -> HomeMaterialSettings) -> Unit,
     updateCamera: ((CameraSettings) -> CameraSettings) -> Unit,
     updateDeviceProfile: ((DeviceProfileSettings) -> DeviceProfileSettings) -> Unit,
     updateAppearance: ((SettingsAppearanceSettings) -> SettingsAppearanceSettings) -> Unit,
@@ -1062,8 +1077,8 @@ private fun Shell(
             LocalPageBackSuppressed provides if (isTop) ({ value -> suppressPageBack = value }) else ({ }),
         ) {
             Detail(
-                detailPage, settings, lockscreenCapsuleSettings, cameras, deviceProfile, appearance, musicWhitelist, dockSettings, homeRecentsSettings, homeFolderSettings, airDropSettings,
-                update, updateLockscreenCapsule, updateDock, updateHomeRecents, updateHomeFolder, updateCamera,
+                detailPage, settings, lockscreenCapsuleSettings, cameras, deviceProfile, appearance, musicWhitelist, dockSettings, homeRecentsSettings, homeFolderSettings, homeMaterialSettings, airDropSettings,
+                update, updateLockscreenCapsule, updateDock, updateHomeRecents, updateHomeFolder, updateHomeMaterial, updateCamera,
                 updateDeviceProfile, updateAppearance, updateMusicWhitelist, presetActions, updateAirDrop,
                 openPage = openNestedPage, back = dismissPage,
                 onDebugMode = { showDebug = true }, captcha = captcha,
@@ -2639,6 +2654,9 @@ private fun Desktop(
     updateHomeRecents: ((HomeRecentsSettings) -> HomeRecentsSettings) -> Unit,
     homeFolderSettings: HomeFolderSettings,
     updateHomeFolder: ((HomeFolderSettings) -> HomeFolderSettings) -> Unit,
+    homeMaterialSettings: HomeMaterialSettings,
+    updateHomeMaterial: ((HomeMaterialSettings) -> HomeMaterialSettings) -> Unit,
+    openPage: (PageId) -> Unit,
     back: () -> Unit,
 ) = AppPage(tr("桌面", "桌面"), back, restartScopes = setOf(ScopeApplication.DESKTOP)) { padding, scroll ->
     AppList(padding, scroll) {
@@ -2733,16 +2751,57 @@ private fun Desktop(
             }
         }
         item {
+            Group(tr("桌面材质", "桌面材质")) {
+                SwitchPreference(
+                    title = tr("桌面材质调整", "桌面材质调整"),
+                    checked = homeMaterialSettings.enabled,
+                    onCheckedChange = { enabled -> updateHomeMaterial { it.copy(enabled = enabled) } },
+                )
+                AnimatedVisibility(visible = homeMaterialSettings.enabled) {
+                    ArrowPreference(title = tr("调整桌面材质", "调整桌面材质"), onClick = { openPage(PageId.DESKTOP_MATERIAL) })
+                }
+            }
+        }
+        item {
             Group(tr("文件夹", "文件夹")) {
-                val columns = listOf(0, 4, 5, 6)
+                val columns = listOf(0, 4, 5, 6, HOME_FOLDER_CUSTOM_COLUMNS)
                 OverlayDropdownPreference(
                     title = tr("自定义文件夹列数", "自定义文件夹列数"),
-                    items = listOf(tr("系统默认", "系统默认"), tr("4", "4"), tr("5", "5"), tr("6", "6")),
+                    items = listOf(tr("系统默认", "系统默认"), tr("4", "4"), tr("5", "5"), tr("6", "6"), tr("自定义", "自定义")),
                     selectedIndex = columns.indexOf(homeFolderSettings.columns).coerceAtLeast(0),
                     onSelectedIndexChange = { index ->
                         updateHomeFolder { it.copy(columns = columns[index]) }
                     },
                 )
+                AnimatedVisibility(visible = homeFolderSettings.columns == HOME_FOLDER_CUSTOM_COLUMNS) {
+                    ParameterIntSlide(
+                        tr("文件夹列数", "文件夹列数"), homeFolderSettings.customColumns,
+                        1..15, defaultValue = 3,
+                    ) { value -> updateHomeFolder { it.copy(customColumns = value) } }
+                }
+                var rowSpacing by remember(homeFolderSettings.rowSpacing) {
+                    mutableFloatStateOf(homeFolderSettings.rowSpacing.toFloat())
+                }
+                SwitchPreference(
+                    title = tr("自定义文件夹图标行间距", "自定义文件夹图标行间距"),
+                    checked = homeFolderSettings.rowSpacingEnabled,
+                    onCheckedChange = { enabled -> updateHomeFolder { it.copy(rowSpacingEnabled = enabled) } },
+                )
+                AnimatedVisibility(visible = homeFolderSettings.rowSpacingEnabled) {
+                    EditableSliderPreference(
+                        title = tr("文件夹图标行间距", "文件夹图标行间距"),
+                        value = rowSpacing,
+                        valueText = tr("文件夹行间距数值", "%s dp").format(rowSpacing.roundToInt()),
+                        valueRange = -20f..80f,
+                        steps = 99,
+                        centerValue = 0f,
+                        defaultValue = 0f,
+                        onValueChange = { rowSpacing = it },
+                        onValueChangeFinished = {
+                            updateHomeFolder { it.copy(rowSpacing = rowSpacing.roundToInt().coerceIn(-20, 80)) }
+                        },
+                    )
+                }
             }
         }
         item {
@@ -2761,6 +2820,39 @@ private fun Desktop(
                         }
                     },
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeMaterialPage(
+    settings: HomeMaterialSettings,
+    update: ((HomeMaterialSettings) -> HomeMaterialSettings) -> Unit,
+    back: () -> Unit,
+) = AppPage(tr("桌面材质调整", "桌面材质调整"), back, restartScopes = setOf(ScopeApplication.DESKTOP)) { padding, scroll ->
+    AppList(padding, scroll) {
+        item {
+            Group(tr("材质", "材质")) {
+                OverlayDropdownPreference(
+                    title = tr("桌面材质", "桌面材质"),
+                    items = listOf(tr("柔光玻璃", "柔光玻璃"), tr("高级材质", "高级材质")),
+                    selectedIndex = settings.style,
+                    onSelectedIndexChange = { value -> update { it.copy(style = value) } },
+                )
+                if (settings.style == 0) Column {
+                    ShortcutBackgroundColorPreference(color = settings.glassColor, onColorChange = { value -> update { it.copy(glassColor = value) } })
+                    ParameterIntSlide(tr("不透明度", "不透明度"), settings.glassOpacity, 0..100, "%", defaultValue = 85) { value -> update { it.copy(glassOpacity = value) } }
+                    ParameterIntSlide(tr("背景模糊度", "背景模糊度"), settings.glassBackdropBlur, 0..100, " px", defaultValue = 40) { value -> update { it.copy(glassBackdropBlur = value) } }
+                    ParameterIntSlide(tr("Glass 模糊度", "Glass 模糊度"), settings.glassBlur, 0..100, " px", defaultValue = 30) { value -> update { it.copy(glassBlur = value) } }
+                    ParameterIntSlide(tr("柔光强度", "柔光强度"), settings.glassSoftLight, 0..100, "%", defaultValue = 50) { value -> update { it.copy(glassSoftLight = value) } }
+                    SwitchPreference(title = tr("显示高光", "显示高光"), checked = settings.glassHighlight, onCheckedChange = { value -> update { it.copy(glassHighlight = value) } })
+                } else Column {
+                    ShortcutBackgroundColorPreference(color = settings.advancedColor, onColorChange = { value -> update { it.copy(advancedColor = value) } })
+                    ParameterIntSlide(tr("不透明度", "不透明度"), settings.advancedOpacity, 0..100, "%", defaultValue = 14) { value -> update { it.copy(advancedOpacity = value) } }
+                    ParameterIntSlide(tr("背景模糊度", "背景模糊度"), settings.advancedBlur, 0..100, " px", defaultValue = 40) { value -> update { it.copy(advancedBlur = value) } }
+                    SwitchPreference(title = tr("显示高光", "显示高光"), checked = settings.advancedHighlight, onCheckedChange = { value -> update { it.copy(advancedHighlight = value) } })
+                }
             }
         }
     }
@@ -3635,12 +3727,14 @@ private fun Detail(
     dockSettings: DockSettings,
     homeRecentsSettings: HomeRecentsSettings,
     homeFolderSettings: HomeFolderSettings,
+    homeMaterialSettings: HomeMaterialSettings,
     airDropSettings: AirDropSettings,
     update: ((HookSettings) -> HookSettings) -> Unit,
     updateLockscreenCapsule: ((LockscreenCapsuleSettings) -> LockscreenCapsuleSettings) -> Unit,
     updateDock: ((DockSettings) -> DockSettings) -> Unit,
     updateHomeRecents: ((HomeRecentsSettings) -> HomeRecentsSettings) -> Unit,
     updateHomeFolder: ((HomeFolderSettings) -> HomeFolderSettings) -> Unit,
+    updateHomeMaterial: ((HomeMaterialSettings) -> HomeMaterialSettings) -> Unit,
     updateCamera: ((CameraSettings) -> CameraSettings) -> Unit,
     updateDeviceProfile: ((DeviceProfileSettings) -> DeviceProfileSettings) -> Unit,
     updateAppearance: ((SettingsAppearanceSettings) -> SettingsAppearanceSettings) -> Unit,
@@ -3680,7 +3774,8 @@ private fun Detail(
 ) {
     when (page) {
         PageId.SHADE -> Shade(settings, update, presetActions, openPage, back)
-        PageId.DESKTOP -> Desktop(dockSettings, updateDock, homeRecentsSettings, updateHomeRecents, homeFolderSettings, updateHomeFolder, back)
+        PageId.DESKTOP -> Desktop(dockSettings, updateDock, homeRecentsSettings, updateHomeRecents, homeFolderSettings, updateHomeFolder, homeMaterialSettings, updateHomeMaterial, openPage, back)
+        PageId.DESKTOP_MATERIAL -> HomeMaterialPage(homeMaterialSettings, updateHomeMaterial, back)
         PageId.SHADE_PRESETS -> ShadePresets(settings, update, presetActions, back)
         PageId.SHADE_NOTIFICATION_ELEMENTS -> MaterialOverrideAdvancedPage(
             tr("通知元素", "通知元素"), settings.notificationElementsMaterial, false,
@@ -10060,7 +10155,7 @@ private fun AboutAdvancedMaterialHeader(onLogoClick: () -> Unit, onVersionClick:
         val logoSize = width * (.94f / 3.91f) * 2.78f * .8f * .95f
         val textWidth = width * (2.97f / 3.91f)
         AndroidView(factory = { HyperCeilerBrandView(it) }, update = { view ->
-            view.configure(with(density) { logoSize.roundToPx() }, with(density) { textWidth.roundToPx() }, "${BuildConfig.VERSION_NAME} | ${BuildConfig.BUILD_DATE}", versionColor, dark, onLogoClick, onVersionClick)
+            view.configure(with(density) { logoSize.roundToPx() }, with(density) { textWidth.roundToPx() }, "${tr("Aikotoba", "Aikotoba")} | ${BuildConfig.VERSION_NAME}-${BuildConfig.BUILD_DATE}", versionColor, dark, onLogoClick, onVersionClick)
         }, modifier = Modifier.fillMaxSize())
     }
 }

@@ -75,10 +75,11 @@ internal fun syncHomeRecentsNativeConfig(
     param: PackageLoadedParam,
     settings: HomeRecentsSettings,
     folderSettings: HomeFolderSettings,
+    materialSettings: HomeMaterialSettings = HomeMaterialSettings(),
 ) {
     val dataDir = param.applicationInfo.dataDir ?: return
     val target = File(dataDir, "files/hyperpatch.bin")
-    val blob = buildHomeLauncherBlob(settings.clearMode.value, folderSettings.columns)
+    val blob = buildHomeLauncherBlob(settings.clearMode.value, folderSettings.effectiveColumns, folderSettings.rowSpacing, folderSettings.rowSpacingEnabled, materialSettings)
     runCatching {
         target.parentFile?.mkdirs()
         val temp = File(target.parentFile, "${target.name}.tmp")
@@ -100,8 +101,11 @@ internal fun stageHomeRecentsNativeConfig(
     folderSettings: HomeFolderSettings = readHomeFolderSettings(
         context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE),
     ),
+    materialSettings: HomeMaterialSettings = readHomeMaterialSettings(
+        context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE),
+    ),
 ): Boolean = runCatching {
-    val blob = buildHomeLauncherBlob(settings.clearMode.value, folderSettings.columns)
+    val blob = buildHomeLauncherBlob(settings.clearMode.value, folderSettings.effectiveColumns, folderSettings.rowSpacing, folderSettings.rowSpacingEnabled, materialSettings)
     // The Rust launcher cannot reliably read /data/adb, and its native startup
     // can precede Java package callbacks. Stage the complete config directly in
     // its own data directory with the launcher's UID and SELinux file context.
