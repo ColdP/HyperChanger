@@ -31,7 +31,9 @@ inline Settings read_settings(std::span<const std::byte> bytes) {
     const uint32_t count = word(bytes, 12);
     if (count > 64) return {};
     const size_t extension = 140 + size_t(count) * 4;
-    if ((bytes.size() != extension + 16 && bytes.size() != extension + 52) || word(bytes, extension) != 0x53524746
+    // FGRS may be followed by the independent material extension. Accept both
+    // the spacing-only payload and the current v2 material tail.
+    if (bytes.size() < extension + 16 || word(bytes, extension) != 0x53524746
         || word(bytes, extension + 4) != 2 || word(bytes, extension + 8) > 1) return {};
     for (size_t i = 0; i < count; ++i)
         if (word(bytes, 16 + i * 4) == 27) return {};
@@ -44,17 +46,34 @@ inline Settings read_settings(std::span<const std::byte> bytes) {
 struct MaterialSettings {
     bool enabled = false;
     uint32_t style = 0;
+    uint32_t glass_color = 0xccffffff;
     uint32_t glass = 0;
+    uint32_t advanced_color = 0x24ffffff;
     uint32_t advanced = 0;
     bool glass_highlight = true;
     bool advanced_highlight = true;
 };
 
 inline MaterialSettings read_material_settings(std::span<const std::byte> bytes) {
-    if (bytes.size() < 192 || word(bytes, bytes.size() - 36) != 0x4c52544d || word(bytes, bytes.size() - 32) != 1)
-        return {};
-    const size_t p = bytes.size() - 36;
-    return {word(bytes, p + 8) != 0, word(bytes, p + 12), word(bytes, p + 16), word(bytes, p + 20), word(bytes, p + 24) != 0, word(bytes, p + 28) != 0};
+    // MTRL v2 is a fixed ten-word tail. Scan backwards so a future optional
+    // extension after it cannot make the parser silently fall back to stock.
+    constexpr size_t kBytes = 40;
+    if (bytes.size() < kBytes) return {};
+    for (size_t p = 0; p + kBytes <= bytes.size(); ++p) {
+        if (word(bytes, p) != 0x4c52544d || p + kBytes > bytes.size()) continue;
+        if (word(bytes, p + 4) != 2 || word(bytes, p + 8) > 1 || word(bytes, p + 12) > 1)
+            continue;
+        const uint32_t glass = word(bytes, p + 20);
+        const uint32_t advanced = word(bytes, p + 28);
+        if ((glass & 0xffu) > 100 || ((glass >> 8) & 0xffu) > 100
+            || ((glass >> 16) & 0xffu) > 100 || ((glass >> 24) & 0xffu) > 100
+            || (advanced & 0xffu) > 100 || ((advanced >> 8) & 0xffu) > 100
+            || word(bytes, p + 32) > 1 || word(bytes, p + 36) > 1)
+            continue;
+        return {word(bytes, p + 8) != 0, word(bytes, p + 12), word(bytes, p + 16), glass,
+            word(bytes, p + 24), advanced, word(bytes, p + 32) != 0, word(bytes, p + 36) != 0};
+    }
+    return {};
 }
 
 // Guarded instruction layout from calItemSpacing, rather than a fixed address.

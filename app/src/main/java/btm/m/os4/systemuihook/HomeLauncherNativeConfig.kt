@@ -46,12 +46,15 @@ internal fun buildHomeLauncherBlob(
     u32(if (folderRowSpacingEnabled) 1 else 0)
     u32(folderRowSpacing)
     // Material extension: kept separate from the V18 feature words so older
-    // launchers continue to parse the original settings safely.
+    // launchers continue to parse the original settings safely. Version 2
+    // carries both colors as well as the packed numeric controls.
     u32(0x4c52544d) // MTRL
-    u32(1)
+    u32(2)
     u32(if (material.enabled) 1 else 0)
     u32(material.style)
+    u32(material.glassColor)
     u32(material.glassOpacity or (material.glassBackdropBlur shl 8) or (material.glassBlur shl 16) or (material.glassSoftLight shl 24))
+    u32(material.advancedColor)
     u32(material.advancedOpacity or (material.advancedBlur shl 8))
     u32(if (material.glassHighlight) 1 else 0)
     u32(if (material.advancedHighlight) 1 else 0)
