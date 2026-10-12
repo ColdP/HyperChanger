@@ -19,8 +19,8 @@ internal const val KEY_DOCK_GLASS_OPACITY = "dock_glass_opacity"
 internal const val KEY_DOCK_GLASS_BACKDROP_BLUR = "dock_glass_backdrop_blur"
 internal const val KEY_DOCK_GLASS_BLUR = "dock_glass_blur"
 internal const val KEY_DOCK_GLASS_SOFT_LIGHT = "dock_glass_soft_light"
-internal const val KEY_DOCK_HEIGHT = "dock_height"
 internal const val KEY_DOCK_MARGIN = "dock_margin"
+internal const val KEY_DOCK_HEIGHT = "dock_height"
 internal const val KEY_DOCK_BOTTOM = "dock_bottom"
 internal const val KEY_DOCK_RADIUS = "dock_radius"
 
@@ -38,8 +38,9 @@ data class DockSettings(
     val glassBackdropBlur: Int = 40,
     val glassBlur: Int = 30,
     val glassSoftLight: Int = 50,
-    val height: Int = 150,
     val margin: Int = 25,
+    /** Legacy overlay values retained for preference compatibility; native Dock ignores them. */
+    val height: Int = 150,
     val bottom: Int = 15,
     val radius: Int = 30,
 )
@@ -98,8 +99,8 @@ class DockSettingsStore(private val context: Context) {
             .putInt(KEY_DOCK_GLASS_BACKDROP_BLUR, value.glassBackdropBlur.coerceIn(0, 100))
             .putInt(KEY_DOCK_GLASS_BLUR, value.glassBlur.coerceIn(0, 100))
             .putInt(KEY_DOCK_GLASS_SOFT_LIGHT, value.glassSoftLight.coerceIn(0, 100))
-            .putInt(KEY_DOCK_HEIGHT, value.height.coerceIn(40, 300))
             .putInt(KEY_DOCK_MARGIN, value.margin.coerceIn(0, 150))
+            .putInt(KEY_DOCK_HEIGHT, value.height.coerceIn(40, 300))
             .putInt(KEY_DOCK_BOTTOM, value.bottom.coerceIn(0, 150))
             .putInt(KEY_DOCK_RADIUS, value.radius.coerceIn(0, 60))
             .apply()
@@ -120,8 +121,8 @@ internal fun readDockSettings(prefs: SharedPreferences) = DockSettings(
         glassBackdropBlur = prefs.getInt(KEY_DOCK_GLASS_BACKDROP_BLUR, 40).coerceIn(0, 100),
         glassBlur = prefs.getInt(KEY_DOCK_GLASS_BLUR, 30).coerceIn(0, 100),
         glassSoftLight = prefs.getInt(KEY_DOCK_GLASS_SOFT_LIGHT, 50).coerceIn(0, 100),
-        height = prefs.getInt(KEY_DOCK_HEIGHT, 150).coerceIn(40, 300),
         margin = prefs.getInt(KEY_DOCK_MARGIN, 25).coerceIn(0, 150),
+        height = prefs.getInt(KEY_DOCK_HEIGHT, 150).coerceIn(40, 300),
         bottom = prefs.getInt(KEY_DOCK_BOTTOM, 15).coerceIn(0, 150),
         radius = prefs.getInt(KEY_DOCK_RADIUS, 30).coerceIn(0, 60),
     )

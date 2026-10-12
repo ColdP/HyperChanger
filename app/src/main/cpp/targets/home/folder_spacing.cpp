@@ -51,7 +51,13 @@ struct EffectSlot {
     std::array<uint64_t, 2> class_headers{};
 };
 std::vector<EffectSlot> effect_slots;
-struct NativeGate { uintptr_t address; nhk::CodeSource source; uint32_t original; };
+struct NativeGate {
+    uintptr_t address;
+    nhk::CodeSource source;
+    uint32_t original;
+    uint32_t replacement;
+    uint32_t reported_failures = 0;
+};
 std::vector<NativeGate> native_gates;
 std::mutex observer_mutex;
 std::map<std::string, std::optional<std::pair<uint64_t, uint64_t>>> zip_cache;
@@ -291,23 +297,34 @@ bool write_effect(const EffectSlot &slot, bool enabled) {
     return mprotect(reinterpret_cast<void *>(page), size, PROT_READ | PROT_EXEC) == 0;
 }
 
-bool write_native_gate(const NativeGate &gate, bool enabled) {
+bool write_native_gate(NativeGate &gate, bool enabled) {
+    const auto fail = [&](uint32_t reason, const char *operation, uint32_t live, int error) {
+        if (!(gate.reported_failures & reason)) {
+            gate.reported_failures |= reason;
+            __android_log_print(ANDROID_LOG_WARN, kTag,
+                "Native Dock gate %s failed at %p live=%08x original=%08x replacement=%08x errno=%d",
+                operation, reinterpret_cast<void *>(gate.address), live, gate.original, gate.replacement, error);
+        }
+        return false;
+    };
     uint32_t current = 0;
-    if (!nhk::safe_read(gate.address, std::as_writable_bytes(std::span(&current, 1)))) return false;
-    // _HotseatWidgetState skips its background when this capability bit is
-    // set. NOP the conditional branch while the native Dock is enabled so the
-    // launcher's own Dock background construction path is reached.
-    constexpr uint32_t nop = 0xd503201f;
-    const uint32_t desired = enabled ? nop : gate.original;
-    const uint32_t expected = enabled ? gate.original : nop;
+    if (!nhk::safe_read(gate.address, std::as_writable_bytes(std::span(&current, 1))))
+        return fail(1, "read", current, errno);
+    const uint32_t desired = enabled ? gate.replacement : gate.original;
+    const uint32_t expected = enabled ? gate.original : gate.replacement;
     if (current == desired) return true;
-    if (current != expected) return false;
+    if (current != expected) return fail(2, "instruction check", current, 0);
     const uintptr_t page = nhk::page_down(gate.address);
     const size_t size = nhk::host_page_size();
-    if (mprotect(reinterpret_cast<void *>(page), size, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) return false;
+    if (mprotect(reinterpret_cast<void *>(page), size, PROT_READ | PROT_WRITE | PROT_EXEC) != 0)
+        return fail(4, "write permission", current, errno);
     __atomic_store_n(reinterpret_cast<uint32_t *>(gate.address), desired, __ATOMIC_RELEASE);
     __builtin___clear_cache(reinterpret_cast<char *>(gate.address), reinterpret_cast<char *>(gate.address + 4));
-    return mprotect(reinterpret_cast<void *>(page), size, PROT_READ | PROT_EXEC) == 0;
+    if (mprotect(reinterpret_cast<void *>(page), size, PROT_READ | PROT_EXEC) != 0)
+        return fail(8, "restore permission", desired, errno);
+    __android_log_print(ANDROID_LOG_INFO, kTag, "Native Dock gate %s at %p %08x -> %08x",
+        enabled ? "enabled" : "restored", reinterpret_cast<void *>(gate.address), current, desired);
+    return true;
 }
 
 void publish_effect(const EffectSlot &slot, const folder_spacing::MaterialSettings &settings) {
@@ -329,7 +346,7 @@ void publish_effect(const EffectSlot &slot, const folder_spacing::MaterialSettin
 
 void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
         const folder_spacing::MaterialSettings &settings, unsigned tick) {
-    for (const auto &gate : native_gates)
+    for (auto &gate : native_gates)
         if (source_at(mappings, gate.address) == gate.source)
             write_native_gate(gate, settings.native_dock_enabled);
     for (const auto &slot : effect_slots) {
@@ -353,7 +370,7 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
             return s.native_parameter != 0 && source_at(generation,s.address) == s.source;
         }) != 4;
         if (!need_glass && !need_dock && !need_native) continue;
-        std::vector<uintptr_t> glass, dock, gates, supports, strategies, glass_radii, advanced_radii, paddings;
+        std::vector<uintptr_t> glass, dock, gates, supports, new_supports, newer_supports, strategies, glass_radii, advanced_radii, paddings;
         for (const auto &mapping : generation) {
             std::vector<uint32_t> code((mapping.end - mapping.begin) / 4);
             if (!nhk::safe_read(mapping.begin, std::as_writable_bytes(std::span(code)))) continue;
@@ -365,7 +382,7 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
             for (const auto &gate : native_gates) {
                 if (mapping.source_at(gate.address, 4) != gate.source) continue;
                 const size_t at = (gate.address - mapping.begin) / 4;
-                if (code[at] == 0xd503201f) code[at] = gate.original;
+                if (code[at] == gate.replacement) code[at] = gate.original;
             }
             for (size_t i = 0; i < code.size(); ++i) {
                 const auto candidate = std::span(code).subspan(i);
@@ -373,6 +390,10 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
                     && home_native_dock::matches(candidate,home_native_dock::kGateShape)) gates.push_back(mapping.begin+i*4);
                 if (need_native && code[i] == home_native_dock::kSupportShape[0]
                     && home_native_dock::matches(candidate,home_native_dock::kSupportShape)) supports.push_back(mapping.begin+i*4);
+                if (need_native && code[i] == home_native_dock::kNewSupportShape[0]
+                    && home_native_dock::matches(candidate,home_native_dock::kNewSupportShape)) new_supports.push_back(mapping.begin+i*4);
+                if (need_native && code[i] == home_native_dock::kNewerSupportShape[0]
+                    && home_native_dock::matches(candidate,home_native_dock::kNewerSupportShape)) newer_supports.push_back(mapping.begin+i*4);
                 if (code[i] != 0xa9bf79fd) continue;
                 if (need_glass && home_effects::matches_glass(candidate)) glass.push_back(mapping.begin + i * 4);
                 if (need_dock && home_effects::matches_dock(candidate)) dock.push_back(mapping.begin + i * 4);
@@ -386,8 +407,8 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
         }
         if (need_native)
             __android_log_print(ANDROID_LOG_INFO, kTag,
-                "Native Dock scan: gates=%zu support=%zu strategies=%zu radius=%zu advanced=%zu padding=%zu",
-                gates.size(), supports.size(), strategies.size(), glass_radii.size(), advanced_radii.size(), paddings.size());
+                "Native Dock scan: legacy_gates=%zu legacy_support=%zu new_support=%zu newer_support=%zu strategies=%zu radius=%zu advanced=%zu padding=%zu",
+                gates.size(), supports.size(), new_supports.size(), newer_supports.size(), strategies.size(), glass_radii.size(), advanced_radii.size(), paddings.size());
         // Refuse unsupported/ambiguous bodies; never derive an address from
         // load_bias, which includes the ZIP container offset for APK images.
         const auto install = [&](uintptr_t base, auto shape, size_t index,
@@ -431,7 +452,7 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
                 && !std::ranges::any_of(native_gates, [&](const NativeGate &s) {
                     return s.address == address && s.source == *source;
                 })) {
-                native_gates.push_back({address, *source, home_native_dock::kGateShape[2]});
+                native_gates.push_back({address, *source, home_native_dock::kGateShape[2], 0xd503201f});
                 __android_log_print(ANDROID_LOG_INFO, kTag,
                     "Native Dock capability gate found at %p", reinterpret_cast<void *>(address));
             }
@@ -443,10 +464,79 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
                 && !std::ranges::any_of(native_gates, [&](const NativeGate &s) {
                     return s.address == address && s.source == *source;
                 })) {
-                native_gates.push_back({address, *source, home_native_dock::kSupportShape[2]});
+                native_gates.push_back({address, *source, home_native_dock::kSupportShape[2], 0xd503201f});
                 __android_log_print(ANDROID_LOG_INFO, kTag,
                     "Native Dock support predicate found at %p", reinterpret_cast<void *>(address));
             }
+        }
+        // 8.01.02.6245 and later keep the same support predicate semantics but
+        // moved the actual Dock background decision into _DockBackgroundViewState.build.
+        // Anchor the new targets to that predicate instead of guessing a load bias.
+        const auto add_gate = [&](uintptr_t address, uint32_t original, uint32_t replacement,
+                const char *label, std::span<const uint32_t> shape = {}) {
+            const auto source = source_at(generation, address);
+            if (!source || std::ranges::any_of(native_gates, [&](const NativeGate &s) {
+                return s.address == address && s.source == *source;
+            })) return;
+            uint32_t live = 0;
+            if (source_at(inventory(), address) != source
+                || !nhk::safe_read(address, std::as_writable_bytes(std::span(&live, 1)))) return;
+            // Count repeated discovery failures once for each instruction in a
+            // mapped image. The worker retries, but must not flood logcat.
+            static std::map<std::pair<uintptr_t, uint32_t>, bool> reported;
+            const auto mismatch = [&] {
+                if (reported.emplace(std::pair{address, live}, true).second)
+                    __android_log_print(ANDROID_LOG_WARN, kTag,
+                        "Native Dock %s rejected at %p live=%08x expected=%08x replacement=%08x",
+                        label, reinterpret_cast<void *>(address), live, original, replacement);
+            };
+            if (live != original) { mismatch(); return; }
+            if (!shape.empty()) {
+                std::array<uint32_t, 6> context{};
+                if (shape.size() != context.size() || !source_at(generation, address - 4)
+                    || !source_at(generation, address + 16)
+                    || !nhk::safe_read(address - 4, std::as_writable_bytes(std::span(context)))) return;
+                for (size_t i = 0; i < context.size(); ++i) {
+                    const uint32_t mask = (shape[i] & 0xfc000000) == 0x94000000 ? 0xfc000000 : 0xffffffff;
+                    if ((context[i] & mask) != (shape[i] & mask)) { mismatch(); return; }
+                }
+            }
+            native_gates.push_back({address, *source, original, replacement});
+            __android_log_print(ANDROID_LOG_INFO, kTag,
+                "Native Dock %s validated at %p live=%08x replacement=%08x",
+                label, reinterpret_cast<void *>(address), live, replacement);
+        };
+        if (need_native && new_supports.size() == 1) {
+            const uintptr_t base = new_supports[0] - home_native_dock::kNewSupportRva;
+            // The support predicate's TBZ branches to the fallback object when
+            // the capability bit is clear. Jump over that fallback to the
+            // supported object path (the ADD immediately after TBZ). The old
+            // +3 target entered the fallback path and made the Dock invisible
+            // on the new launcher.
+            add_gate(new_supports[0] + 8, home_native_dock::kNewSupportShape[2], 0x14000001, "support");
+            add_gate(base + home_native_dock::kNewBackgroundGateRva, 0x37200101, 0x14000008, "background");
+            // The new launcher computes the Dock bounds through backgroundLayout.
+            // Select Dart true's fallthrough in all three Dock-only callers.
+            add_gate(base + home_native_dock::kNewNoLabelLayoutGateRva, 0x37200220,
+                home_native_dock::kNoLabelFallthrough, "no-label-layout", home_native_dock::kNoLabelLayoutShape);
+            add_gate(base + home_native_dock::kNewNoLabelOffsetGateRva, 0x37200160,
+                home_native_dock::kNoLabelFallthrough, "no-label-offset", home_native_dock::kNoLabelOffsetShape);
+            add_gate(base + home_native_dock::kNewNoLabelPositionGateRva, 0x372000a0,
+                home_native_dock::kNoLabelFallthrough, "no-label-position", home_native_dock::kNoLabelPositionShape);
+        }
+        // 8.01.02.7722 keeps the same generated bodies, but the support
+        // predicate and background builder moved. Resolve the newer anchor from
+        // its own signature instead of applying old RVAs to the wrong image.
+        if (need_native && newer_supports.size() == 1) {
+            const uintptr_t base = newer_supports[0] - home_native_dock::kNewerSupportRva;
+            add_gate(newer_supports[0] + 8, home_native_dock::kNewerSupportShape[2], 0x14000001, "support");
+            add_gate(base + home_native_dock::kNewerBackgroundGateRva, 0x37200101, 0x14000008, "background");
+            add_gate(base + home_native_dock::kNewerNoLabelLayoutGateRva, 0x37200220,
+                home_native_dock::kNoLabelFallthrough, "no-label-layout", home_native_dock::kNoLabelLayoutShape);
+            add_gate(base + home_native_dock::kNewerNoLabelOffsetGateRva, 0x37200160,
+                home_native_dock::kNoLabelFallthrough, "no-label-offset", home_native_dock::kNoLabelOffsetShape);
+            add_gate(base + home_native_dock::kNewerNoLabelPositionGateRva, 0x372000a0,
+                home_native_dock::kNoLabelFallthrough, "no-label-position", home_native_dock::kNoLabelPositionShape);
         }
         if (need_native && gates.size()==1 && strategies.size()==1 && glass_radii.size()==1 && advanced_radii.size()==1 && paddings.size()==1) {
             std::array<uint32_t,109> strategy{};

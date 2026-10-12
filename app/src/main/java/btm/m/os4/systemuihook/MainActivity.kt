@@ -2723,14 +2723,8 @@ private fun Desktop(
                         selectedIndex = settings.material,
                         onSelectedIndexChange = { value -> update { it.copy(material = value) } },
                     )
-                    ParameterIntSlide(tr("Dock 高度", "Dock 高度"), settings.height, 40..300, " dp", defaultValue = 150) { value ->
-                        update { it.copy(height = value) }
-                    }
                     ParameterIntSlide(tr("Dock 水平边距", "Dock 水平边距"), settings.margin, 0..150, " dp", defaultValue = 25) { value ->
                         update { it.copy(margin = value) }
-                    }
-                    ParameterIntSlide(tr("Dock 底部边距", "Dock 底部边距"), settings.bottom, 0..150, " dp", defaultValue = 15) { value ->
-                        update { it.copy(bottom = value) }
                     }
                     ParameterIntSlide(tr("Dock 圆角", "Dock 圆角"), settings.radius, 0..60, " dp", defaultValue = 30) { value ->
                         update { it.copy(radius = value) }

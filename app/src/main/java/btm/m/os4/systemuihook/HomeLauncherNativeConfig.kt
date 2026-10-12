@@ -58,10 +58,14 @@ internal fun buildHomeLauncherBlob(
     u32(if (material.dockIcon.enabled) 1 else 0)
     u32(material.dockIcon.offset)
     u32(0x4b444e48) // HNDK
-    u32(1)
+    u32(2)
     u32(if (nativeDock.enabled) 1 else 0)
     u32(if (nativeDock.glass) 1 else 2)
     u32(nativeDock.radius)
     u32(nativeDock.padding)
+    // Reserved legacy slots keep the HNDK v2 wire layout readable by older
+    // native modules. They are no longer exposed or applied as settings.
+    u32(150)
+    u32(15)
     return output.toByteArray()
 }

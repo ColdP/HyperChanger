@@ -52,6 +52,8 @@ struct MaterialSettings {
     uint32_t native_dock_style = 1;
     uint32_t native_dock_radius = 30;
     uint32_t native_dock_padding = 25;
+    uint32_t native_dock_height = 150;
+    uint32_t native_dock_bottom = 15;
 };
 
 inline MaterialSettings read_material_settings(std::span<const std::byte> bytes) {
@@ -63,7 +65,7 @@ inline MaterialSettings read_material_settings(std::span<const std::byte> bytes)
     if (p > bytes.size() || bytes.size() - p < 8) return {};
     const uint32_t version = word(bytes, p + 4);
     const bool legacy = version == 3;
-    if (bytes.size() != p + (legacy ? 48 : 76) || word(bytes, spacing) != 0x53524746 || word(bytes, spacing + 4) != 2
+    if (bytes.size() < p + (legacy ? 48 : 76) || word(bytes, spacing) != 0x53524746 || word(bytes, spacing + 4) != 2
         || word(bytes, p) != 0x4c52544d || (!legacy && version != 4) || word(bytes, p + 8) > 1) return {};
     const size_t dock = p + (legacy ? 32 : 36);
     if (word(bytes, dock) != 0x464f4944 || word(bytes, dock + 4) != 1 || word(bytes, dock + 8) > 1) return {};
@@ -78,13 +80,20 @@ inline MaterialSettings read_material_settings(std::span<const std::byte> bytes)
     if (settings.dock_offset < -60 || settings.dock_offset > 30) return {};
     if (!legacy) {
         const size_t native = dock + 16;
-        if (word(bytes, native) != 0x4b444e48 || word(bytes, native + 4) != 1 || word(bytes, native + 8) > 1) return {};
+        const uint32_t native_version = word(bytes, native + 4);
+        if (word(bytes, native) != 0x4b444e48 || (native_version != 1 && native_version != 2) || word(bytes, native + 8) > 1) return {};
         settings.native_dock_enabled = word(bytes, native + 8) != 0;
         settings.native_dock_style = word(bytes, native + 12);
         settings.native_dock_radius = word(bytes, native + 16);
         settings.native_dock_padding = word(bytes, native + 20);
         if (settings.native_dock_style < 1 || settings.native_dock_style > 2 || settings.native_dock_radius > 60
             || settings.native_dock_padding > 150) return {};
+        if (native_version >= 2) {
+            if (bytes.size() < native + 32) return {};
+            settings.native_dock_height = word(bytes, native + 24);
+            settings.native_dock_bottom = word(bytes, native + 28);
+            if (settings.native_dock_height < 40 || settings.native_dock_height > 300 || settings.native_dock_bottom > 150) return {};
+        }
     }
     return settings;
 }

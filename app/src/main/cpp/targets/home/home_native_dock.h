@@ -3,6 +3,44 @@
 #include "home_effects.h"
 #include <optional>
 namespace home_native_dock {
+inline constexpr uint32_t kNewLauncherVersionCode = 801027748;
+// The 8.01.02.6245+ launcher moved the Dock background builder and changed
+// the state field used by DeviceConfig. These RVAs are anchored by the unique
+// support predicate below; they are never used with an unrecognised image.
+inline constexpr uintptr_t kNewSupportRva = 0xf34648;
+inline constexpr uintptr_t kNewBackgroundGateRva = 0x109eaf8;
+// Dart true is null + 0x20; false is null + 0x30. TBNZ bit 4 therefore
+// selects the labelled layout. NOP selects the no-label fallthrough locally;
+// never change Utilities.isNoWordModel globally (that also hides icon labels).
+// Background bounds, icon position and widget offset must agree on this mode.
+inline constexpr uintptr_t kNewNoLabelLayoutGateRva = 0xe0e22c;
+inline constexpr uintptr_t kNewNoLabelOffsetGateRva = 0x91f0d0;
+inline constexpr uintptr_t kNewNoLabelPositionGateRva = 0xbf1f44;
+// The later 8.01.02.7722 image keeps the same Rust code but shifts the
+// generated functions and one DeviceConfig field by a release-specific amount.
+inline constexpr uintptr_t kNewerSupportRva = 0xfa0440;
+inline constexpr uintptr_t kNewerBackgroundGateRva = 0x11286fc;
+inline constexpr uintptr_t kNewerNoLabelLayoutGateRva = 0xe9a7e4;
+inline constexpr uintptr_t kNewerNoLabelOffsetGateRva = 0xa8a10c;
+inline constexpr uintptr_t kNewerNoLabelPositionGateRva = 0xb77548;
+inline constexpr uint32_t kNoLabelFallthrough = 0xd503201f;
+// Include the predicate call and the first four fallthrough instructions so a
+// single coincidental branch word cannot select a target in an unknown image.
+inline constexpr std::array<uint32_t, 6> kNoLabelLayoutShape{
+    0x94000000, 0x37200220, 0xf85f03a1, 0x94000000, 0xf85f03a1, 0xfc1e03a0,
+};
+inline constexpr std::array<uint32_t, 6> kNoLabelOffsetShape{
+    0x94000000, 0x37200160, 0xfc5f03a1, 0xfc5e83a0, 0x1e601003, 0x6e221c42,
+};
+inline constexpr std::array<uint32_t, 6> kNoLabelPositionShape{
+    0x94000000, 0x372000a0, 0xfc5d83a0, 0xaa1d03ef, 0xa8c179fd, 0xd65f03c0,
+};
+inline constexpr std::array<uint32_t, 5> kNewSupportShape{
+    0xb84cb022, 0x8b1c8042, 0x36200062, 0x910082c0, 0x14000007,
+};
+inline constexpr std::array<uint32_t, 5> kNewerSupportShape{
+    0xb84db022, 0x8b1c8042, 0x36200062, 0x910082c0, 0x14000007,
+};
 inline constexpr std::array<uint32_t, 14> kGateShape{
     0xb841b001, 0x8b1c8021, 0x372004c1, 0xf85e83a3, 0xb840f061, 0x8b1c8021,
     0x940024bf, 0xaa0003e2, 0xf85d83a0, 0xf81c83a2, 0xb840b001, 0xb840f003,
