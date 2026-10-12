@@ -4,10 +4,9 @@ package btm.m.os4.systemuihook
 import java.nio.file.Files
 import java.nio.file.Path
 
-/** Host test using Git Bash; chown/restorecon are recorded, never run against Android. */
+/** Host test using Git Bash; ownership and SELinux operations are mocked. */
 fun main(args: Array<String>) {
     val root = Files.createTempDirectory(Path.of(args[1]), "transport-")
-    val source = root.resolve("source's config.bin")
     val launcher = Files.createDirectory(root.resolve("launcher's data"))
     val target = launcher.resolve("files/hyperpatch.bin")
     val log = root.resolve("permissions.log")
@@ -16,41 +15,58 @@ fun main(args: Array<String>) {
         return "/${value[0].lowercaseChar()}${value.substring(2)}"
     }
     fun quote(value: String) = "'" + value.replace("'", "'\\''") + "'"
-    val command = buildHomeLauncherStageCommand(shellPath(source), shellPath(launcher))
     val mocks = """
-        test() {
-            if [ "${'$'}#" -eq 2 ] && [ "${'$'}2" = /data/adb ]; then return 1; fi
-            builtin test "${'$'}@"
+        id() { printf '0\n'; }
+        stat() {
+            if [ "${'$'}2" = '%u:%g' ]; then printf '10123:10123\n';
+            else command stat "${'$'}@"; fi
         }
-        stat() { printf '10123:10123\n'; }
+        ls() { printf 'u:object_r:privapp_data_file:s0:c123,c456 %s\n' "${'$'}2"; }
         chown() { printf 'owner %s %s\n' "${'$'}1" "${'$'}2" >> ${quote(shellPath(log))}; }
-        restorecon() { printf 'label %s\n' "${'$'}1" >> ${quote(shellPath(log))}; }
+        chcon() { printf 'label %s %s\n' "${'$'}1" "${'$'}2" >> ${quote(shellPath(log))}; }
     """.trimIndent()
-    fun run(prefix: String): Int {
+    fun run(prefix: String, blob: ByteArray, expectedSize: Int = blob.size): Pair<Int, String> {
+        val command = buildHomeLauncherStageCommand(shellPath(launcher), expectedSize)
         Files.writeString(root.resolve("command.sh"), prefix + "\n" + command)
         val process = ProcessBuilder(args[0], "--noprofile", "--norc", shellPath(root.resolve("command.sh")))
             .redirectErrorStream(true).start()
+        runCatching { process.outputStream.use { it.write(blob) } }
         val output = process.inputStream.bufferedReader().readText()
         val result = process.waitFor()
-        check(output.isBlank()) { output }
-        return result
+        return result to output
     }
-    Files.write(source, buildHomeLauncherBlob(1, 0))
-    check(run(mocks) == 0)
-    check(Files.readAllBytes(target).contentEquals(Files.readAllBytes(source)))
+    val first = buildHomeLauncherBlob(1, 0)
+    check(run(mocks, first) == (0 to ""))
+    check(Files.readAllBytes(target).contentEquals(first))
     val permissions = Files.readString(log)
-    check(permissions.contains("owner 10123:10123 ${shellPath(target)}.tmp"))
-    check(permissions.contains("label ${shellPath(target)}.tmp"))
-    check(permissions.contains("label ${shellPath(target)}\n"))
+    check(permissions.contains("owner 10123:10123 ${shellPath(target)}."))
+    check(permissions.contains("label u:object_r:privapp_data_file:s0:c123,c456 ${shellPath(target)}."))
+    check(permissions.contains("label u:object_r:privapp_data_file:s0:c123,c456 ${shellPath(launcher)}/files\n"))
     // A later folder change must retain the selected clear-button mode.
-    Files.write(source, buildHomeLauncherBlob(1, 6))
-    check(run(mocks) == 0)
+    val updated = buildHomeLauncherBlob(1, 6)
+    check(run(mocks, updated) == (0 to ""))
     val previous = Files.readAllBytes(target)
-    check(previous.contentEquals(Files.readAllBytes(source)))
-    check(!Files.exists(launcher.resolve("files/hyperpatch.bin.tmp")))
+    check(previous.contentEquals(updated))
+    fun assertNoTemporaryFiles() {
+        Files.list(target.parent).use { files -> check(files.count() == 1L) }
+    }
+    assertNoTemporaryFiles()
     // Failed labeling must not publish an unreadable configuration over the old one.
-    Files.write(source, buildHomeLauncherBlob(2, 4))
-    check(run(mocks + "\nrestorecon() { return 9; }") == 9)
+    val next = buildHomeLauncherBlob(2, 4)
+    val failure = run(mocks + "\nchcon() { return 9; }", next)
+    check(failure.first == 9 && failure.second.contains("file-label failed (exit 9)"))
     check(Files.readAllBytes(target).contentEquals(previous))
-    println("Passed launcher staging: quoted paths, ownership, labels, atomic updates, and labeling failure")
+    assertNoTemporaryFiles()
+    val truncated = run(mocks, next.copyOf(next.size - 1), next.size)
+    check(truncated.first != 0 && truncated.second.contains("length failed"))
+    check(Files.readAllBytes(target).contentEquals(previous))
+    assertNoTemporaryFiles()
+    val denied = run(mocks + "\nid() { printf '10101\\n'; }", next)
+    check(denied.first != 0 && denied.second.contains("root failed"))
+    check(Files.readAllBytes(target).contentEquals(previous))
+    val contextFailure = run(mocks + "\nls() { return 8; }", next)
+    check(contextFailure.first == 8 && contextFailure.second.contains("context failed"))
+    val missingContext = run(mocks + "\nls() { printf '?\\n'; }", next)
+    check(missingContext.first != 0 && missingContext.second.contains("missing SELinux context"))
+    println("Passed launcher staging: binary stdin, quoted paths, app SELinux categories, atomic updates, cleanup, truncation, and failure diagnostics")
 }

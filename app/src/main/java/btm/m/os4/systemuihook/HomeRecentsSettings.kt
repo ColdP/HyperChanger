@@ -101,21 +101,31 @@ internal fun stageHomeRecentsNativeConfig(
         context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE),
     ),
 ): Boolean = runCatching {
-    val source = File(context.filesDir, "hyperpatch.bin")
-    FileOutputStream(source).use {
-        it.write(buildHomeLauncherBlob(settings.clearMode.value, folderSettings.columns))
-        it.fd.sync()
-    }
+    val blob = buildHomeLauncherBlob(settings.clearMode.value, folderSettings.columns)
     // The Rust launcher cannot reliably read /data/adb, and its native startup
     // can precede Java package callbacks. Stage the complete config directly in
     // its own data directory with the launcher's UID and SELinux file context.
     val launcherDataDir = context.packageManager.getApplicationInfo(
         "com.miui.home", PackageManager.ApplicationInfoFlags.of(0),
-    ).dataDir
-    val command = buildHomeLauncherStageCommand(source.absolutePath, launcherDataDir)
-    val process = ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()
+    ).dataDir ?: error("Launcher data directory unavailable")
+    val command = buildHomeLauncherStageCommand(launcherDataDir, blob.size)
+    // Android app-data isolation hides other apps' directories in our mount
+    // namespace, even after gaining UID 0. Magisk/KernelSU -M uses the global one.
+    val process = ProcessBuilder("su", "-M", "-c", command).redirectErrorStream(true).start()
+    val transfer = runCatching { process.outputStream.use { it.write(blob) } }
     val output = process.inputStream.bufferedReader().use { it.readText() }
-    check(process.waitFor() == 0) { output }
+    val exitCode = process.waitFor()
+    check(exitCode == 0) { "Root config transport for $launcherDataDir exited $exitCode: $output" }
+    transfer.getOrThrow()
+    runCatching { File(context.filesDir, "home-config-write.log").writeText("${System.currentTimeMillis()}: Config staged successfully\n") }
     true
-}.onFailure { Log.w("HyperChangerHomeRecents", "Could not stage native launcher config", it) }
+}.onFailure {
+    Log.w("HyperChangerHomeRecents", "Could not stage native launcher config", it)
+    // Persist diagnostics even on devices that suppress app logcat messages.
+    runCatching {
+        File(context.filesDir, "home-config-write.log").writeText(
+            "${System.currentTimeMillis()}: Config staging failed\n${it.stackTraceToString()}\n",
+        )
+    }
+}
     .getOrDefault(false)
