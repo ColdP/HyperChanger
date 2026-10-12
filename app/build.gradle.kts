@@ -27,7 +27,15 @@ android {
         versionCode = 1020002
         versionName = "1.2.0 RC2"
         buildConfigField("String", "BUILD_DATE", "\"$buildDate\"")
+        ndk { abiFilters += "arm64-v8a" }
 
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     signingConfigs {

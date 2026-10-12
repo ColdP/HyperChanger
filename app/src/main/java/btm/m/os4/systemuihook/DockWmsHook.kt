@@ -9,6 +9,10 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
+import android.os.Binder
+import android.os.IBinder
+import android.os.Parcel
+import android.os.PowerManager
 import android.view.SurfaceControlViewHost
 import android.view.SurfaceControl
 import android.view.WindowManager
@@ -16,6 +20,12 @@ import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import java.lang.reflect.Method
 import java.util.IdentityHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+import btm.m.os4.systemuihook.dockmotion.DockNativeMotion
+import btm.m.os4.systemuihook.dockmotion.DockNativeMotionEndpoint
+import btm.m.os4.systemuihook.dockmotion.DockRecentsMotion
+import btm.m.os4.systemuihook.dockmotion.DockWallpaperEndpoint
 
 /** Composites the Dock background below the launcher buffer in the WMS window tree. */
 internal object DockWmsHook {
@@ -33,6 +43,8 @@ internal object DockWmsHook {
         val radius: Float,
         val density: Float,
         val dark: Boolean,
+        val frameWidth: Int,
+        val frameHeight: Int,
     )
     private data class Layer(
         val parent: SurfaceControl,
@@ -51,6 +63,16 @@ internal object DockWmsHook {
         var remoteContext: android.content.Context? = null,
         var revealAt: Long = 0L,
         var revealScheduled: Boolean = false,
+        var uid: Int = -1,
+        var pid: Int = -1,
+        var session: Any? = null,
+        var token: IBinder? = null,
+        var overview: Boolean = false,
+        val motion: DockNativeMotion = DockNativeMotion(),
+        val fallback: DockRecentsMotion = DockRecentsMotion(),
+        var nativeApplied: Boolean = false,
+        var projection: Float = 1f,
+        var pose: DockMotionPose? = null,
     )
     private val layers = IdentityHashMap<Any, Layer>()
     private var backgroundBlurAvailable = true
@@ -59,6 +81,12 @@ internal object DockWmsHook {
     private var nextGlassId = 0L
     private var lastUnlockAt = 0L
     private const val REVEAL_MS = 821L
+    private val frameQueued = AtomicBoolean()
+    private val nativePose = AtomicReference<DockNativePose?>()
+    private val endpoint = DockNativeMotionEndpoint(
+        { scheduleMotion() },
+        { android.util.Log.i("HyperChangerDockMotion", it) },
+    )
 
     fun install(module: HyperSystemUiModule, param: PackageLoadedParam) = install(module, param.defaultClassLoader)
 
@@ -89,6 +117,133 @@ internal object DockWmsHook {
                 }
         }
         installRevealHook(module, loader)
+        installMotionEndpoint(module, loader)
+        installWallpaperMotion(module, loader, windowClass)
+    }
+
+    private fun installMotionEndpoint(module: HyperSystemUiModule, loader: ClassLoader) {
+        val stub = loader.loadClass("android.view.IWindowManager\$Stub")
+        val method = stub.getDeclaredMethod("onTransact", Int::class.javaPrimitiveType,
+            Parcel::class.java, Parcel::class.java, Int::class.javaPrimitiveType)
+        module.installHook(method)
+            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+            .setId("hyperchanger:desktop-dock-motion-binder")
+            .intercept { chain ->
+                val code = chain.getArg(0) as Int
+                if (!DockNativeMotionEndpoint.handles(code) && code != DockNativeMotionEndpoint.STATE_TRANSACTION_CODE && code != DOCK_POSE_TRANSACTION) {
+                    return@intercept chain.proceed()
+                }
+                val data = chain.getArg(1) as Parcel
+                val reply = chain.getArg(2) as? Parcel ?: return@intercept false
+                if (code == DOCK_POSE_TRANSACTION) {
+                    data.enforceInterface("android.view.IWindowManager")
+                    val uid = Binder.getCallingUid()
+                    val pid = Binder.getCallingPid()
+                    if ((chain.getArg(3) as Int) and IBinder.FLAG_ONEWAY == 0 && data.dataAvail() == 64) {
+                        val wire = LongArray(8) { data.readLong() }
+                        val previous = nativePose.get()
+                        val pose = decodeDockNativePose(uid, pid, wire,
+                            previous?.takeIf { it.uid == uid && it.pid == pid }?.sequence ?: 0L, System.nanoTime())
+                        val authenticated = synchronized(layers) { layers.values.any { it.uid == uid && it.pid == pid && !it.closed } }
+                        if (pose != null && authenticated) {
+                            nativePose.updateAndGet { current ->
+                                if (current != null && current.uid == uid && current.pid == pid && current.sequence >= pose.sequence) current else pose
+                            }
+                            scheduleMotion()
+                        }
+                    }
+                    reply.writeInt(DockNativeMotionEndpoint.ACK)
+                } else if (code == DockNativeMotionEndpoint.STATE_TRANSACTION_CODE) {
+                    data.enforceInterface("android.view.IWindowManager")
+                    val enabled = readDockSettings(module.getRemotePreferences(REMOTE_PREFERENCE_GROUP)).enabled
+                    val callerUid = Binder.getCallingUid()
+                    val callerPid = Binder.getCallingPid()
+                    val ownLayer = synchronized(layers) {
+                        layers.values.firstOrNull { it.uid == callerUid && it.pid == callerPid && !it.closed }
+                    }
+                    val context = ownLayer?.remoteContext
+                    val interactive = context?.getSystemService(PowerManager::class.java)?.isInteractive != false
+                    reply.writeInt(DockNativeMotionEndpoint.STATE_ACK)
+                    reply.writeInt(if (enabled && interactive) 1 else 0)
+                } else {
+                    reply.writeInt(endpoint.receive(code, data, chain.getArg(3) as Int))
+                }
+                true
+            }
+        android.util.Log.i("HyperChangerDockMotion", "Authenticated native motion endpoint installed")
+    }
+
+    private fun installWallpaperMotion(module: HyperSystemUiModule, loader: ClassLoader, windowClass: Class<*>) {
+        runCatching {
+            val resolved = DockWallpaperEndpoint.resolve(loader.loadClass("com.android.server.wm.WallpaperController"),
+                windowClass, loader.loadClass("com.android.server.wm.Session"), IBinder::class.java, Bundle::class.java)
+            module.installHook(resolved.method)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .setId("hyperchanger:desktop-dock-motion-scene")
+                .intercept { chain ->
+                    runCatching {
+                        val command = chain.getArg(1) as? String
+                        val extras = chain.getArg(5) as? Bundle
+                        @Suppress("DEPRECATION")
+                        val scale = (extras?.get("scale_to") as? Number)?.toDouble()
+                        val target = scale?.let { DockRecentsMotion.overviewTarget(command, extras.getString("action"), it) }
+                        if (target != null) {
+                            synchronized(layers) {
+                                layers.entries.firstOrNull { (window, layer) ->
+                                    if (resolved.sessionScoped()) DockWallpaperEndpoint.ownsWindow(
+                                        layer.session, layer.token, chain.thisObject, chain.getArg(0))
+                                    else window === chain.getArg(0)
+                                }?.value?.let { layer ->
+                                    synchronized(layer) {
+                                        layer.overview = target
+                                        layer.fallback.setOverview(target, SystemClock.uptimeMillis())
+                                        if (extras.getString("action") == "setTo") layer.fallback.finish()
+                                        if (target) endpoint.requestHookRevalidation(layer.uid, layer.pid)
+                                    }
+                                    scheduleMotion()
+                                }
+                            }
+                        }
+                    }.onFailure { android.util.Log.w("HyperChangerDockMotion", "Scene observer failed", it) }
+                    chain.proceed()
+                }
+        }.onFailure { android.util.Log.w("HyperChangerDockMotion", "Scene endpoint unavailable; native following remains enabled", it) }
+    }
+
+    private fun bindMotion(window: Any, layer: Layer) {
+        val session = field(window, "mSession")?.get(window) ?: return
+        val uid = field(session, "mUid")?.get(session) as? Int ?: return
+        val pid = field(session, "mPid")?.get(session) as? Int ?: return
+        if (uid < 10000 || pid <= 0) return
+        synchronized(layer) {
+            if (layer.uid != uid || layer.pid != pid) {
+                layer.motion.reset()
+                layer.nativeApplied = false
+                layer.projection = 1f
+                layer.pose = null
+            }
+            layer.session = session
+            layer.token = (field(window, "mClient")?.get(window) as? android.os.IInterface)?.asBinder()
+                ?: field(window, "mClient")?.get(window) as? IBinder
+            layer.uid = uid
+            layer.pid = pid
+        }
+        endpoint.bindIdentity(uid, pid)
+    }
+
+    /** Coalesce Binder samples. Apply every material as one parent transform. */
+    private fun scheduleMotion() {
+        if (!frameQueued.compareAndSet(false, true)) return
+        worker.postDelayed({
+            frameQueued.set(false)
+            var running = false
+            val snapshot = synchronized(layers) { layers.values.toList() }
+            snapshot.forEach { layer ->
+                if (!layer.closed) runCatching { if (drawMotion(layer)) running = true }
+                    .onFailure { android.util.Log.w("HyperChangerDockMotion", "Motion frame failed", it) }
+            }
+            if (running) scheduleMotion()
+        }, 8L)
     }
 
     private fun installRevealHook(module: HyperSystemUiModule, loader: ClassLoader) {
@@ -127,42 +282,62 @@ internal object DockWmsHook {
     }
 
     private fun scheduleReveal(layer: Layer) {
-        if (layer.revealScheduled) return
-        layer.revealScheduled = true
-        val tick = object : Runnable {
-            override fun run() {
-                if (layer.closed || layer.revealAt == 0L) {
-                    layer.revealScheduled = false
-                    return
-                }
-                runCatching { drawReveal(layer) }
-                    .onFailure { android.util.Log.w("HyperChangerDock", "Dock reveal frame failed", it) }
-                if (layer.revealAt != 0L) worker.postDelayed(this, 16L)
-                else layer.revealScheduled = false
-            }
-        }
-        worker.postDelayed(tick, 16L)
+        if (!layer.closed) scheduleMotion()
     }
 
-    private fun drawReveal(layer: Layer) {
+    private fun drawReveal(layer: Layer) { drawMotion(layer) }
+
+    private fun drawMotion(layer: Layer): Boolean {
         synchronized(layer) {
-            val appearance = layer.appearance ?: return
-            val effect = layer.effect ?: return
-            if (!effect.isValid) return
-            val elapsed = (SystemClock.uptimeMillis() - layer.revealAt - 10L).coerceAtLeast(0L)
-            val t = (elapsed.toFloat() / REVEAL_MS).coerceIn(0f, 1f)
+            val appearance = layer.appearance ?: return false
+            val effect = layer.effect ?: return false
+            if (!effect.isValid || layer.closed) return false
+            val now = SystemClock.uptimeMillis()
+            val sample = endpoint.latest(layer.uid, layer.pid)
+            if (sample != null) {
+                layer.motion.accept(sample, layer.overview)
+                layer.nativeApplied = true
+                if (sample.scene() == 1) layer.overview = true
+                else if (sample.scene() == 2 || sample.scale() >= .999999) layer.overview = false
+            } else if (layer.nativeApplied) {
+                layer.fallback.resumeFrom(layer.motion.progress(), layer.overview, now)
+                layer.nativeApplied = false
+            }
+            val projected = DockNativeMotion.autoAimScale(endpoint.latestAutoAim(layer.uid, layer.pid),
+                layer.revealAt.takeIf { it > 0 } ?: lastUnlockAt, System.nanoTime())
+            val observedPose = nativePose.get()?.takeIf {
+                it.uid == layer.uid && it.pid == layer.pid && it.timestamp <= System.nanoTime()
+                    && System.nanoTime() - it.timestamp <= DOCK_POSE_MAX_AGE_NS
+            }
+            layer.projection = observedPose?.scale ?: projected?.toFloat() ?: 1f
+            val elapsed = (now - layer.revealAt - 10L).coerceAtLeast(0L)
+            val t = if (layer.revealAt > 0L) (elapsed.toFloat() / REVEAL_MS).coerceIn(0f, 1f) else 1f
             val remaining = 1f - t
             val lift = remaining * remaining * (1f - 2.25f * t)
             val alphaT = (elapsed / 280f).coerceIn(0f, 1f)
-            val alpha = alphaT * alphaT * (3f - 2f * alphaT)
+            val alpha = if (layer.revealAt > 0L) alphaT * alphaT * (3f - 2f * alphaT) else 1f
+            val scale = if (layer.nativeApplied) layer.motion.scale() else 1f - .05f * layer.fallback.progress(now)
+            // The launcher's parent already carries the large recents translation.
+            // Only compensate the residual icon-row shift inside that parent.
+            val offset = if (layer.nativeApplied) layer.motion.relativeOffsetY(appearance.density)
+                else DockNativeMotion.relativeOffsetY(appearance.density, layer.fallback.progress(now))
+            val pose = dockMotionPose(appearance.margin.toFloat(), appearance.y.toFloat(),
+                appearance.frameWidth / 2f, appearance.frameHeight / 2f, scale, layer.projection,
+                (observedPose?.x ?: 0f) * appearance.density,
+                offset + if (observedPose != null) observedPose.y * appearance.density else 96f * appearance.density * lift,
+                observedPose?.alpha ?: alpha)
+            if (t >= 1f) layer.revealAt = 0L
+            val running = layer.revealAt > 0L || projected != null || observedPose != null || sample != null || layer.fallback.isRunning(now)
+            if (layer.pose == pose) return running
             val tx = SurfaceControl.Transaction()
             try {
-                invoke(tx, "setPosition", effect, appearance.margin.toFloat(),
-                    appearance.y + 96f * appearance.density * lift)
-                invoke(tx, "setAlpha", effect, alpha)
+                invoke(tx, "setPosition", effect, pose.x, pose.y)
+                invoke(tx, "setMatrix", effect, pose.scale, 0f, 0f, pose.scale)
+                invoke(tx, "setAlpha", effect, pose.alpha)
                 invoke(tx, "apply")
             } finally { tx.close() }
-            if (t >= 1f) layer.revealAt = 0L
+            layer.pose = pose
+            return running
         }
     }
 
@@ -204,14 +379,17 @@ internal object DockWmsHook {
         val radius = (settings.radius * density).coerceAtMost(minOf(width, height) / 2f)
         val dark = (config?.uiMode ?: 0) and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
         val layer = layers[window]?.takeIf { it.parent == parent && it.tint.isValid } ?: create(window, parent)
-        val appearance = Appearance(settings, margin, y, width, height, radius, density, dark)
+        bindMotion(window, layer)
+        val service = field(window, "mWmService")?.get(window)
+        layer.remoteContext = service?.let { field(it, "mContext")?.get(it) as? android.content.Context }
+        val appearance = Appearance(settings, margin, y, width, height, radius, density, dark, frame.width(), frame.height())
         if (!settings.entryAnimation) layer.revealAt = 0L
         else if (layer.appearance == null && SystemClock.uptimeMillis() - lastUnlockAt < REVEAL_MS) {
             layer.revealAt = lastUnlockAt
         }
         if (settings.material == 2) requestGlass(window, layer, appearance)
         else if (layer.glassId != null) retireGlass(layer)
-        if (layer.appearance == appearance) return
+        if (layer.appearance == appearance) { drawMotion(layer); scheduleMotion(); return }
         val color = when (settings.material) {
             0 -> settings.solidColor
             1 -> settings.advancedColor
@@ -269,7 +447,9 @@ internal object DockWmsHook {
             invoke(tx, "show", layer.highlight)
             invoke(tx, "apply")
             layer.appearance = appearance
-            if (layer.revealAt > 0L) scheduleReveal(layer)
+            layer.pose = null
+            drawMotion(layer)
+            scheduleMotion()
         } finally {
             tx.close()
         }
