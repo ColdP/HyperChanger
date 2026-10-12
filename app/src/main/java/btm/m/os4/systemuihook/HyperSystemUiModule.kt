@@ -716,7 +716,9 @@ class HyperSystemUiModule : XposedModule() {
         if (param.packageName == "com.miui.home") {
             runCatching {
                 val preferences = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
-                syncHomeRecentsNativeConfig(param, readHomeRecentsSettings(preferences))
+                syncHomeRecentsNativeConfig(
+                    param, readHomeRecentsSettings(preferences), readHomeFolderSettings(preferences),
+                )
             }.onFailure { error ->
                 log(Log.ERROR, TAG, "Could not sync native desktop recents config", error)
             }

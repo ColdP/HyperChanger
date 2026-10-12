@@ -3,6 +3,11 @@
   "creator": "btm_m",
   "locale": "en",
   "strings": {
+    "文件夹": "Folders",
+    "自定义文件夹列数": "Customize folder columns",
+    "4": "4",
+    "5": "5",
+    "6": "6",
     "islandCollapsedSmoothing": "Smooth collapsed island background",
     "islandCollapsedSmoothingPercent": "Collapsed island background smoothing",
     "hyperIslandSmoothingAttribution": "Island-related code",

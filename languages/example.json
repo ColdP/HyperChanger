@@ -3,6 +3,11 @@
   "creator": "btm_m",
   "locale": "en",
   "strings": {
+    "文件夹": "Folders",
+    "自定义文件夹列数": "Customize folder columns",
+    "4": "4",
+    "5": "5",
+    "6": "6",
     "islandCollapsedSmoothing": "平滑收起时的超级岛背景",
     "islandCollapsedSmoothingPercent": "收起时的超级岛背景平滑度",
     "hyperIslandSmoothingAttribution": "超级岛相关代码",

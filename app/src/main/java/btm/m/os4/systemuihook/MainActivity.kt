@@ -368,6 +368,8 @@ private fun Root(
     var dockSettings by remember { mutableStateOf(dockStore.settings) }
     val homeRecentsStore = remember(context) { HomeRecentsSettingsStore(context) }
     var homeRecentsSettings by remember { mutableStateOf(homeRecentsStore.settings) }
+    val homeFolderStore = remember(context) { HomeFolderSettingsStore(context) }
+    var homeFolderSettings by remember { mutableStateOf(homeFolderStore.settings) }
     var pendingRestartTargets by remember { mutableStateOf(emptySet<ScopeApplication>()) }
     val markRestartTargets: (Set<ScopeApplication>) -> Unit = { targets ->
         if (targets.isNotEmpty()) pendingRestartTargets = pendingRestartTargets + targets
@@ -541,6 +543,8 @@ private fun Root(
         val previousAppearance = appearances.settings
         val previousMusicWhitelist = musicStore.apps
         val previousDockSettings = dockStore.settings
+        val previousHomeRecentsSettings = homeRecentsStore.settings
+        val previousHomeFolderSettings = homeFolderStore.settings
         runCatching {
             ModulePresetCodec.import(context, service, payload)
             hooks.reload()
@@ -551,6 +555,7 @@ private fun Root(
             musicStore.reload()
             dockStore.reload()
             homeRecentsStore.reload()
+            homeFolderStore.reload()
             settings = hooks.settings
             lockscreenCapsuleSettings = lockscreenCapsules.settings
             cameraSettings = cameras.settings
@@ -559,6 +564,8 @@ private fun Root(
             musicWhitelist = musicStore.apps
             dockSettings = dockStore.settings
             homeRecentsSettings = homeRecentsStore.settings
+            homeFolderSettings = homeFolderStore.settings
+            stageHomeRecentsNativeConfig(context, homeRecentsSettings, homeFolderSettings)
         }.onSuccess {
             markRestartTargets(suggestedScopesForHookChange(previousSettings, settings))
             if (previousLockscreenCapsule != lockscreenCapsuleSettings) {
@@ -574,6 +581,9 @@ private fun Root(
                 markRestartTargets(setOf(ScopeApplication.SUBSCREEN_CENTER))
             }
             if (previousDockSettings != dockSettings) markRestartTargets(setOf(ScopeApplication.DESKTOP))
+            if (previousHomeRecentsSettings != homeRecentsSettings || previousHomeFolderSettings != homeFolderSettings) {
+                markRestartTargets(setOf(ScopeApplication.DESKTOP))
+            }
             Toast.makeText(context, tr("预设已导入", "预设已导入"), Toast.LENGTH_SHORT).show()
         }.onFailure {
             Toast.makeText(context, tr("导入失败", "导入失败"), Toast.LENGTH_SHORT).show()
@@ -644,6 +654,7 @@ private fun Root(
             musicStore.syncRemote(it)
             dockStore.syncRemote(it)
             homeRecentsStore.syncRemote(it)
+            homeFolderStore.syncRemote(it)
             settings = hooks.settings
             navigationSettings = navigation.settings
             lockscreenCapsuleSettings = lockscreenCapsules.settings
@@ -654,6 +665,7 @@ private fun Root(
             musicWhitelist = musicStore.apps
             dockSettings = dockStore.settings
             homeRecentsSettings = homeRecentsStore.settings
+            homeFolderSettings = homeFolderStore.settings
         }
     }
     MiuixTheme(controller = controller) {
@@ -701,7 +713,7 @@ private fun Root(
         } else {
         Shell(
             settings, navigationSettings, lockscreenCapsuleSettings, cameraSettings, deviceProfile, appearance, musicWhitelist, screenRecorder, airDropSettings,
-            dockSettings, homeRecentsSettings, service,
+            dockSettings, homeRecentsSettings, homeFolderSettings, service,
             update = { transform ->
                 val before = hooks.settings
                 hooks.update(service, transform)
@@ -731,6 +743,16 @@ private fun Root(
                 val staged = homeRecentsStore.update(service, transform)
                 homeRecentsSettings = homeRecentsStore.settings
                 if (staged && before != homeRecentsSettings) {
+                    markRestartTargets(setOf(ScopeApplication.DESKTOP))
+                } else if (!staged) {
+                    Toast.makeText(context, tr("写入桌面配置失败，请检查 Root 权限", "写入桌面配置失败，请检查 Root 权限"), Toast.LENGTH_LONG).show()
+                }
+            },
+            updateHomeFolder = { transform ->
+                val before = homeFolderStore.settings
+                val staged = homeFolderStore.update(service, transform)
+                homeFolderSettings = homeFolderStore.settings
+                if (staged && before != homeFolderSettings) {
                     markRestartTargets(setOf(ScopeApplication.DESKTOP))
                 } else if (!staged) {
                     Toast.makeText(context, tr("写入桌面配置失败，请检查 Root 权限", "写入桌面配置失败，请检查 Root 权限"), Toast.LENGTH_LONG).show()
@@ -906,12 +928,14 @@ private fun Shell(
     airDropSettings: AirDropSettings,
     dockSettings: DockSettings,
     homeRecentsSettings: HomeRecentsSettings,
+    homeFolderSettings: HomeFolderSettings,
     service: XposedService?,
     update: ((HookSettings) -> HookSettings) -> Unit,
     updateLockscreenCapsule: ((LockscreenCapsuleSettings) -> LockscreenCapsuleSettings) -> Unit,
     updateNavigation: ((ModuleNavigationSettings) -> ModuleNavigationSettings) -> Unit,
     updateDock: ((DockSettings) -> DockSettings) -> Unit,
     updateHomeRecents: ((HomeRecentsSettings) -> HomeRecentsSettings) -> Unit,
+    updateHomeFolder: ((HomeFolderSettings) -> HomeFolderSettings) -> Unit,
     updateCamera: ((CameraSettings) -> CameraSettings) -> Unit,
     updateDeviceProfile: ((DeviceProfileSettings) -> DeviceProfileSettings) -> Unit,
     updateAppearance: ((SettingsAppearanceSettings) -> SettingsAppearanceSettings) -> Unit,
@@ -1038,8 +1062,8 @@ private fun Shell(
             LocalPageBackSuppressed provides if (isTop) ({ value -> suppressPageBack = value }) else ({ }),
         ) {
             Detail(
-                detailPage, settings, lockscreenCapsuleSettings, cameras, deviceProfile, appearance, musicWhitelist, dockSettings, homeRecentsSettings, airDropSettings,
-                update, updateLockscreenCapsule, updateDock, updateHomeRecents, updateCamera,
+                detailPage, settings, lockscreenCapsuleSettings, cameras, deviceProfile, appearance, musicWhitelist, dockSettings, homeRecentsSettings, homeFolderSettings, airDropSettings,
+                update, updateLockscreenCapsule, updateDock, updateHomeRecents, updateHomeFolder, updateCamera,
                 updateDeviceProfile, updateAppearance, updateMusicWhitelist, presetActions, updateAirDrop,
                 openPage = openNestedPage, back = dismissPage,
                 onDebugMode = { showDebug = true }, captcha = captcha,
@@ -2613,6 +2637,8 @@ private fun Desktop(
     update: ((DockSettings) -> DockSettings) -> Unit,
     homeRecentsSettings: HomeRecentsSettings,
     updateHomeRecents: ((HomeRecentsSettings) -> HomeRecentsSettings) -> Unit,
+    homeFolderSettings: HomeFolderSettings,
+    updateHomeFolder: ((HomeFolderSettings) -> HomeFolderSettings) -> Unit,
     back: () -> Unit,
 ) = AppPage(tr("桌面", "桌面"), back, restartScopes = setOf(ScopeApplication.DESKTOP)) { padding, scroll ->
     AppList(padding, scroll) {
@@ -2704,6 +2730,19 @@ private fun Desktop(
                         }
                     }
                 }
+            }
+        }
+        item {
+            Group(tr("文件夹", "文件夹")) {
+                val columns = listOf(0, 4, 5, 6)
+                OverlayDropdownPreference(
+                    title = tr("自定义文件夹列数", "自定义文件夹列数"),
+                    items = listOf(tr("系统默认", "系统默认"), tr("4", "4"), tr("5", "5"), tr("6", "6")),
+                    selectedIndex = columns.indexOf(homeFolderSettings.columns).coerceAtLeast(0),
+                    onSelectedIndexChange = { index ->
+                        updateHomeFolder { it.copy(columns = columns[index]) }
+                    },
+                )
             }
         }
         item {
@@ -3595,11 +3634,13 @@ private fun Detail(
     musicWhitelist: Set<String>,
     dockSettings: DockSettings,
     homeRecentsSettings: HomeRecentsSettings,
+    homeFolderSettings: HomeFolderSettings,
     airDropSettings: AirDropSettings,
     update: ((HookSettings) -> HookSettings) -> Unit,
     updateLockscreenCapsule: ((LockscreenCapsuleSettings) -> LockscreenCapsuleSettings) -> Unit,
     updateDock: ((DockSettings) -> DockSettings) -> Unit,
     updateHomeRecents: ((HomeRecentsSettings) -> HomeRecentsSettings) -> Unit,
+    updateHomeFolder: ((HomeFolderSettings) -> HomeFolderSettings) -> Unit,
     updateCamera: ((CameraSettings) -> CameraSettings) -> Unit,
     updateDeviceProfile: ((DeviceProfileSettings) -> DeviceProfileSettings) -> Unit,
     updateAppearance: ((SettingsAppearanceSettings) -> SettingsAppearanceSettings) -> Unit,
@@ -3639,7 +3680,7 @@ private fun Detail(
 ) {
     when (page) {
         PageId.SHADE -> Shade(settings, update, presetActions, openPage, back)
-        PageId.DESKTOP -> Desktop(dockSettings, updateDock, homeRecentsSettings, updateHomeRecents, back)
+        PageId.DESKTOP -> Desktop(dockSettings, updateDock, homeRecentsSettings, updateHomeRecents, homeFolderSettings, updateHomeFolder, back)
         PageId.SHADE_PRESETS -> ShadePresets(settings, update, presetActions, back)
         PageId.SHADE_NOTIFICATION_ELEMENTS -> MaterialOverrideAdvancedPage(
             tr("通知元素", "通知元素"), settings.notificationElementsMaterial, false,

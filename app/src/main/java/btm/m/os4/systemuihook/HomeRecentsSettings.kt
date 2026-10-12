@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.SharedPreferences
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import io.github.libxposed.service.XposedService
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import android.util.Log
@@ -71,10 +70,14 @@ internal fun readHomeRecentsSettings(prefs: SharedPreferences) = HomeRecentsSett
  * Feature 18 hides the clear button while retaining its action; feature
  * 9 removes both the button and its action.
  */
-internal fun syncHomeRecentsNativeConfig(param: PackageLoadedParam, settings: HomeRecentsSettings) {
+internal fun syncHomeRecentsNativeConfig(
+    param: PackageLoadedParam,
+    settings: HomeRecentsSettings,
+    folderSettings: HomeFolderSettings,
+) {
     val dataDir = param.applicationInfo.dataDir ?: return
     val target = File(dataDir, "files/hyperpatch.bin")
-    val blob = buildHomeRecentsBlob(settings.clearMode)
+    val blob = buildHomeLauncherBlob(settings.clearMode.value, folderSettings.columns)
     runCatching {
         target.parentFile?.mkdirs()
         val temp = File(target.parentFile, "${target.name}.tmp")
@@ -90,9 +93,18 @@ internal fun syncHomeRecentsNativeConfig(param: PackageLoadedParam, settings: Ho
     }
 }
 
-internal fun stageHomeRecentsNativeConfig(context: Context, settings: HomeRecentsSettings): Boolean = runCatching {
+internal fun stageHomeRecentsNativeConfig(
+    context: Context,
+    settings: HomeRecentsSettings,
+    folderSettings: HomeFolderSettings = readHomeFolderSettings(
+        context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE),
+    ),
+): Boolean = runCatching {
     val source = File(context.filesDir, "hyperpatch.bin")
-    FileOutputStream(source).use { it.write(buildHomeRecentsBlob(settings.clearMode)); it.fd.sync() }
+    FileOutputStream(source).use {
+        it.write(buildHomeLauncherBlob(settings.clearMode.value, folderSettings.columns))
+        it.fd.sync()
+    }
     val destination = "/data/adb/hyperpatch.bin"
     val staged = "$destination.tmp"
     val command = "cp '${source.absolutePath}' '$staged' && chmod 644 '$staged' && mv '$staged' '$destination'"
@@ -102,28 +114,3 @@ internal fun stageHomeRecentsNativeConfig(context: Context, settings: HomeRecent
     true
 }.onFailure { Log.w("HyperChangerHomeRecents", "Could not stage native launcher config", it) }
     .getOrDefault(false)
-
-private fun buildHomeRecentsBlob(mode: HomeRecentsClearMode): ByteArray {
-    val output = ByteArrayOutputStream(144)
-    fun u32(value: Int) {
-        output.write(value and 0xff)
-        output.write((value ushr 8) and 0xff)
-        output.write((value ushr 16) and 0xff)
-        output.write((value ushr 24) and 0xff)
-    }
-    output.write(byteArrayOf('H'.code.toByte(), 'P'.code.toByte(), 'C'.code.toByte(), 'F'.code.toByte()))
-    u32(18)
-    u32(if (mode == HomeRecentsClearMode.NONE) 0 else 1)
-    if (mode == HomeRecentsClearMode.NONE) {
-        u32(0)
-    } else {
-        u32(1)
-        u32(if (mode == HomeRecentsClearMode.HIDE_KEEP_FUNCTION) 18 else 9)
-    }
-    // Keep the remaining V18 fields at their stock/default values.
-    listOf(5, 8, 5, 5, 8, 5, 0, 112, 0, 0, 0).forEach(::u32)
-    repeat(12) { u32(0) }
-    u32(0)
-    repeat(7) { u32(0) }
-    return output.toByteArray()
-}
