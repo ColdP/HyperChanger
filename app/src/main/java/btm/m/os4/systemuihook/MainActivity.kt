@@ -9997,13 +9997,6 @@ private fun openProjects() = listOf(
         "https://github.com/1812z/HyperIsland",
         tr("MIT License", "MIT License"),
     ),
-    OpenProject(
-        tr("HyperCeiler", "HyperCeiler"),
-        tr("Canary", "Canary"),
-        tr("HyperOS 4 Rust 桌面的 Dock 栏相关代码", "HyperOS 4 Rust 桌面的 Dock 栏相关代码"),
-        "https://github.com/ReChronoRain/HyperCeiler",
-        tr("AGPL-3.0/MIT License", "AGPL-3.0/MIT License"),
-    ),
 )
 
 @Composable

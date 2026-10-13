@@ -671,7 +671,7 @@ class HyperSystemUiModule : XposedModule() {
             }.getOrNull()
             attachModuleResources(settingsContext)
             val settingsIcon = if (moduleContext != null) {
-                R.drawable.ic_hyperchanger
+                R.drawable.ic_hyperchanger_settings_entry
             } else {
                 android.R.drawable.ic_menu_manage
             }

@@ -528,14 +528,68 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
         // predicate and background builder moved. Resolve the newer anchor from
         // its own signature instead of applying old RVAs to the wrong image.
         if (need_native && newer_supports.size() == 1) {
-            const uintptr_t base = newer_supports[0] - home_native_dock::kNewerSupportRva;
+            struct LayoutRvas {
+                uintptr_t support;
+                uintptr_t background;
+                uintptr_t layout;
+                uintptr_t offset;
+                uintptr_t position;
+                const char *label;
+            };
+            const std::array candidates{
+                LayoutRvas{home_native_dock::kNewerSupportRva,
+                    home_native_dock::kNewerBackgroundGateRva,
+                    home_native_dock::kNewerNoLabelLayoutGateRva,
+                    home_native_dock::kNewerNoLabelOffsetGateRva,
+                    home_native_dock::kNewerNoLabelPositionGateRva, "8.01.02.7722"},
+                LayoutRvas{home_native_dock::kNewestSupportRva,
+                    home_native_dock::kNewestBackgroundGateRva,
+                    home_native_dock::kNewestNoLabelLayoutGateRva,
+                    home_native_dock::kNewestNoLabelOffsetGateRva,
+                    home_native_dock::kNewestNoLabelPositionGateRva, "8.01.02.7748"},
+            };
+            const auto valid_candidate = [&](const LayoutRvas &rvas) {
+                if (newer_supports[0] < rvas.support) return false;
+                const uintptr_t base = newer_supports[0] - rvas.support;
+                const std::array<std::pair<uintptr_t, uint32_t>, 4> checks{{
+                    {base + rvas.background, 0x37200101},
+                    {base + rvas.layout, 0x37200220},
+                    {base + rvas.offset, 0x37200160},
+                    {base + rvas.position, 0x372000a0},
+                }};
+                for (const auto &[address, expected] : checks) {
+                    uint32_t live = 0;
+                    if (!source_at(generation, address)
+                        || source_at(inventory(), address) != source_at(generation, address)
+                        || !nhk::safe_read(address, std::as_writable_bytes(std::span(&live, 1)))
+                        || live != expected) return false;
+                }
+                return true;
+            };
+            const LayoutRvas *selected = nullptr;
+            for (const auto &candidate : candidates) {
+                if (valid_candidate(candidate)) {
+                    selected = &candidate;
+                    break;
+                }
+            }
+            if (!selected) {
+                __android_log_print(ANDROID_LOG_WARN, kTag,
+                    "Native Dock support matched but no known layout variant validated at %p",
+                    reinterpret_cast<void *>(newer_supports[0]));
+                continue;
+            }
+            const uintptr_t base = newer_supports[0] - selected->support;
+            __android_log_print(ANDROID_LOG_INFO, kTag,
+                "Native Dock layout variant %s validated (base=%p)", selected->label,
+                reinterpret_cast<void *>(base));
             add_gate(newer_supports[0] + 8, home_native_dock::kNewerSupportShape[2], 0x14000001, "support");
-            add_gate(base + home_native_dock::kNewerBackgroundGateRva, 0x37200101, 0x14000008, "background");
-            add_gate(base + home_native_dock::kNewerNoLabelLayoutGateRva, 0x37200220,
+            add_gate(base + selected->background, 0x37200101, 0x14000008, "background");
+            add_gate(base + selected->layout, 0x37200220,
                 home_native_dock::kNoLabelFallthrough, "no-label-layout", home_native_dock::kNoLabelLayoutShape);
-            add_gate(base + home_native_dock::kNewerNoLabelOffsetGateRva, 0x37200160,
+            add_gate(base + selected->offset, 0x37200160,
                 home_native_dock::kNoLabelFallthrough, "no-label-offset", home_native_dock::kNoLabelOffsetShape);
-            add_gate(base + home_native_dock::kNewerNoLabelPositionGateRva, 0x372000a0,
+            add_gate(base + selected->position, 0x372000a0,
                 home_native_dock::kNoLabelFallthrough, "no-label-position", home_native_dock::kNoLabelPositionShape);
         }
         if (need_native && gates.size()==1 && strategies.size()==1 && glass_radii.size()==1 && advanced_radii.size()==1 && paddings.size()==1) {

@@ -23,6 +23,13 @@ inline constexpr uintptr_t kNewerBackgroundGateRva = 0x11286fc;
 inline constexpr uintptr_t kNewerNoLabelLayoutGateRva = 0xe9a7e4;
 inline constexpr uintptr_t kNewerNoLabelOffsetGateRva = 0xa8a10c;
 inline constexpr uintptr_t kNewerNoLabelPositionGateRva = 0xb77548;
+// 8.01.02.7748 keeps the 7722 support predicate bytes but the AOT image was
+// rebuilt, moving the Dock functions independently of the old image.
+inline constexpr uintptr_t kNewestSupportRva = 0xfa1fd4;
+inline constexpr uintptr_t kNewestBackgroundGateRva = 0x112a2f0;
+inline constexpr uintptr_t kNewestNoLabelLayoutGateRva = 0xe9b2c0;
+inline constexpr uintptr_t kNewestNoLabelOffsetGateRva = 0xa8b240;
+inline constexpr uintptr_t kNewestNoLabelPositionGateRva = 0xb77c4c;
 inline constexpr uint32_t kNoLabelFallthrough = 0xd503201f;
 // Include the predicate call and the first four fallthrough instructions so a
 // single coincidental branch word cannot select a target in an unknown image.
