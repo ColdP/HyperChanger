@@ -26,4 +26,15 @@ folder_spacing_return:
     ldp x29, x30, [x15], #16
     ret
 .size folder_spacing_return, .-folder_spacing_return
+
+// A Dart true object is the null singleton plus 0x20. This helper is only
+// reached through a version-gated branch installed at the 8.01.02.7748
+// isMultipleSplitSupport entry, so the original Dart frame remains untouched.
+.global multi_split_support_return
+.hidden multi_split_support_return
+.type multi_split_support_return, %function
+multi_split_support_return:
+    add x0, x22, #0x20
+    ret
+.size multi_split_support_return, .-multi_split_support_return
 .section .note.GNU-stack,"",%progbits

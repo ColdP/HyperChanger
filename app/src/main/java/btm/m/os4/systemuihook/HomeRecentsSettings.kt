@@ -89,10 +89,11 @@ internal fun syncHomeRecentsNativeConfig(
     folderSettings: HomeFolderSettings,
     materialSettings: HomeMaterialSettings = HomeMaterialSettings(),
     nativeDock: HomeNativeDockSettings = HomeNativeDockSettings(),
+    multiSplitSettings: HomeMultiSplitSettings = HomeMultiSplitSettings(),
 ) {
     val dataDir = param.applicationInfo.dataDir ?: return
     val target = File(dataDir, "files/hyperpatch.bin")
-    val blob = buildHomeLauncherBlob(settings.clearMode.value, folderSettings.effectiveColumns, folderSettings.rowSpacing, folderSettings.rowSpacingEnabled, materialSettings, nativeDock)
+    val blob = buildHomeLauncherBlob(settings.clearMode.value, folderSettings.effectiveColumns, folderSettings.rowSpacing, folderSettings.rowSpacingEnabled, materialSettings, nativeDock, multiSplitSettings.enabled)
     runCatching {
         target.parentFile?.mkdirs()
         val temp = File(target.parentFile, "${target.name}.tmp")
@@ -120,15 +121,16 @@ internal fun stageHomeRecentsNativeConfig(
     nativeDock: HomeNativeDockSettings = readHomeNativeDockSettings(
         context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE),
     ),
+    multiSplitSettings: HomeMultiSplitSettings = readLocalHomeMultiSplitSettings(context),
 ): Boolean = runCatching {
-    val blob = buildHomeLauncherBlob(settings.clearMode.value, folderSettings.effectiveColumns, folderSettings.rowSpacing, folderSettings.rowSpacingEnabled, materialSettings, nativeDock)
+    val blob = buildHomeLauncherBlob(settings.clearMode.value, folderSettings.effectiveColumns, folderSettings.rowSpacing, folderSettings.rowSpacingEnabled, materialSettings, nativeDock, multiSplitSettings.enabled)
     // The Rust launcher cannot reliably read /data/adb, and its native startup
     // can precede Java package callbacks. Stage the complete config directly in
     // its own data directory with the launcher's UID and SELinux file context.
     val launcherDataDir = context.packageManager.getApplicationInfo(
         "com.miui.home", PackageManager.ApplicationInfoFlags.of(0),
     ).dataDir ?: error("Launcher data directory unavailable")
-    val command = buildHomeLauncherStageCommand(launcherDataDir, blob.size)
+    val command = buildHomeLauncherStageCommand(launcherDataDir, blob.size, if (multiSplitSettings.enabled) 6 else 3)
     // Android app-data isolation hides other apps' directories in our mount
     // namespace, even after gaining UID 0. Magisk/KernelSU -M uses the global one.
     val process = ProcessBuilder("su", "-M", "-c", command).redirectErrorStream(true).start()

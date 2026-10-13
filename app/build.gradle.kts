@@ -24,8 +24,8 @@ android {
         applicationId = "btm.m.os4.systemuihook"
         minSdk = 35
         targetSdk = 37
-        versionCode = 1020039
-        versionName = "1.2.0"
+        versionCode = 1020040
+        versionName = "1.2.0 Fix"
         buildConfigField("String", "BUILD_DATE", "\"$buildDate\"")
         ndk { abiFilters += "arm64-v8a" }
 

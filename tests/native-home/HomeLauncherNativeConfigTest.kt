@@ -17,7 +17,7 @@ fun main(args: Array<String>) {
         check(wire.int == 18)
         val enabled = wire.int != 0
         val count = wire.int
-        check(blob.size == 232 + 4 * count) // V18 plus spacing, glass, Dock icon and native Dock extensions
+        check(blob.size == 252 + 4 * count) // V18 plus spacing, glass, Dock icon, native Dock and multi-split extensions
         val features = List(count) { wire.int }.toSet()
         check(enabled == (clearMode != 0 || columns != 0))
         check((16 in features) == (columns != 0)) {

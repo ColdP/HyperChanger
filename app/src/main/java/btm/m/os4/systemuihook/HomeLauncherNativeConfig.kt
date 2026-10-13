@@ -12,6 +12,7 @@ internal fun buildHomeLauncherBlob(
     folderRowSpacingEnabled: Boolean = false,
     material: HomeMaterialSettings = HomeMaterialSettings(),
     nativeDock: HomeNativeDockSettings = HomeNativeDockSettings(),
+    multiSplitEnabled: Boolean = false,
 ): ByteArray {
     require(clearMode in 0..2)
     require(folderColumns in 0..15)
@@ -67,5 +68,8 @@ internal fun buildHomeLauncherBlob(
     // native modules. They are no longer exposed or applied as settings.
     u32(150)
     u32(15)
+    u32(0x4c50534d) // MSPL
+    u32(1)
+    u32(if (multiSplitEnabled) 1 else 0)
     return output.toByteArray()
 }

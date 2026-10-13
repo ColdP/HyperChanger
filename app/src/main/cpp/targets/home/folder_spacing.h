@@ -56,6 +56,25 @@ struct MaterialSettings {
     uint32_t native_dock_bottom = 15;
 };
 
+struct MultiSplitSettings {
+    bool enabled = false;
+};
+
+// MSPL is an independent tail extension. Search only the bounded wire payload
+// so older configs remain valid and malformed tails fail closed.
+inline MultiSplitSettings read_multi_split_settings(std::span<const std::byte> bytes) {
+    if (bytes.size() < 16 || word(bytes, 0) != 0x46435048 || word(bytes, 4) != 18) return {};
+    const uint32_t count = word(bytes, 12);
+    if (count > 64) return {};
+    const size_t start = 140 + size_t(count) * 4;
+    for (size_t p = start; p + 12 <= bytes.size(); p += 4) {
+        if (word(bytes, p) != 0x4c50534d) continue;
+        if (word(bytes, p + 4) != 1 || word(bytes, p + 8) > 1) return {};
+        return {word(bytes, p + 8) != 0};
+    }
+    return {};
+}
+
 inline MaterialSettings read_material_settings(std::span<const std::byte> bytes) {
     if (bytes.size() < 204 || word(bytes, 0) != 0x46435048 || word(bytes, 4) != 18) return {};
     const uint32_t count = word(bytes, 12);

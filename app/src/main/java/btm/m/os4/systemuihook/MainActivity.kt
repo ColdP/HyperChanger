@@ -368,6 +368,8 @@ private fun Root(
     var dockSettings by remember { mutableStateOf(dockStore.settings) }
     val homeRecentsStore = remember(context) { HomeRecentsSettingsStore(context) }
     var homeRecentsSettings by remember { mutableStateOf(homeRecentsStore.settings) }
+    val homeMultiSplitStore = remember(context) { HomeMultiSplitSettingsStore(context) }
+    var homeMultiSplitSettings by remember { mutableStateOf(homeMultiSplitStore.settings) }
     val homeFolderStore = remember(context) { HomeFolderSettingsStore(context) }
     var homeFolderSettings by remember { mutableStateOf(homeFolderStore.settings) }
     val homeMaterialStore = remember(context) { HomeMaterialSettingsStore(context) }
@@ -546,6 +548,7 @@ private fun Root(
         val previousMusicWhitelist = musicStore.apps
         val previousDockSettings = dockStore.settings
         val previousHomeRecentsSettings = homeRecentsStore.settings
+        val previousHomeMultiSplitSettings = homeMultiSplitStore.settings
         val previousHomeFolderSettings = homeFolderStore.settings
         val previousHomeMaterialSettings = homeMaterialStore.settings
         runCatching {
@@ -558,6 +561,7 @@ private fun Root(
             musicStore.reload()
             dockStore.reload()
             homeRecentsStore.reload()
+            homeMultiSplitStore.reload()
             homeFolderStore.reload()
             homeMaterialStore.reload()
             settings = hooks.settings
@@ -568,6 +572,7 @@ private fun Root(
             musicWhitelist = musicStore.apps
             dockSettings = dockStore.settings
             homeRecentsSettings = homeRecentsStore.settings
+            homeMultiSplitSettings = homeMultiSplitStore.settings
             homeFolderSettings = homeFolderStore.settings
             homeMaterialSettings = homeMaterialStore.settings
             stageHomeRecentsNativeConfig(
@@ -576,6 +581,7 @@ private fun Root(
                 homeFolderSettings,
                 homeMaterialSettings,
                 readHomeNativeDockSettings(context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE)),
+                homeMultiSplitSettings,
             )
         }.onSuccess {
             markRestartTargets(suggestedScopesForHookChange(previousSettings, settings))
@@ -592,7 +598,7 @@ private fun Root(
                 markRestartTargets(setOf(ScopeApplication.SUBSCREEN_CENTER))
             }
             if (previousDockSettings != dockSettings) markRestartTargets(setOf(ScopeApplication.DESKTOP))
-            if (previousHomeRecentsSettings != homeRecentsSettings || previousHomeFolderSettings != homeFolderSettings || previousHomeMaterialSettings != homeMaterialSettings) {
+            if (previousHomeRecentsSettings != homeRecentsSettings || previousHomeMultiSplitSettings != homeMultiSplitSettings || previousHomeFolderSettings != homeFolderSettings || previousHomeMaterialSettings != homeMaterialSettings) {
                 markRestartTargets(setOf(ScopeApplication.DESKTOP))
             }
             Toast.makeText(context, tr("预设已导入", "预设已导入"), Toast.LENGTH_SHORT).show()
@@ -665,6 +671,7 @@ private fun Root(
             musicStore.syncRemote(it)
             dockStore.syncRemote(it)
             homeRecentsStore.syncRemote(it)
+            homeMultiSplitStore.syncRemote(it)
             homeFolderStore.syncRemote(it)
             homeMaterialStore.syncRemote(it)
             settings = hooks.settings
@@ -677,6 +684,7 @@ private fun Root(
             musicWhitelist = musicStore.apps
             dockSettings = dockStore.settings
             homeRecentsSettings = homeRecentsStore.settings
+            homeMultiSplitSettings = homeMultiSplitStore.settings
             homeFolderSettings = homeFolderStore.settings
             homeMaterialSettings = homeMaterialStore.settings
         }
@@ -2828,7 +2836,7 @@ private fun Desktop(
             }
         }
         item {
-            Group(tr("多任务界面", "多任务界面")) {
+            Group(tr("多任务", "多任务")) {
                 OverlayDropdownPreference(
                     title = tr("隐藏多任务界面的清除按钮", "隐藏多任务界面的清除按钮"),
                     items = listOf(

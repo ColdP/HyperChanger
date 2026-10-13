@@ -10,8 +10,6 @@ import btm.m.os4.systemuihook.REMOTE_PREFERENCE_GROUP
 const val KEY_IOS_NOTIFICATION_CENTER = "ios_notification_center"
 const val KEY_IOS_NOTIFICATION_WALLPAPER = "ios_notification_wallpaper"
 const val KEY_IOS_NOTIFICATION_HIDE_CLEAR = "ios_notification_hide_clear"
-const val KEY_IOS_NOTIFICATION_GLASS_REFRACTION = "ios_notification_glass_refraction"
-const val KEY_IOS_NOTIFICATION_GLASS_HDR = "ios_notification_glass_hdr"
 
 // Preserve the stored value 2 for no wallpaper. Retired home wallpaper (1) and
 // unknown values fall back to the lock wallpaper (0), independently of UI indices.
@@ -22,8 +20,6 @@ data class IosNotificationCenterSettings(
     // 0 = lock wallpaper, 2 = keep the system background; 1 is retired.
     val wallpaper: Int = 0,
     val hideClearButton: Boolean = false,
-    val glassRefraction: Boolean = true,
-    val glassHdr: Boolean = false,
 )
 
 class IosNotificationCenterSettingsStore(context: Context) {
@@ -52,8 +48,6 @@ class IosNotificationCenterSettingsStore(context: Context) {
         enabled = prefs.getBoolean(KEY_IOS_NOTIFICATION_CENTER, false),
         wallpaper = normalizeIosNotificationWallpaper(prefs.getInt(KEY_IOS_NOTIFICATION_WALLPAPER, 0)),
         hideClearButton = prefs.getBoolean(KEY_IOS_NOTIFICATION_HIDE_CLEAR, false),
-        glassRefraction = prefs.getBoolean(KEY_IOS_NOTIFICATION_GLASS_REFRACTION, true),
-        glassHdr = prefs.getBoolean(KEY_IOS_NOTIFICATION_GLASS_HDR, false),
     )
 
     private fun write(prefs: SharedPreferences, value: IosNotificationCenterSettings) {
@@ -61,8 +55,6 @@ class IosNotificationCenterSettingsStore(context: Context) {
             .putBoolean(KEY_IOS_NOTIFICATION_CENTER, value.enabled)
             .putInt(KEY_IOS_NOTIFICATION_WALLPAPER, value.wallpaper)
             .putBoolean(KEY_IOS_NOTIFICATION_HIDE_CLEAR, value.hideClearButton)
-            .putBoolean(KEY_IOS_NOTIFICATION_GLASS_REFRACTION, value.glassRefraction)
-            .putBoolean(KEY_IOS_NOTIFICATION_GLASS_HDR, value.glassHdr)
             .apply()
     }
 }

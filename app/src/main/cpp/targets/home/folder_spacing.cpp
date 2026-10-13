@@ -25,6 +25,7 @@
 extern "C" {
 alignas(4) std::atomic<int32_t> folder_spacing_value{folder_spacing::kDisabledValue};
 void folder_spacing_return();
+void multi_split_support_return();
 }
 static_assert(sizeof(folder_spacing_value) == sizeof(int32_t));
 static_assert(std::atomic<int32_t>::is_always_lock_free);
@@ -57,6 +58,8 @@ struct NativeGate {
     uint32_t original;
     uint32_t replacement;
     uint32_t reported_failures = 0;
+    const char *label = "Native Dock";
+    bool multi_split = false;
 };
 std::vector<NativeGate> native_gates;
 std::mutex observer_mutex;
@@ -78,6 +81,7 @@ std::optional<std::span<const std::byte>> read_blob(std::array<std::byte, 512> &
 struct ConfigSnapshot {
     folder_spacing::Settings spacing;
     folder_spacing::MaterialSettings material;
+    folder_spacing::MultiSplitSettings multi_split;
 };
 
 ConfigSnapshot read_config() {
@@ -85,7 +89,8 @@ ConfigSnapshot read_config() {
     std::streamsize size = 0;
     const auto blob = read_blob(buffer, size);
     if (!blob) return {};
-    return {folder_spacing::read_settings(*blob), folder_spacing::read_material_settings(*blob)};
+    return {folder_spacing::read_settings(*blob), folder_spacing::read_material_settings(*blob),
+        folder_spacing::read_multi_split_settings(*blob)};
 }
 
 std::vector<nhk::ExecutableMapping> inventory() {
@@ -302,8 +307,8 @@ bool write_native_gate(NativeGate &gate, bool enabled) {
         if (!(gate.reported_failures & reason)) {
             gate.reported_failures |= reason;
             __android_log_print(ANDROID_LOG_WARN, kTag,
-                "Native Dock gate %s failed at %p live=%08x original=%08x replacement=%08x errno=%d",
-                operation, reinterpret_cast<void *>(gate.address), live, gate.original, gate.replacement, error);
+                "%s gate %s failed at %p live=%08x original=%08x replacement=%08x errno=%d",
+                gate.label, operation, reinterpret_cast<void *>(gate.address), live, gate.original, gate.replacement, error);
         }
         return false;
     };
@@ -322,9 +327,56 @@ bool write_native_gate(NativeGate &gate, bool enabled) {
     __builtin___clear_cache(reinterpret_cast<char *>(gate.address), reinterpret_cast<char *>(gate.address + 4));
     if (mprotect(reinterpret_cast<void *>(page), size, PROT_READ | PROT_EXEC) != 0)
         return fail(8, "restore permission", desired, errno);
-    __android_log_print(ANDROID_LOG_INFO, kTag, "Native Dock gate %s at %p %08x -> %08x",
-        enabled ? "enabled" : "restored", reinterpret_cast<void *>(gate.address), current, desired);
+    __android_log_print(ANDROID_LOG_INFO, kTag, "%s gate %s at %p %08x -> %08x",
+        gate.label, enabled ? "enabled" : "restored", reinterpret_cast<void *>(gate.address), current, desired);
     return true;
+}
+
+bool multi_split_entry_matches(std::span<const uint32_t> code) {
+    if (code.size() < 12) return false;
+    // The Dart pool loads are image-specific. Keep the stable frame, null
+    // singleton compare, and return epilogue; the call displacement is masked.
+    if (code[0] != 0xa9bf79fd || code[1] != 0xaa0f03fd
+        || (code[2] & 0xffc00000) != 0xf9400000
+        || (code[3] & 0xffc00000) != 0xf9400000
+        || (code[4] & 0xffc00000) != 0xf9400000
+        || (code[5] & 0xffe0001f) != 0xeb00001f
+        || (code[6] & 0xff00001f) != 0x54000000
+        || (code[8] & 0xfc000000) != 0x94000000
+        || (code[9] & 0xffc00000) != 0xb8400000) return false;
+    return true;
+}
+
+void resolve_multi_split(const std::vector<nhk::ExecutableMapping> &mappings) {
+    for (const auto &generation : nhk::runtime_generations(mappings)) {
+        std::vector<uintptr_t> supports;
+        for (const auto &mapping : generation) {
+            const size_t bytes = mapping.end - mapping.begin;
+            if (bytes < home_native_dock::kNewerSupportShape.size() * 4) continue;
+            std::vector<uint32_t> code(bytes / sizeof(uint32_t));
+            if (!nhk::safe_read(mapping.begin, std::as_writable_bytes(std::span(code)))) continue;
+            for (size_t i = 0; i + home_native_dock::kNewerSupportShape.size() <= code.size(); ++i)
+                if (home_native_dock::matches(std::span(code).subspan(i), home_native_dock::kNewerSupportShape))
+                    supports.push_back(mapping.begin + i * sizeof(uint32_t));
+        }
+        // The 8.01.02.7748 support predicate is the unique image anchor used
+        // by the existing Dock resolver. Unknown/rebuilt images are refused.
+        if (supports.size() != 1 || supports[0] < home_native_dock::kNewestSupportRva) continue;
+        const uintptr_t base = supports[0] - home_native_dock::kNewestSupportRva;
+        const uintptr_t target = base + 0x1690b5c;
+        std::array<uint32_t, 12> live{};
+        const auto source = source_at(generation, target);
+        if (!source || !nhk::safe_read(target, std::as_writable_bytes(std::span(live)))
+            || !multi_split_entry_matches(live)) continue;
+        if (std::ranges::any_of(native_gates, [&](const NativeGate &gate) {
+                return gate.address == target && gate.source == *source;
+            })) continue;
+        const auto branch = allocate_branch(target, reinterpret_cast<uintptr_t>(multi_split_support_return));
+        if (!branch || source_at(inventory(), target) != source) continue;
+        native_gates.push_back({target, *source, live[0], *branch, 0, "Multiple split", true});
+        __android_log_print(ANDROID_LOG_INFO, kTag,
+            "Multiple split support resolver matched 8.01.02.7748 at %p", reinterpret_cast<void *>(target));
+    }
 }
 
 void publish_effect(const EffectSlot &slot, const folder_spacing::MaterialSettings &settings) {
@@ -345,16 +397,19 @@ void publish_effect(const EffectSlot &slot, const folder_spacing::MaterialSettin
 }
 
 void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
-        const folder_spacing::MaterialSettings &settings, unsigned tick) {
+        const folder_spacing::MaterialSettings &settings,
+        const folder_spacing::MultiSplitSettings &multi_split, unsigned tick) {
+    if (multi_split.enabled) resolve_multi_split(mappings);
     for (auto &gate : native_gates)
         if (source_at(mappings, gate.address) == gate.source)
-            write_native_gate(gate, settings.native_dock_enabled);
+            write_native_gate(gate, gate.multi_split ? multi_split.enabled : settings.native_dock_enabled);
     for (const auto &slot : effect_slots) {
         publish_effect(slot, settings); // disable gate before restoring code
         if (source_at(mappings, slot.address) == slot.source)
             write_effect(slot, slot.native_parameter ? settings.native_dock_enabled : slot.dock ? settings.dock_enabled : settings.enabled);
     }
-    if ((!settings.enabled && !settings.dock_enabled && !settings.native_dock_enabled) || (tick >= 40 && tick % 10 != 0)) return;
+    if ((!settings.enabled && !settings.dock_enabled && !settings.native_dock_enabled && !multi_split.enabled)
+        || (tick >= 40 && tick % 10 != 0)) return;
     for (const auto &generation : nhk::runtime_generations(mappings)) {
         size_t total = 0;
         for (const auto &mapping : generation) total += mapping.end - mapping.begin;
@@ -670,7 +725,8 @@ void *worker(void *) {
             tick = 0;
         }
         if (settings.enabled || !slots.empty() || material.enabled || material.dock_enabled
-            || material.native_dock_enabled || !effect_slots.empty() || !native_gates.empty()) {
+            || material.native_dock_enabled || snapshot.multi_split.enabled
+            || !effect_slots.empty() || !native_gates.empty()) {
             const std::lock_guard lock(observer_mutex);
             const auto mappings = inventory();
             for (const auto &slot : slots) {
@@ -684,10 +740,11 @@ void *worker(void *) {
             if (settings.enabled && slots.empty() && tick % 120 == 0)
                 __android_log_print(ANDROID_LOG_WARN, kTag,
                     "Folder resolver pending: mappings=%zu value=%d", mappings.size(), settings.value);
-            update_effects(mappings, material, tick);
+            update_effects(mappings, material, snapshot.multi_split, tick);
         }
         ++tick;
-        usleep((settings.enabled && slots.empty()) || tick < 40 ? 50000 : 500000);
+        usleep((settings.enabled && slots.empty()) || (snapshot.multi_split.enabled && native_gates.empty())
+            || tick < 40 ? 50000 : 500000);
     }
     return nullptr;
 }
@@ -696,8 +753,9 @@ void *worker(void *) {
 void refresh_home_effects_on_load() {
     const std::lock_guard lock(observer_mutex);
     const auto snapshot = read_config();
-    if (snapshot.material.enabled || snapshot.material.dock_enabled || snapshot.material.native_dock_enabled)
-        update_effects(inventory(), snapshot.material, 0);
+    if (snapshot.material.enabled || snapshot.material.dock_enabled || snapshot.material.native_dock_enabled
+        || snapshot.multi_split.enabled)
+        update_effects(inventory(), snapshot.material, snapshot.multi_split, 0);
 }
 
 void start_folder_spacing() {

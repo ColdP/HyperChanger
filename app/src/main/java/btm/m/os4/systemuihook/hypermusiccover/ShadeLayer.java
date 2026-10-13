@@ -189,8 +189,8 @@ public final class ShadeLayer {
      * also fire when the opposite panel collapses, so they cannot determine ownership. */
     public static void onSwitchProgress(float progress, boolean switching) {
         if (!IOS.switchProgress(progress, switching)) return;
-        IosNotificationCenterPresentation.setSwitching(IOS.switching);
         if (!sIosEnabled) return;
+        IosNotificationCenterPresentation.setSwitching(IOS.switching);
         cancelIosSettle();
         applyIosProgress();
     }
@@ -258,9 +258,7 @@ public final class ShadeLayer {
                 if (btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_CENTER.equals(key)
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_WALLPAPER.equals(key)
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_HIDE_CLEAR.equals(key)
-                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_GLASS_REFRACTION.equals(key)
-                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationBottomOffsetSettingsKt.KEY_IOS_NOTIFICATION_BOTTOM_OFFSET.equals(key)
-                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_GLASS_HDR.equals(key)) {
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationBottomOffsetSettingsKt.KEY_IOS_NOTIFICATION_BOTTOM_OFFSET.equals(key)) {
                     UI.post(() -> readPreferences(prefs));
                 }
             };
@@ -279,20 +277,16 @@ public final class ShadeLayer {
                 btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_WALLPAPER, 0));
         boolean hideClear = prefs.getBoolean(
                 btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_HIDE_CLEAR, false);
-        boolean glassRefraction = prefs.getBoolean(
-                btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_GLASS_REFRACTION, true);
-        boolean glassHdr = prefs.getBoolean(
-                btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_GLASS_HDR, false);
         IosNotificationCenterPresentation.setHideClearButton(hideClear);
         IosNotificationCenterPresentation.setNotificationBottomOffset(
                 btm.m.os4.systemuihook.newnotificationcenter.IosNotificationBottomOffsetSettingsKt
                         .readIosNotificationBottomOffset(prefs));
-        IosNotificationCenterPresentation.setGlassFeatures(glassRefraction, glassHdr);
         if (enabled == sIosEnabled && source == sIosWallpaper) return;
         reset();
         if (sEffectOn) Main.setCardBlurActive(false);
         sEffectOn = false;
         sIosEnabled = enabled;
+        if (!enabled) IosNotificationCenterPresentation.onFeatureDisabled();
         sIosWallpaper = source;
         IosNotificationCenterPresentation.setWallpaperEnabled(source != 2);
         Main.invalidateShadeWallpaper();

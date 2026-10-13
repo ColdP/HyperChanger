@@ -3,7 +3,8 @@
 package btm.m.os4.systemuihook
 
 /** Root transport: the launcher-owned file is required; the shared mirror is optional. */
-internal fun buildHomeLauncherStageCommand(launcherDataDir: String, expectedSize: Int): String {
+internal fun buildHomeLauncherStageCommand(launcherDataDir: String, expectedSize: Int, maxStages: Int = 3): String {
+    require(maxStages in 3..6)
     fun quote(value: String) = "'" + value.replace("'", "'\\''") + "'"
     return """
         set -e
@@ -44,6 +45,9 @@ internal fun buildHomeLauncherStageCommand(launcherDataDir: String, expectedSize
         # Preserve the app-specific SELinux categories; restorecon may not assign them.
         run_stage file-label chcon "${'$'}launcher_context" "${'$'}launcher_staged"
         run_stage publish mv -f "${'$'}launcher_staged" "${'$'}launcher_target"
+        # Launcher 8.01.02.7748 observes this secure setting and uses it as the
+        # resolved upper bound for multiple split stages. Keep stock behavior at 3.
+        run_stage max-stages settings put secure miui_multiple_split_resolved_max_stages ${quote(maxStages.toString())}
         if [ -d /data/adb ]; then
             (mirror=${'$'}(mktemp /data/adb/hyperpatch.bin.XXXXXX) &&
                 cp "${'$'}launcher_target" "${'$'}mirror" &&
