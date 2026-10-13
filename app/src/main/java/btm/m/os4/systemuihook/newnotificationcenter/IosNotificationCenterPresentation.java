@@ -475,6 +475,11 @@ public final class IosNotificationCenterPresentation {
         syncStatus();
         syncClearButton();
         syncEmptyText();
+        // The OEM clock's depth layout may hide minute_view when its clockDepthType is a
+        // lockscreen-only region. This hosted copy has no depth foreground layer, so that state
+        // would make the minute half disappear until the next clock rebuild. Re-assert the
+        // minute subtree after every layout/pre-draw pass while the iOS clock owns the surface.
+        ensureHostedClockMinuteVisible();
         // Ease the clock from a soft, blurred entrance to a crisp resting state. Using the
         // same smooth-step curve as the sheet alpha avoids a sharp focus jump near the end of
         // an upward swipe when native expansion reports uneven frame deltas.
@@ -707,6 +712,50 @@ public final class IosNotificationCenterPresentation {
             clockInfoOffset = offset;
             clockInfo.setTranslationY(clockInfoBaseTranslation + offset);
         }
+    }
+
+    /**
+     * Keep the minute half of the hosted clock visible. HyperOS reuses the same clock templates
+     * for the lockscreen depth composition and may call updateDepthContentVisibility() after the
+     * clock has been attached, which sets minute_view to GONE for the depth region. The iOS
+     * notification center deliberately has no depth clock layer, so that lockscreen decision is
+     * invalid here. Resolve by resource entry name as clock-library ids are not always in the
+     * SystemUI resource table.
+     */
+    private static void ensureHostedClockMinuteVisible() {
+        if (clock == null || host == null || progress <= 0f) return;
+        String[] names = {"minute_view", "minute1", "minute2", "time_minute",
+                "time_minute_right", "current_time_minute_style1", "time_below_view_minute1",
+                "time_below_view_minute2", "tv_minute"};
+        for (String name : names) {
+            View minute = findDescendantByEntryName(clock, name);
+            if (minute == null) continue;
+            for (View current = minute; current != null; ) {
+                if (current.getVisibility() != View.VISIBLE) current.setVisibility(View.VISIBLE);
+                if (current == clock) break;
+                android.view.ViewParent parent = current.getParent();
+                current = parent instanceof View ? (View) parent : null;
+            }
+        }
+    }
+
+    private static View findDescendantByEntryName(View root, String name) {
+        if (root == null) return null;
+        try {
+            if (root.getId() != View.NO_ID
+                    && name.equals(root.getResources().getResourceEntryName(root.getId()))) {
+                return root;
+            }
+        } catch (Throwable ignored) {
+            // Resource ids from the clock library may not resolve in the SystemUI table.
+        }
+        if (!(root instanceof ViewGroup)) return null;
+        ViewGroup group = (ViewGroup) root;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View found = findDescendantByEntryName(group.getChildAt(i), name);
+            if (found != null) return found;
+        }
+        return null;
     }
 
     /** Keep all lockscreen date/lunar/weather/health slots supplied by the OEM clock. */
