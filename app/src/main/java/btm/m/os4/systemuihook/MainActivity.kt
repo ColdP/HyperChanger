@@ -5557,19 +5557,6 @@ private fun Island(
                     }
                 }
                 SwitchPreference(
-                    title = tr("expanded_island_corner_radius", "岛展开时的背景圆角调整"),
-                    checked = appearanceSettings.expandedCornerRadiusEnabled,
-                    onCheckedChange = { enabled -> updateAppearance { it.copy(expandedCornerRadiusEnabled = enabled) } },
-                )
-                AnimatedVisibility(visible = appearanceSettings.expandedCornerRadiusEnabled) {
-                    ParameterDpSlide(
-                        tr("expanded_island_corner_radius", "岛展开时的背景圆角调整"),
-                        appearanceSettings.expandedCornerRadius,
-                        EXPANDED_ISLAND_CORNER_RADIUS_MIN..EXPANDED_ISLAND_CORNER_RADIUS_MAX,
-                        defaultValue = EXPANDED_ISLAND_CORNER_RADIUS_DEFAULT,
-                    ) { value -> updateAppearance { it.copy(expandedCornerRadius = value) } }
-                }
-                SwitchPreference(
                     title = tr("media_island_info_vertical_offset", "调整超级岛歌曲信息行垂直定位"),
                     checked = s.mediaIslandInfoVerticalOffsetEnabled,
                     onCheckedChange = { enabled -> update { it.copy(mediaIslandInfoVerticalOffsetEnabled = enabled) } },

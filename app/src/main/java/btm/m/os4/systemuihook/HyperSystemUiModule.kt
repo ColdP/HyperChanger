@@ -4367,14 +4367,13 @@ class HyperSystemUiModule : XposedModule() {
                         val view = chain.getArg(0) as? View
                         val radiusDp = preferences.readExpandedIslandCornerRadius()
                         if (preferences.getBoolean(KEY_EXPANDED_ISLAND_CORNER_RADIUS_ENABLED, false) &&
-                            radiusDp != 0f && view != null && isExpandedIslandView(view)
+                            radiusDp != 0f && view != null && isExpandedIslandCornerTarget(view)
                         ) {
                             view.outlineProvider?.let { provider ->
                                 if (provider !is ExpandedIslandCornerProvider) {
                                     view.outlineProvider = ExpandedIslandCornerProvider(provider, preferences)
                                 }
                             }
-                            view.clipToOutline = true
                             view.invalidateOutline()
                         } else if (view != null) {
                             (view.outlineProvider as? ExpandedIslandCornerProvider)?.let { wrapped ->
@@ -4416,6 +4415,8 @@ class HyperSystemUiModule : XposedModule() {
         internal val original: ViewOutlineProvider,
         private val preferences: SharedPreferences,
     ) : ViewOutlineProvider() {
+        private var baseRadiusPx: Float? = null
+
         override fun getOutline(view: View, outline: Outline) {
             original.getOutline(view, outline)
             if (!preferences.getBoolean(KEY_EXPANDED_ISLAND_CORNER_RADIUS_ENABLED, false)) return
@@ -4424,9 +4425,10 @@ class HyperSystemUiModule : XposedModule() {
             val rect = Rect()
             if (outline.getRect(rect)) {
                 val density = view.resources.displayMetrics.density
-                val baseRadius = view.resources.getIdentifier("island_radius", "dimen", SYSTEM_UI_PLUGIN)
+                val baseRadius = baseRadiusPx ?: view.resources.getIdentifier("island_radius", "dimen", SYSTEM_UI_PLUGIN)
                     .takeIf { it != 0 }
                     ?.let { runCatching { view.resources.getDimension(it) }.getOrNull() }
+                    ?.also { baseRadiusPx = it }
                     ?: 0f
                 val radius = (baseRadius + offsetDp * density)
                     .coerceAtLeast(0f)
@@ -4436,27 +4438,11 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
-    private fun isExpandedIslandView(view: View): Boolean {
+    private fun isExpandedIslandCornerTarget(view: View): Boolean {
         val idName = runCatching { view.resources.getResourceEntryName(view.id) }.getOrDefault("")
-        if (idName in setOf("expanded_view", "fake_expanded_view")) return true
-        fun expandedState(target: View): Boolean = runCatching {
-            val state = target.javaClass.methods.firstOrNull { it.name == "getState" && it.parameterCount == 0 }?.invoke(target)
-            state?.javaClass?.simpleName == "Expanded"
-        }.getOrDefault(false)
-        if (expandedState(view)) return true
-        // The shared background hosts the content as a child, not as an ancestor.
-        if (view is ViewGroup && view.javaClass.name == DYNAMIC_ISLAND_BACKGROUND_CLASS) {
-            for (index in 0 until view.childCount) {
-                if (expandedState(view.getChildAt(index))) return true
-            }
-        }
-        var parent = view.parent as? View
-        repeat(6) {
-            val current = parent ?: return false
-            if (expandedState(current)) return true
-            parent = current.parent as? View
-        }
-        return false
+        return idName == "expanded_view" ||
+            idName == "fake_expanded_view" ||
+            view.javaClass.name == DYNAMIC_ISLAND_EXPANDED_VIEW_CLASS
     }
 
     private fun applySmallMediaIconCorner(view: View, preferences: SharedPreferences) {
