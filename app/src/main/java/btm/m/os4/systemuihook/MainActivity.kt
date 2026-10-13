@@ -661,6 +661,7 @@ private fun Root(
             deviceProfiles.syncRemote(it)
             appearances.syncRemote(it)
             airDrop.syncRemote(it)
+            IslandWidthSettingsStore(context).syncRemote(it)
             ControlCenterHeaderHeightSettingsStore(context).syncRemote(it)
             IosNotificationBottomOffsetSettingsStore(context).syncRemote(it)
             ControlCenterCarrierSettingsStore(context).syncRemote(it)
@@ -5428,10 +5429,16 @@ private fun Island(
     var showFocusNotificationDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val service by HookApplication.service.collectAsStateWithLifecycle()
+    val widthStore = remember(context) { IslandWidthSettingsStore(context) }
+    var widthSettings by remember { mutableStateOf(widthStore.settings) }
     val smoothingStore = remember(context) { IslandSmoothingSettingsStore(context) }
     var smoothingSettings by remember { mutableStateOf(smoothingStore.settings) }
     val spacingStore = remember(context) { IslandSpacingSettingsStore(context) }
     var spacingSettings by remember { mutableStateOf(spacingStore.settings) }
+    fun updateWidth(transform: (IslandWidthSettings) -> IslandWidthSettings) {
+        widthStore.update(service, transform)
+        widthSettings = widthStore.settings
+    }
     fun updateSpacing(transform: (IslandSpacingSettings) -> IslandSpacingSettings) {
         spacingStore.update(service, transform)
         spacingSettings = spacingStore.settings
@@ -5441,6 +5448,8 @@ private fun Island(
         smoothingSettings = smoothingStore.settings
     }
     LaunchedEffect(service) {
+        service?.let(widthStore::syncRemote)
+        widthSettings = widthStore.settings
         service?.let(smoothingStore::syncRemote)
         smoothingSettings = smoothingStore.settings
         service?.let(spacingStore::syncRemote)
@@ -5462,8 +5471,11 @@ private fun Island(
                         update { it.copy(removeFocusAndIslandWhitelistLimit = value) }
                     },
                 )
-                SwitchPreference(title = tr("\u81ea\u5b9a\u4e49\u8d85\u7ea7\u5c9b\u957f\u5ea6", "\u81ea\u5b9a\u4e49\u8d85\u7ea7\u5c9b\u957f\u5ea6"), checked = s.islandEnabled, onCheckedChange = { v -> update { it.copy(islandEnabled = v) } })
-                if (s.islandEnabled) IntSlide(tr("\u6700\u5c0f\u5bbd\u5ea6", "\u6700\u5c0f\u5bbd\u5ea6"), s.islandWidth, 108..190, defaultValue = 108) { v -> update { it.copy(islandWidth = v) } }
+                SwitchPreference(title = tr("\u81ea\u5b9a\u4e49\u8d85\u7ea7\u5c9b\u957f\u5ea6", "\u81ea\u5b9a\u4e49\u8d85\u7ea7\u5c9b\u957f\u5ea6"), checked = widthSettings.enabled, onCheckedChange = { v -> updateWidth { it.copy(enabled = v) } })
+                if (widthSettings.enabled) {
+                    IntSlide(tr("\u5927\u5c9b\u6700\u5c0f\u5bbd\u5ea6", "\u5927\u5c9b\u6700\u5c0f\u5bbd\u5ea6"), widthSettings.bigMinWidth, ISLAND_BIG_WIDTH_RANGE, defaultValue = ISLAND_BIG_WIDTH_DEFAULT) { v -> updateWidth { it.copy(bigMinWidth = v) } }
+                    IntSlide(tr("\u5c0f\u5c9b\u6700\u5c0f\u5bbd\u5ea6", "\u5c0f\u5c9b\u6700\u5c0f\u5bbd\u5ea6"), widthSettings.smallMinWidth, ISLAND_SMALL_WIDTH_RANGE, defaultValue = ISLAND_SMALL_WIDTH_DEFAULT) { v -> updateWidth { it.copy(smallMinWidth = v) } }
+                }
                 SwitchPreference(
                     title = tr("islandSpacingEnabled", "自定义大小岛间距"),
                     checked = spacingSettings.enabled,

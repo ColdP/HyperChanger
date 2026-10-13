@@ -14099,8 +14099,10 @@ class HyperSystemUiModule : XposedModule() {
             preferences.getInt(KEY_VOLUME_PANEL_BLUR_RADIUS, 24).coerceIn(0, 120).toFloat()
         "volume_dialog_background_surface_blur_radius" ->
             (preferences.getInt(KEY_VOLUME_PANEL_GLASS_STRENGTH, 50).coerceIn(0, 100) * 1.2f)
-        "big_island_min_width" -> preferences.takeIf { it.getBoolean(KEY_ISLAND_ENABLED, false) }
-            ?.getInt(KEY_ISLAND_WIDTH, 108)?.coerceIn(108, 190)?.toFloat()
+        "big_island_min_width" -> readIslandWidthSettings(preferences)
+            .takeIf { it.enabled }?.bigMinWidth?.toFloat()
+        "small_island_width" -> readIslandWidthSettings(preferences)
+            .takeIf { it.enabled }?.smallMinWidth?.toFloat()
         "island_space" -> islandSpacingDp(originalDp, readIslandSpacingSettings(preferences))
         "notification_item_bg_radius" -> preferences.getInt(KEY_NOTIFICATION_CORNER_RADIUS_OFFSET, 0)
             .coerceIn(-30, 30)
@@ -14631,8 +14633,6 @@ class HyperSystemUiModule : XposedModule() {
             1f, 1f, 0.6f, 0.5f, 0.95f, -0.5f, 1f, 1f, 1f, 0.35f,
         )
 
-        private const val KEY_ISLAND_ENABLED = "island_enabled"
-        private const val KEY_ISLAND_WIDTH = "island_width"
         private const val KEY_REMOVE_FOCUS_AND_ISLAND_WHITELIST_LIMIT =
             "remove_focus_and_island_whitelist_limit"
         private const val KEY_REMOVE_DYNAMIC_ISLAND_MEDIA_MINI_BAR_WHITELIST_LIMIT =
