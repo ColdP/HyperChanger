@@ -36,8 +36,8 @@ internal class KeyguardUnlockStateHook(private val module: XposedModule) {
     private val hookedMethods = Collections.newSetFromMap(WeakHashMap<Method, Boolean>())
     @Volatile private var screenReceiverRegistered = false
 
-    fun install(classLoader: ClassLoader) {
-        hookClasses(module, classLoader)
+    fun install(classLoader: ClassLoader, retry: Boolean = false) {
+        hookClasses(module, classLoader, retry)
     }
 
     fun registerScreenReceiver(context: Context) {
@@ -64,9 +64,9 @@ internal class KeyguardUnlockStateHook(private val module: XposedModule) {
         }
     }
 
-    private fun hookClasses(module: XposedModule, classLoader: ClassLoader) {
+    private fun hookClasses(module: XposedModule, classLoader: ClassLoader, retry: Boolean) {
         synchronized(hookedClassLoaders) {
-            if (!hookedClassLoaders.add(classLoader)) return
+            if (!hookedClassLoaders.add(classLoader) && !retry) return
         }
         controllerClassNames.forEach { className ->
             val clazz = runCatching { classLoader.loadClass(className) }.getOrNull() ?: return@forEach

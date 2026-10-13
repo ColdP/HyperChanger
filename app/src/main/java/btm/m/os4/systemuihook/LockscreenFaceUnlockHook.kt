@@ -19,6 +19,7 @@ internal class LockscreenFaceUnlockHook(private val module: XposedModule) {
     private var installed = false
     private var initialized = false
     private var preferences: SharedPreferences? = null
+    private val discoveredClasses = java.util.Collections.newSetFromMap(java.util.WeakHashMap<Class<*>, Boolean>())
 
     fun install(loader: ClassLoader, prefs: SharedPreferences) {
         if (installed) return
@@ -47,12 +48,18 @@ internal class LockscreenFaceUnlockHook(private val module: XposedModule) {
     fun onClassLoaded(clazz: Class<*>) {
         val prefs = preferences ?: return
         val loader = clazz.classLoader ?: return
+        val relevant = clazz.name.contains("FaceAuth") || clazz.name.endsWith("KeyguardUpdateMonitor") ||
+            clazz.name.endsWith("IslandIconViewHolder") || clazz.name.endsWith("KeyguardStateControllerImpl") ||
+            clazz.name.endsWith("MiuiKeyguardFaceUnlockView")
+        if (!relevant) return
+        synchronized(discoveredClasses) { if (!discoveredClasses.add(clazz)) return }
+        if (prefs.getBoolean(KEY_DISABLE_FACE_UNLOCK_ICON, false) && clazz.name.endsWith("MiuiKeyguardFaceUnlockView")) ui.install(loader)
         if (prefs.getBoolean(KEY_FACE_UNLOCK_ISLAND, false)) {
             if (clazz.name.contains("FaceAuth") || clazz.name.endsWith("KeyguardUpdateMonitor")) {
-                runCatching { face.install(loader) }.onFailure { report("face loader", it) }
+                runCatching { face.install(loader, retry = true) }.onFailure { report("face loader", it) }
             }
             if (clazz.name.endsWith("IslandIconViewHolder") || clazz.name.endsWith("KeyguardStateControllerImpl")) {
-                runCatching { keyguard.install(loader) }.onFailure { report("keyguard loader", it) }
+                runCatching { keyguard.install(loader, retry = true) }.onFailure { report("keyguard loader", it) }
             }
         }
     }

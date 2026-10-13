@@ -58,13 +58,13 @@ internal class FaceUnlockStateHook(private val module: XposedModule) {
     )
     private val hookedMethods = Collections.newSetFromMap(WeakHashMap<Method, Boolean>())
 
-    fun install(classLoader: ClassLoader) {
-        hookMonitorClasses(module, classLoader)
+    fun install(classLoader: ClassLoader, retry: Boolean = false) {
+        hookMonitorClasses(module, classLoader, retry)
     }
 
-    private fun hookMonitorClasses(module: XposedModule, classLoader: ClassLoader) {
+    private fun hookMonitorClasses(module: XposedModule, classLoader: ClassLoader, retry: Boolean) {
         synchronized(hookedClassLoaders) {
-            if (!hookedClassLoaders.add(classLoader)) return
+            if (!hookedClassLoaders.add(classLoader) && !retry) return
         }
 
         if (hookRepositoryCallback(module, classLoader)) return

@@ -5562,10 +5562,10 @@ private fun Island(
                     onCheckedChange = { enabled -> updateAppearance { it.copy(expandedCornerRadiusEnabled = enabled) } },
                 )
                 AnimatedVisibility(visible = appearanceSettings.expandedCornerRadiusEnabled) {
-                    IntSlide(
+                    ParameterDpSlide(
                         tr("expanded_island_corner_radius", "岛展开时的背景圆角调整"),
                         appearanceSettings.expandedCornerRadius,
-                        -1..50,
+                        EXPANDED_ISLAND_CORNER_RADIUS_MIN..EXPANDED_ISLAND_CORNER_RADIUS_MAX,
                         defaultValue = EXPANDED_ISLAND_CORNER_RADIUS_DEFAULT,
                     ) { value -> updateAppearance { it.copy(expandedCornerRadius = value) } }
                 }

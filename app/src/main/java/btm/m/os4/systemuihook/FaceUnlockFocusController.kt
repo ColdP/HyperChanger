@@ -213,8 +213,8 @@ internal object FaceUnlockFocusController {
         runOnMain {
             synchronized(stateLock) {
                 val actuallyLocked = isKeyguardLocked(appContext)
-                if (!actuallyLocked) return@synchronized
-                if (keyguardShowing && !unlockCommitted) return@synchronized
+                if (!actuallyLocked) return@runOnMain
+                if (keyguardShowing && !unlockCommitted) return@runOnMain
             }
             onFaceState(appContext, FaceState.LOCKED)
         }
@@ -228,12 +228,12 @@ internal object FaceUnlockFocusController {
                 screenOnSettling = false
                 if (!interactive) {
                     normalizeHidden(appContext)
-                    return@synchronized
+                    return@runOnMain
                 } else if (locked) {
-                    if (keyguardShowing) return@synchronized
+                    if (keyguardShowing) return@runOnMain
                 } else {
                     normalizeHidden(appContext)
-                    return@synchronized
+                    return@runOnMain
                 }
             }
             onFaceState(appContext, FaceState.LOCKED)

@@ -4365,57 +4365,27 @@ class HyperSystemUiModule : XposedModule() {
                     .intercept { chain ->
                         val result = chain.proceed()
                         val view = chain.getArg(0) as? View
-                        val radiusDp = preferences.getInt(KEY_EXPANDED_ISLAND_CORNER_RADIUS, -1).coerceIn(-1, 50)
+                        val radiusDp = preferences.readExpandedIslandCornerRadius()
                         if (preferences.getBoolean(KEY_EXPANDED_ISLAND_CORNER_RADIUS_ENABLED, false) &&
-                            radiusDp >= 0 && view != null && isExpandedIslandView(view)
-                        ) applyRoundedOutline(view, radiusDp * view.resources.displayMetrics.density)
+                            radiusDp != 0f && view != null && isExpandedIslandView(view)
+                        ) {
+                            view.outlineProvider?.let { provider ->
+                                if (provider !is ExpandedIslandCornerProvider) {
+                                    view.outlineProvider = ExpandedIslandCornerProvider(provider, preferences)
+                                }
+                            }
+                            view.clipToOutline = true
+                            view.invalidateOutline()
+                        } else if (view != null) {
+                            (view.outlineProvider as? ExpandedIslandCornerProvider)?.let { wrapped ->
+                                view.outlineProvider = wrapped.original
+                                view.invalidateOutline()
+                            }
+                        }
                         result
                     }
             }
         }.onFailure { error -> log(Log.DEBUG, TAG, "Expanded island material corner hook unavailable", error) }
-
-        runCatching {
-            val background = classLoader.loadClass("miui.systemui.dynamicisland.DynamicIslandBackgroundView")
-            background.declaredMethods.filter {
-                it.name == "onDraw" && it.parameterTypes.contentEquals(arrayOf(Canvas::class.java))
-            }.forEachIndexed { index, method ->
-                method.isAccessible = true
-                hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
-                    .setId("dynamic-island-expanded-corner:$index")
-                    .intercept { chain ->
-                        val canvas = chain.getArg(0) as? Canvas
-                        val view = chain.thisObject as? View
-                        val enabled = preferences.getBoolean(KEY_EXPANDED_ISLAND_CORNER_RADIUS_ENABLED, false)
-                        val radiusDp = preferences.getInt(KEY_EXPANDED_ISLAND_CORNER_RADIUS, EXPANDED_ISLAND_CORNER_RADIUS_DEFAULT)
-                            .coerceIn(-1, 50)
-                        if (!enabled || radiusDp < 0 || canvas == null || view == null || !isExpandedIslandView(view)) {
-                            chain.proceed()
-                        } else {
-                            val density = view.resources.displayMetrics.density
-                            val radius = radiusDp * density
-                            val save = canvas.save()
-                            try {
-                                val left = readIntProperty(view, "getActualLeft") - readIntProperty(view, "getStokeWidth")
-                                val top = readIntProperty(view, "getActualTop") - readIntProperty(view, "getStokeWidth")
-                                val right = readIntProperty(view, "getActualWidth") + readIntProperty(view, "getStokeWidth")
-                                val bottom = readIntProperty(view, "getActualHeight") + readIntProperty(view, "getStokeWidth")
-                                val clip = Path().apply {
-                                    addRoundRect(
-                                        android.graphics.RectF(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat()),
-                                        radius,
-                                        radius,
-                                        Path.Direction.CW,
-                                    )
-                                }
-                                canvas.clipPath(clip)
-                                chain.proceed()
-                            } finally {
-                                canvas.restoreToCount(save)
-                            }
-                        }
-                    }
-            }
-        }.onFailure { error -> log(Log.DEBUG, TAG, "Expanded island corner hook unavailable", error) }
 
         runCatching {
             val holder = classLoader.loadClass("miui.systemui.dynamicisland.module.IslandIconViewHolder")
@@ -4426,6 +4396,13 @@ class HyperSystemUiModule : XposedModule() {
                     .intercept { chain ->
                         val result = chain.proceed()
                         if (preferences.getBoolean(KEY_SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS_ENABLED, false)) {
+                            val picInfo = runCatching {
+                                holder.getMethod("getPicInfo").invoke(chain.thisObject)
+                            }.getOrNull()
+                            val picture = runCatching {
+                                picInfo?.javaClass?.getMethod("getPic")?.invoke(picInfo) as? String
+                            }.getOrNull()
+                            if (picture != "miui_media_album_icon") return@intercept result
                             val icon = findDynamicIslandField(chain.thisObject, "smallIcon")?.get(chain.thisObject) as? View
                             icon?.let { applySmallMediaIconCorner(it, preferences) }
                         }
@@ -4435,30 +4412,59 @@ class HyperSystemUiModule : XposedModule() {
         }.onFailure { error -> log(Log.DEBUG, TAG, "Small island media icon corner hook unavailable", error) }
     }
 
+    private inner class ExpandedIslandCornerProvider(
+        internal val original: ViewOutlineProvider,
+        private val preferences: SharedPreferences,
+    ) : ViewOutlineProvider() {
+        override fun getOutline(view: View, outline: Outline) {
+            original.getOutline(view, outline)
+            if (!preferences.getBoolean(KEY_EXPANDED_ISLAND_CORNER_RADIUS_ENABLED, false)) return
+            val offsetDp = preferences.readExpandedIslandCornerRadius()
+            if (offsetDp == 0f) return
+            val rect = Rect()
+            if (outline.getRect(rect)) {
+                val density = view.resources.displayMetrics.density
+                val baseRadius = view.resources.getIdentifier("island_radius", "dimen", SYSTEM_UI_PLUGIN)
+                    .takeIf { it != 0 }
+                    ?.let { runCatching { view.resources.getDimension(it) }.getOrNull() }
+                    ?: 0f
+                val radius = (baseRadius + offsetDp * density)
+                    .coerceAtLeast(0f)
+                    .coerceAtMost(minOf(rect.width(), rect.height()) / 2f)
+                outline.setRoundRect(rect, radius)
+            }
+        }
+    }
+
     private fun isExpandedIslandView(view: View): Boolean {
         val idName = runCatching { view.resources.getResourceEntryName(view.id) }.getOrDefault("")
-        if (idName.contains("expanded", ignoreCase = true)) return true
-        var current: View? = view
+        if (idName in setOf("expanded_view", "fake_expanded_view")) return true
+        fun expandedState(target: View): Boolean = runCatching {
+            val state = target.javaClass.methods.firstOrNull { it.name == "getState" && it.parameterCount == 0 }?.invoke(target)
+            state?.javaClass?.simpleName == "Expanded"
+        }.getOrDefault(false)
+        if (expandedState(view)) return true
+        // The shared background hosts the content as a child, not as an ancestor.
+        if (view is ViewGroup && view.javaClass.name == DYNAMIC_ISLAND_BACKGROUND_CLASS) {
+            for (index in 0 until view.childCount) {
+                if (expandedState(view.getChildAt(index))) return true
+            }
+        }
+        var parent = view.parent as? View
         repeat(6) {
-            current = current?.parent as? View
-            val parent = current ?: return@repeat
-            val state = runCatching {
-                parent.javaClass.methods.firstOrNull { it.name == "getState" && it.parameterCount == 0 }?.invoke(parent)
-            }.getOrNull()
-            if (state?.javaClass?.simpleName?.contains("Expanded", ignoreCase = true) == true) return true
+            val current = parent ?: return false
+            if (expandedState(current)) return true
+            parent = current.parent as? View
         }
         return false
     }
-
-    private fun readIntProperty(target: Any, name: String): Int = runCatching {
-        (target.javaClass.methods.firstOrNull { it.name == name && it.parameterCount == 0 }?.invoke(target) as? Number)?.toInt() ?: 0
-    }.getOrDefault(0)
 
     private fun applySmallMediaIconCorner(view: View, preferences: SharedPreferences) {
         val offsetDp = preferences.getInt(KEY_SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS, SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS_DEFAULT)
             .coerceIn(-64, 96)
         val baseId = view.resources.getIdentifier("island_icon_radius", "dimen", SYSTEM_UI_PLUGIN)
-        val base = if (baseId != 0) view.resources.getDimension(baseId) else 0f
+        val base = if (baseId != 0) view.resources.getDimension(baseId) else 4.56f * view.resources.displayMetrics.density
+        if (offsetDp == 0) return
         val radius = (base + offsetDp * view.resources.displayMetrics.density).coerceAtLeast(0f)
         view.outlineProvider = object : ViewOutlineProvider() {
             override fun getOutline(target: View, outline: Outline) {
@@ -4645,6 +4651,19 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ): Boolean {
+        runCatching {
+            classLoader.loadClass("miui.systemui.notification.focus.SignatureChecker")
+                .declaredMethods.filter {
+                    it.name == "checkSignatures" && it.returnType == Boolean::class.javaPrimitiveType
+                }.forEachIndexed { index, method ->
+                    method.isAccessible = true
+                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("unlock-all-focus:signature:$index")
+                        .intercept { chain ->
+                            if (preferences.getBoolean(KEY_UNLOCK_ALL_FOCUS, false)) true else chain.proceed()
+                        }
+                }
+        }.onFailure { log(Log.DEBUG, TAG, "Focus signature hook unavailable", it) }
         return runCatching {
             val settingsClass = classLoader.loadClass(PLUGIN_NOTIFICATION_SETTINGS_MANAGER_CLASS)
             listOf("canCustomFocus", "mediaIslandSupportMiniWindow").forEach { name ->
