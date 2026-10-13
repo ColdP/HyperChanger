@@ -214,6 +214,7 @@ class MainActivity : ComponentActivity() {
 
 private enum class Tab { CATEGORY, SETTINGS }
 
+private val LocalNotificationSettingsChanged = compositionLocalOf<() -> Unit> { {} }
 private val LocalPageBackSuppressed = compositionLocalOf<(Boolean) -> Unit> { {} }
 private val LocalLanguageChanged = compositionLocalOf<() -> Unit> { {} }
 val LocalDialogBackdrop = compositionLocalOf<Backdrop?> { null }
@@ -270,7 +271,7 @@ private enum class PageId {
     SHADE_NOTIFICATION_BACKGROUND,
     SHADE_CONTROL_CENTER_BACKGROUND,
     GESTURE_HANDLE_STYLE, DESKTOP, DESKTOP_MATERIAL,
-    ISLAND, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, DEVICE_PROFILE,
+    ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
     SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, OTHER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION,
@@ -540,6 +541,8 @@ private fun Root(
         }
     }
     fun importModulePresetPayload(payload: String) {
+        val previousNotificationSettings = context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE).toNotificationIslandSettings()
+        val previousWidthSettings = readIslandWidthSettings(context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE))
         val previousSettings = hooks.settings
         val previousLockscreenCapsule = lockscreenCapsules.settings
         val previousCameras = cameras.settings
@@ -585,6 +588,10 @@ private fun Root(
             )
         }.onSuccess {
             markRestartTargets(suggestedScopesForHookChange(previousSettings, settings))
+            val preferences = context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE)
+            if (previousNotificationSettings != preferences.toNotificationIslandSettings() || previousWidthSettings != readIslandWidthSettings(preferences)) {
+                markRestartTargets(setOf(ScopeApplication.SYSTEM_UI))
+            }
             if (previousLockscreenCapsule != lockscreenCapsuleSettings) {
                 markRestartTargets(setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.AOD))
             }
@@ -662,6 +669,7 @@ private fun Root(
             appearances.syncRemote(it)
             airDrop.syncRemote(it)
             IslandWidthSettingsStore(context).syncRemote(it)
+            NotificationIslandSettingsStore(context).syncRemote(it)
             ControlCenterHeaderHeightSettingsStore(context).syncRemote(it)
             IosNotificationBottomOffsetSettingsStore(context).syncRemote(it)
             ControlCenterCarrierSettingsStore(context).syncRemote(it)
@@ -697,6 +705,7 @@ private fun Root(
         SideEffect { activeLanguageStrings = strings }
         CompositionLocalProvider(
             LocalLanguageChanged provides { languageRevision++ },
+            LocalNotificationSettingsChanged provides { markRestartTargets(setOf(ScopeApplication.SYSTEM_UI)) },
         ) {
         AnimatedContent(
             targetState = showOobe,
@@ -3825,7 +3834,9 @@ private fun Detail(
             if (value.shadeSettingsUnified) next.copy(notificationCenterBackgroundMaterial = it) else next
         } }
         PageId.GESTURE_HANDLE_STYLE -> GestureHandleStylePage(back)
-        PageId.ISLAND -> Island(settings, update, openPage, onRequestNotificationPermission, back)
+        PageId.ISLAND -> Island(openPage, onRequestNotificationPermission, back)
+        PageId.NOTIFICATION_RESTRICTIONS -> NotificationRestrictions(back)
+        PageId.NOTIFICATION_MEDIA_CARD -> NotificationMediaCard(back)
         PageId.STATUS -> Status(settings, update, openPage, back)
         PageId.STATUS_SIGNAL_CUSTOMIZATION -> StatusSignalCustomization(settings, update, openPage, back)
         PageId.STATUS_SIGNAL_TUNING -> StatusSignalTuning(settings, update, back)
@@ -5415,8 +5426,6 @@ private fun applyCompactColor(value: MaterialOverride, percent: Int): MaterialOv
 
 @Composable
 private fun Island(
-    s: HookSettings,
-    update: ((HookSettings) -> HookSettings) -> Unit,
     openPage: (PageId) -> Unit,
     onRequestNotificationPermission: () -> Unit,
     back: () -> Unit,
@@ -5427,6 +5436,7 @@ private fun Island(
 ) { p, scroll ->
     var showNormalNotificationDialog by remember { mutableStateOf(false) }
     var showFocusNotificationDialog by remember { mutableStateOf(false) }
+    val (s, update) = rememberNotificationIslandSettings()
     val context = LocalContext.current
     val service by HookApplication.service.collectAsStateWithLifecycle()
     val widthStore = remember(context) { IslandWidthSettingsStore(context) }
@@ -5458,20 +5468,22 @@ private fun Island(
 
     AppList(p, scroll, 28) {
         item {
-                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+            Group(tr("islandCollapsedGroup", "超级岛收起时")) {
                 SwitchPreference(
-                    title = tr("hide_notification_mini_window_bar", "隐藏通知底部的小窗下拉提示线"),
-                    checked = s.hideNotificationMiniWindowBar,
-                    onCheckedChange = { value -> update { it.copy(hideNotificationMiniWindowBar = value) } },
+                    title = tr("islandCollapsedSmoothing", "平滑收起时的超级岛背景"),
+                    checked = smoothingSettings.enabled,
+                    onCheckedChange = { enabled -> updateSmoothing { it.copy(enabled = enabled) } },
                 )
-                SwitchPreference(
-                    title = tr("\u53bb\u9664\u7126\u70b9\u901a\u77e5\u4e0e\u8d85\u7ea7\u5c9b\u767d\u540d\u5355\u9650\u5236", "\u53bb\u9664\u7126\u70b9\u901a\u77e5\u4e0e\u8d85\u7ea7\u5c9b\u767d\u540d\u5355\u9650\u5236"),
-                    checked = s.removeFocusAndIslandWhitelistLimit,
-                    onCheckedChange = { value ->
-                        update { it.copy(removeFocusAndIslandWhitelistLimit = value) }
-                    },
-                )
-                SwitchPreference(title = tr("\u81ea\u5b9a\u4e49\u8d85\u7ea7\u5c9b\u957f\u5ea6", "\u81ea\u5b9a\u4e49\u8d85\u7ea7\u5c9b\u957f\u5ea6"), checked = widthSettings.enabled, onCheckedChange = { v -> updateWidth { it.copy(enabled = v) } })
+                AnimatedVisibility(visible = smoothingSettings.enabled) {
+                    ParameterIntSlide(
+                        title = tr("islandCollapsedSmoothingPercent", "收起时的超级岛背景平滑度"),
+                        value = smoothingSettings.percent,
+                        range = 0..100,
+                        suffix = "%",
+                        defaultValue = ISLAND_SMOOTHING_DEFAULT_PERCENT,
+                    ) { percent -> updateSmoothing { it.copy(percent = percent) } }
+                }
+                SwitchPreference(title = tr("islandWidthCustomization", "自定义岛宽度"), checked = widthSettings.enabled, onCheckedChange = { v -> updateWidth { it.copy(enabled = v) } })
                 if (widthSettings.enabled) {
                     IntSlide(tr("\u5927\u5c9b\u6700\u5c0f\u5bbd\u5ea6", "\u5927\u5c9b\u6700\u5c0f\u5bbd\u5ea6"), widthSettings.bigMinWidth, ISLAND_BIG_WIDTH_RANGE, defaultValue = ISLAND_BIG_WIDTH_DEFAULT) { v -> updateWidth { it.copy(bigMinWidth = v) } }
                     IntSlide(tr("\u5c0f\u5c9b\u6700\u5c0f\u5bbd\u5ea6", "\u5c0f\u5c9b\u6700\u5c0f\u5bbd\u5ea6"), widthSettings.smallMinWidth, ISLAND_SMALL_WIDTH_RANGE, defaultValue = ISLAND_SMALL_WIDTH_DEFAULT) { v -> updateWidth { it.copy(smallMinWidth = v) } }
@@ -5493,37 +5505,7 @@ private fun Island(
             }
         }
         item {
-            Group(tr("notification_simulation", "通知模拟")) {
-                ArrowPreference(
-                    title = tr("normal_notification_simulation", "普通通知模拟"),
-                    onClick = { showNormalNotificationDialog = true },
-                )
-                ArrowPreference(
-                    title = tr("focus_notification_simulation", "超级岛&焦点通知模拟"),
-                    onClick = { showFocusNotificationDialog = true },
-                )
-                ArrowPreference(
-                    title = tr("simulate_media_notification", "媒体通知模拟"),
-                    onClick = { openPage(PageId.SIMULATE_MEDIA_NOTIFICATION) },
-                )
-            }
-        }
-        item {
-            Group(tr("\u8d85\u7ea7\u5c9b\u80cc\u666f\u8c03\u6574", "\u8d85\u7ea7\u5c9b\u80cc\u666f\u8c03\u6574")) {
-                SwitchPreference(
-                    title = tr("islandCollapsedSmoothing", "平滑收起时的超级岛背景"),
-                    checked = smoothingSettings.enabled,
-                    onCheckedChange = { enabled -> updateSmoothing { it.copy(enabled = enabled) } },
-                )
-                AnimatedVisibility(visible = smoothingSettings.enabled) {
-                    ParameterIntSlide(
-                        title = tr("islandCollapsedSmoothingPercent", "收起时的超级岛背景平滑度"),
-                        value = smoothingSettings.percent,
-                        range = 0..100,
-                        suffix = "%",
-                        defaultValue = ISLAND_SMOOTHING_DEFAULT_PERCENT,
-                    ) { percent -> updateSmoothing { it.copy(percent = percent) } }
-                }
+            Group(tr("islandExpandedGroup", "超级岛展开时")) {
                 SwitchPreference(
                     title = tr("\u5c55\u5f00\u6001\u4e0b\u7684\u8d85\u7ea7\u5c9b\u80cc\u666f\u8c03\u6574", "\u5c55\u5f00\u6001\u4e0b\u7684\u8d85\u7ea7\u5c9b\u80cc\u666f\u8c03\u6574"),
                     checked = s.expandedIslandBackgroundEnabled,
@@ -5551,10 +5533,30 @@ private fun Island(
                         )
                     }
                 }
+                SwitchPreference(
+                    title = tr("media_island_info_vertical_offset", "调整超级岛歌曲信息行垂直定位"),
+                    checked = s.mediaIslandInfoVerticalOffsetEnabled,
+                    onCheckedChange = { enabled -> update { it.copy(mediaIslandInfoVerticalOffsetEnabled = enabled) } },
+                )
+                AnimatedVisibility(visible = s.mediaIslandInfoVerticalOffsetEnabled) {
+                IntSlide(tr("media_island_info_vertical_offset", "调整超级岛歌曲信息行垂直定位"), s.mediaIslandInfoVerticalOffset, -50..50, defaultValue = 0) { value ->
+                    update { it.copy(mediaIslandInfoVerticalOffset = value) }
+                }
+                }
+                SwitchPreference(
+                    title = tr("hide_media_island_source_icon", "隐藏媒体超级岛来源图标"),
+                    checked = s.hideMediaIslandSourceIcon,
+                    onCheckedChange = { value -> update { it.copy(hideMediaIslandSourceIcon = value) } },
+                )
+                SwitchPreference(
+                    title = tr("关闭媒体超级岛底部的氛围光感", "关闭媒体超级岛底部的氛围光感"),
+                    checked = s.disableMediaIslandBottomGlow,
+                    onCheckedChange = { value -> update { it.copy(disableMediaIslandBottomGlow = value) } },
+                )
             }
         }
         item {
-            Group(tr("notification_background_adjustments", "通知背景调整")) {
+            Group(tr("notificationGroup", "通知")) {
                 SwitchPreference(
                     title = tr("\u7edf\u4e00\u901a\u77e5\u80cc\u666f\u6750\u8d28", "\u7edf\u4e00\u901a\u77e5\u80cc\u666f\u6750\u8d28"),
                     checked = s.unifyNotificationMaterial,
@@ -5569,13 +5571,102 @@ private fun Island(
                         update { it.copy(headsUpNotificationSoftGlass = enabled) }
                     },
                 )
-                IntSlide(tr("notification_corner_radius_offset", "调整通知圆角大小"), s.notificationCornerRadiusOffset, -30..30, defaultValue = 0) { value ->
-                    update { it.copy(notificationCornerRadiusOffset = value) }
+                SwitchPreference(
+                    title = tr("notification_corner_radius_offset", "调整通知圆角大小"),
+                    checked = s.notificationCornerRadiusOffsetEnabled,
+                    onCheckedChange = { enabled -> update { it.copy(notificationCornerRadiusOffsetEnabled = enabled) } },
+                )
+                AnimatedVisibility(visible = s.notificationCornerRadiusOffsetEnabled) {
+                    IntSlide(tr("notification_corner_radius_offset", "调整通知圆角大小"), s.notificationCornerRadiusOffset, -30..30, defaultValue = 0) { value ->
+                        update { it.copy(notificationCornerRadiusOffset = value) }
+                    }
                 }
+                ArrowPreference(title = tr("通知限制去除", "通知限制去除"), onClick = { openPage(PageId.NOTIFICATION_RESTRICTIONS) })
+                ArrowPreference(title = tr("notificationMediaCard", "媒体卡片"), onClick = { openPage(PageId.NOTIFICATION_MEDIA_CARD) })
             }
         }
         item {
-            Group(tr("\u901a\u77e5\u9650\u5236\u53bb\u9664", "\u901a\u77e5\u9650\u5236\u53bb\u9664")) {
+            Group(tr("notification_simulation", "通知模拟")) {
+                ArrowPreference(
+                    title = tr("normal_notification_simulation", "普通通知模拟"),
+                    onClick = { showNormalNotificationDialog = true },
+                )
+                ArrowPreference(
+                    title = tr("focus_notification_simulation", "超级岛&焦点通知模拟"),
+                    onClick = { showFocusNotificationDialog = true },
+                )
+                ArrowPreference(
+                    title = tr("simulate_media_notification", "媒体通知模拟"),
+                    onClick = { openPage(PageId.SIMULATE_MEDIA_NOTIFICATION) },
+                )
+            }
+        }
+    }
+
+    if (showNormalNotificationDialog) {
+        NotificationSimulationDialog(
+            focus = false,
+            onRequestNotificationPermission = onRequestNotificationPermission,
+            onDismiss = { showNormalNotificationDialog = false },
+        )
+    }
+    if (showFocusNotificationDialog) {
+        NotificationSimulationDialog(
+            focus = true,
+            onRequestNotificationPermission = onRequestNotificationPermission,
+            onDismiss = { showFocusNotificationDialog = false },
+        )
+    }
+}
+
+@Composable
+private fun rememberNotificationIslandSettings(): Pair<NotificationIslandSettings, ((NotificationIslandSettings) -> NotificationIslandSettings) -> Unit> {
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    val store = remember(context) { NotificationIslandSettingsStore(context) }
+    var settings by remember { mutableStateOf(store.settings) }
+    val onChanged = LocalNotificationSettingsChanged.current
+    DisposableEffect(store) {
+        val preferences = context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE)
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+            store.reload()
+            settings = store.settings
+        }
+        preferences.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+    LaunchedEffect(service) {
+        service?.let(store::syncRemote)
+        settings = store.settings
+    }
+    return settings to { transform ->
+        val before = store.settings
+        store.update(service, transform)
+        settings = store.settings
+        if (before != settings) onChanged()
+    }
+}
+
+@Composable
+private fun NotificationRestrictions(back: () -> Unit) = AppPage(
+    tr("通知限制去除", "通知限制去除"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI),
+) { p, scroll ->
+    val (s, update) = rememberNotificationIslandSettings()
+    AppList(p, scroll) {
+        item {
+            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                SwitchPreference(
+                    title = tr("hide_notification_mini_window_bar", "隐藏通知底部的小窗下拉提示线"),
+                    checked = s.hideNotificationMiniWindowBar,
+                    onCheckedChange = { value -> update { it.copy(hideNotificationMiniWindowBar = value) } },
+                )
+                SwitchPreference(
+                    title = tr("\u53bb\u9664\u7126\u70b9\u901a\u77e5\u4e0e\u8d85\u7ea7\u5c9b\u767d\u540d\u5355\u9650\u5236", "\u53bb\u9664\u7126\u70b9\u901a\u77e5\u4e0e\u8d85\u7ea7\u5c9b\u767d\u540d\u5355\u9650\u5236"),
+                    checked = s.removeFocusAndIslandWhitelistLimit,
+                    onCheckedChange = { value ->
+                        update { it.copy(removeFocusAndIslandWhitelistLimit = value) }
+                    },
+                )
                 SwitchPreference(
                     title = tr("\u4fdd\u7559\u901a\u77e5", "\u4fdd\u7559\u901a\u77e5"),
                     checked = s.keepNotifications,
@@ -5608,8 +5699,17 @@ private fun Island(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun NotificationMediaCard(back: () -> Unit) = AppPage(
+    tr("notificationMediaCard", "媒体卡片"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI),
+) { p, scroll ->
+    val (s, update) = rememberNotificationIslandSettings()
+    AppList(p, scroll) {
         item {
-            Group(tr("media_card_adjustments", "媒体卡片调整")) {
+            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
                 SwitchPreference(
                     title = tr("removeDynamicIslandMediaMiniBarWhitelistLimit", "去除媒体控件下拉条白名单限制"),
                     checked = s.removeDynamicIslandMediaMiniBarWhitelistLimit,
@@ -5620,16 +5720,8 @@ private fun Island(
                     checked = s.hideSystemMediaSourceIcon,
                     onCheckedChange = { value -> update { it.copy(hideSystemMediaSourceIcon = value) } },
                 )
-                SwitchPreference(
-                    title = tr("hide_media_island_source_icon", "隐藏媒体超级岛来源图标"),
-                    checked = s.hideMediaIslandSourceIcon,
-                    onCheckedChange = { value -> update { it.copy(hideMediaIslandSourceIcon = value) } },
-                )
                 IntSlide(tr("system_media_info_vertical_offset", "调整系统媒体通知歌曲信息行垂直定位"), s.systemMediaInfoVerticalOffset, -50..50, defaultValue = 0) { value ->
                     update { it.copy(systemMediaInfoVerticalOffset = value) }
-                }
-                IntSlide(tr("media_island_info_vertical_offset", "调整超级岛歌曲信息行垂直定位"), s.mediaIslandInfoVerticalOffset, -50..50, defaultValue = 0) { value ->
-                    update { it.copy(mediaIslandInfoVerticalOffset = value) }
                 }
                 IntSlide(tr("media_title_artist_spacing", "媒体标题与艺术家行间距"), s.mediaTitleArtistSpacing, -30..30, defaultValue = 0) { value ->
                     update { it.copy(mediaTitleArtistSpacing = value) }
@@ -5637,28 +5729,8 @@ private fun Island(
                 IntSlide(tr("media_cover_corner_radius_offset", "调整媒体封面圆角大小"), s.mediaCoverCornerRadiusOffset, -30..30, defaultValue = 0) { value ->
                     update { it.copy(mediaCoverCornerRadiusOffset = value) }
                 }
-                SwitchPreference(
-                    title = tr("关闭媒体超级岛底部的氛围光感", "关闭媒体超级岛底部的氛围光感"),
-                    checked = s.disableMediaIslandBottomGlow,
-                    onCheckedChange = { value -> update { it.copy(disableMediaIslandBottomGlow = value) } },
-                )
             }
         }
-    }
-
-    if (showNormalNotificationDialog) {
-        NotificationSimulationDialog(
-            focus = false,
-            onRequestNotificationPermission = onRequestNotificationPermission,
-            onDismiss = { showNormalNotificationDialog = false },
-        )
-    }
-    if (showFocusNotificationDialog) {
-        NotificationSimulationDialog(
-            focus = true,
-            onRequestNotificationPermission = onRequestNotificationPermission,
-            onDismiss = { showFocusNotificationDialog = false },
-        )
     }
 }
 
