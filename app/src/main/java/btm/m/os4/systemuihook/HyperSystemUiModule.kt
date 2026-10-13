@@ -4882,6 +4882,31 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        runCatching {
+            val baseClass = classLoader.loadClass(DYNAMIC_ISLAND_BASE_CONTENT_CLASS)
+            val reset = baseClass.getDeclaredMethod("reset").apply { isAccessible = true }
+            hook(reset)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("dynamic-island-small-width-height")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    runCatching {
+                        val target = chain.thisObject
+                        val smallView = baseClass.getDeclaredField("smallIslandView").apply { isAccessible = true }
+                            .get(target) as? View
+                        val islandHeight = baseClass.getDeclaredField("islandViewHeight").apply { isAccessible = true }
+                            .getInt(target)
+                        if (smallView != null && islandHeight > 0) {
+                            smallView.layoutParams = smallView.layoutParams?.apply { height = islandHeight }
+                            smallView.requestLayout()
+                        }
+                    }
+                    result
+                }
+            log(Log.INFO, TAG, "Installed small-island width/height alignment hook")
+        }.onFailure { error ->
+            log(Log.WARN, TAG, "Could not install small-island width/height alignment hook", error)
+        }
         DYNAMIC_ISLAND_LAYOUT_CLASSES.forEach { className ->
             runCatching {
                 val layoutClass = classLoader.loadClass(className)
