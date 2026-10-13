@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="app/src/main/res/drawable/ic_hyperchanger.png" alt="HyperChanger icon" width="128">
+  <img src="app/src/main/res/drawable/ic_hyperchanger.png" alt="HyperChanger Icon" width="128">
 </p>
 
 <h1 align="center"><strong>HyperChanger</strong></h1>

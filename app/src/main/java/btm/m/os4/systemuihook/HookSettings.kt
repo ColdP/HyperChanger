@@ -115,7 +115,6 @@ data class HookSettings(
     val controlCardBlurRadius: Float = 0f,
     val notificationCardOpacity: Int = 100,
     val notificationCardBlurRadius: Float = 0f,
-    val unifyNotificationMaterial: Boolean = false,
     val notificationContextUnified: Boolean = true,
     val notificationTypeUnified: Boolean = true,
     val notificationCenterBackground: GlassTuning = GlassTuning(),
@@ -128,31 +127,6 @@ data class HookSettings(
     val lockscreenFocus: GlassTuning = GlassTuning(),
     val controlCenterButton: GlassTuning = GlassTuning(),
     val controlCenterSlider: GlassTuning = GlassTuning(),
-    val removeFocusAndIslandWhitelistLimit: Boolean = false,
-    val removeDynamicIslandMediaMiniBarWhitelistLimit: Boolean = false,
-    val hideNotificationMiniWindowBar: Boolean = false,
-    val expandedIslandBackgroundEnabled: Boolean = false,
-    val expandedIslandBackgroundOpacity: Int = 97,
-    val expandedIslandBackgroundBlurRadius: Int = 40,
-    val expandedIslandGlassReflection: Int = 0,
-    val expandedIslandGlassBlurRadius: Int = 110,
-    val expandedIslandGlassLargeBlurRadius: Int = 110,
-    val expandedIslandSelfBlurRadius: Int = 0,
-    val expandedIslandShowHighlight: Boolean = false,
-    val disableMediaIslandBottomGlow: Boolean = false,
-    val hideSystemMediaSourceIcon: Boolean = false,
-    val hideMediaIslandSourceIcon: Boolean = false,
-    val systemMediaInfoVerticalOffset: Int = 0,
-    val mediaIslandInfoVerticalOffset: Int = 0,
-    val mediaTitleArtistSpacing: Int = 0,
-    val mediaCoverCornerRadiusOffset: Int = 0,
-    val notificationCornerRadiusOffset: Int = 0,
-    val keepNotifications: Boolean = false,
-    val allowAllNotificationsOnLockscreen: Boolean = false,
-    val forceAllNotificationsHeadsUp: Boolean = false,
-    val removeNotificationImportanceLimit: Boolean = false,
-    val removeBleUnlockToast: Boolean = false,
-    val disableNotificationHistoryFolding: Boolean = false,
     val superXiaoAiGlobalSearchAppearance: Boolean = false,
     val superXiaoAiBlacklistUnblocked: Boolean = false,
     val superXiaoAiClipboardUnblocked: Boolean = false,
@@ -274,7 +248,6 @@ data class HookSettings(
     val lockscreenWidgetSignatureScale: Int = 100,
     val lockscreenWidgetSignatureBackground: Boolean = true,
     val keepSoftGlassAfterGlobalTheme: Boolean = false,
-    val headsUpNotificationSoftGlass: Boolean = false,
     val removeClockMaterialLimit: Boolean = false,
     val hideStatusBarWifiStandard: Boolean = false,
     val hideStatusBarClockText: Boolean = false,
@@ -420,7 +393,6 @@ private const val KEY_CONTROL_CARD_OPACITY = "control_card_opacity"
 private const val KEY_CONTROL_CARD_BLUR_RADIUS = "control_card_blur_radius"
 private const val KEY_NOTIFICATION_CARD_OPACITY = "notification_card_opacity"
 private const val KEY_NOTIFICATION_CARD_BLUR_RADIUS = "notification_card_blur_radius"
-private const val KEY_UNIFY_NOTIFICATION_MATERIAL = "unify_notification_material"
 private const val KEY_NOTIFICATION_CONTEXT_UNIFIED = "notification_context_unified"
 private const val KEY_NOTIFICATION_TYPE_UNIFIED = "notification_type_unified"
 private const val KEY_NOTIFICATION_CENTER_BACKGROUND = "notification_center_background_glass"
@@ -433,33 +405,6 @@ private const val KEY_NOTIFICATION_CENTER_FOCUS = "notification_center_focus_gla
 private const val KEY_LOCKSCREEN_FOCUS = "lockscreen_focus_glass"
 private const val KEY_CONTROL_CENTER_BUTTON = "control_center_button_glass"
 private const val KEY_CONTROL_CENTER_SLIDER = "control_center_slider_glass"
-private const val KEY_REMOVE_FOCUS_AND_ISLAND_WHITELIST_LIMIT =
-    "remove_focus_and_island_whitelist_limit"
-private const val KEY_REMOVE_DYNAMIC_ISLAND_MEDIA_MINI_BAR_WHITELIST_LIMIT =
-    "remove_dynamic_island_media_mini_bar_whitelist_limit"
-private const val KEY_HIDE_NOTIFICATION_MINI_WINDOW_BAR = "hide_notification_mini_window_bar"
-private const val KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED = "expanded_island_background_enabled"
-private const val KEY_EXPANDED_ISLAND_BACKGROUND_OPACITY = "expanded_island_background_opacity"
-private const val KEY_EXPANDED_ISLAND_BACKGROUND_BLUR_RADIUS = "expanded_island_background_blur_radius"
-private const val KEY_EXPANDED_ISLAND_GLASS_REFLECTION = "expanded_island_glass_reflection"
-private const val KEY_EXPANDED_ISLAND_GLASS_BLUR_RADIUS = "expanded_island_glass_blur_radius"
-private const val KEY_EXPANDED_ISLAND_GLASS_LARGE_BLUR_RADIUS = "expanded_island_glass_large_blur_radius"
-private const val KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS = "expanded_island_self_blur_radius"
-private const val KEY_EXPANDED_ISLAND_SHOW_HIGHLIGHT = "expanded_island_show_highlight"
-private const val KEY_DISABLE_MEDIA_ISLAND_BOTTOM_GLOW = "disable_media_island_bottom_glow"
-private const val KEY_HIDE_SYSTEM_MEDIA_SOURCE_ICON = "hide_system_media_source_icon"
-private const val KEY_HIDE_MEDIA_ISLAND_SOURCE_ICON = "hide_media_island_source_icon"
-private const val KEY_SYSTEM_MEDIA_INFO_VERTICAL_OFFSET = "system_media_info_vertical_offset"
-private const val KEY_MEDIA_ISLAND_INFO_VERTICAL_OFFSET = "media_island_info_vertical_offset"
-private const val KEY_MEDIA_TITLE_ARTIST_SPACING = "media_title_artist_spacing"
-private const val KEY_MEDIA_COVER_CORNER_RADIUS_OFFSET = "media_cover_corner_radius_offset"
-private const val KEY_NOTIFICATION_CORNER_RADIUS_OFFSET = "notification_corner_radius_offset"
-internal const val KEY_KEEP_NOTIFICATIONS = "keep_notifications"
-internal const val KEY_ALLOW_ALL_NOTIFICATIONS_ON_LOCKSCREEN = "allow_all_notifications_on_lockscreen"
-internal const val KEY_FORCE_ALL_NOTIFICATIONS_HEADS_UP = "force_all_notifications_heads_up"
-internal const val KEY_REMOVE_NOTIFICATION_IMPORTANCE_LIMIT = "remove_notification_importance_limit"
-internal const val KEY_REMOVE_BLE_UNLOCK_TOAST = "remove_ble_unlock_toast"
-internal const val KEY_DISABLE_NOTIFICATION_HISTORY_FOLDING = "disable_notification_history_folding"
 private const val KEY_SUPER_XIAOAI_GLOBAL_SEARCH_APPEARANCE =
     "super_xiaoai_global_search_appearance"
 internal const val KEY_SUPER_XIAOAI_BLACKLIST_UNBLOCKED = "super_xiaoai_blacklist_unblocked"
@@ -653,7 +598,6 @@ internal const val LOCKSCREEN_WIDGET_SIGNATURE_NONE = 0
 internal const val LOCKSCREEN_WIDGET_SIGNATURE_PNG = 1
 internal const val LOCKSCREEN_WIDGET_SIGNATURE_VECTOR = 2
 private const val KEY_KEEP_SOFT_GLASS_AFTER_GLOBAL_THEME = "keep_soft_glass_after_global_theme"
-internal const val KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS = "heads_up_notification_soft_glass"
 private const val KEY_REMOVE_CLOCK_MATERIAL_LIMIT = "remove_clock_material_limit"
 private const val KEY_HIDE_STATUS_BAR_WIFI_STANDARD = "hide_status_bar_wifi_standard"
 private const val KEY_HIDE_STATUS_BAR_CLOCK_TEXT = "hide_status_bar_clock_text"
@@ -835,7 +779,6 @@ private fun SharedPreferences.toSettings(): HookSettings {
     controlCardBlurRadius = getFloat(KEY_CONTROL_CARD_BLUR_RADIUS, 0f).coerceIn(0f, 40f),
     notificationCardOpacity = getInt(KEY_NOTIFICATION_CARD_OPACITY, 100).coerceIn(0, 100),
     notificationCardBlurRadius = getFloat(KEY_NOTIFICATION_CARD_BLUR_RADIUS, 0f).coerceIn(0f, 40f),
-    unifyNotificationMaterial = getBoolean(KEY_UNIFY_NOTIFICATION_MATERIAL, false),
     notificationContextUnified = getBoolean(KEY_NOTIFICATION_CONTEXT_UNIFIED, true),
     notificationTypeUnified = getBoolean(KEY_NOTIFICATION_TYPE_UNIFIED, true),
     notificationCenterBackground = getGlassTuning(KEY_NOTIFICATION_CENTER_BACKGROUND),
@@ -848,42 +791,6 @@ private fun SharedPreferences.toSettings(): HookSettings {
     lockscreenFocus = getGlassTuning(KEY_LOCKSCREEN_FOCUS),
     controlCenterButton = getGlassTuning(KEY_CONTROL_CENTER_BUTTON),
     controlCenterSlider = getGlassTuning(KEY_CONTROL_CENTER_SLIDER),
-    removeFocusAndIslandWhitelistLimit =
-        getBoolean(KEY_REMOVE_FOCUS_AND_ISLAND_WHITELIST_LIMIT, false),
-    removeDynamicIslandMediaMiniBarWhitelistLimit = getBoolean(
-        KEY_REMOVE_DYNAMIC_ISLAND_MEDIA_MINI_BAR_WHITELIST_LIMIT,
-        false,
-    ),
-    hideNotificationMiniWindowBar = getBoolean(KEY_HIDE_NOTIFICATION_MINI_WINDOW_BAR, false),
-    expandedIslandBackgroundEnabled = getBoolean(KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED, false),
-    expandedIslandBackgroundOpacity = getInt(KEY_EXPANDED_ISLAND_BACKGROUND_OPACITY, 97).coerceIn(0, 100),
-    expandedIslandBackgroundBlurRadius = getInt(
-        KEY_EXPANDED_ISLAND_BACKGROUND_BLUR_RADIUS,
-        maxOf(
-            getInt(KEY_EXPANDED_ISLAND_GLASS_BLUR_RADIUS, 40),
-            getInt(KEY_EXPANDED_ISLAND_GLASS_LARGE_BLUR_RADIUS, 40),
-            getInt(KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS, 0),
-        ),
-    ).coerceIn(0, 120),
-    expandedIslandGlassReflection = getInt(KEY_EXPANDED_ISLAND_GLASS_REFLECTION, 0).coerceIn(0, 100),
-    expandedIslandGlassBlurRadius = getInt(KEY_EXPANDED_ISLAND_GLASS_BLUR_RADIUS, 40).coerceIn(0, 120),
-    expandedIslandGlassLargeBlurRadius = getInt(KEY_EXPANDED_ISLAND_GLASS_LARGE_BLUR_RADIUS, 40).coerceIn(0, 120),
-    expandedIslandSelfBlurRadius = getInt(KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS, 0).coerceIn(0, 120),
-    expandedIslandShowHighlight = getBoolean(KEY_EXPANDED_ISLAND_SHOW_HIGHLIGHT, false),
-    disableMediaIslandBottomGlow = getBoolean(KEY_DISABLE_MEDIA_ISLAND_BOTTOM_GLOW, false),
-    hideSystemMediaSourceIcon = getBoolean(KEY_HIDE_SYSTEM_MEDIA_SOURCE_ICON, false),
-    hideMediaIslandSourceIcon = getBoolean(KEY_HIDE_MEDIA_ISLAND_SOURCE_ICON, false),
-    systemMediaInfoVerticalOffset = getInt(KEY_SYSTEM_MEDIA_INFO_VERTICAL_OFFSET, 0).coerceIn(-50, 50),
-    mediaIslandInfoVerticalOffset = getInt(KEY_MEDIA_ISLAND_INFO_VERTICAL_OFFSET, 0).coerceIn(-50, 50),
-    mediaTitleArtistSpacing = getInt(KEY_MEDIA_TITLE_ARTIST_SPACING, 0).coerceIn(-30, 30),
-    mediaCoverCornerRadiusOffset = getInt(KEY_MEDIA_COVER_CORNER_RADIUS_OFFSET, 0).coerceIn(-30, 30),
-    notificationCornerRadiusOffset = getInt(KEY_NOTIFICATION_CORNER_RADIUS_OFFSET, 0).coerceIn(-30, 30),
-    keepNotifications = getBoolean(KEY_KEEP_NOTIFICATIONS, false),
-    allowAllNotificationsOnLockscreen = getBoolean(KEY_ALLOW_ALL_NOTIFICATIONS_ON_LOCKSCREEN, false),
-    forceAllNotificationsHeadsUp = getBoolean(KEY_FORCE_ALL_NOTIFICATIONS_HEADS_UP, false),
-    removeNotificationImportanceLimit = getBoolean(KEY_REMOVE_NOTIFICATION_IMPORTANCE_LIMIT, false),
-    removeBleUnlockToast = getBoolean(KEY_REMOVE_BLE_UNLOCK_TOAST, false),
-    disableNotificationHistoryFolding = getBoolean(KEY_DISABLE_NOTIFICATION_HISTORY_FOLDING, false),
     superXiaoAiGlobalSearchAppearance = getBoolean(
         KEY_SUPER_XIAOAI_GLOBAL_SEARCH_APPEARANCE,
         false,
@@ -1120,7 +1027,6 @@ private fun SharedPreferences.toSettings(): HookSettings {
     lockscreenWidgetSignatureScale = getInt(KEY_LOCKSCREEN_WIDGET_SIGNATURE_SCALE, 100).coerceIn(25, 200),
     lockscreenWidgetSignatureBackground = getBoolean(KEY_LOCKSCREEN_WIDGET_SIGNATURE_BACKGROUND, true),
     keepSoftGlassAfterGlobalTheme = getBoolean(KEY_KEEP_SOFT_GLASS_AFTER_GLOBAL_THEME, false),
-    headsUpNotificationSoftGlass = getBoolean(KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS, false),
     removeClockMaterialLimit = getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false),
     hideStatusBarWifiStandard = getBoolean(KEY_HIDE_STATUS_BAR_WIFI_STANDARD, false),
     hideStatusBarClockText = getBoolean(KEY_HIDE_STATUS_BAR_CLOCK_TEXT, false),
@@ -1392,38 +1298,6 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putString(KEY_NOTIFICATION_CENTER_BACKGROUND_MATERIAL, value.notificationCenterBackgroundMaterial.serialize())
         .putString(KEY_CONTROL_CENTER_BACKGROUND_MATERIAL, value.controlCenterBackgroundMaterial.serialize())
         .putBoolean(KEY_SHADE_SETTINGS_UNIFIED, value.shadeSettingsUnified)
-        .putBoolean(KEY_UNIFY_NOTIFICATION_MATERIAL, value.unifyNotificationMaterial)
-        .putBoolean(
-            KEY_REMOVE_FOCUS_AND_ISLAND_WHITELIST_LIMIT,
-            value.removeFocusAndIslandWhitelistLimit,
-        )
-        .putBoolean(
-            KEY_REMOVE_DYNAMIC_ISLAND_MEDIA_MINI_BAR_WHITELIST_LIMIT,
-            value.removeDynamicIslandMediaMiniBarWhitelistLimit,
-        )
-        .putBoolean(KEY_HIDE_NOTIFICATION_MINI_WINDOW_BAR, value.hideNotificationMiniWindowBar)
-        .putBoolean(KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED, value.expandedIslandBackgroundEnabled)
-        .putInt(KEY_EXPANDED_ISLAND_BACKGROUND_OPACITY, value.expandedIslandBackgroundOpacity)
-        .putInt(KEY_EXPANDED_ISLAND_BACKGROUND_BLUR_RADIUS, value.expandedIslandBackgroundBlurRadius)
-        .putInt(KEY_EXPANDED_ISLAND_GLASS_REFLECTION, value.expandedIslandGlassReflection)
-        .putInt(KEY_EXPANDED_ISLAND_GLASS_BLUR_RADIUS, value.expandedIslandGlassBlurRadius)
-        .putInt(KEY_EXPANDED_ISLAND_GLASS_LARGE_BLUR_RADIUS, value.expandedIslandGlassLargeBlurRadius)
-        .putInt(KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS, value.expandedIslandSelfBlurRadius)
-        .putBoolean(KEY_EXPANDED_ISLAND_SHOW_HIGHLIGHT, value.expandedIslandShowHighlight)
-        .putBoolean(KEY_DISABLE_MEDIA_ISLAND_BOTTOM_GLOW, value.disableMediaIslandBottomGlow)
-        .putBoolean(KEY_HIDE_SYSTEM_MEDIA_SOURCE_ICON, value.hideSystemMediaSourceIcon)
-        .putBoolean(KEY_HIDE_MEDIA_ISLAND_SOURCE_ICON, value.hideMediaIslandSourceIcon)
-        .putInt(KEY_SYSTEM_MEDIA_INFO_VERTICAL_OFFSET, value.systemMediaInfoVerticalOffset.coerceIn(-50, 50))
-        .putInt(KEY_MEDIA_ISLAND_INFO_VERTICAL_OFFSET, value.mediaIslandInfoVerticalOffset.coerceIn(-50, 50))
-        .putInt(KEY_MEDIA_TITLE_ARTIST_SPACING, value.mediaTitleArtistSpacing.coerceIn(-30, 30))
-        .putInt(KEY_MEDIA_COVER_CORNER_RADIUS_OFFSET, value.mediaCoverCornerRadiusOffset.coerceIn(-30, 30))
-        .putInt(KEY_NOTIFICATION_CORNER_RADIUS_OFFSET, value.notificationCornerRadiusOffset.coerceIn(-30, 30))
-        .putBoolean(KEY_KEEP_NOTIFICATIONS, value.keepNotifications)
-        .putBoolean(KEY_ALLOW_ALL_NOTIFICATIONS_ON_LOCKSCREEN, value.allowAllNotificationsOnLockscreen)
-        .putBoolean(KEY_FORCE_ALL_NOTIFICATIONS_HEADS_UP, value.forceAllNotificationsHeadsUp)
-        .putBoolean(KEY_REMOVE_NOTIFICATION_IMPORTANCE_LIMIT, value.removeNotificationImportanceLimit)
-        .putBoolean(KEY_REMOVE_BLE_UNLOCK_TOAST, value.removeBleUnlockToast)
-        .putBoolean(KEY_DISABLE_NOTIFICATION_HISTORY_FOLDING, value.disableNotificationHistoryFolding)
         .putBoolean(
             KEY_SUPER_XIAOAI_GLOBAL_SEARCH_APPEARANCE,
             value.superXiaoAiGlobalSearchAppearance,
@@ -1632,7 +1506,6 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putInt(KEY_LOCKSCREEN_WIDGET_SIGNATURE_SCALE, value.lockscreenWidgetSignatureScale.coerceIn(25, 200))
         .putBoolean(KEY_LOCKSCREEN_WIDGET_SIGNATURE_BACKGROUND, value.lockscreenWidgetSignatureBackground)
         .putBoolean(KEY_KEEP_SOFT_GLASS_AFTER_GLOBAL_THEME, value.keepSoftGlassAfterGlobalTheme)
-        .putBoolean(KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS, value.headsUpNotificationSoftGlass)
         .putBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, value.removeClockMaterialLimit)
         .putBoolean(KEY_HIDE_STATUS_BAR_WIFI_STANDARD, value.hideStatusBarWifiStandard)
         .putBoolean(KEY_HIDE_STATUS_BAR_CLOCK_TEXT, value.hideStatusBarClockText)
