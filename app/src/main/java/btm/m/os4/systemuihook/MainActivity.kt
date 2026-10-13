@@ -271,7 +271,7 @@ private enum class PageId {
     SHADE_NOTIFICATION_BACKGROUND,
     SHADE_CONTROL_CENTER_BACKGROUND,
     GESTURE_HANDLE_STYLE, DESKTOP, DESKTOP_MATERIAL,
-    ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, DEVICE_PROFILE,
+    ISLAND, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
     SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, OTHER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION,
@@ -676,6 +676,7 @@ private fun Root(
             ControlCenterClockSettingsStore(context).syncRemote(it)
             IslandSmoothingSettingsStore(context).syncRemote(it)
             IslandSpacingSettingsStore(context).syncRemote(it)
+            DynamicIslandAppearanceSettingsStore(context).syncRemote(it)
             LockscreenFaceUnlockSettingsStore(context).syncRemote(it)
             musicStore.syncRemote(it)
             dockStore.syncRemote(it)
@@ -3835,6 +3836,7 @@ private fun Detail(
         } }
         PageId.GESTURE_HANDLE_STYLE -> GestureHandleStylePage(back)
         PageId.ISLAND -> Island(openPage, onRequestNotificationPermission, back)
+        PageId.UNLOCK_ISLAND -> UnlockIslandPage(back)
         PageId.NOTIFICATION_RESTRICTIONS -> NotificationRestrictions(back)
         PageId.NOTIFICATION_MEDIA_CARD -> NotificationMediaCard(back)
         PageId.STATUS -> Status(settings, update, openPage, back)
@@ -5445,6 +5447,8 @@ private fun Island(
     var smoothingSettings by remember { mutableStateOf(smoothingStore.settings) }
     val spacingStore = remember(context) { IslandSpacingSettingsStore(context) }
     var spacingSettings by remember { mutableStateOf(spacingStore.settings) }
+    val appearanceStore = remember(context) { DynamicIslandAppearanceSettingsStore(context) }
+    var appearanceSettings by remember { mutableStateOf(appearanceStore.settings) }
     fun updateWidth(transform: (IslandWidthSettings) -> IslandWidthSettings) {
         widthStore.update(service, transform)
         widthSettings = widthStore.settings
@@ -5457,6 +5461,10 @@ private fun Island(
         smoothingStore.update(service, transform)
         smoothingSettings = smoothingStore.settings
     }
+    fun updateAppearance(transform: (DynamicIslandAppearanceSettings) -> DynamicIslandAppearanceSettings) {
+        appearanceStore.update(service, transform)
+        appearanceSettings = appearanceStore.settings
+    }
     LaunchedEffect(service) {
         service?.let(widthStore::syncRemote)
         widthSettings = widthStore.settings
@@ -5464,6 +5472,8 @@ private fun Island(
         smoothingSettings = smoothingStore.settings
         service?.let(spacingStore::syncRemote)
         spacingSettings = spacingStore.settings
+        service?.let(appearanceStore::syncRemote)
+        appearanceSettings = appearanceStore.settings
     }
 
     AppList(p, scroll, 28) {
@@ -5487,6 +5497,19 @@ private fun Island(
                 if (widthSettings.enabled) {
                     IntSlide(tr("\u5927\u5c9b\u6700\u5c0f\u5bbd\u5ea6", "\u5927\u5c9b\u6700\u5c0f\u5bbd\u5ea6"), widthSettings.bigMinWidth, ISLAND_BIG_WIDTH_RANGE, defaultValue = ISLAND_BIG_WIDTH_DEFAULT) { v -> updateWidth { it.copy(bigMinWidth = v) } }
                     IntSlide(tr("\u5c0f\u5c9b\u6700\u5c0f\u5bbd\u5ea6", "\u5c0f\u5c9b\u6700\u5c0f\u5bbd\u5ea6"), widthSettings.smallMinWidth, ISLAND_SMALL_WIDTH_RANGE, defaultValue = ISLAND_SMALL_WIDTH_DEFAULT) { v -> updateWidth { it.copy(smallMinWidth = v) } }
+                }
+                SwitchPreference(
+                    title = tr("small_island_media_icon_corner_radius", "收起时的媒体图标圆角"),
+                    checked = appearanceSettings.smallMediaIconCornerRadiusEnabled,
+                    onCheckedChange = { enabled -> updateAppearance { it.copy(smallMediaIconCornerRadiusEnabled = enabled) } },
+                )
+                AnimatedVisibility(visible = appearanceSettings.smallMediaIconCornerRadiusEnabled) {
+                    IntSlide(
+                        tr("small_island_media_icon_corner_radius", "收起时的媒体图标圆角"),
+                        appearanceSettings.smallMediaIconCornerRadius,
+                        -64..96,
+                        defaultValue = SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS_DEFAULT,
+                    ) { value -> updateAppearance { it.copy(smallMediaIconCornerRadius = value) } }
                 }
                 SwitchPreference(
                     title = tr("islandSpacingEnabled", "自定义大小岛间距"),
@@ -5532,6 +5555,19 @@ private fun Island(
                             onCheckedChange = { value -> update { it.copy(expandedIslandShowHighlight = value) } },
                         )
                     }
+                }
+                SwitchPreference(
+                    title = tr("expanded_island_corner_radius", "岛展开时的背景圆角调整"),
+                    checked = appearanceSettings.expandedCornerRadiusEnabled,
+                    onCheckedChange = { enabled -> updateAppearance { it.copy(expandedCornerRadiusEnabled = enabled) } },
+                )
+                AnimatedVisibility(visible = appearanceSettings.expandedCornerRadiusEnabled) {
+                    IntSlide(
+                        tr("expanded_island_corner_radius", "岛展开时的背景圆角调整"),
+                        appearanceSettings.expandedCornerRadius,
+                        -1..50,
+                        defaultValue = EXPANDED_ISLAND_CORNER_RADIUS_DEFAULT,
+                    ) { value -> updateAppearance { it.copy(expandedCornerRadius = value) } }
                 }
                 SwitchPreference(
                     title = tr("media_island_info_vertical_offset", "调整超级岛歌曲信息行垂直定位"),
@@ -5583,6 +5619,7 @@ private fun Island(
                 }
                 ArrowPreference(title = tr("通知限制去除", "通知限制去除"), onClick = { openPage(PageId.NOTIFICATION_RESTRICTIONS) })
                 ArrowPreference(title = tr("notificationMediaCard", "媒体卡片"), onClick = { openPage(PageId.NOTIFICATION_MEDIA_CARD) })
+                ArrowPreference(title = tr("unlockIslandPage", "解锁岛"), onClick = { openPage(PageId.UNLOCK_ISLAND) })
             }
         }
         item {
@@ -5644,6 +5681,80 @@ private fun rememberNotificationIslandSettings(): Pair<NotificationIslandSetting
         store.update(service, transform)
         settings = store.settings
         if (before != settings) onChanged()
+    }
+}
+
+@Composable
+private fun UnlockIslandPage(back: () -> Unit) = AppPage(
+    tr("unlockIslandPage", "解锁岛"),
+    back,
+    restartScopes = setOf(ScopeApplication.SYSTEM_UI),
+) { padding, scroll ->
+    val context = LocalContext.current
+    val faceUnlockStore = remember(context) { LockscreenFaceUnlockSettingsStore(context) }
+    val faceUnlockService by HookApplication.service.collectAsStateWithLifecycle()
+    var faceUnlockSettings by remember { mutableStateOf(faceUnlockStore.settings) }
+    fun updateFaceUnlock(transform: (LockscreenFaceUnlockSettings) -> LockscreenFaceUnlockSettings) {
+        faceUnlockStore.update(faceUnlockService, transform)
+        faceUnlockSettings = faceUnlockStore.settings
+    }
+    LaunchedEffect(faceUnlockService) {
+        faceUnlockService?.let(faceUnlockStore::syncRemote)
+        faceUnlockSettings = faceUnlockStore.settings
+    }
+    AppList(padding, scroll, 12) {
+        item {
+            Group(tr("unlockIslandPage", "解锁岛")) {
+                SwitchPreference(
+                    title = tr("disableFaceUnlockIcon", "禁用系统的人脸解锁图标"),
+                    checked = faceUnlockSettings.disableIcon,
+                    onCheckedChange = { value -> updateFaceUnlock { it.copy(disableIcon = value) } },
+                )
+                SwitchPreference(
+                    title = tr("faceUnlockIsland", "人脸解锁岛"),
+                    checked = faceUnlockSettings.unlockIsland,
+                    onCheckedChange = { value -> updateFaceUnlock { it.copy(unlockIsland = value) } },
+                )
+                SwitchPreference(
+                    title = tr("faceUnlockFirstFloat", "人脸解锁岛首次悬浮"),
+                    checked = faceUnlockSettings.firstFloat,
+                    onCheckedChange = { value -> updateFaceUnlock { it.copy(firstFloat = value) } },
+                )
+                SwitchPreference(
+                    title = tr("faceUnlockKeepUntilHidden", "人脸解锁成功后保持显示"),
+                    checked = faceUnlockSettings.keepUntilKeyguardHidden,
+                    onCheckedChange = { value -> updateFaceUnlock { it.copy(keepUntilKeyguardHidden = value) } },
+                )
+                OverlayDropdownPreference(
+                    title = tr("faceUnlockAnimationStyle", "人脸解锁岛动画"),
+                    items = listOf(
+                        tr("faceUnlockAnimationDefault", "默认"),
+                        tr("faceUnlockAnimationLock", "解锁锁动画"),
+                        tr("faceUnlockAnimationLock2", "解锁锁动画 2"),
+                    ),
+                    selectedIndex = when (faceUnlockSettings.animationStyle) {
+                        "lock" -> 1
+                        "lock_2" -> 2
+                        else -> 0
+                    },
+                    onSelectedIndexChange = { index ->
+                        updateFaceUnlock {
+                            it.copy(animationStyle = listOf("default", "lock", "lock_2")[index.coerceIn(0, 2)])
+                        }
+                    },
+                )
+                SwitchPreference(
+                    title = tr("unlockAllFocus", "解锁所有焦点通知与超级岛"),
+                    checked = faceUnlockSettings.unlockAllFocus,
+                    onCheckedChange = { value -> updateFaceUnlock { it.copy(unlockAllFocus = value) } },
+                )
+                SwitchPreference(
+                    title = tr("unlockFocusAuth", "解锁焦点通知认证限制"),
+                    checked = faceUnlockSettings.unlockFocusAuth,
+                    onCheckedChange = { value -> updateFaceUnlock { it.copy(unlockFocusAuth = value) } },
+                )
+            }
+        }
     }
 }
 
@@ -6316,23 +6427,13 @@ private fun Lock(
     val clockHorizontalStore = remember(context) { LockscreenClockHorizontalSettingsStore(context) }
     val clockHorizontalService by HookApplication.service.collectAsStateWithLifecycle()
     var clockHorizontalEnabled by remember { mutableStateOf(clockHorizontalStore.enabled) }
-    val faceUnlockStore = remember(context) { LockscreenFaceUnlockSettingsStore(context) }
-    val faceUnlockService by HookApplication.service.collectAsStateWithLifecycle()
-    var faceUnlockSettings by remember { mutableStateOf(faceUnlockStore.settings) }
-    fun updateFaceUnlock(transform: (LockscreenFaceUnlockSettings) -> LockscreenFaceUnlockSettings) {
-        faceUnlockStore.update(faceUnlockService, transform)
-        faceUnlockSettings = faceUnlockStore.settings
-    }
     LaunchedEffect(clockHorizontalService) {
         clockHorizontalService?.let {
             clockHorizontalStore.syncRemote(it)
             clockHorizontalEnabled = clockHorizontalStore.enabled
         }
     }
-    LaunchedEffect(faceUnlockService) {
-        faceUnlockService?.let(faceUnlockStore::syncRemote)
-        faceUnlockSettings = faceUnlockStore.settings
-    }
+
     var showSaveWallpaperDialog by remember { mutableStateOf(false) }
     val pickEditorBackground = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -6527,16 +6628,7 @@ OverlayDropdownPreference(
                         update { it.copy(fingerprintHideMode = value) }
                     },
                 )
-                SwitchPreference(
-                    title = tr("disableFaceUnlockIcon", "禁用系统的人脸解锁图标"),
-                    checked = faceUnlockSettings.disableIcon,
-                    onCheckedChange = { value -> updateFaceUnlock { it.copy(disableIcon = value) } },
-                )
-                SwitchPreference(
-                    title = tr("faceUnlockIsland", "人脸解锁岛"),
-                    checked = faceUnlockSettings.unlockIsland,
-                    onCheckedChange = { value -> updateFaceUnlock { it.copy(unlockIsland = value) } },
-                )
+                ArrowPreference(title = tr("unlockIslandPage", "解锁岛"), onClick = { open(PageId.UNLOCK_ISLAND) })
             }
         }
         item {

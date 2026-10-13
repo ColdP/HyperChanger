@@ -300,6 +300,7 @@ class HyperSystemUiModule : XposedModule() {
     private val controlCenterClockHook by lazy { ControlCenterClockHook(this) }
     private val islandSmoothingHook by lazy { IslandSmoothingHook(this) }
     private val lockscreenFaceUnlockHook by lazy { LockscreenFaceUnlockHook(this) }
+    private val unlockFocusAuthHook by lazy { UnlockFocusAuthHook(this) }
     internal fun installHook(member: java.lang.reflect.Executable) = hook(member)
 
     override fun onSystemServerStarting(param: SystemServerStartingParam) {
@@ -741,6 +742,11 @@ class HyperSystemUiModule : XposedModule() {
         if (param.packageName == LOCKSCREEN_WALLPAPER) {
             // HyperMusicCover's original Java WallpaperProbe is registered separately through
             // java_init.list and owns this process's GL upload hook.
+            return
+        }
+        if (param.packageName == XMSF_PACKAGE) {
+            runCatching { unlockFocusAuthHook.install(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP)) }
+                .onFailure { error -> log(Log.WARN, TAG, "Could not install focus authentication hook", error) }
             return
         }
         if (param.packageName !in SYSTEM_UI_TARGETS) return
@@ -4335,11 +4341,133 @@ class HyperSystemUiModule : XposedModule() {
         installDynamicIslandSelfBlurHook(classLoader, preferences)
         installMediaSourceIconHooks(classLoader, preferences)
         installDynamicIslandMiniBarHook(classLoader, preferences)
+        installDynamicIslandAppearanceHooks(classLoader, preferences)
         if (!focusIslandWhitelistPluginHooksInstalled) {
             focusIslandWhitelistPluginHooksInstalled =
                 installFocusIslandWhitelistPluginHooks(classLoader, preferences)
         }
         log(Log.INFO, TAG, "Installed dynamic-island hooks")
+    }
+
+    /** Applies the optional island corner controls after the vendor has created its views. */
+    private fun installDynamicIslandAppearanceHooks(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
+        runCatching {
+            val baseContent = classLoader.loadClass(DYNAMIC_ISLAND_BASE_CONTENT_CLASS)
+            baseContent.declaredMethods.filter {
+                it.name == "updateBackgroundBg" && it.parameterTypes.size == 2 && it.parameterTypes[0] == View::class.java
+            }.forEachIndexed { index, method ->
+                method.isAccessible = true
+                hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("dynamic-island-expanded-corner-material:$index")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        val view = chain.getArg(0) as? View
+                        val radiusDp = preferences.getInt(KEY_EXPANDED_ISLAND_CORNER_RADIUS, -1).coerceIn(-1, 50)
+                        if (preferences.getBoolean(KEY_EXPANDED_ISLAND_CORNER_RADIUS_ENABLED, false) &&
+                            radiusDp >= 0 && view != null && isExpandedIslandView(view)
+                        ) applyRoundedOutline(view, radiusDp * view.resources.displayMetrics.density)
+                        result
+                    }
+            }
+        }.onFailure { error -> log(Log.DEBUG, TAG, "Expanded island material corner hook unavailable", error) }
+
+        runCatching {
+            val background = classLoader.loadClass("miui.systemui.dynamicisland.DynamicIslandBackgroundView")
+            background.declaredMethods.filter {
+                it.name == "onDraw" && it.parameterTypes.contentEquals(arrayOf(Canvas::class.java))
+            }.forEachIndexed { index, method ->
+                method.isAccessible = true
+                hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("dynamic-island-expanded-corner:$index")
+                    .intercept { chain ->
+                        val canvas = chain.getArg(0) as? Canvas
+                        val view = chain.thisObject as? View
+                        val enabled = preferences.getBoolean(KEY_EXPANDED_ISLAND_CORNER_RADIUS_ENABLED, false)
+                        val radiusDp = preferences.getInt(KEY_EXPANDED_ISLAND_CORNER_RADIUS, EXPANDED_ISLAND_CORNER_RADIUS_DEFAULT)
+                            .coerceIn(-1, 50)
+                        if (!enabled || radiusDp < 0 || canvas == null || view == null || !isExpandedIslandView(view)) {
+                            chain.proceed()
+                        } else {
+                            val density = view.resources.displayMetrics.density
+                            val radius = radiusDp * density
+                            val save = canvas.save()
+                            try {
+                                val left = readIntProperty(view, "getActualLeft") - readIntProperty(view, "getStokeWidth")
+                                val top = readIntProperty(view, "getActualTop") - readIntProperty(view, "getStokeWidth")
+                                val right = readIntProperty(view, "getActualWidth") + readIntProperty(view, "getStokeWidth")
+                                val bottom = readIntProperty(view, "getActualHeight") + readIntProperty(view, "getStokeWidth")
+                                val clip = Path().apply {
+                                    addRoundRect(
+                                        android.graphics.RectF(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat()),
+                                        radius,
+                                        radius,
+                                        Path.Direction.CW,
+                                    )
+                                }
+                                canvas.clipPath(clip)
+                                chain.proceed()
+                            } finally {
+                                canvas.restoreToCount(save)
+                            }
+                        }
+                    }
+            }
+        }.onFailure { error -> log(Log.DEBUG, TAG, "Expanded island corner hook unavailable", error) }
+
+        runCatching {
+            val holder = classLoader.loadClass("miui.systemui.dynamicisland.module.IslandIconViewHolder")
+            holder.declaredMethods.filter { it.name == "setSmallIcon" && it.parameterCount == 1 }.forEachIndexed { index, method ->
+                method.isAccessible = true
+                hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("dynamic-island-small-media-icon-corner:$index")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        if (preferences.getBoolean(KEY_SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS_ENABLED, false)) {
+                            val icon = findDynamicIslandField(chain.thisObject, "smallIcon")?.get(chain.thisObject) as? View
+                            icon?.let { applySmallMediaIconCorner(it, preferences) }
+                        }
+                        result
+                    }
+            }
+        }.onFailure { error -> log(Log.DEBUG, TAG, "Small island media icon corner hook unavailable", error) }
+    }
+
+    private fun isExpandedIslandView(view: View): Boolean {
+        val idName = runCatching { view.resources.getResourceEntryName(view.id) }.getOrDefault("")
+        if (idName.contains("expanded", ignoreCase = true)) return true
+        var current: View? = view
+        repeat(6) {
+            current = current?.parent as? View
+            val parent = current ?: return@repeat
+            val state = runCatching {
+                parent.javaClass.methods.firstOrNull { it.name == "getState" && it.parameterCount == 0 }?.invoke(parent)
+            }.getOrNull()
+            if (state?.javaClass?.simpleName?.contains("Expanded", ignoreCase = true) == true) return true
+        }
+        return false
+    }
+
+    private fun readIntProperty(target: Any, name: String): Int = runCatching {
+        (target.javaClass.methods.firstOrNull { it.name == name && it.parameterCount == 0 }?.invoke(target) as? Number)?.toInt() ?: 0
+    }.getOrDefault(0)
+
+    private fun applySmallMediaIconCorner(view: View, preferences: SharedPreferences) {
+        val offsetDp = preferences.getInt(KEY_SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS, SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS_DEFAULT)
+            .coerceIn(-64, 96)
+        val baseId = view.resources.getIdentifier("island_icon_radius", "dimen", SYSTEM_UI_PLUGIN)
+        val base = if (baseId != 0) view.resources.getDimension(baseId) else 0f
+        val radius = (base + offsetDp * view.resources.displayMetrics.density).coerceAtLeast(0f)
+        view.outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(target: View, outline: Outline) {
+                val max = minOf(target.width, target.height) / 2f
+                outline.setRoundRect(0, 0, target.width, target.height, radius.coerceAtMost(max))
+            }
+        }
+        view.clipToOutline = true
+        view.invalidateOutline()
     }
 
     private fun installMediaSourceIconHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
@@ -4524,7 +4652,7 @@ class HyperSystemUiModule : XposedModule() {
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("focus-island-whitelist-plugin:$name")
                     .intercept { chain ->
-                        if (preferences.getBoolean(KEY_REMOVE_FOCUS_AND_ISLAND_WHITELIST_LIMIT, false)) {
+                        if (isFocusWhitelistBypassEnabled(preferences)) {
                             true
                         } else {
                             chain.proceed()
@@ -4535,7 +4663,7 @@ class HyperSystemUiModule : XposedModule() {
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("focus-island-whitelist-plugin:canShowFocus")
                 .intercept { chain ->
-                    if (preferences.getBoolean(KEY_REMOVE_FOCUS_AND_ISLAND_WHITELIST_LIMIT, false)) {
+                    if (isFocusWhitelistBypassEnabled(preferences)) {
                         true
                     } else {
                         chain.proceed()
@@ -4550,7 +4678,7 @@ class HyperSystemUiModule : XposedModule() {
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("focus-island-whitelist-plugin:focus-permission")
                 .intercept { chain ->
-                    if (preferences.getBoolean(KEY_REMOVE_FOCUS_AND_ISLAND_WHITELIST_LIMIT, false)) {
+                    if (isFocusWhitelistBypassEnabled(preferences)) {
                         true
                     } else {
                         chain.proceed()
@@ -4570,7 +4698,7 @@ class HyperSystemUiModule : XposedModule() {
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("focus-island-whitelist-plugin:auth-result")
                         .intercept { chain ->
-                            if (!preferences.getBoolean(KEY_REMOVE_FOCUS_AND_ISLAND_WHITELIST_LIMIT, false)) {
+                            if (!isFocusWhitelistBypassEnabled(preferences)) {
                                 return@intercept chain.proceed()
                             }
                             val sbn = chain.getArg(1)
@@ -4611,7 +4739,7 @@ class HyperSystemUiModule : XposedModule() {
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("focus-island-whitelist-plugin:event-coordinator")
                 .intercept { chain ->
-                    if (preferences.getBoolean(KEY_REMOVE_FOCUS_AND_ISLAND_WHITELIST_LIMIT, false)) {
+                    if (isFocusWhitelistBypassEnabled(preferences)) {
                         true
                     } else {
                         chain.proceed()
@@ -4626,7 +4754,7 @@ class HyperSystemUiModule : XposedModule() {
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("focus-island-whitelist-plugin:state-callback")
                 .intercept { chain ->
-                    if (preferences.getBoolean(KEY_REMOVE_FOCUS_AND_ISLAND_WHITELIST_LIMIT, false)) {
+                    if (isFocusWhitelistBypassEnabled(preferences)) {
                         allowIslandStateCallbackPackage(chain.thisObject, stateCallbackClass, chain.getArg(1))
                     }
                     chain.proceed()
@@ -4637,6 +4765,10 @@ class HyperSystemUiModule : XposedModule() {
             log(Log.ERROR, TAG, "Could not install focus-notification and island whitelist plugin hooks", error)
         }.getOrDefault(false)
     }
+
+    private fun isFocusWhitelistBypassEnabled(preferences: SharedPreferences): Boolean =
+        preferences.getBoolean(KEY_REMOVE_FOCUS_AND_ISLAND_WHITELIST_LIMIT, false) ||
+            preferences.getBoolean(KEY_UNLOCK_ALL_FOCUS, false)
 
     private fun allowIslandStateCallbackPackage(
         controller: Any?,
@@ -4677,7 +4809,7 @@ class HyperSystemUiModule : XposedModule() {
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("focus-island-whitelist-systemui:$name")
                     .intercept { chain ->
-                        if (preferences.getBoolean(KEY_REMOVE_FOCUS_AND_ISLAND_WHITELIST_LIMIT, false)) {
+                        if (isFocusWhitelistBypassEnabled(preferences)) {
                             1
                         } else {
                             chain.proceed()
@@ -4702,7 +4834,7 @@ class HyperSystemUiModule : XposedModule() {
                     .setId("focus-island-whitelist-systemui:provider-call")
                     .intercept { chain ->
                         val result = chain.proceed() as? android.os.Bundle
-                        if (!preferences.getBoolean(KEY_REMOVE_FOCUS_AND_ISLAND_WHITELIST_LIMIT, false) ||
+                        if (!isFocusWhitelistBypassEnabled(preferences) ||
                             chain.getArg(0) != "canShowFocus"
                         ) {
                             result
@@ -4745,6 +4877,7 @@ class HyperSystemUiModule : XposedModule() {
                 controlCenterCarrierHook.onClassLoaded(loadedClass, preferences)
                 controlCenterClockHook.onClassLoaded(loadedClass, preferences)
                 islandSmoothingHook.onClassLoaded(loadedClass, preferences)
+                lockscreenFaceUnlockHook.onClassLoaded(loadedClass)
                 if ((loadedClass.name == CONTROL_CENTER_EDIT_BUTTON_CONTROLLER_CLASS ||
                     loadedClass.name == CONTROL_CENTER_CONTENT_DISTRIBUTOR_CLASS ||
                     loadedClass.name == CONTROL_CENTER_MAIN_PANEL_CONTROLLER_CLASS ||
@@ -14307,6 +14440,7 @@ class HyperSystemUiModule : XposedModule() {
         private const val TAG = "HyperSystemUIHook"
         private const val SYSTEM_UI = "com.android.systemui"
         private const val LOCKSCREEN_WALLPAPER = "com.miui.miwallpaper"
+        private const val XMSF_PACKAGE = "com.xiaomi.xmsf"
         private const val SYSTEM_UI_PLUGIN = "miui.systemui.plugin"
         private const val AOD = "com.miui.aod"
         private const val SUPER_XIAOAI_IME = "com.xiaomi.type"
