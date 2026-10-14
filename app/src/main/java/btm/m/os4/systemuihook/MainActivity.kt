@@ -43,6 +43,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -276,6 +277,167 @@ private enum class PageId {
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
     SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, OTHER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION,
 }
+
+private data class CategorySearchItem(
+    val title: String,
+    val description: String,
+    val scopes: Set<ScopeApplication>,
+    val page: PageId,
+)
+
+private data class CategoryPageEntry(
+    val title: String,
+    val page: PageId,
+)
+
+private fun categorySearchItems(): List<CategorySearchItem> = listOf(
+    CategorySearchItem(
+        tr("系统界面", "系统界面"),
+        tr("category_search_system_ui_description", "调整通知、控制中心、状态栏和手势提示线。"),
+        setOf(ScopeApplication.SYSTEM_UI),
+        PageId.SHADE,
+    ),
+    CategorySearchItem(
+        tr("桌面", "桌面"),
+        tr("category_search_desktop_description", "调整桌面、文件夹、Dock 和最近任务。"),
+        setOf(ScopeApplication.DESKTOP),
+        PageId.DESKTOP,
+    ),
+    CategorySearchItem(
+        tr("通知与超级岛", "通知与超级岛"),
+        tr("category_search_island_description", "调整通知下沉、指纹图标和超级岛相关功能。"),
+        setOf(ScopeApplication.SYSTEM_UI),
+        PageId.ISLAND,
+    ),
+    CategorySearchItem(
+        tr("状态栏与控制中心", "状态栏与控制中心"),
+        tr("category_search_status_description", "调整状态栏图标、信号显示和控制中心布局。"),
+        setOf(ScopeApplication.SYSTEM_UI),
+        PageId.STATUS,
+    ),
+    CategorySearchItem(
+        tr("锁屏", "锁屏"),
+        tr("category_search_lockscreen_description", "调整锁屏时钟、壁纸、小组件、歌词和锁屏胶囊。"),
+        setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.AOD),
+        PageId.LOCK,
+    ),
+    CategorySearchItem(
+        tr("超级小爱输入法", "超级小爱输入法"),
+        tr("category_search_xiaoai_description", "移除超级小爱输入法的功能限制。"),
+        setOf(ScopeApplication.SUPER_XIAOAI_IME),
+        PageId.SUPER_XIAOAI,
+    ),
+    CategorySearchItem(
+        tr("相机与相册编辑", "相机与相册编辑"),
+        tr("category_search_camera_description", "调整相机、相册和媒体编辑器的功能。"),
+        setOf(ScopeApplication.CAMERA, ScopeApplication.GALLERY, ScopeApplication.MEDIA_EDITOR),
+        PageId.CAMERA,
+    ),
+    CategorySearchItem(
+        tr("系统更新", "系统更新"),
+        tr("category_search_update_description", "阻止自动更新检查并调整系统更新行为。"),
+        setOf(ScopeApplication.SYSTEM_UPDATE),
+        PageId.SYSTEM_UPDATE,
+    ),
+    CategorySearchItem(
+        tr("系统设置", "系统设置"),
+        tr("category_search_settings_description", "调整设置应用首页、设备信息和外观。"),
+        setOf(ScopeApplication.SETTINGS),
+        PageId.SYSTEM_SETTINGS,
+    ),
+    CategorySearchItem(
+        tr("背屏", "背屏"),
+        tr("category_search_rear_screen_description", "解锁和自定义背屏应用、壁纸与媒体控件。"),
+        setOf(ScopeApplication.SUBSCREEN_CENTER, ScopeApplication.THEME_MANAGER, ScopeApplication.PERSONAL_ASSISTANT),
+        PageId.REAR_SCREEN,
+    ),
+    CategorySearchItem(
+        tr("其他", "其他"),
+        tr("category_search_other_description", "调整屏幕录制、健康和小米互传等功能。"),
+        setOf(ScopeApplication.SCREEN_RECORDER, ScopeApplication.XIAOMI_HEALTH, ScopeApplication.AIRDROP),
+        PageId.OTHER,
+    ),
+    CategorySearchItem(
+        tr("iosNotificationCenter", "iOS 风格通知中心"),
+        tr("iosNotificationCenterSummary", "下拉时展示圆角壁纸面板、锁屏时钟及景深效果。动态壁纸暂不支持。"),
+        setOf(ScopeApplication.SYSTEM_UI),
+        PageId.SHADE,
+    ),
+    CategorySearchItem(
+        tr("iosNotificationHideClear", "隐藏通知中心清除按钮"),
+        tr("iosNotificationHideClearSummary", "隐藏通知中心底部的清除按钮"),
+        setOf(ScopeApplication.SYSTEM_UI),
+        PageId.SHADE,
+    ),
+    CategorySearchItem(
+        tr("controlCenterBigClock", "在控制中心顶栏日期之上添加大时钟"),
+        tr("category_search_control_center_clock_description", "在控制中心日期上方显示可自定义的大时钟。"),
+        setOf(ScopeApplication.SYSTEM_UI),
+        PageId.STATUS,
+    ),
+    CategorySearchItem(
+        tr("controlCenterCarrierCustom", "自定义运营商文本"),
+        tr("category_search_carrier_description", "自定义或隐藏状态栏中的运营商名称。"),
+        setOf(ScopeApplication.SYSTEM_UI),
+        PageId.STATUS,
+    ),
+    CategorySearchItem(
+        tr("全局隐藏手势提示线", "全局隐藏手势提示线"),
+        tr("category_search_gesture_description", "隐藏系统底部的手势提示线，也可以单独调整其样式。"),
+        setOf(ScopeApplication.SYSTEM_UI),
+        PageId.SHADE,
+    ),
+    CategorySearchItem(
+        tr("为桌面添加 Dock", "为桌面添加 Dock"),
+        tr("category_search_dock_description", "在桌面底部添加 Dock，需要重启桌面后生效。"),
+        setOf(ScopeApplication.DESKTOP),
+        PageId.DESKTOP,
+    ),
+    CategorySearchItem(
+        tr("锁屏胶囊", "锁屏胶囊"),
+        tr("category_search_capsule_description", "在锁屏上显示媒体和通知胶囊。"),
+        setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.AOD),
+        PageId.LOCKSCREEN_CAPSULE,
+    ),
+    CategorySearchItem(
+        tr("锁屏小组件", "锁屏小组件"),
+        tr("category_search_widget_description", "编辑锁屏小组件、背景和设备名称。"),
+        setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.AOD),
+        PageId.LOCKSCREEN_WIDGET_EDITOR,
+    ),
+    CategorySearchItem(
+        tr("光栅壁纸", "光栅壁纸"),
+        tr("category_search_raster_description", "随手机倾斜在多张图片间切换。"),
+        setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.WALLPAPER),
+        PageId.RASTER_WALLPAPER,
+    ),
+    CategorySearchItem(
+        tr("自定义背屏中心", "自定义背屏中心"),
+        tr("category_search_rear_center_description", "查看和管理已导入的自定义背屏应用。"),
+        setOf(ScopeApplication.SUBSCREEN_CENTER),
+        PageId.REAR_CUSTOM_CENTER,
+    ),
+    CategorySearchItem(
+        tr("相机调色板", "相机调色板"),
+        tr("category_search_camera_palette_description", "自定义相机取景器中的调色板和色彩保护。"),
+        setOf(ScopeApplication.CAMERA, ScopeApplication.GALLERY, ScopeApplication.MEDIA_EDITOR),
+        PageId.CAMERA_PALETTE,
+    ),
+    CategorySearchItem(
+        tr("应用底部导航", "应用底部导航"),
+        tr("category_search_app_navigation_description", "为支持的应用自定义底部导航样式。"),
+        setOf(
+            ScopeApplication.APPLE_MUSIC,
+            ScopeApplication.WEIBO,
+            ScopeApplication.XIAOHONGSHU,
+            ScopeApplication.XIAOMI_STORE,
+            ScopeApplication.XIAOMI_WALLET,
+            ScopeApplication.XIAOMI_HEALTH,
+            ScopeApplication.LUCKIN_COFFEE,
+        ),
+        PageId.APP_NAVIGATION,
+    ),
+)
 
 private data class CustomRearScreenApp(
     val productId: String,
@@ -1290,7 +1452,7 @@ private fun BottomBar(
     LaunchedEffect(tab) { index.intValue = tab.ordinal }
     val tabs = Tab.entries.mapIndexed { i, item ->
         val title = if (item == Tab.CATEGORY) {
-            tr("tab_category", tr("分类", "分类"))
+            tr("tab_home", tr("首页", "首页"))
         } else {
             tr("tab_settings", tr("设置", "设置"))
         }
@@ -1321,28 +1483,207 @@ private fun BottomBar(
 private fun CategoryHome(
     connected: Boolean,
     open: (PageId) -> Unit,
-) = AppPage(
-    "HyperChanger",
-    actions = {
-        GlassToolbarIconButton(
-            icon = MiuixIcons.Regular.Refresh,
-            description = tr("重启作用域应用", "重启作用域应用"),
-            onClick = { open(PageId.RESTART_SCOPES) },
-        )
-    },
-) { padding, scroll ->
-    AppList(padding, scroll) {
-        item { Entry(tr("\u7cfb\u7edf\u754c\u9762", "\u7cfb\u7edf\u754c\u9762"), enabled = connected) { open(PageId.SHADE) } }
-        item { Entry(tr("桌面", "桌面"), enabled = connected) { open(PageId.DESKTOP) } }
-        item { Entry(tr("\u901a\u77e5\u4e0e\u8d85\u7ea7\u5c9b", "\u901a\u77e5\u4e0e\u8d85\u7ea7\u5c9b"), enabled = connected) { open(PageId.ISLAND) } }
-        item { Entry(tr("\u72b6\u6001\u680f\u4e0e\u63a7\u5236\u4e2d\u5fc3", "\u72b6\u6001\u680f\u4e0e\u63a7\u5236\u4e2d\u5fc3"), enabled = connected) { open(PageId.STATUS) } }
-        item { Entry(tr("\u9501\u5c4f", "\u9501\u5c4f"), enabled = connected) { open(PageId.LOCK) } }
-        item { Entry(tr("\u8d85\u7ea7\u5c0f\u7231\u8f93\u5165\u6cd5", "\u8d85\u7ea7\u5c0f\u7231\u8f93\u5165\u6cd5"), enabled = connected) { open(PageId.SUPER_XIAOAI) } }
-        item { Entry(tr("\u76f8\u673a\u4e0e\u76f8\u518c\u7f16\u8f91", "\u76f8\u673a\u4e0e\u76f8\u518c\u7f16\u8f91"), enabled = connected) { open(PageId.CAMERA) } }
-        item { Entry(tr("\u7cfb\u7edf\u66f4\u65b0", "\u7cfb\u7edf\u66f4\u65b0"), enabled = connected) { open(PageId.SYSTEM_UPDATE) } }
-        item { Entry(tr("\u7cfb\u7edf\u8bbe\u7f6e", "\u7cfb\u7edf\u8bbe\u7f6e"), enabled = connected) { open(PageId.SYSTEM_SETTINGS) } }
-        item { Entry(tr("\u80cc\u5c4f", "\u80cc\u5c4f"), enabled = connected) { open(PageId.REAR_SCREEN) } }
-        item { Entry(tr("\u5176\u4ed6", "\u5176\u4ed6"), enabled = connected) { open(PageId.OTHER) } }
+) {
+    var query by rememberSaveable { mutableStateOf("") }
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val searchItems = categorySearchItems()
+    val normalizedQuery = query.trim().lowercase(Locale.getDefault())
+    val filteredItems = if (normalizedQuery.isBlank()) {
+        emptyList()
+    } else {
+        searchItems.filter { item ->
+            buildString {
+                append(item.title)
+                append('\n')
+                append(item.description)
+                item.scopes.forEach { scope ->
+                    append('\n')
+                    append(tr(scope.title, scope.title))
+                    append('\n')
+                    append(scope.packageName)
+                }
+            }.lowercase(Locale.getDefault()).contains(normalizedQuery)
+        }
+    }
+    val groupedItems = filteredItems
+        .flatMap { item -> item.scopes.map { scope -> scope to item } }
+        .groupBy({ it.first }, { it.second })
+        .mapValues { (_, items) -> items.distinctBy { it.title to it.page } }
+
+    AppPage(
+        "HyperChanger",
+        actions = {
+            GlassToolbarIconButton(
+                icon = MiuixIcons.Regular.Refresh,
+                description = tr("重启作用域应用", "重启作用域应用"),
+                onClick = { open(PageId.RESTART_SCOPES) },
+            )
+        },
+    ) { padding, scroll ->
+        AppList(padding, scroll) {
+            item {
+                CategorySearchBar(
+                    query = query,
+                    expanded = expanded,
+                    onQueryChange = { query = it },
+                    onExpandedChange = { expanded = it },
+                    onCancel = { query = ""; expanded = false },
+                )
+            }
+            if (normalizedQuery.isBlank()) {
+                item {
+                    CategoryGroup(
+                        title = tr("系统界面", "系统界面"),
+                        entries = listOf(
+                            CategoryPageEntry(tr("系统界面", "系统界面"), PageId.SHADE),
+                            CategoryPageEntry(tr("桌面", "桌面"), PageId.DESKTOP),
+                            CategoryPageEntry(tr("通知与超级岛", "通知与超级岛"), PageId.ISLAND),
+                            CategoryPageEntry(tr("状态栏与控制中心", "状态栏与控制中心"), PageId.STATUS),
+                            CategoryPageEntry(tr("锁屏", "锁屏"), PageId.LOCK),
+                        ),
+                        enabled = connected,
+                        open = open,
+                    )
+                }
+                item {
+                    CategoryGroup(
+                        title = tr("系统功能", "系统功能"),
+                        entries = listOf(
+                            CategoryPageEntry(tr("超级小爱输入法", "超级小爱输入法"), PageId.SUPER_XIAOAI),
+                            CategoryPageEntry(tr("相机与相册编辑", "相机与相册编辑"), PageId.CAMERA),
+                            CategoryPageEntry(tr("系统更新", "系统更新"), PageId.SYSTEM_UPDATE),
+                            CategoryPageEntry(tr("系统设置", "系统设置"), PageId.SYSTEM_SETTINGS),
+                            CategoryPageEntry(tr("背屏", "背屏"), PageId.REAR_SCREEN),
+                        ),
+                        enabled = connected,
+                        open = open,
+                    )
+                }
+                item {
+                    CategoryGroup(
+                        title = tr("其他", "其他"),
+                        entries = listOf(CategoryPageEntry(tr("其他", "其他"), PageId.OTHER)),
+                        enabled = connected,
+                        open = open,
+                    )
+                }
+            } else if (groupedItems.isEmpty()) {
+                item {
+                    Card(
+                        Modifier.fillMaxWidth(),
+                        cornerRadius = 22.5.dp,
+                        insideMargin = PaddingValues(18.dp),
+                    ) {
+                        Text(
+                            tr("category_search_no_results", "没有找到匹配的设置项"),
+                            style = MiuixTheme.textStyles.body2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+            } else {
+                groupedItems.forEach { (scope, items) ->
+                    item {
+                        SmallTitle(
+                            tr(scope.title, scope.title),
+                            insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp),
+                        )
+                        Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                            items.forEach { result ->
+                                ArrowPreference(
+                                    title = result.title,
+                                    summary = result.description,
+                                    enabled = connected,
+                                    onClick = { open(result.page) },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategorySearchBar(
+    query: String,
+    expanded: Boolean,
+    onQueryChange: (String) -> Unit,
+    onExpandedChange: (Boolean) -> Unit,
+    onCancel: () -> Unit,
+) {
+    val showCancel = expanded || query.isNotBlank()
+    val cancelAlpha by animateFloatAsState(
+        targetValue = if (showCancel) 1f else 0f,
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        label = "categorySearchCancelAlpha",
+    )
+    val cancelBlur by animateFloatAsState(
+        targetValue = if (showCancel) 0f else 8f,
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        label = "categorySearchCancelBlur",
+    )
+    SearchBar(
+        modifier = Modifier.fillMaxWidth().animateContentSize(tween(260, easing = FastOutSlowInEasing)),
+        insideMargin = DpSize(0.dp, 0.dp),
+        inputField = {
+            InputField(
+                query = query,
+                onQueryChange = onQueryChange,
+                onSearch = { onExpandedChange(false) },
+                expanded = expanded,
+                onExpandedChange = onExpandedChange,
+                label = tr("category_search_placeholder", "搜索设置项名称、描述或作用域"),
+            )
+        },
+        expanded = expanded,
+        onExpandedChange = onExpandedChange,
+        outsideEndAction = {
+            AnimatedVisibility(
+                visible = showCancel,
+                enter = fadeIn(tween(220, easing = FastOutSlowInEasing)),
+                exit = fadeOut(tween(220, easing = FastOutSlowInEasing)),
+            ) {
+                Text(
+                    modifier = Modifier
+                        .padding(start = 12.dp)
+                        .graphicsLayer { alpha = cancelAlpha }
+                        .blur(cancelBlur.dp)
+                        .clickable(
+                            interactionSource = null,
+                            indication = null,
+                            onClick = onCancel,
+                        ),
+                    text = tr("取消", "取消"),
+                    color = MiuixTheme.colorScheme.primary,
+                )
+            }
+        },
+    ) {}
+}
+
+@Composable
+private fun CategoryGroup(
+    title: String,
+    entries: List<CategoryPageEntry>,
+    enabled: Boolean,
+    open: (PageId) -> Unit,
+) {
+    SmallTitle(
+        title,
+        insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp),
+    )
+    Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+        entries.forEach { entry ->
+            ArrowPreference(
+                title = entry.title,
+                enabled = enabled,
+                onClick = { open(entry.page) },
+            )
+        }
     }
 }
 
