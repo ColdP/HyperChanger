@@ -43,7 +43,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -1528,6 +1527,7 @@ private fun CategoryHome(
                     onQueryChange = { query = it },
                     onExpandedChange = { expanded = it },
                     onCancel = { query = ""; expanded = false },
+                    collapsedFraction = scroll.state.collapsedFraction.coerceIn(0f, 1f),
                 )
             }
             if (normalizedQuery.isBlank()) {
@@ -1614,6 +1614,7 @@ private fun CategorySearchBar(
     onQueryChange: (String) -> Unit,
     onExpandedChange: (Boolean) -> Unit,
     onCancel: () -> Unit,
+    collapsedFraction: Float,
 ) {
     val showCancel = expanded || query.isNotBlank()
     val cancelAlpha by animateFloatAsState(
@@ -1627,7 +1628,13 @@ private fun CategorySearchBar(
         label = "categorySearchCancelBlur",
     )
     SearchBar(
-        modifier = Modifier.fillMaxWidth().animateContentSize(tween(260, easing = FastOutSlowInEasing)),
+        modifier = Modifier.fillMaxWidth()
+            .graphicsLayer {
+                val scale = 1f - .1f * collapsedFraction
+                scaleX = scale
+                scaleY = scale
+            }
+            .blur((4f * collapsedFraction).dp),
         insideMargin = DpSize(0.dp, 0.dp),
         inputField = {
             InputField(
@@ -10561,6 +10568,11 @@ internal fun AppPage(
     val backdrop = rememberLayerBackdrop()
     val surface = MiuixTheme.colorScheme.surface
     val collapsedFraction = scroll.state.collapsedFraction.coerceIn(0f, 1f)
+    val topBarMaterialProgress by animateFloatAsState(
+        targetValue = collapsedFraction,
+        animationSpec = tween(280, easing = FastOutSlowInEasing),
+        label = "topBarMaterialProgress",
+    )
     CompositionLocalProvider(
         LocalToolbarBackdrop provides backdrop,
         LocalToolbarCollapsed provides collapsedFraction,
@@ -10575,11 +10587,11 @@ internal fun AppPage(
         topBar = {
             Box {
                 if (pageBackground != null) {
-                    ProgressiveBlurLayer(backdrop, collapsedFraction)
+                    ProgressiveBlurLayer(backdrop, topBarMaterialProgress)
                 } else if (isRuntimeShaderSupported()) {
                     Box(
                         Modifier.matchParentSize()
-                            .graphicsLayer { alpha = 1f - collapsedFraction }
+                            .graphicsLayer { alpha = 1f - topBarMaterialProgress }
                             .drawPlainBackdrop(
                                 backdrop = backdrop,
                                 shape = { androidx.compose.ui.graphics.RectangleShape },
@@ -10587,9 +10599,11 @@ internal fun AppPage(
                                 onDrawSurface = { drawRect(surface.copy(alpha = 0.55f)) }
                             )
                     )
-                    ProgressiveBlurLayer(backdrop, collapsedFraction)
+                    ProgressiveBlurLayer(backdrop, topBarMaterialProgress)
+                    CollapsedTopBarGradientLayer(surface, topBarMaterialProgress)
                 } else {
-                    Box(Modifier.matchParentSize().background(surface.copy(alpha = 0.82f * (1f - collapsedFraction))))
+                    Box(Modifier.matchParentSize().background(surface.copy(alpha = 0.82f * (1f - topBarMaterialProgress))))
+                    CollapsedTopBarGradientLayer(surface, topBarMaterialProgress)
                 }
                 if (compactTopBar) {
                     SmallTopAppBar(
@@ -11120,13 +11134,13 @@ private fun saveLanguagePacks(prefs: android.content.SharedPreferences, packs: L
 private fun BoxScope.ProgressiveBlurLayer(backdrop: LayerBackdrop, collapsedFraction: Float) {
     Box(
         Modifier.matchParentSize()
-            .expandDrawHeight(1.184625f)
+            .expandDrawHeight(TOP_BAR_MATERIAL_HEIGHT_FACTOR)
             .graphicsLayer { alpha = collapsedFraction }
             .drawPlainBackdrop(
                 backdrop = backdrop,
                 shape = { androidx.compose.ui.graphics.RectangleShape },
                 effects = {
-                    blur(16.dp.toPx())
+                    blur(10.dp.toPx())
                     runtimeShaderEffect(
                         key = "progressive-blur-alpha-mask",
                         shaderString = PROGRESSIVE_BLUR_ALPHA_MASK_SHADER,
@@ -11137,6 +11151,26 @@ private fun BoxScope.ProgressiveBlurLayer(backdrop: LayerBackdrop, collapsedFrac
     )
 }
 
+@Composable
+private fun BoxScope.CollapsedTopBarGradientLayer(surface: ComposeColor, progress: Float) {
+    if (progress <= 0f) return
+    Box(
+        Modifier
+            .matchParentSize()
+            .expandDrawHeight(TOP_BAR_MATERIAL_HEIGHT_FACTOR)
+            .graphicsLayer { alpha = progress }
+            .background(
+                Brush.verticalGradient(
+                    0f to surface.copy(alpha = 0.92f),
+                    0.72f to surface.copy(alpha = 0.18f),
+                    1f to ComposeColor.Transparent,
+                )
+            )
+    )
+}
+
+// Keep the progressive blur and gradient tint aligned to the same extended height.
+private const val TOP_BAR_MATERIAL_HEIGHT_FACTOR = 1.4926275f
 private const val TOOLBAR_GLASS_SURFACE_ALPHA = .80f
 internal val TOOLBAR_GLASS_BLUR_RADIUS = 2.dp
 private val TOOLBAR_GLASS_LENS_HEIGHT = 16.dp

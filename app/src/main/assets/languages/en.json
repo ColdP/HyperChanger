@@ -3,6 +3,7 @@
   "creator": "btm_m",
   "locale": "en",
   "strings": {
+    "category_search_clear": "Clear",
     "tab_home": "Home",
     "category_search_system_ui_description": "Adjust notifications, Control Center, status bar, and gesture hints.",
     "category_search_desktop_description": "Adjust the launcher, folders, Dock, and recent tasks.",

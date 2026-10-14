@@ -3,6 +3,7 @@
   "creator": "btm_m",
   "locale": "ja",
   "strings": {
+    "category_search_clear": "クリア",
     "tab_home": "ホーム",
     "category_search_system_ui_description": "通知、コントロールセンター、ステータスバー、ジェスチャーガイドを調整します。",
     "category_search_desktop_description": "ホーム画面、フォルダー、Dock、最近のタスクを調整します。",

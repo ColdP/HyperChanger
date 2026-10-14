@@ -3,6 +3,7 @@
   "creator": "btm_m",
   "locale": "en",
   "strings": {
+    "category_search_clear": "清除",
     "tab_home": "首页",
     "category_search_system_ui_description": "调整通知、控制中心、状态栏和手势提示线。",
     "category_search_desktop_description": "调整桌面、文件夹、Dock 和最近任务。",
