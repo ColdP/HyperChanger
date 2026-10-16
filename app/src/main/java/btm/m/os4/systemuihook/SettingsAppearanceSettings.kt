@@ -12,6 +12,13 @@ const val SETTINGS_APPEARANCE_AUTHORITY = "btm.m.os4.systemuihook.settingsappear
 const val APPEARANCE_SLOT_HOME = "home"
 const val APPEARANCE_SLOT_DEVICE = "device"
 const val APPEARANCE_SLOT_LOGO = "logo"
+
+/**
+ * Dedicated slot for the imported processor icon. It rides the same provider/file pipeline as the
+ * other appearance slots, but stays separate from [APPEARANCE_SLOT_LOGO] so importing a CPU icon
+ * never disturbs the device-interface LOGO.
+ */
+const val APPEARANCE_SLOT_CPU_ICON = "cpu_icon"
 const val APPEARANCE_SLOT_DEVICE_IMAGE = "device_image"
 const val APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO = "custom_device_logo"
 const val APPEARANCE_SLOT_STYLE1_UPDATE_BACKGROUND = "style1_update_background"
@@ -206,6 +213,16 @@ class SettingsAppearanceStore(context: Context) {
     var settings: SettingsAppearanceSettings = local.toSettingsAppearance()
         private set
 
+    init {
+        // The control for this value was removed from the UI, but installs that used it keep a low
+        // number behind (8 in the field). The card-replacement paths kept rewriting every Settings
+        // card background to 8%-opaque white, which is what "the card background disappeared" was.
+        // With no way to change it any more, retire the key so nothing can read it again.
+        if (local.contains(KEY_LIGHT_CARD_OPACITY)) {
+            local.edit().remove(KEY_LIGHT_CARD_OPACITY).apply()
+        }
+    }
+
     fun reload() {
         settings = local.toSettingsAppearance()
     }
@@ -241,7 +258,10 @@ internal fun SharedPreferences.toSettingsAppearance() = SettingsAppearanceSettin
     logoScale = getInt(KEY_LOGO_SCALE, 100),
     logoMime = getString(KEY_LOGO_MIME, "").orEmpty(),
     logoVersion = getLong(KEY_LOGO_VERSION, 0L),
-    lightCardOpacity = getInt(KEY_LIGHT_CARD_OPACITY, 100),
+    // Retired: nothing in the UI writes this key any more. Pinned to 100 so the card background
+    // replacement paths (cardFinalColorReplacement / cardBlurAlpha / cardColorResourceReplacement)
+    // short-circuit and leave the native Settings card surfaces untouched.
+    lightCardOpacity = 100,
     tutorialCardEnabled = getBoolean(KEY_TUTORIAL_CARD_ENABLED, false),
     tutorialCardTitle = getString(KEY_TUTORIAL_CARD_TITLE, "").orEmpty(),
     tutorialCardSlogan = getString(KEY_TUTORIAL_CARD_SLOGAN, "").orEmpty(),
@@ -382,7 +402,7 @@ private fun SharedPreferences.writeSettingsAppearance(value: SettingsAppearanceS
         .putInt(KEY_LOGO_SCALE, value.logoScale)
         .putString(KEY_LOGO_MIME, value.logoMime)
         .putLong(KEY_LOGO_VERSION, value.logoVersion)
-        .putInt(KEY_LIGHT_CARD_OPACITY, value.lightCardOpacity)
+        .remove(KEY_LIGHT_CARD_OPACITY)
         .putBoolean(KEY_TUTORIAL_CARD_ENABLED, value.tutorialCardEnabled)
         .putString(KEY_TUTORIAL_CARD_TITLE, value.tutorialCardTitle)
         .putString(KEY_TUTORIAL_CARD_SLOGAN, value.tutorialCardSlogan)

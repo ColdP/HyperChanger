@@ -23,13 +23,24 @@ import io.github.libxposed.api.XposedInterface.ExceptionMode
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import org.json.JSONObject
+import java.lang.ref.WeakReference
 import java.lang.reflect.Proxy
+import java.util.Collections
+import java.util.WeakHashMap
 
 /** Hooks only Settings' presentation models; no system property is written. */
 class SettingsDeviceModule : XposedModule() {
     private var settingsApplicationContext: Context? = null
     private var activeWifiPassword: String? = null
     private val wifiTranslations = mutableMapOf<String, Map<String, String>>()
+    private val settingsDrawableIds = mutableMapOf<String, Int>()
+
+    /**
+     * Cards that came in through `DeviceBasicInfoPresenter.addBasicInfoCard` / `updateCardByIndex`,
+     * i.e. the "All parameters" page's basic rows. That page reuses the "My device" presenter, so its
+     * adapter reports the same type (0/2) and the two pages cannot be told apart by type alone.
+     */
+    private val detailBasicCards = Collections.synchronizedMap(WeakHashMap<Any, Boolean>())
 
     override fun onPackageLoaded(param: PackageLoadedParam) {
         if (!OsCompatibility.areHooksAllowed()) return
@@ -54,6 +65,8 @@ class SettingsDeviceModule : XposedModule() {
             installCardBindingHook(param.defaultClassLoader, preferences)
             installDirectDetailHooks(param.defaultClassLoader, preferences)
             installCpuIconHook(param.defaultClassLoader, preferences)
+            installDetailCardMarker(param.defaultClassLoader)
+            installProcessorIconHooks(param.defaultClassLoader, preferences)
             // These methods are global framework hooks in the Settings process.
             // Install only the groups that can currently change a view. This is
             // important because Settings calls these methods during every bind.
@@ -817,6 +830,22 @@ class SettingsDeviceModule : XposedModule() {
         }.getOrNull()?.also { settingsApplicationContext = it }
     }
 
+    /**
+     * Resolves a Settings drawable by name, cached for the process. Numeric resource ids are not
+     * stable across Settings builds; asking for a stale id yields an icon that never draws.
+     * Returns null when the Settings app has no such resource, so callers keep the native value.
+     */
+    private fun settingsDrawableId(name: String): Int? {
+        settingsDrawableIds[name]?.let { return it }
+        val context = currentApplicationContext() ?: return null
+        val id = runCatching {
+            context.resources.getIdentifier(name, "drawable", SETTINGS_PACKAGE)
+        }.getOrDefault(0)
+        if (id == 0) return null
+        settingsDrawableIds[name] = id
+        return id
+    }
+
     private fun installSavedWifiPasswordHooks(classLoader: ClassLoader) {
         runCatching {
             val preferenceClass = classLoader.loadClass("com.android.settings.wifi.SavedAccessPointPreference")
@@ -1258,12 +1287,15 @@ class SettingsDeviceModule : XposedModule() {
             .setExceptionMode(ExceptionMode.PROTECTIVE)
             .setId("settings-device-profile:bind-card")
             .intercept { chain ->
-                val result = chain.proceed()
+                // Applied BEFORE the row renders. Cards that a page adds asynchronously - the detail
+                // page's processor item is inserted after ReadCpuInfoTask finishes - never pass
+                // through setDataList, and writing the value after proceed() only took effect on the
+                // next bind. That is why "My device" worked while "All parameters" did not.
                 val profile = preferences.toDeviceProfileSettings()
                 if (profile.enabled) {
                     applyCardOverride(chain.thisObject, chain.getArg(1) as? Int ?: -1, profile)
                 }
-                result
+                chain.proceed()
             }
     }
 
@@ -1278,6 +1310,114 @@ class SettingsDeviceModule : XposedModule() {
                     chain.proceed()
                 }
         }
+    }
+
+    /**
+     * Records the cards the "All parameters" page contributes.
+     *
+     * `DeviceInfoCallbacks.cardsInitNotComplete` builds its processor row and hands it to
+     * `miuiMyDeviceDetailSettings.mPresenter.addBasicInfoCard(...)`, and `cardsInitComplete` refreshes
+     * it via `updateCardByIndex(0, card)`. Both are called only from that page, so marking the card
+     * here is what lets the two pages keep separate processor values.
+     */
+    private fun installDetailCardMarker(classLoader: ClassLoader) {
+        runCatching {
+            val presenter = classLoader.loadClass(DEVICE_BASIC_INFO_PRESENTER)
+            presenter.declaredMethods.filter {
+                (it.name == "addBasicInfoCard" && it.parameterCount == 1) ||
+                    (it.name == "updateCardByIndex" && it.parameterCount == 2)
+            }.forEach { method ->
+                val cardIndex = if (method.name == "addBasicInfoCard") 0 else 1
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("settings-device-profile:detail-card-${method.name}")
+                    .intercept { chain ->
+                        (chain.getArg(cardIndex) as? Any)?.let { detailBasicCards[it] = true }
+                        chain.proceed()
+                    }
+            }
+            log(Log.INFO, TAG, "Installed Settings detail basic card markers")
+        }.onFailure { error -> log(Log.WARN, TAG, "Could not mark Settings detail basic cards", error) }
+    }
+
+    /**
+     * Draws the picked vendor mark over the card icon.
+     *
+     * The vendor vectors live in the module APK, so their resource ids cannot be handed to
+     * `DeviceCardInfo.setIconResId` - that id would be resolved against Settings' own resources. The
+     * rows are retinted at the image setter instead. Snapdragon and "system default" are left to
+     * Settings' own drawables.
+     */
+    private fun installProcessorIconHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
+        runCatching {
+            val presenter = classLoader.loadClass(DEVICE_BASIC_INFO_PRESENTER)
+            hook(ImageView::class.java.getMethod("setImageResource", Int::class.javaPrimitiveType))
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("settings-device-profile:processor-icon")
+                .intercept { chain ->
+                    val view = chain.thisObject as? ImageView
+                    val resId = chain.getArg(0) as? Int
+                    val drawable = if (view != null && resId != null) {
+                        processorIconDrawable(view, presenter, resId, preferences)
+                    } else null
+                    if (drawable == null || view == null) {
+                        chain.proceed()
+                    } else {
+                        view.setImageDrawable(drawable)
+                        null
+                    }
+                }
+            log(Log.INFO, TAG, "Installed Settings processor icon hooks")
+        }.onFailure { error -> log(Log.WARN, TAG, "Could not install processor icon hooks", error) }
+    }
+
+    private fun processorIconDrawable(
+        view: ImageView,
+        presenter: Class<*>,
+        resId: Int,
+        preferences: SharedPreferences,
+    ): Drawable? {
+        val profile = preferences.toDeviceProfileSettings()
+        if (!profile.enabled) return null
+        val moduleRes = when (profile.processorIcon) {
+            PROCESSOR_ICON_XRING -> R.drawable.ic_cpu_vendor_xring
+            PROCESSOR_ICON_DIMENSITY -> R.drawable.ic_cpu_vendor_mediatek
+            PROCESSOR_ICON_APPLE -> R.drawable.ic_cpu_vendor_apple
+            PROCESSOR_ICON_INTEL -> R.drawable.ic_cpu_vendor_intel
+            PROCESSOR_ICON_NVIDIA -> R.drawable.ic_cpu_vendor_nvidia
+            PROCESSOR_ICON_AMD -> R.drawable.ic_cpu_vendor_amd
+            PROCESSOR_ICON_CUSTOM -> {
+                // Imported through the picker into its own appearance slot. The provider hands the
+                // file over by slot, and LogoDrawableLoader already knows how to turn a PNG/JPEG or
+                // XML/SVG payload into a Drawable.
+                val source = SettingsAppearanceSources.query(view.context, APPEARANCE_SLOT_CPU_ICON)
+                if (!source.exists) return null
+                val custom = LogoDrawableLoader.load(view.context, source) ?: return null
+                val night = view.resources.configuration.uiMode and
+                    android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES
+                return custom.mutate().apply {
+                    setTint(if (night) 0x99FFFFFF.toInt() else 0x99000000.toInt())
+                }
+            }
+            else -> return null
+        }
+        // Only rows currently showing the processor icon may be retinted.
+        val cpuIcon = runCatching {
+            @Suppress("UNCHECKED_CAST")
+            (presenter.getField("ICON_MAP").get(null) as Map<Any, Any>)[0] as? Int
+        }.getOrNull() ?: return null
+        if (resId != cpuIcon) return null
+        val moduleContext = runCatching {
+            view.context.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY)
+        }.getOrNull() ?: return null
+        val drawable = runCatching { moduleContext.getDrawable(moduleRes) }.getOrNull() ?: return null
+        // Match color/device_icon_fill_color, which is what every other device card icon is tinted
+        // with: #99000000 in light mode, #99ffffff in night mode. An opaque colour here reads as
+        // much darker/lighter than the neighbouring icons.
+        val dark = view.resources.configuration.uiMode and
+            android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        drawable.mutate().setTint(if (dark) 0x99FFFFFF.toInt() else 0x99000000.toInt())
+        return drawable
     }
 
     private fun installDirectDetailHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
@@ -1308,7 +1448,10 @@ class SettingsDeviceModule : XposedModule() {
     @Suppress("UNCHECKED_CAST")
     private fun updateCpuIcon(presenter: Class<*>, profile: DeviceProfileSettings) {
         val icons = presenter.getField("ICON_MAP").get(null) as? MutableMap<Any?, Any?> ?: return
-        icons[0] = if (profile.enabled && profile.snapdragonIcon) SNAPDRAGON_CPU_ICON else DEFAULT_CPU_ICON
+        val name = if (profile.enabled && profile.snapdragonIcon) SNAPDRAGON_CPU_ICON_NAME else DEFAULT_CPU_ICON_NAME
+        // Keep whatever the system resolved when the drawable is unavailable in this Settings build.
+        val id = settingsDrawableId(name) ?: return
+        icons[0] = id
     }
 
     private fun applyCardOverride(adapter: Any?, position: Int, profile: DeviceProfileSettings) {
@@ -1322,14 +1465,16 @@ class SettingsDeviceModule : XposedModule() {
         val key = (type.getMethod("getKey").invoke(card) as? String).orEmpty()
         val title = (type.getMethod("getTitle").invoke(card) as? String).orEmpty()
         val adapterType = adapterType(adapter)
-        val value = overrideValue(adapterType, index, key, title, profile)
+        val value = overrideValue(card, adapterType, index, key, title, profile)
         if (value != null) {
             type.getMethod("setValue", String::class.java).invoke(card, value)
         }
         applyCameraParts(card, index, profile)
         if (value == null && index != CAMERA_INDEX) return
         if ((index == CPU_INDEX || key == "cpu_item") && profile.snapdragonIcon) {
-            type.getMethod("setIconResId", Int::class.javaPrimitiveType).invoke(card, SNAPDRAGON_CPU_ICON)
+            settingsDrawableId(SNAPDRAGON_CPU_ICON_NAME)?.let { id ->
+                runCatching { type.getMethod("setIconResId", Int::class.javaPrimitiveType).invoke(card, id) }
+            }
         }
     }
 
@@ -1343,14 +1488,16 @@ class SettingsDeviceModule : XposedModule() {
             val index = runCatching { cardType.getMethod("getIndex").invoke(card) as? Int ?: -1 }.getOrDefault(-1)
             val key = runCatching { (cardType.getMethod("getKey").invoke(card) as? String).orEmpty() }.getOrDefault("")
             val title = runCatching { (cardType.getMethod("getTitle").invoke(card) as? String).orEmpty() }.getOrDefault("")
-            val value = overrideValue(type, index, key, title, profile)
+            val value = overrideValue(card, type, index, key, title, profile)
             if (value != null) {
                 runCatching { cardType.getMethod("setValue", String::class.java).invoke(card, value) }
             }
             applyCameraParts(card, index, profile)
             if (value == null && index != CAMERA_INDEX) return@repeat
             if ((index == CPU_INDEX || key == "cpu_item") && profile.snapdragonIcon) {
-                runCatching { cardType.getMethod("setIconResId", Int::class.javaPrimitiveType).invoke(card, SNAPDRAGON_CPU_ICON) }
+                settingsDrawableId(SNAPDRAGON_CPU_ICON_NAME)?.let { id ->
+                    runCatching { cardType.getMethod("setIconResId", Int::class.javaPrimitiveType).invoke(card, id) }
+                }
             }
         }
     }
@@ -1359,8 +1506,22 @@ class SettingsDeviceModule : XposedModule() {
         adapter.javaClass.getDeclaredField("mType").apply { isAccessible = true }.getInt(adapter)
     }.getOrDefault(0)
 
-    private fun overrideValue(type: Int, index: Int, key: String, title: String, profile: DeviceProfileSettings): String? =
-        if (type == 0 || type == 2) valueFor(index, key, title, profile) else valueForDetail(key, title, profile)
+    private fun overrideValue(
+        card: Any?,
+        type: Int,
+        index: Int,
+        key: String,
+        title: String,
+        profile: DeviceProfileSettings,
+    ): String? = when {
+        // The "All parameters" page's basic rows (its processor item included) are added through the
+        // "My device" presenter's addBasicInfoCard, so that adapter reports type 0/2 exactly like the
+        // grid. Routing on type alone therefore handed the detail page profile.processor. Rows known
+        // to have come from the detail page go to the detail values instead.
+        card != null && detailBasicCards.containsKey(card) -> valueForDetail(key, title, profile)
+        type == 0 || type == 2 -> valueFor(index, key, title, profile)
+        else -> valueForDetail(key, title, profile)
+    }
 
     private fun applyCameraParts(card: Any, index: Int, profile: DeviceProfileSettings) {
         if (index != CAMERA_INDEX) return
@@ -1417,9 +1578,11 @@ class SettingsDeviceModule : XposedModule() {
         const val RESOLUTION_INDEX = 4
         const val RAM_INDEX = 5
         const val MODEL_INDEX = 6
-        // R.drawable.device_description_cpu / device_description_snapdragon_cpu in 设置_17.apk.
-        const val DEFAULT_CPU_ICON = 0x7f08079b
-        const val SNAPDRAGON_CPU_ICON = 0x7f0807a2
+        // Resolved by name at runtime. The numeric ids these used to be hardcoded to came from a
+        // different Settings build (0x7f08079b / 0x7f0807a2 there vs 0x7f08079e / 0x7f0807a5 in the
+        // current one), so the card asked for a drawable that does not exist and rendered no icon.
+        const val DEFAULT_CPU_ICON_NAME = "device_description_cpu"
+        const val SNAPDRAGON_CPU_ICON_NAME = "device_description_snapdragon_cpu"
         const val NEVER_SCREEN_TIMEOUT = 2147483647L
         const val DEFAULT_SCREEN_TIMEOUT = 30000L
         const val MILLIS_PER_MINUTE = 60_000L

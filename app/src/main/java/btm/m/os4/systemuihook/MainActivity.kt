@@ -43,6 +43,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -215,6 +217,7 @@ class MainActivity : ComponentActivity() {
 private enum class Tab { CATEGORY, SETTINGS }
 
 private val LocalNotificationSettingsChanged = compositionLocalOf<() -> Unit> { {} }
+private val LocalXiaoAiSettingsChanged = compositionLocalOf<() -> Unit> { {} }
 private val LocalPageBackSuppressed = compositionLocalOf<(Boolean) -> Unit> { {} }
 private val LocalLanguageChanged = compositionLocalOf<() -> Unit> { {} }
 val LocalDialogBackdrop = compositionLocalOf<Backdrop?> { null }
@@ -272,7 +275,7 @@ private enum class PageId {
     SHADE_CONTROL_CENTER_BACKGROUND,
     GESTURE_HANDLE_STYLE, DESKTOP, DESKTOP_MATERIAL,
     ISLAND, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, DEVICE_PROFILE,
-    SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
+    SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
     SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, OTHER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION,
 }
@@ -321,9 +324,9 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
         PageId.LOCK,
     ),
     CategorySearchItem(
-        tr("超级小爱输入法", "超级小爱输入法"),
-        tr("category_search_xiaoai_description", "移除超级小爱输入法的功能限制。"),
-        setOf(ScopeApplication.SUPER_XIAOAI_IME),
+        tr("超级小爱", "超级小爱"),
+        tr("category_search_xiaoai_description", "调整超级小爱悬浮窗口和输入法。"),
+        setOf(ScopeApplication.SUPER_XIAOAI, ScopeApplication.SUPER_XIAOAI_IME),
         PageId.SUPER_XIAOAI,
     ),
     CategorySearchItem(
@@ -536,6 +539,8 @@ private fun Root(
     var homeFolderSettings by remember { mutableStateOf(homeFolderStore.settings) }
     val homeMaterialStore = remember(context) { HomeMaterialSettingsStore(context) }
     var homeMaterialSettings by remember { mutableStateOf(homeMaterialStore.settings) }
+    val settingsAppStore = remember(context) { SettingsAppPreferencesStore(context) }
+    var settingsApp by remember { mutableStateOf(settingsAppStore.settings) }
     var pendingRestartTargets by remember { mutableStateOf(emptySet<ScopeApplication>()) }
     val markRestartTargets: (Set<ScopeApplication>) -> Unit = { targets ->
         if (targets.isNotEmpty()) pendingRestartTargets = pendingRestartTargets + targets
@@ -823,6 +828,7 @@ private fun Root(
     LaunchedEffect(service) {
         service?.let {
             hooks.syncRemote(it)
+            SuperXiaoAiInputGlassSettingsStore(context).syncRemote(it)
             navigation.syncRemote(it)
             lockscreenCapsules.syncRemote(it)
             cameras.syncRemote(it)
@@ -845,6 +851,7 @@ private fun Root(
             homeMultiSplitStore.syncRemote(it)
             homeFolderStore.syncRemote(it)
             homeMaterialStore.syncRemote(it)
+            settingsAppStore.syncRemote(it)
             settings = hooks.settings
             navigationSettings = navigation.settings
             lockscreenCapsuleSettings = lockscreenCapsules.settings
@@ -858,6 +865,7 @@ private fun Root(
             homeMultiSplitSettings = homeMultiSplitStore.settings
             homeFolderSettings = homeFolderStore.settings
             homeMaterialSettings = homeMaterialStore.settings
+            settingsApp = settingsAppStore.settings
         }
     }
     MiuixTheme(controller = controller) {
@@ -868,6 +876,7 @@ private fun Root(
         CompositionLocalProvider(
             LocalLanguageChanged provides { languageRevision++ },
             LocalNotificationSettingsChanged provides { markRestartTargets(setOf(ScopeApplication.SYSTEM_UI)) },
+            LocalXiaoAiSettingsChanged provides { markRestartTargets(setOf(ScopeApplication.SUPER_XIAOAI)) },
         ) {
         AnimatedContent(
             targetState = showOobe,
@@ -912,6 +921,14 @@ private fun Root(
                 hooks.update(service, transform)
                 settings = hooks.settings
                 markRestartTargets(suggestedScopesForHookChange(before, settings))
+            },
+            settingsApp = settingsApp,
+            updateSettingsApp = { transform ->
+                val before = settingsAppStore.settings
+                settingsAppStore.update(service, transform)
+                settingsApp = settingsAppStore.settings
+                // Everything here is applied inside the Settings process.
+                if (before != settingsApp) markRestartTargets(setOf(ScopeApplication.SETTINGS))
             },
             updateLockscreenCapsule = { transform ->
                 val before = lockscreenCapsules.settings
@@ -1131,7 +1148,9 @@ private fun Shell(
     homeFolderSettings: HomeFolderSettings,
     homeMaterialSettings: HomeMaterialSettings,
     service: XposedService?,
+    settingsApp: SettingsAppPreferences,
     update: ((HookSettings) -> HookSettings) -> Unit,
+    updateSettingsApp: ((SettingsAppPreferences) -> SettingsAppPreferences) -> Unit,
     updateLockscreenCapsule: ((LockscreenCapsuleSettings) -> LockscreenCapsuleSettings) -> Unit,
     updateNavigation: ((ModuleNavigationSettings) -> ModuleNavigationSettings) -> Unit,
     updateDock: ((DockSettings) -> DockSettings) -> Unit,
@@ -1181,9 +1200,39 @@ private fun Shell(
     var showDebug by remember { mutableStateOf(false) }
     var debugPreview by remember { mutableStateOf<String?>(null) }
     var disclaimerRead by remember { mutableStateOf(false) }
+    // Module self-update prompt. Seeded from the process-level result so a rebuilt composition does
+    // not lose an already resolved update.
+    var pendingUpdate by remember { mutableStateOf(startupUpdatePending) }
     val captcha = remember { (100000..999999).random().toString() }
     var captchaInput by remember { mutableStateOf("") }
     var exitSeconds by remember { mutableIntStateOf(10) }
+    // Proactive check for the module's own release feed. The very first request after a cold start
+    // can lose the race against DNS/TLS setup, which is why the update page worked while this did
+    // not; three attempts close that gap. Only a resolved answer is cached for the process.
+    LaunchedEffect(Unit) {
+        if (startupUpdateChecked) {
+            pendingUpdate = startupUpdatePending
+            return@LaunchedEffect
+        }
+        var resolved: UpdateInfo? = null
+        for (attempt in 0 until 3) {
+            if (attempt > 0) delay(3_000L)
+            val result = withContext(Dispatchers.IO) {
+                runCatching { fetchUpdateInfo(lastUpdateChannel) }
+            }
+            if (result.isSuccess) {
+                resolved = result.getOrNull()
+                break
+            }
+        }
+        // Offline, timeout or a malformed feed: stay silent rather than nag on every launch.
+        val info = resolved ?: return@LaunchedEffect
+        startupUpdateChecked = true
+        if (info.versionCode > BuildConfig.VERSION_CODE.toLong()) {
+            startupUpdatePending = info
+            pendingUpdate = info
+        }
+    }
     LaunchedEffect(osCode) {
         if (osCode.isBlank()) {
             showOsMissing = true
@@ -1267,6 +1316,7 @@ private fun Shell(
                 detailPage, settings, lockscreenCapsuleSettings, cameras, deviceProfile, appearance, musicWhitelist, dockSettings, homeRecentsSettings, homeFolderSettings, homeMaterialSettings, airDropSettings,
                 update, updateLockscreenCapsule, updateDock, updateHomeRecents, updateHomeFolder, updateHomeMaterial, updateCamera,
                 updateDeviceProfile, updateAppearance, updateMusicWhitelist, presetActions, updateAirDrop,
+                settingsApp = settingsApp, updateSettingsApp = updateSettingsApp,
                 openPage = openNestedPage, back = dismissPage,
                 onDebugMode = { showDebug = true }, captcha = captcha,
                 onPickRasterImages = onPickRasterImages, onApplyRasterWallpaper = onApplyRasterWallpaper,
@@ -1320,9 +1370,11 @@ private fun Shell(
                     Tab.SETTINGS -> SettingsHome(
                         settings,
                         navigationSettings,
+                        settingsApp,
                         service != null,
                         update,
                         updateNavigation,
+                        updateSettingsApp,
                         openRootPage,
                         onImportModulePreset,
                         onExportModulePreset,
@@ -1423,6 +1475,21 @@ private fun Shell(
             seconds = if (debugPreview == "empty") 10 else exitSeconds,
             preview = debugPreview == "empty",
             onExit = { if (debugPreview == "empty") debugPreview = null else (context as? Activity)?.finishAndRemoveTask() },
+        )
+        UpdateAvailableDialog(
+            // Never stack on top of the compatibility gates or a preview.
+            show = pendingUpdate != null && !showOsWarning && !showOsMissing && debugPreview == null,
+            currentVersion = BuildConfig.VERSION_NAME,
+            latestVersion = pendingUpdate?.versionName.orEmpty(),
+            onDismiss = {
+                pendingUpdate = null
+                startupUpdatePending = null
+            },
+            onViewUpdate = {
+                pendingUpdate = null
+                startupUpdatePending = null
+                openRootPage(PageId.SOFTWARE_UPDATE)
+            },
         )
         if (showDebug) {
             DebugModeDialog(
@@ -1549,7 +1616,7 @@ private fun CategoryHome(
                     CategoryGroup(
                         title = tr("系统功能", "系统功能"),
                         entries = listOf(
-                            CategoryPageEntry(tr("超级小爱输入法", "超级小爱输入法"), PageId.SUPER_XIAOAI),
+                            CategoryPageEntry(tr("超级小爱", "超级小爱"), PageId.SUPER_XIAOAI),
                             CategoryPageEntry(tr("相机与相册编辑", "相机与相册编辑"), PageId.CAMERA),
                             CategoryPageEntry(tr("系统更新", "系统更新"), PageId.SYSTEM_UPDATE),
                             CategoryPageEntry(tr("系统设置", "系统设置"), PageId.SYSTEM_SETTINGS),
@@ -2495,14 +2562,17 @@ private fun RearAppIcon(packageManager: PackageManager, info: ApplicationInfo) {
 private fun SettingsHome(
     settings: HookSettings,
     navigationSettings: ModuleNavigationSettings,
+    settingsApp: SettingsAppPreferences,
     online: Boolean,
     update: ((HookSettings) -> HookSettings) -> Unit,
     updateNavigation: ((ModuleNavigationSettings) -> ModuleNavigationSettings) -> Unit,
+    updateSettingsApp: ((SettingsAppPreferences) -> SettingsAppPreferences) -> Unit,
     open: (PageId) -> Unit,
     onImportModulePreset: () -> Unit,
     onExportModulePreset: () -> Unit,
 ) = AppPage(tr("settings", tr("设置", "设置"))) { padding, scroll ->
     val context = LocalContext.current
+    var editingEntryTitle by remember { mutableStateOf(false) }
     var predictiveProgress by remember(settings.predictiveBackProgress) { mutableFloatStateOf(settings.predictiveBackProgress.toFloat()) }
     AppList(padding, scroll) {
         item { ServiceCard(online) }
@@ -2538,8 +2608,13 @@ private fun SettingsHome(
                         tr("中部", "中部"),
                         tr("底部", "底部"),
                     ),
-                    selectedIndex = settings.settingsAppEntryPosition.coerceIn(0, 3),
-                    onSelectedIndexChange = { index -> update { it.copy(settingsAppEntryPosition = index) } },
+                    selectedIndex = settingsApp.entryPosition.coerceIn(0, 3),
+                    onSelectedIndexChange = { index -> updateSettingsApp { it.copy(entryPosition = index) } },
+                )
+                ArrowPreference(
+                    title = tr("settingsAppEntryTitle", "模块应用入口文案"),
+                    summary = settingsApp.entryTitle.ifBlank { tr("settingsAppEntryTitleDefault", "默认（模块名称）") },
+                    onClick = { editingEntryTitle = true },
                 )
                 OverlayDropdownPreference(
                     title = tr("theme_mode", tr("\u4e3b\u9898\u6a21\u5f0f", "\u4e3b\u9898\u6a21\u5f0f")),
@@ -2603,6 +2678,18 @@ OverlayDropdownPreference(
             }
         }
     }
+    if (editingEntryTitle) {
+        DeviceProfileFieldDialog(
+            title = tr("settingsAppEntryTitle", "模块应用入口文案"),
+            current = settingsApp.entryTitle,
+            inputLabel = tr("settingsAppEntryTitleHint", "留空则使用模块名称"),
+            onDismiss = { editingEntryTitle = false },
+            onSave = { value ->
+                updateSettingsApp { it.copy(entryTitle = value) }
+                editingEntryTitle = false
+            },
+        )
+    }
 }
 
 @Composable
@@ -2628,6 +2715,7 @@ private fun RestartScopesPage(
         ScopeApplication.SUBSCREEN_CENTER,
         ScopeApplication.SYSTEM_UPDATE,
         ScopeApplication.SCREEN_RECORDER,
+        ScopeApplication.SUPER_XIAOAI,
         ScopeApplication.SUPER_XIAOAI_IME,
         ScopeApplication.GALLERY,
         ScopeApplication.CAMERA,
@@ -3237,8 +3325,8 @@ private fun HomeMaterialPage(
 
 @Composable
 private fun SystemSettings(
-    settings: HookSettings,
-    updateSettings: ((HookSettings) -> HookSettings) -> Unit,
+    settingsApp: SettingsAppPreferences,
+    updateSettingsApp: ((SettingsAppPreferences) -> SettingsAppPreferences) -> Unit,
     profile: DeviceProfileSettings,
     update: ((DeviceProfileSettings) -> DeviceProfileSettings) -> Unit,
     appearance: SettingsAppearanceSettings,
@@ -3248,6 +3336,21 @@ private fun SystemSettings(
     onClearLogo: () -> Unit,
     back: () -> Unit,
 ) = AppPage(tr("系统设置", "系统设置"), back, restartScopes = setOf(ScopeApplication.SETTINGS)) { padding, scroll ->
+    val cpuIconContext = LocalContext.current
+    var cpuIconImported by remember {
+        mutableStateOf(runCatching { appearanceFile(cpuIconContext, APPEARANCE_SLOT_CPU_ICON).exists() }.getOrDefault(false))
+    }
+    val pickCpuIcon = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                copyAppearanceFile(cpuIconContext, APPEARANCE_SLOT_CPU_ICON, uri)
+                cpuIconImported = true
+                Toast.makeText(cpuIconContext, tr("已导入", "已导入"), Toast.LENGTH_SHORT).show()
+            }.onFailure {
+                Toast.makeText(cpuIconContext, tr("导入失败", "导入失败"), Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
     AppList(padding, scroll) {
         item {
             Group(tr("设置应用", "设置应用")) {
@@ -3256,25 +3359,66 @@ private fun SystemSettings(
                     checked = profile.enabled,
                     onCheckedChange = { enabled -> update { it.copy(enabled = enabled) } },
                 )
-                SwitchPreference(
-                    title = tr("使用骁龙处理器图标", "使用骁龙处理器图标"),
-                    checked = profile.snapdragonIcon,
-                    onCheckedChange = { enabled -> update { it.copy(snapdragonIcon = enabled) } },
+                OverlayDropdownPreference(
+                    title = tr("处理器图标", "处理器图标"),
+                    items = listOf(
+                        tr("系统默认", "系统默认"),
+                        tr("骁龙", "骁龙"),
+                        tr("玄戒", "玄戒"),
+                        tr("天玑", "天玑"),
+                        tr("Apple Silicon", "Apple Silicon"),
+                        tr("英特尔", "英特尔"),
+                        tr("英伟达", "英伟达"),
+                        tr("AMD", "AMD"),
+                        tr("自定义", "自定义"),
+                    ),
+                    selectedIndex = profile.processorIcon.coerceIn(0, PROCESSOR_ICON_MAX),
+                    onSelectedIndexChange = { index ->
+                        update {
+                            it.copy(
+                                processorIcon = index.coerceIn(0, PROCESSOR_ICON_MAX),
+                                snapdragonIcon = index == PROCESSOR_ICON_SNAPDRAGON,
+                            )
+                        }
+                    },
                 )
+                // Mirrors the LOGO import pattern in the appearance page, but animated so the rows
+                // slide in instead of popping the group's height.
+                AnimatedVisibility(
+                    visible = profile.processorIcon == PROCESSOR_ICON_CUSTOM,
+                    enter = expandVertically(animationSpec = tween(220)) + fadeIn(animationSpec = tween(180)),
+                    exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(animationSpec = tween(120)),
+                ) {
+                    Column(Modifier.fillMaxWidth()) {
+                        ArrowPreference(
+                            title = tr("导入处理器图标", "导入处理器图标"),
+                            summary = if (cpuIconImported) tr("已导入", "已导入") else tr("未导入", "未导入"),
+                            onClick = { pickCpuIcon.launch(arrayOf("image/*", "application/xml", "text/xml")) },
+                        )
+                        ArrowPreference(
+                            title = tr("清除处理器图标", "清除处理器图标"),
+                            summary = if (cpuIconImported) tr("已导入", "已导入") else tr("无图标", "无图标"),
+                            onClick = {
+                                runCatching { appearanceFile(cpuIconContext, APPEARANCE_SLOT_CPU_ICON).delete() }
+                                cpuIconImported = false
+                            },
+                        )
+                    }
+                }
                 SwitchPreference(
                     title = tr("解锁更多自动锁屏选项", "解锁更多自动锁屏选项"),
-                    checked = settings.unlockNeverScreenTimeout,
-                    onCheckedChange = { enabled -> updateSettings { it.copy(unlockNeverScreenTimeout = enabled) } },
+                    checked = settingsApp.unlockNeverScreenTimeout,
+                    onCheckedChange = { enabled -> updateSettingsApp { it.copy(unlockNeverScreenTimeout = enabled) } },
                 )
                 SwitchPreference(
                     title = tr("显示 Google 服务入口", "显示 Google 服务入口"),
-                    checked = settings.showGoogleServiceEntry,
-                    onCheckedChange = { enabled -> updateSettings { it.copy(showGoogleServiceEntry = enabled) } },
+                    checked = settingsApp.showGoogleServiceEntry,
+                    onCheckedChange = { enabled -> updateSettingsApp { it.copy(showGoogleServiceEntry = enabled) } },
                 )
                 SwitchPreference(
                     title = tr("显示已保存 WiFi 的密码", "显示已保存 WiFi 的密码"),
-                    checked = settings.showSavedWifiPasswords,
-                    onCheckedChange = { enabled -> updateSettings { it.copy(showSavedWifiPasswords = enabled) } },
+                    checked = settingsApp.showSavedWifiPasswords,
+                    onCheckedChange = { enabled -> updateSettingsApp { it.copy(showSavedWifiPasswords = enabled) } },
                 )
             }
         }
@@ -3317,10 +3461,113 @@ OverlayDropdownPreference(
             }
         }
         item {
+            Group(tr("settingsEntryLabelsGroup", "设置入口文案")) {
+                ArrowPreference(
+                    title = tr("settingsEntryLabels", "自定义系统设置入口文案"),
+                    summary = tr("settingsEntryLabelsSummary", "修改系统设置首页各入口显示的文字"),
+                    onClick = { open(PageId.SETTINGS_ENTRY_LABELS) },
+                )
+            }
+        }
+        item {
             Group(tr("设备信息", "设备信息")) {
                 ArrowPreference(title = tr("我的设备与全部参数", "我的设备与全部参数"), onClick = { open(PageId.DEVICE_PROFILE) })
             }
         }
+    }
+}
+
+private data class SettingsEntryLabel(val id: String, val title: String)
+
+/**
+ * Settings dashboard headers this module can retitle.
+ *
+ * Keyed by the header id's **resource entry name** (`my_device`, `bluetooth_settings`, ...), which is
+ * stable across Settings builds; the numeric `R.id` values are not.
+ */
+private fun settingsEntryLabelCatalog(): List<SettingsEntryLabel> = listOf(
+    SettingsEntryLabel("my_device", tr("我的设备", "我的设备")),
+    SettingsEntryLabel("bluetooth_settings", tr("蓝牙", "蓝牙")),
+    SettingsEntryLabel("wifi_settings", tr("WLAN", "WLAN")),
+    SettingsEntryLabel("msim_settings", tr("SIM 卡与移动网络", "SIM 卡与移动网络")),
+    SettingsEntryLabel("mobile_network_settings", tr("移动网络", "移动网络")),
+    SettingsEntryLabel("wifi_tether_settings", tr("个人热点", "个人热点")),
+    SettingsEntryLabel("vpn_settings", tr("VPN", "VPN")),
+    SettingsEntryLabel("sound_settings", tr("声音与振动", "声音与振动")),
+    SettingsEntryLabel("screen_settings", tr("显示与亮度", "显示与亮度")),
+    SettingsEntryLabel("battery_settings_new", tr("电池", "电池")),
+    SettingsEntryLabel("application_settings", tr("应用", "应用")),
+    SettingsEntryLabel("privacy_protection_settings", tr("隐私保护", "隐私保护")),
+    SettingsEntryLabel("location_settings", tr("位置信息", "位置信息")),
+    SettingsEntryLabel("security_settings", tr("安全", "安全")),
+    SettingsEntryLabel("mi_account_settings", tr("小米账号", "小米账号")),
+    SettingsEntryLabel("micloud_settings", tr("小米云服务", "小米云服务")),
+    SettingsEntryLabel("wallpaper_settings", tr("壁纸与个性化", "壁纸与个性化")),
+    SettingsEntryLabel("theme_settings", tr("主题", "主题")),
+    SettingsEntryLabel("font_settings", tr("字体", "字体")),
+    SettingsEntryLabel("accessibility_function", tr("无障碍", "无障碍")),
+    SettingsEntryLabel("other_advanced_settings", tr("更多设置", "更多设置")),
+    SettingsEntryLabel("launcher_settings", tr("桌面", "桌面")),
+    SettingsEntryLabel("app_timer", tr("应用使用时间", "应用使用时间")),
+    SettingsEntryLabel("sub_screen", tr("妙享背屏", "妙享背屏")),
+    SettingsEntryLabel("flip_screen_settings", tr("小折叠外屏", "小折叠外屏")),
+    SettingsEntryLabel("fold_screen_settings", tr("折叠屏专区", "折叠屏专区")),
+    SettingsEntryLabel("tablet_screen_settings", tr("平板专区", "平板专区")),
+    SettingsEntryLabel("satellite_settings", tr("卫星通信", "卫星通信")),
+    SettingsEntryLabel("interconnection_settings", tr("互联互通", "互联互通")),
+    SettingsEntryLabel("header_google_settings", tr("Google", "Google")),
+    SettingsEntryLabel("system_apps_updater", tr("系统应用更新", "系统应用更新")),
+)
+
+@Composable
+private fun SettingsEntryLabelsPage(
+    settingsApp: SettingsAppPreferences,
+    update: ((SettingsAppPreferences) -> SettingsAppPreferences) -> Unit,
+    back: () -> Unit,
+) = AppPage(tr("settingsEntryLabels", "自定义系统设置入口文案"), back, restartScopes = setOf(ScopeApplication.SETTINGS)) { padding, scroll ->
+    var editing by remember { mutableStateOf<SettingsEntryLabel?>(null) }
+    AppList(padding, scroll) {
+        item {
+            Text(
+                tr("settingsEntryLabelsHint", "留空则使用系统默认文案；修改后需要重启“设置”应用生效。"),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                style = MiuixTheme.textStyles.body2,
+            )
+        }
+        item {
+            Group(tr("settingsEntryLabelsGroup", "设置入口文案")) {
+                settingsEntryLabelCatalog().forEach { entry ->
+                    ArrowPreference(
+                        title = entry.title,
+                        summary = settingsApp.entryLabels[entry.id]?.takeIf { it.isNotBlank() }
+                            ?: tr("默认", "默认"),
+                        onClick = { editing = entry },
+                    )
+                }
+            }
+        }
+    }
+    editing?.let { entry ->
+        DeviceProfileFieldDialog(
+            title = entry.title,
+            current = settingsApp.entryLabels[entry.id].orEmpty(),
+            inputLabel = tr("settingsEntryLabelsInputHint", "留空使用系统默认"),
+            onDismiss = { editing = null },
+            onSave = { value ->
+                val trimmed = value.trim().take(MAX_SETTINGS_APP_ENTRY_TITLE_LENGTH)
+                update { current ->
+                    current.copy(
+                        entryLabels = if (trimmed.isEmpty()) {
+                            current.entryLabels - entry.id
+                        } else {
+                            current.entryLabels + (entry.id to trimmed)
+                        },
+                    )
+                }
+                editing = null
+            },
+        )
     }
 }
 
@@ -4118,6 +4365,8 @@ private fun Detail(
     updateMusicWhitelist: (Set<String>) -> Unit,
     presetActions: ShadePresetActions,
     updateAirDrop: (((AirDropSettings) -> AirDropSettings) -> Unit),
+    settingsApp: SettingsAppPreferences,
+    updateSettingsApp: ((SettingsAppPreferences) -> SettingsAppPreferences) -> Unit,
     onDebugMode: () -> Unit,
     captcha: String,
     onPickRasterImages: () -> Unit,
@@ -4201,8 +4450,9 @@ private fun Detail(
         PageId.CAMERA -> Camera(cameras, updateCamera, openPage, back)
         PageId.CAMERA_PALETTE -> CameraPalette(cameras, updateCamera, back)
         PageId.SYSTEM_UPDATE -> SystemUpdate(settings, update, back)
-        PageId.SYSTEM_SETTINGS -> SystemSettings(settings, update, deviceProfile, updateDeviceProfile, appearance, updateAppearance, openPage, onPickAppearanceLogo, onClearAppearanceLogo, back)
+        PageId.SYSTEM_SETTINGS -> SystemSettings(settingsApp, updateSettingsApp, deviceProfile, updateDeviceProfile, appearance, updateAppearance, openPage, onPickAppearanceLogo, onClearAppearanceLogo, back)
         PageId.DEVICE_PROFILE -> DeviceProfileEditor(deviceProfile, updateDeviceProfile, back)
+        PageId.SETTINGS_ENTRY_LABELS -> SettingsEntryLabelsPage(settingsApp, updateSettingsApp, back)
         PageId.SETTINGS_APPEARANCE_HOME -> SettingsAppearancePage(APPEARANCE_SLOT_HOME, appearance, updateAppearance, onPickAppearanceHome, onClearAppearanceHome, back)
         PageId.SETTINGS_APPEARANCE_DEVICE -> SettingsAppearancePage(APPEARANCE_SLOT_DEVICE, appearance, updateAppearance, onPickAppearanceDevice, onClearAppearanceDevice, back)
             PageId.TUTORIAL_DEVICE_CARD -> TutorialDeviceCardSettings(appearance, updateAppearance, onPickAppearanceLogo, onClearAppearanceLogo, onPickTutorialDeviceImage, onClearTutorialDeviceImage, onPickCustomDeviceLogo, onClearCustomDeviceLogo, onPickStyle1UpdateBackground, onClearStyle1UpdateBackground, onPickStyle2DeviceImage, onClearStyle2DeviceImage, onPickStyle2DeviceLogo, onClearStyle2DeviceLogo, onPickStyle2UpdateBackground, onClearStyle2UpdateBackground, onColorModeAssetAction, back)
@@ -4759,12 +5009,54 @@ private fun mediaTimeText(milliseconds: Long): String {
 }
 
 @Composable
+private fun XiaoAiGlassSliders(value: XiaoAiGlassParameters, update: (XiaoAiGlassParameters) -> Unit) {
+    ParameterIntSlide(tr("xiaoaiGlassBlur", "模糊强度"), value.blur, 0..200, "%", defaultValue = 100) { update(value.copy(blur = it)) }
+    ParameterIntSlide(tr("xiaoaiGlassRefraction", "折射强度"), value.refraction, 0..200, "%", defaultValue = 100) { update(value.copy(refraction = it)) }
+    ParameterIntSlide(tr("xiaoaiGlassSoftLight", "柔光强度"), value.softLight, 0..200, "%", defaultValue = 100) { update(value.copy(softLight = it)) }
+    ParameterIntSlide(tr("xiaoaiGlassSaturation", "饱和度"), value.saturation, 0..200, "%", defaultValue = 100) { update(value.copy(saturation = it)) }
+    ParameterIntSlide(tr("xiaoaiGlassBrightness", "亮度"), value.brightness, 0..200, "%", defaultValue = 100) { update(value.copy(brightness = it)) }
+    // No opacity slider: the shader's layer alpha must stay at its native value or the glass layer
+    // is dropped entirely. See SuperXiaoAiInputGlassSettings.
+}
+
+@Composable
 private fun SuperXiaoAi(
     settings: HookSettings,
     update: ((HookSettings) -> HookSettings) -> Unit,
     back: () -> Unit,
-) = AppPage(tr("\u8d85\u7ea7\u5c0f\u7231\u8f93\u5165\u6cd5", "\u8d85\u7ea7\u5c0f\u7231\u8f93\u5165\u6cd5"), back, restartScopes = setOf(ScopeApplication.SUPER_XIAOAI_IME)) { padding, scroll ->
+) = AppPage(tr("超级小爱", "超级小爱"), back, restartScopes = setOf(ScopeApplication.SUPER_XIAOAI, ScopeApplication.SUPER_XIAOAI_IME)) { padding, scroll ->
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    val onFloatingChanged = LocalXiaoAiSettingsChanged.current
+    val store = remember(context) { SuperXiaoAiInputGlassSettingsStore(context) }
+    var floating by remember { mutableStateOf(store.settings) }
+    LaunchedEffect(service) {
+        service?.let(store::syncRemote)
+        floating = store.settings
+    }
+    val updateFloating: ((SuperXiaoAiInputGlassSettings) -> SuperXiaoAiInputGlassSettings) -> Unit = { transform ->
+        store.update(service, transform)
+        floating = store.settings
+        onFloatingChanged()
+    }
     AppList(padding, scroll, 28) {
+        item {
+            Group(tr("xiaoaiFloatingInput", "悬浮输入框")) {
+                SwitchPreference(
+                    title = tr("xiaoaiInputGlass", "为悬浮输入框添加柔光玻璃效果"),
+                    checked = floating.enabled,
+                    onCheckedChange = { value -> updateFloating { it.copy(enabled = value) } },
+                )
+            }
+        }
+        if (floating.enabled) {
+            item {
+                Group(tr("xiaoaiInputParameters", "悬浮输入框柔光玻璃参数")) {
+                    XiaoAiGlassSliders(floating.parameters) { value -> updateFloating { it.copy(parameters = value) } }
+                }
+            }
+        }
+
         item {
             Group(tr("\u5916\u89c2", "\u5916\u89c2")) {
                 SwitchPreference(
@@ -9737,6 +10029,48 @@ private fun ParameterFloatSlide(
     )
 }
 
+/**
+ * Startup prompt for the module's own release feed. It only announces the new version and routes the
+ * user to the software update page, which stays the single place that downloads and installs.
+ */
+@Composable
+private fun UpdateAvailableDialog(
+    show: Boolean,
+    currentVersion: String,
+    latestVersion: String,
+    onDismiss: () -> Unit,
+    onViewUpdate: () -> Unit,
+) {
+    WindowDialog(show = show, onDismissRequest = onDismiss) {
+        Text(
+            tr("检测到新版本", "检测到新版本"),
+            style = MiuixTheme.textStyles.title3,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            "${tr("当前版本", "当前版本")}：$currentVersion",
+            style = MiuixTheme.textStyles.body2,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            modifier = Modifier.padding(top = 12.dp),
+        )
+        Text(
+            "${tr("最新版本", "最新版本")}：$latestVersion",
+            style = MiuixTheme.textStyles.body2,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        Spacer(Modifier.height(20.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            GlassDialogButton(onDismiss, Modifier.weight(1f)) { Text(tr("取消", "取消")) }
+            GlassDialogButton(
+                onClick = onViewUpdate,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColorsPrimary(),
+            ) { Text(tr("查看更新", "查看更新")) }
+        }
+    }
+}
+
 @Composable
 private fun SoftwareUpdate(openPage: (PageId) -> Unit, back: () -> Unit) {
     val context = LocalContext.current
@@ -9932,6 +10266,12 @@ private fun SoftwareUpdate(openPage: (PageId) -> Unit, back: () -> Unit) {
 
 private data class UpdateInfo(val versionCode: Long, val versionName: String, val releaseNoteUrl: String, val apkUrl: String, val apkSize: Long)
 private var lastUpdateChannel = "github"
+
+/** Set once the startup check resolved an answer, so it is not repeated within one process. */
+private var startupUpdateChecked = false
+
+/** The newer build the startup check found, kept at process scope so recomposition cannot lose it. */
+private var startupUpdatePending: UpdateInfo? = null
 
 private fun stripMarkdown(value: String): String = value
     .replace(Regex("^\\s{0,3}#{1,6}\\s*", RegexOption.MULTILINE), "")

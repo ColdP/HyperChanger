@@ -64,6 +64,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.SystemServerStartingParam
 import btm.m.xiaoaihook.SuperXiaoAiInputHook
+import btm.m.xiaoaihook.SuperXiaoAiWindowHook
 import btm.m.liquidglass.AppColorMode
 import btm.m.liquidglass.LabelMode
 import btm.m.liquidglass.NavigationStyle
@@ -677,9 +678,16 @@ class HyperSystemUiModule : XposedModule() {
                 android.R.drawable.ic_menu_manage
             }
             setIntField(header, "iconRes", settingsIcon)
-            val label = runCatching {
-                (moduleContext ?: settingsContext).applicationInfo.loadLabel(settingsContext.packageManager).toString()
-            }.getOrDefault("HyperChanger")
+            // A custom title wins over the module's application label; blank keeps the default.
+            val customTitle = prefs.getString(KEY_SETTINGS_APP_ENTRY_TITLE, "").orEmpty()
+                .trim().take(MAX_SETTINGS_APP_ENTRY_TITLE_LENGTH)
+            val label = if (customTitle.isNotBlank()) {
+                customTitle
+            } else {
+                runCatching {
+                    (moduleContext ?: settingsContext).applicationInfo.loadLabel(settingsContext.packageManager).toString()
+                }.getOrDefault("HyperChanger")
+            }
             setObjectField(header, "title", label)
             setObjectField(header, "intent", Intent().setClassName(BuildConfig.APPLICATION_ID, "${BuildConfig.APPLICATION_ID}.MainActivity").apply {
                 putExtra("isDisplayHomeAsUpEnabled", true)
@@ -700,6 +708,43 @@ class HyperSystemUiModule : XposedModule() {
                 setIntField(header, "groupId", getIntField(groupSource!!, "groupId"))
             }
             headers.add(insertAt.coerceIn(0, headers.size), header)
+            result
+        }
+    }
+
+    /**
+     * Rewrites the visible titles of the Settings dashboard entries.
+     *
+     * `PreferenceActivity.Header.getTitle()` prefers `titleRes` over `title`, and `titleRes` is also
+     * reused for the second-layer page title and for click analytics, so mutating the header would
+     * break those. The bound row view is retitled instead, which touches display text only.
+     *
+     * The header id's resource entry name (`my_device`, `bluetooth_settings`, ...) is stable across
+     * Settings builds; the numeric ids are not.
+     */
+    private fun installSettingsEntryLabelHook(loader: ClassLoader, prefs: SharedPreferences) {
+        val adapter = runCatching { loader.loadClass(MIUI_SETTINGS_HEADER_ADAPTER) }.getOrNull() ?: return
+        val bind = adapter.declaredMethods.firstOrNull {
+            it.name == "onBindViewHolder" && it.parameterCount == 2 &&
+                it.parameterTypes[1] == Int::class.javaPrimitiveType
+        } ?: return
+        val getItem = runCatching { adapter.getMethod("getItem", Int::class.javaPrimitiveType) }.getOrNull() ?: return
+        hook(bind).setExceptionMode(ExceptionMode.PROTECTIVE).setId("hyperchanger:settings-entry-labels").intercept { chain ->
+            val result = chain.proceed()
+            runCatching {
+                val labels = readSettingsEntryLabels(prefs)
+                if (labels.isEmpty()) return@runCatching
+                val position = chain.getArg(1) as? Int ?: return@runCatching
+                val header = getItem.invoke(chain.thisObject, position) ?: return@runCatching
+                val id = header.javaClass.getField("id").getLong(header)
+                if (id <= 0L) return@runCatching
+                val holder = chain.getArg(0)
+                val title = holder.javaClass.getField("title").get(holder) as? TextView ?: return@runCatching
+                val name = runCatching { title.resources.getResourceEntryName(id.toInt()) }.getOrNull()
+                    ?: return@runCatching
+                val custom = labels[name] ?: return@runCatching
+                if (title.text?.toString() != custom) title.text = custom
+            }
             result
         }
     }
@@ -732,6 +777,9 @@ class HyperSystemUiModule : XposedModule() {
             runCatching {
                 installSettingsAppEntryHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
             }.onFailure { error -> log(Log.ERROR, TAG, "Could not install Settings app entry hook", error) }
+            runCatching {
+                installSettingsEntryLabelHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install Settings entry label hook", error) }
             return
         }
         if (param.packageName == AIRDROP_PACKAGE) {
@@ -747,6 +795,12 @@ class HyperSystemUiModule : XposedModule() {
         if (param.packageName == XMSF_PACKAGE) {
             runCatching { unlockFocusAuthHook.install(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP)) }
                 .onFailure { error -> log(Log.WARN, TAG, "Could not install focus authentication hook", error) }
+            return
+        }
+        if (param.packageName == "com.miui.voiceassist") {
+            runCatching {
+                SuperXiaoAiWindowHook.install(this, param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install Super XiaoAI floating window hooks", error) }
             return
         }
         if (param.packageName !in SYSTEM_UI_TARGETS) return
@@ -14439,7 +14493,7 @@ class HyperSystemUiModule : XposedModule() {
         private const val AIRDROP_PACKAGE = "com.miui.mishare.connectivity"
         private const val AIRDROP_AVAILABILITY_CLASS = "com.miui.mishare.connectivity.c"
         private const val SETTINGS_HEADER_ID = 0x4843_0001L
-        private const val KEY_SETTINGS_APP_ENTRY_POSITION = "settings_app_entry_position"
+        private const val MIUI_SETTINGS_HEADER_ADAPTER = "com.android.settings.MiuiSettings\$HeaderAdapter"
         private const val KEY_HIDE_APP_ICON = "hide_app_icon"
         @Volatile private var settingsModuleResourcesLoader: ResourcesLoader? = null
         private const val TAG = "HyperSystemUIHook"

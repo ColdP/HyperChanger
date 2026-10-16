@@ -10,6 +10,19 @@ const val DEVICE_PROFILE_PREFERENCES = "device_profile"
 private const val KEY_DEVICE_PROFILE_INITIALIZED = "initialized"
 private const val KEY_ENABLED = "enabled"
 private const val KEY_SNAPDRAGON_ICON = "snapdragon_icon"
+private const val KEY_PROCESSOR_ICON = "processor_icon"
+
+/** Processor icon choices for the device cards. Index order matches the picker in the module UI. */
+internal const val PROCESSOR_ICON_SYSTEM = 0
+internal const val PROCESSOR_ICON_SNAPDRAGON = 1
+internal const val PROCESSOR_ICON_XRING = 2
+internal const val PROCESSOR_ICON_DIMENSITY = 3
+internal const val PROCESSOR_ICON_APPLE = 4
+internal const val PROCESSOR_ICON_INTEL = 5
+internal const val PROCESSOR_ICON_NVIDIA = 6
+internal const val PROCESSOR_ICON_AMD = 7
+internal const val PROCESSOR_ICON_CUSTOM = 8
+internal const val PROCESSOR_ICON_MAX = PROCESSOR_ICON_CUSTOM
 private const val KEY_MODEL = "model"
 private const val KEY_PROCESSOR = "processor"
 private const val KEY_DEVICE_DETAIL_PROCESSOR = "device_detail_processor"
@@ -30,6 +43,8 @@ private const val KEY_HARDWARE = "hardware"
 /** Values are presentation overrides for Settings, never changes to system properties. */
 data class DeviceProfileSettings(
     val enabled: Boolean = false,
+    val processorIcon: Int = PROCESSOR_ICON_SYSTEM,
+    /** Mirrors [processorIcon] == Snapdragon; kept so the existing Snapdragon-only checks still work. */
     val snapdragonIcon: Boolean = false,
     val model: String = "",
     val processor: String = "",
@@ -74,10 +89,23 @@ class DeviceProfileStore(context: Context) {
 
 internal fun SharedPreferences.toDeviceProfileSettings() = DeviceProfileSettings(
     enabled = getBoolean(KEY_ENABLED, false),
-    snapdragonIcon = getBoolean(KEY_SNAPDRAGON_ICON, false),
+    // The old boolean toggle migrates onto the Snapdragon entry of the icon picker.
+    processorIcon = if (getBoolean(KEY_SNAPDRAGON_ICON, false)) {
+        PROCESSOR_ICON_SNAPDRAGON
+    } else {
+        getInt(KEY_PROCESSOR_ICON, PROCESSOR_ICON_SYSTEM).coerceIn(0, PROCESSOR_ICON_MAX)
+    },
+    snapdragonIcon = if (getBoolean(KEY_SNAPDRAGON_ICON, false)) {
+        true
+    } else {
+        getInt(KEY_PROCESSOR_ICON, PROCESSOR_ICON_SYSTEM) == PROCESSOR_ICON_SNAPDRAGON
+    },
     model = getString(KEY_MODEL, "").orEmpty(),
     processor = getString(KEY_PROCESSOR, "").orEmpty(),
-    detailProcessor = getString(KEY_DEVICE_DETAIL_PROCESSOR, getString(KEY_PROCESSOR, "").orEmpty()).orEmpty(),
+    // Deliberately NOT falling back to KEY_PROCESSOR: the detail page ("All parameters") must stay
+    // independent from the "My device" grid. Inheriting the grid value made the two pages always
+    // show the same processor no matter which one the user edited.
+    detailProcessor = getString(KEY_DEVICE_DETAIL_PROCESSOR, "").orEmpty(),
     ram = getString(KEY_RAM, "").orEmpty(),
     battery = getString(KEY_BATTERY, "").orEmpty(),
     screenSize = getString(KEY_SCREEN_SIZE, "").orEmpty(),
@@ -97,7 +125,8 @@ private fun SharedPreferences.writeDeviceProfileSettings(value: DeviceProfileSet
     edit()
         .putBoolean(KEY_DEVICE_PROFILE_INITIALIZED, true)
         .putBoolean(KEY_ENABLED, value.enabled)
-        .putBoolean(KEY_SNAPDRAGON_ICON, value.snapdragonIcon)
+        .putInt(KEY_PROCESSOR_ICON, value.processorIcon.coerceIn(0, PROCESSOR_ICON_MAX))
+        .remove(KEY_SNAPDRAGON_ICON)
         .putString(KEY_MODEL, value.model)
         .putString(KEY_PROCESSOR, value.processor)
         .putString(KEY_DEVICE_DETAIL_PROCESSOR, value.detailProcessor)

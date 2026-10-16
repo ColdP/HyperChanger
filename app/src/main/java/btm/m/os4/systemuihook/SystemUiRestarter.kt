@@ -104,6 +104,7 @@ enum class ScopeApplication(val title: String, val packageName: String) {
     GALLERY("\u76f8\u518c", "com.miui.gallery"),
     CAMERA("\u76f8\u673a", "com.android.camera"),
     MEDIA_EDITOR("\u5c0f\u7c73\u76f8\u518c-\u7f16\u8f91", "com.miui.mediaeditor"),
+    SUPER_XIAOAI("超级小爱", "com.miui.voiceassist"),
     SUPER_XIAOAI_IME("\u8d85\u7ea7\u5c0f\u7231\u8f93\u5165\u6cd5", "com.xiaomi.type"),
     SETTINGS("\u8bbe\u7f6e", "com.android.settings"),
     SYSTEM_UPDATE("\u7cfb\u7edf\u66f4\u65b0", "com.android.updater"),

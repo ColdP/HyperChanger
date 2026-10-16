@@ -449,7 +449,11 @@ object SettingsAppearanceApplier {
         val matches = cardColorResources[resources]?.get(resourceId) ?: run {
             val packageName = runCatching { resources.getResourcePackageName(resourceId) }.getOrNull()
             val name = runCatching { resources.getResourceEntryName(resourceId).lowercase() }.getOrNull()
-            val result = packageName == null || packageName == "com.android.settings" && name in LIGHT_CARD_COLOR_RESOURCES
+            // Fail closed. The previous default treated an unresolvable id as a card colour, so
+            // whatever colour failed the lookup got rewritten to translucent white and the surface
+            // it belonged to lost its background. Only a positively identified Settings card colour
+            // may be replaced.
+            val result = packageName == "com.android.settings" && name != null && name in LIGHT_CARD_COLOR_RESOURCES
             cardColorResources.getOrPut(resources) { HashMap() }[resourceId] = result
             result
         }
@@ -1094,15 +1098,20 @@ object SettingsAppearanceApplier {
         }
 
         private fun isCard(view: View): Boolean {
-            if (view.width <= 0 || view.height <= 0) return false
             val name = runCatching {
                 if (view.id == View.NO_ID || view.id == 0) ""
                 else activity.resources.getResourceEntryName(view.id).lowercase()
             }.getOrDefault("")
             val cls = view.javaClass.name.lowercase()
-            return (name.contains("card") || cls.contains("card")) &&
-                !name.contains("icon") && !name.contains("button") &&
-                view.width >= activity.resources.displayMetrics.widthPixels * 0.55f
+            if (!(name.contains("card") || cls.contains("card"))) return false
+            if (name.contains("icon") || name.contains("button")) return false
+            // The walk runs both from apply() - before the first layout - and from the layout
+            // listener. Requiring a measured view made the same row count in one pass and not in the
+            // other, and once apply() had recorded the root size the listener no longer re-ran, so
+            // some cards kept their background and others faded out. Unmeasured rows are treated as
+            // cards; the width filter only applies once a width exists.
+            if (view.width <= 0) return true
+            return view.width >= activity.resources.displayMetrics.widthPixels * 0.55f
         }
 
         private fun isLightMode(): Boolean =
@@ -1125,9 +1134,9 @@ object SettingsAppearanceApplier {
         view.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK != Configuration.UI_MODE_NIGHT_YES
 
     private fun isCardLike(view: View): Boolean {
-        val width = view.width
-        val height = view.height
-        if (width <= 0 || height <= 0) return false
+        // Cached hits win even before layout: setBackground often runs during onCreateViewHolder /
+        // onBindViewHolder, when width and height are still 0. Rejecting those views made the
+        // replacement depend on RecyclerView recycling order, so the card background came and went.
         if (cardLikeViews[view] == true) return true
         val name = runCatching {
             if (view.id == View.NO_ID || view.id == 0) "" else view.resources.getResourceEntryName(view.id).lowercase()

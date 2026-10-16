@@ -13,9 +13,6 @@ internal const val KEY_SYSTEM_UPDATE_OTA_LIMIT_REMOVED = "system_update_ota_limi
 internal const val KEY_SYSTEM_UPDATE_VERSION_SPOOF_ENABLED = "system_update_version_spoof_enabled"
 internal const val KEY_SYSTEM_UPDATE_VERSION = "system_update_version"
 internal const val KEY_SYSTEM_UPDATE_SOTA_VERSION = "system_update_sota_version"
-internal const val KEY_UNLOCK_NEVER_SCREEN_TIMEOUT = "unlock_never_screen_timeout"
-internal const val KEY_SHOW_GOOGLE_SERVICE_ENTRY = "show_google_service_entry"
-internal const val KEY_SHOW_SAVED_WIFI_PASSWORDS = "show_saved_wifi_passwords"
 internal const val KEY_STACKED_MOBILE_SIGNAL_ENABLED = "stacked_mobile_signal_enabled"
 internal const val KEY_STACKED_MOBILE_SIGNAL_SCALE = "stacked_mobile_signal_scale"
 internal const val KEY_STACKED_MOBILE_SIGNAL_VERTICAL_OFFSET = "stacked_mobile_signal_vertical_offset"
@@ -299,15 +296,10 @@ data class HookSettings(
     val systemUpdateVersionSpoofEnabled: Boolean = false,
     val systemUpdateVersion: String = "",
     val systemUpdateSotaVersion: String = "",
-    val unlockNeverScreenTimeout: Boolean = false,
-    val showGoogleServiceEntry: Boolean = false,
-    val showSavedWifiPasswords: Boolean = false,
     val themeMode: String = "system",
     val predictiveBackEnabled: Boolean = true,
     val predictiveBackProgress: Int = 90,
     val hideAppIcon: Boolean = false,
-    /** 0 = disabled, 1 = top, 2 = middle, 3 = bottom in Android Settings. */
-    val settingsAppEntryPosition: Int = 0,
 )
 
 class HookSettingsStore(context: Context) {
@@ -370,7 +362,6 @@ class HookSettingsStore(context: Context) {
 private const val KEY_INITIALIZED = "initialized"
 private const val KEY_USER_SHADE_PRESETS = "user_shade_presets_v1"
 private const val KEY_HIDE_APP_ICON = "hide_app_icon"
-private const val KEY_SETTINGS_APP_ENTRY_POSITION = "settings_app_entry_position"
 private const val MAX_PRESET_NAME_LENGTH = 40
 private const val KEY_NOTIFICATION_ELEMENTS_MATERIAL = "shade_notification_elements_material_v2"
 private const val KEY_CONTROL_CENTER_ELEMENTS_MATERIAL = "shade_control_center_elements_material_v2"
@@ -1133,14 +1124,10 @@ private fun SharedPreferences.toSettings(): HookSettings {
     systemUpdateVersionSpoofEnabled = getBoolean(KEY_SYSTEM_UPDATE_VERSION_SPOOF_ENABLED, false),
     systemUpdateVersion = getString(KEY_SYSTEM_UPDATE_VERSION, "").orEmpty().take(128),
     systemUpdateSotaVersion = getString(KEY_SYSTEM_UPDATE_SOTA_VERSION, "").orEmpty().take(128),
-    unlockNeverScreenTimeout = getBoolean(KEY_UNLOCK_NEVER_SCREEN_TIMEOUT, false),
-    showGoogleServiceEntry = getBoolean(KEY_SHOW_GOOGLE_SERVICE_ENTRY, false),
-    showSavedWifiPasswords = getBoolean(KEY_SHOW_SAVED_WIFI_PASSWORDS, false),
     themeMode = getString(KEY_THEME_MODE, "system").orEmpty().ifBlank { "system" },
     predictiveBackEnabled = getBoolean(KEY_PREDICTIVE_BACK_ENABLED, true),
     predictiveBackProgress = getInt(KEY_PREDICTIVE_BACK_PROGRESS, 90).coerceIn(10, 100),
     hideAppIcon = getBoolean(KEY_HIDE_APP_ICON, false),
-    settingsAppEntryPosition = getInt(KEY_SETTINGS_APP_ENTRY_POSITION, 0).coerceIn(0, 3),
 )
 }
 
@@ -1618,13 +1605,9 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putBoolean(KEY_SYSTEM_UPDATE_VERSION_SPOOF_ENABLED, value.systemUpdateVersionSpoofEnabled)
         .putString(KEY_SYSTEM_UPDATE_VERSION, value.systemUpdateVersion.take(128))
         .putString(KEY_SYSTEM_UPDATE_SOTA_VERSION, value.systemUpdateSotaVersion.take(128))
-        .putBoolean(KEY_UNLOCK_NEVER_SCREEN_TIMEOUT, value.unlockNeverScreenTimeout)
-        .putBoolean(KEY_SHOW_GOOGLE_SERVICE_ENTRY, value.showGoogleServiceEntry)
-        .putBoolean(KEY_SHOW_SAVED_WIFI_PASSWORDS, value.showSavedWifiPasswords)
         .putString(KEY_THEME_MODE, value.themeMode)
         .putBoolean(KEY_PREDICTIVE_BACK_ENABLED, value.predictiveBackEnabled)
         .putInt(KEY_PREDICTIVE_BACK_PROGRESS, value.predictiveBackProgress)
         .putBoolean(KEY_HIDE_APP_ICON, value.hideAppIcon)
-        .putInt(KEY_SETTINGS_APP_ENTRY_POSITION, value.settingsAppEntryPosition.coerceIn(0, 3))
         .apply()
 }
