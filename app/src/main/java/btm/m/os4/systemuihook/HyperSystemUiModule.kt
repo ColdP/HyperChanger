@@ -35,7 +35,11 @@ import android.graphics.drawable.RippleDrawable
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.ParcelFileDescriptor
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import android.provider.Settings
 import android.telephony.SubscriptionManager
 import android.text.SpannableString
@@ -722,6 +726,86 @@ class HyperSystemUiModule : XposedModule() {
      * The header id's resource entry name (`my_device`, `bluetooth_settings`, ...) is stable across
      * Settings builds; the numeric ids are not.
      */
+    /**
+     * Keeps the lift-to-wake gesture alive while the configured window is open.
+     *
+     * `KeyguardSensorInjector.updatePickupSensorRegistration` decides whether to listen for the lift
+     * gesture from two flags: `mWakeupByPickUp` and the system pickup switch. Only the first is ours
+     * to override, so inside the window it is forced on before the native evaluation runs; outside it
+     * is left untouched so the user's own setting keeps working.
+     */
+    /**
+     * Registers the lift-to-wake pickup sensor during the configured window.
+     *
+     * `updatePickupSensorRegistration` gates on two things: `mWakeupByPickUp` and the system pickup
+     * switch. The switch is not ours to flip, and forcing the flag also broke the AOD wake path. So
+     * neither is touched here: the injector instance is captured and the pickup listener is
+     * registered directly while the window is open, then released once it closes. When the native
+     * code already has the sensor registered its own handling wins and this stays out of the way.
+     */
+    private fun installLiftToWakeScheduleHook(loader: ClassLoader, prefs: SharedPreferences) {
+        val cls = loader.loadClass("com.android.keyguard.injector.KeyguardSensorInjector")
+        val instance = AtomicReference<Any?>(null)
+        cls.declaredConstructors.forEach { constructor ->
+            hook(constructor)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("hyperchanger:lift-to-wake-instance")
+                .intercept { chain ->
+                    val created = chain.proceed()
+                    if (created != null) instance.set(created)
+                    created
+                }
+        }
+        val main = Handler(Looper.getMainLooper())
+        val registered = AtomicBoolean(false)
+        val tick = object : Runnable {
+            override fun run() {
+                runCatching { applyLiftToWakeSchedule(cls, instance.get(), registered, prefs) }
+                main.postDelayed(this, 20_000L)
+            }
+        }
+        main.post(tick)
+        log(Log.INFO, TAG, "Installed lift-to-wake schedule hook")
+    }
+
+    private fun applyLiftToWakeSchedule(
+        cls: Class<*>,
+        injector: Any?,
+        registered: AtomicBoolean,
+        prefs: SharedPreferences,
+    ) {
+        if (injector == null) return
+        val schedule = readLiftToWakeSchedulePreferences(prefs)
+        val active = schedule.isActiveAt(currentMinuteOfDay())
+        val nativeRegistered = runCatching {
+            cls.getDeclaredField("mCurrentPickupSensorRegistered").apply { isAccessible = true }.getBoolean(injector)
+        }.getOrDefault(false)
+        val manager = runCatching {
+            cls.getDeclaredField("mSensorManager").apply { isAccessible = true }.get(injector)
+        }.getOrNull() as? SensorManager ?: return
+        val listener = runCatching {
+            cls.getDeclaredField("mPickupSensorListener").apply { isAccessible = true }.get(injector)
+        }.getOrNull() as? SensorEventListener ?: return
+        val sensorType = runCatching {
+            cls.getDeclaredField("WAKEUP_AND_SLEEP_SENSOR_XIAOMI").apply { isAccessible = true }.getInt(injector)
+        }.getOrDefault(33171036)
+        if (active && !nativeRegistered && !registered.get()) {
+            val sensor = manager.getDefaultSensor(sensorType, true) ?: return
+            manager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+            registered.set(true)
+            log(Log.INFO, TAG, "Lift-to-wake window opened, pickup sensor registered")
+        } else if ((!active || nativeRegistered) && registered.get()) {
+            manager.unregisterListener(listener)
+            registered.set(false)
+            log(Log.INFO, TAG, "Lift-to-wake window closed, pickup sensor released")
+        }
+    }
+
+    private fun currentMinuteOfDay(): Int {
+        val calendar = java.util.Calendar.getInstance()
+        return calendar.get(java.util.Calendar.HOUR_OF_DAY) * 60 + calendar.get(java.util.Calendar.MINUTE)
+    }
+
     private fun installSettingsEntryLabelHook(loader: ClassLoader, prefs: SharedPreferences) {
         val adapter = runCatching { loader.loadClass(MIUI_SETTINGS_HEADER_ADAPTER) }.getOrNull() ?: return
         val bind = adapter.declaredMethods.firstOrNull {
@@ -751,6 +835,11 @@ class HyperSystemUiModule : XposedModule() {
 
     override fun onPackageLoaded(param: PackageLoadedParam) {
         if (!OsCompatibility.areHooksAllowed()) return
+        if (param.packageName == "com.android.systemui") {
+            runCatching {
+                installLiftToWakeScheduleHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install lift-to-wake schedule hook", error) }
+        }
         if (param.packageName == "android" || param.packageName == "system") {
             return
         }

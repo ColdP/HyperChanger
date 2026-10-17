@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 btm_m
 package btm.m.os4.systemuihook
 
@@ -161,6 +161,11 @@ import com.kyant.backdrop.effects.vibrancy
 import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.shadow.Shadow
 import io.github.libxposed.service.XposedService
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
 import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.ChevronBackward
@@ -274,7 +279,7 @@ private enum class PageId {
     SHADE_NOTIFICATION_BACKGROUND,
     SHADE_CONTROL_CENTER_BACKGROUND,
     GESTURE_HANDLE_STYLE, DESKTOP, DESKTOP_MATERIAL,
-    ISLAND, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, DEVICE_PROFILE,
+    ISLAND, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
     SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, OTHER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION,
@@ -4465,6 +4470,7 @@ private fun Detail(
         PageId.CONTROL -> Control(settings, update, back)
         PageId.LOCK -> Lock(settings, lockscreenCapsuleSettings, update, openPage, back)
         PageId.LOCKSCREEN_CAPSULE -> LockscreenCapsule(lockscreenCapsuleSettings, updateLockscreenCapsule, back)
+        PageId.LIFT_TO_WAKE_SCHEDULE -> LiftToWakeSchedulePage(back)
         PageId.LOCKSCREEN_WIDGET_EDITOR -> LockscreenWidgetEditor(settings, update, back)
         PageId.LOCKSCREEN_WIDGET_BACKGROUND -> LockscreenWidgetBackgroundSettings(settings, update, back)
         PageId.LYRIC_LIBRARY -> LyricLibraryPage(back)
@@ -7968,6 +7974,160 @@ private fun LyricLibraryPage(back: () -> Unit) {
     }
 }
 
+/**
+ * Capsule tab strip used by the schedule page. The module has no page-level Backdrop context (only
+ * `LocalDialogBackdrop` inside glass dialogs), so the glass is approximated with the same layered
+ * recipe: a translucent tinted container, a pill behind the active label, and a capsule clip.
+ */
+@Composable
+private fun GlassSegmentedTabs(
+    tabs: List<String>,
+    selected: Int,
+    onSelected: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val container = MiuixTheme.colorScheme.surfaceContainer
+    val indicator = MiuixTheme.colorScheme.onSurfaceContainer.copy(alpha = 0.08f)
+    val backdrop = rememberLayerBackdrop()
+    Row(
+        modifier
+            .fillMaxWidth()
+            .height(42.dp)
+            .clip(RoundedCornerShape(50.dp))
+            .drawBackdrop(
+                backdrop = backdrop,
+                shape = { RoundedCornerShape(50.dp) },
+                effects = {
+                    vibrancy()
+                    blur(6.dp.toPx())
+                    lens(18.dp.toPx(), 44.dp.toPx(), depthEffect = true, chromaticAberration = true)
+                },
+                highlight = { Highlight.Default.copy(alpha = 0.62f) },
+                shadow = { Shadow.Default.copy(radius = 10.dp, color = androidx.compose.ui.graphics.Color.Black, alpha = 0.28f) },
+                innerShadow = null,
+                onDrawSurface = { drawRect(container.copy(alpha = 0.82f)) },
+            )
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        tabs.forEachIndexed { index, label ->
+            val active = index == selected
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(50.dp))
+                    .then(if (active) Modifier.background(indicator) else Modifier)
+                    .clickable { onSelected(index) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = label,
+                    color = MiuixTheme.colorScheme.onSurfaceContainer,
+                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                    fontSize = 14.sp,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LiftToWakeSchedulePage(back: () -> Unit) {
+    val context = LocalContext.current
+    val store = remember(context) { LiftToWakeSchedulePreferencesStore(context) }
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    var schedule by remember { mutableStateOf(store.settings) }
+    LaunchedEffect(service) {
+        service?.let {
+            store.syncRemote(it)
+            schedule = store.settings
+        }
+    }
+    val update: ((LiftToWakeSchedulePreferences) -> LiftToWakeSchedulePreferences) -> Unit = { transform ->
+        store.update(service, transform)
+        schedule = store.settings
+    }
+    var tab by remember { mutableStateOf(0) }
+    fun pickTime(editingStart: Boolean) {
+        val base = if (editingStart) schedule.startMinutes else schedule.endMinutes
+        android.app.TimePickerDialog(
+            context,
+            { _, hour, minute ->
+                val minutes = hour * 60 + minute
+                update { current ->
+                    if (editingStart) current.copy(startMinutes = minutes) else current.copy(endMinutes = minutes)
+                }
+            },
+            base / 60,
+            base % 60,
+            true,
+        ).show()
+    }
+    AppPage(
+        tr("定时抬起亮屏", "定时抬起亮屏"),
+        back,
+        restartScopes = setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.AOD),
+        header = {
+            GlassSegmentedTabs(
+                tabs = listOf(tr("开启时间", "开启时间"), tr("结束时间", "结束时间")),
+                selected = tab,
+                onSelected = { tab = it },
+                modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp),
+            )
+        },
+    ) { padding, scroll ->
+        AppList(padding, scroll) {
+            item {
+                Group(tr("时间段", "时间段")) {
+                    val editingStart = tab == 0
+                    val currentMinutes = if (editingStart) schedule.startMinutes else schedule.endMinutes
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        NumberPicker(
+                            value = currentMinutes / 60,
+                            onValueChange = { hour ->
+                                update { current ->
+                                    val minutes = hour * 60 + currentMinutes % 60
+                                    if (editingStart) current.copy(startMinutes = minutes) else current.copy(endMinutes = minutes)
+                                }
+                            },
+                            range = 0..23,
+                            wrapAround = true,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(text = ":", modifier = Modifier.padding(horizontal = 8.dp))
+                        NumberPicker(
+                            value = currentMinutes % 60,
+                            onValueChange = { minute ->
+                                update { current ->
+                                    val minutes = currentMinutes / 60 * 60 + minute
+                                    if (editingStart) current.copy(startMinutes = minutes) else current.copy(endMinutes = minutes)
+                                }
+                            },
+                            range = 0..59,
+                            wrapAround = true,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+            item {
+                Group(tr("预览", "预览")) {
+                    ArrowPreference(
+                        title = tr("生效时间段", "生效时间段"),
+                        summary = schedule.windowLabel(),
+                        onClick = {},
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun LockscreenCapsule(
     capsule: LockscreenCapsuleSettings,
@@ -10924,6 +11084,7 @@ internal fun AppPage(
     floatingToolbar: @Composable () -> Unit = {},
     showLargeTitle: Boolean = true,
     pageBackground: (@Composable BoxScope.() -> Unit)? = null,
+    header: @Composable () -> Unit = {},
     content: @Composable (PaddingValues, ScrollBehavior) -> Unit,
 ) {
     val context = LocalContext.current
@@ -10949,6 +11110,7 @@ internal fun AppPage(
         floatingToolbar = floatingToolbar,
         floatingToolbarPosition = floatingToolbarPosition,
         topBar = {
+            Column(Modifier.fillMaxWidth()) {
             Box {
                 if (pageBackground != null) {
                     ProgressiveBlurLayer(backdrop, topBarMaterialProgress)
@@ -11016,6 +11178,8 @@ internal fun AppPage(
                         Text(title, style = MiuixTheme.textStyles.title3, maxLines = 1)
                     }
                 }
+            }
+                header()
             }
         }
     ) { padding ->
