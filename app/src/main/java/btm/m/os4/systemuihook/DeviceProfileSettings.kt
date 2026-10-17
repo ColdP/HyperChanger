@@ -24,6 +24,7 @@ internal const val PROCESSOR_ICON_AMD = 7
 internal const val PROCESSOR_ICON_CUSTOM = 8
 internal const val PROCESSOR_ICON_MAX = PROCESSOR_ICON_CUSTOM
 private const val KEY_MODEL = "model"
+private const val KEY_DEVICE_DETAIL_MODEL = "device_detail_model"
 private const val KEY_PROCESSOR = "processor"
 private const val KEY_DEVICE_DETAIL_PROCESSOR = "device_detail_processor"
 private const val KEY_RAM = "ram"
@@ -47,6 +48,8 @@ data class DeviceProfileSettings(
     /** Mirrors [processorIcon] == Snapdragon; kept so the existing Snapdragon-only checks still work. */
     val snapdragonIcon: Boolean = false,
     val model: String = "",
+    /** Certification (CTA) model shown on the All Parameters page, independent from [model]. */
+    val detailModel: String = "",
     val processor: String = "",
     val detailProcessor: String = "",
     val ram: String = "",
@@ -101,6 +104,7 @@ internal fun SharedPreferences.toDeviceProfileSettings() = DeviceProfileSettings
         getInt(KEY_PROCESSOR_ICON, PROCESSOR_ICON_SYSTEM) == PROCESSOR_ICON_SNAPDRAGON
     },
     model = getString(KEY_MODEL, "").orEmpty(),
+    detailModel = getString(KEY_DEVICE_DETAIL_MODEL, "").orEmpty(),
     processor = getString(KEY_PROCESSOR, "").orEmpty(),
     // Deliberately NOT falling back to KEY_PROCESSOR: the detail page ("All parameters") must stay
     // independent from the "My device" grid. Inheriting the grid value made the two pages always
@@ -128,6 +132,7 @@ private fun SharedPreferences.writeDeviceProfileSettings(value: DeviceProfileSet
         .putInt(KEY_PROCESSOR_ICON, value.processorIcon.coerceIn(0, PROCESSOR_ICON_MAX))
         .remove(KEY_SNAPDRAGON_ICON)
         .putString(KEY_MODEL, value.model)
+        .putString(KEY_DEVICE_DETAIL_MODEL, value.detailModel)
         .putString(KEY_PROCESSOR, value.processor)
         .putString(KEY_DEVICE_DETAIL_PROCESSOR, value.detailProcessor)
         .putString(KEY_RAM, value.ram)

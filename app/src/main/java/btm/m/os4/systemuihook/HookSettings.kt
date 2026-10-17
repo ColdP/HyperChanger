@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+﻿// SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 btm_m
 package btm.m.os4.systemuihook
 
@@ -8,11 +8,6 @@ import io.github.libxposed.service.XposedService
 import org.json.JSONObject
 
 const val REMOTE_PREFERENCE_GROUP = "hyper_system_ui_hook"
-internal const val KEY_SYSTEM_UPDATE_DISABLED = "system_update_disabled"
-internal const val KEY_SYSTEM_UPDATE_OTA_LIMIT_REMOVED = "system_update_ota_limit_removed"
-internal const val KEY_SYSTEM_UPDATE_VERSION_SPOOF_ENABLED = "system_update_version_spoof_enabled"
-internal const val KEY_SYSTEM_UPDATE_VERSION = "system_update_version"
-internal const val KEY_SYSTEM_UPDATE_SOTA_VERSION = "system_update_sota_version"
 internal const val KEY_STACKED_MOBILE_SIGNAL_ENABLED = "stacked_mobile_signal_enabled"
 internal const val KEY_STACKED_MOBILE_SIGNAL_SCALE = "stacked_mobile_signal_scale"
 internal const val KEY_STACKED_MOBILE_SIGNAL_VERTICAL_OFFSET = "stacked_mobile_signal_vertical_offset"
@@ -124,20 +119,6 @@ data class HookSettings(
     val lockscreenFocus: GlassTuning = GlassTuning(),
     val controlCenterButton: GlassTuning = GlassTuning(),
     val controlCenterSlider: GlassTuning = GlassTuning(),
-    val superXiaoAiGlobalSearchAppearance: Boolean = false,
-    val superXiaoAiBlacklistUnblocked: Boolean = false,
-    val superXiaoAiClipboardUnblocked: Boolean = false,
-    val superXiaoAiAiSafetyUnblocked: Boolean = false,
-    val superXiaoAiVoiceSafetyUnblocked: Boolean = false,
-    val superXiaoAiKeyboardStyleEnabled: Boolean = false,
-    val superXiaoAiKeyboardColorMode: Int = 0,
-    val superXiaoAiKeyboardCornerRadius: Float = 24f,
-    val superXiaoAiKeyboardOpacity: Int = 56,
-    val superXiaoAiKeyboardBlur: Float = 15f,
-    val superXiaoAiKeyboardHighlight: Int = 100,
-    val superXiaoAiKeyboardShadow: Int = 10,
-    val superXiaoAiKeyboardStrokeWidth: Float = 2f,
-    val superXiaoAiKeyboardBottomHighlight: Int = 100,
     val clockEnabled: Boolean = false,
     val clockSize: Float = 14.8f,
     val paddingEndEnabled: Boolean = false,
@@ -291,11 +272,6 @@ data class HookSettings(
     val mobileNetworkTypeVerticalOffset: Float = 0f,
     val mobileNetworkTypeLeftMargin: Float = 0f,
     val mobileNetworkTypeRightMargin: Float = 0f,
-    val systemUpdateDisabled: Boolean = false,
-    val systemUpdateOtaLimitRemoved: Boolean = false,
-    val systemUpdateVersionSpoofEnabled: Boolean = false,
-    val systemUpdateVersion: String = "",
-    val systemUpdateSotaVersion: String = "",
     val themeMode: String = "system",
     val predictiveBackEnabled: Boolean = true,
     val predictiveBackProgress: Int = 90,
@@ -396,21 +372,6 @@ private const val KEY_NOTIFICATION_CENTER_FOCUS = "notification_center_focus_gla
 private const val KEY_LOCKSCREEN_FOCUS = "lockscreen_focus_glass"
 private const val KEY_CONTROL_CENTER_BUTTON = "control_center_button_glass"
 private const val KEY_CONTROL_CENTER_SLIDER = "control_center_slider_glass"
-private const val KEY_SUPER_XIAOAI_GLOBAL_SEARCH_APPEARANCE =
-    "super_xiaoai_global_search_appearance"
-internal const val KEY_SUPER_XIAOAI_BLACKLIST_UNBLOCKED = "super_xiaoai_blacklist_unblocked"
-internal const val KEY_SUPER_XIAOAI_CLIPBOARD_UNBLOCKED = "super_xiaoai_clipboard_unblocked"
-internal const val KEY_SUPER_XIAOAI_AI_SAFETY_UNBLOCKED = "super_xiaoai_ai_safety_unblocked"
-internal const val KEY_SUPER_XIAOAI_VOICE_SAFETY_UNBLOCKED = "super_xiaoai_voice_safety_unblocked"
-internal const val KEY_SUPER_XIAOAI_KEYBOARD_STYLE_ENABLED = "super_xiaoai_keyboard_style_enabled"
-internal const val KEY_SUPER_XIAOAI_KEYBOARD_COLOR_MODE = "super_xiaoai_keyboard_color_mode"
-internal const val KEY_SUPER_XIAOAI_KEYBOARD_CORNER_RADIUS = "super_xiaoai_keyboard_corner_radius"
-internal const val KEY_SUPER_XIAOAI_KEYBOARD_OPACITY = "super_xiaoai_keyboard_opacity"
-internal const val KEY_SUPER_XIAOAI_KEYBOARD_BLUR = "super_xiaoai_keyboard_blur"
-internal const val KEY_SUPER_XIAOAI_KEYBOARD_HIGHLIGHT = "super_xiaoai_keyboard_highlight"
-internal const val KEY_SUPER_XIAOAI_KEYBOARD_SHADOW = "super_xiaoai_keyboard_shadow"
-internal const val KEY_SUPER_XIAOAI_KEYBOARD_STROKE_WIDTH = "super_xiaoai_keyboard_stroke_width"
-internal const val KEY_SUPER_XIAOAI_KEYBOARD_BOTTOM_HIGHLIGHT = "super_xiaoai_keyboard_bottom_highlight"
 private const val KEY_CLOCK_ENABLED = "clock_enabled"
 private const val KEY_CLOCK_SIZE = "clock_size"
 private const val KEY_PADDING_END_ENABLED = "padding_end_enabled"
@@ -782,23 +743,6 @@ private fun SharedPreferences.toSettings(): HookSettings {
     lockscreenFocus = getGlassTuning(KEY_LOCKSCREEN_FOCUS),
     controlCenterButton = getGlassTuning(KEY_CONTROL_CENTER_BUTTON),
     controlCenterSlider = getGlassTuning(KEY_CONTROL_CENTER_SLIDER),
-    superXiaoAiGlobalSearchAppearance = getBoolean(
-        KEY_SUPER_XIAOAI_GLOBAL_SEARCH_APPEARANCE,
-        false,
-    ),
-    superXiaoAiBlacklistUnblocked = getBoolean(KEY_SUPER_XIAOAI_BLACKLIST_UNBLOCKED, false),
-    superXiaoAiClipboardUnblocked = getBoolean(KEY_SUPER_XIAOAI_CLIPBOARD_UNBLOCKED, false),
-    superXiaoAiAiSafetyUnblocked = getBoolean(KEY_SUPER_XIAOAI_AI_SAFETY_UNBLOCKED, false),
-    superXiaoAiVoiceSafetyUnblocked = getBoolean(KEY_SUPER_XIAOAI_VOICE_SAFETY_UNBLOCKED, false),
-    superXiaoAiKeyboardStyleEnabled = getBoolean(KEY_SUPER_XIAOAI_KEYBOARD_STYLE_ENABLED, false),
-    superXiaoAiKeyboardColorMode = getInt(KEY_SUPER_XIAOAI_KEYBOARD_COLOR_MODE, 0).coerceIn(0, 2),
-    superXiaoAiKeyboardCornerRadius = getFloatCompat(KEY_SUPER_XIAOAI_KEYBOARD_CORNER_RADIUS, 24f).coerceIn(0f, 48f),
-    superXiaoAiKeyboardOpacity = getInt(KEY_SUPER_XIAOAI_KEYBOARD_OPACITY, 56).coerceIn(0, 100),
-    superXiaoAiKeyboardBlur = getFloatCompat(KEY_SUPER_XIAOAI_KEYBOARD_BLUR, 15f).coerceIn(0f, 45f),
-    superXiaoAiKeyboardHighlight = getInt(KEY_SUPER_XIAOAI_KEYBOARD_HIGHLIGHT, 100).coerceIn(0, 100),
-    superXiaoAiKeyboardShadow = getInt(KEY_SUPER_XIAOAI_KEYBOARD_SHADOW, 10).coerceIn(0, 100),
-    superXiaoAiKeyboardStrokeWidth = getFloatCompat(KEY_SUPER_XIAOAI_KEYBOARD_STROKE_WIDTH, 2f).coerceIn(0f, 4f),
-    superXiaoAiKeyboardBottomHighlight = getInt(KEY_SUPER_XIAOAI_KEYBOARD_BOTTOM_HIGHLIGHT, 100).coerceIn(0, 100),
     clockEnabled = getBoolean(KEY_CLOCK_ENABLED, false),
     clockSize = getFloat(KEY_CLOCK_SIZE, 14.8f).coerceIn(10f, 24f),
     paddingEndEnabled = getBoolean(KEY_PADDING_END_ENABLED, false),
@@ -1119,11 +1063,6 @@ private fun SharedPreferences.toSettings(): HookSettings {
         .coerceIn(-8f, 8f),
     mobileNetworkTypeRightMargin = getFloat(KEY_MOBILE_NETWORK_TYPE_RIGHT_MARGIN, 0f)
         .coerceIn(-8f, 8f),
-    systemUpdateDisabled = getBoolean(KEY_SYSTEM_UPDATE_DISABLED, false),
-    systemUpdateOtaLimitRemoved = getBoolean(KEY_SYSTEM_UPDATE_OTA_LIMIT_REMOVED, false),
-    systemUpdateVersionSpoofEnabled = getBoolean(KEY_SYSTEM_UPDATE_VERSION_SPOOF_ENABLED, false),
-    systemUpdateVersion = getString(KEY_SYSTEM_UPDATE_VERSION, "").orEmpty().take(128),
-    systemUpdateSotaVersion = getString(KEY_SYSTEM_UPDATE_SOTA_VERSION, "").orEmpty().take(128),
     themeMode = getString(KEY_THEME_MODE, "system").orEmpty().ifBlank { "system" },
     predictiveBackEnabled = getBoolean(KEY_PREDICTIVE_BACK_ENABLED, true),
     predictiveBackProgress = getInt(KEY_PREDICTIVE_BACK_PROGRESS, 90).coerceIn(10, 100),
@@ -1285,23 +1224,6 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putString(KEY_NOTIFICATION_CENTER_BACKGROUND_MATERIAL, value.notificationCenterBackgroundMaterial.serialize())
         .putString(KEY_CONTROL_CENTER_BACKGROUND_MATERIAL, value.controlCenterBackgroundMaterial.serialize())
         .putBoolean(KEY_SHADE_SETTINGS_UNIFIED, value.shadeSettingsUnified)
-        .putBoolean(
-            KEY_SUPER_XIAOAI_GLOBAL_SEARCH_APPEARANCE,
-            value.superXiaoAiGlobalSearchAppearance,
-        )
-        .putBoolean(KEY_SUPER_XIAOAI_BLACKLIST_UNBLOCKED, value.superXiaoAiBlacklistUnblocked)
-        .putBoolean(KEY_SUPER_XIAOAI_CLIPBOARD_UNBLOCKED, value.superXiaoAiClipboardUnblocked)
-        .putBoolean(KEY_SUPER_XIAOAI_AI_SAFETY_UNBLOCKED, value.superXiaoAiAiSafetyUnblocked)
-        .putBoolean(KEY_SUPER_XIAOAI_VOICE_SAFETY_UNBLOCKED, value.superXiaoAiVoiceSafetyUnblocked)
-        .putBoolean(KEY_SUPER_XIAOAI_KEYBOARD_STYLE_ENABLED, value.superXiaoAiKeyboardStyleEnabled)
-        .putInt(KEY_SUPER_XIAOAI_KEYBOARD_COLOR_MODE, value.superXiaoAiKeyboardColorMode)
-        .putFloat(KEY_SUPER_XIAOAI_KEYBOARD_CORNER_RADIUS, value.superXiaoAiKeyboardCornerRadius)
-        .putInt(KEY_SUPER_XIAOAI_KEYBOARD_OPACITY, value.superXiaoAiKeyboardOpacity)
-        .putFloat(KEY_SUPER_XIAOAI_KEYBOARD_BLUR, value.superXiaoAiKeyboardBlur)
-        .putInt(KEY_SUPER_XIAOAI_KEYBOARD_HIGHLIGHT, value.superXiaoAiKeyboardHighlight)
-        .putInt(KEY_SUPER_XIAOAI_KEYBOARD_SHADOW, value.superXiaoAiKeyboardShadow)
-        .putFloat(KEY_SUPER_XIAOAI_KEYBOARD_STROKE_WIDTH, value.superXiaoAiKeyboardStrokeWidth)
-        .putInt(KEY_SUPER_XIAOAI_KEYBOARD_BOTTOM_HIGHLIGHT, value.superXiaoAiKeyboardBottomHighlight)
         .putBoolean(KEY_CLOCK_ENABLED, value.clockEnabled)
         .putFloat(KEY_CLOCK_SIZE, value.clockSize)
         .putBoolean(KEY_STATUS_DIMENSION_DELTAS_V1, true)
@@ -1600,11 +1522,6 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putBoolean(KEY_STATUS_BAR_SCALE_ADJUSTMENT_MIGRATED, true)
         .putBoolean(KEY_STATUS_BAR_SCALE_ABSOLUTE_MIGRATED, true)
         .putBoolean(KEY_STATUS_BAR_SCALE_ABSOLUTE_MIGRATED_V2, true)
-        .putBoolean(KEY_SYSTEM_UPDATE_DISABLED, value.systemUpdateDisabled)
-        .putBoolean(KEY_SYSTEM_UPDATE_OTA_LIMIT_REMOVED, value.systemUpdateOtaLimitRemoved)
-        .putBoolean(KEY_SYSTEM_UPDATE_VERSION_SPOOF_ENABLED, value.systemUpdateVersionSpoofEnabled)
-        .putString(KEY_SYSTEM_UPDATE_VERSION, value.systemUpdateVersion.take(128))
-        .putString(KEY_SYSTEM_UPDATE_SOTA_VERSION, value.systemUpdateSotaVersion.take(128))
         .putString(KEY_THEME_MODE, value.themeMode)
         .putBoolean(KEY_PREDICTIVE_BACK_ENABLED, value.predictiveBackEnabled)
         .putInt(KEY_PREDICTIVE_BACK_PROGRESS, value.predictiveBackProgress)

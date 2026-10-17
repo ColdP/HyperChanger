@@ -1552,6 +1552,9 @@ class SettingsDeviceModule : XposedModule() {
         if (key == "device_internal_memory") return profile.storage.takeIf(String::isNotBlank)
         val label = title.lowercase()
         return when {
+            // The All Parameters page's certification model carries its own value. The generic "型号"
+            // match below used to hand it the My Device phone model, so editing either changed both.
+            "认证型号" in title -> profile.detailModel.takeIf(String::isNotBlank)
             "model" in label || "型号" in title -> profile.model.takeIf(String::isNotBlank)
             "baseband" in label || "基带" in title -> profile.baseband.takeIf(String::isNotBlank)
             "hardware" in label || "硬件" in title -> profile.hardware.takeIf(String::isNotBlank)

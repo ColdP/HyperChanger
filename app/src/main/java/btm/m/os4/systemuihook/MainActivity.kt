@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+﻿// SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 btm_m
 package btm.m.os4.systemuihook
 
@@ -490,7 +490,6 @@ private fun suggestedScopesForHookChange(before: HookSettings, after: HookSettin
             ScopeApplication.PERSONAL_ASSISTANT,
         )
     }
-    if (changedNames.any { it.contains("systemUpdate", true) }) scopes += ScopeApplication.SYSTEM_UPDATE
     if (changedNames.any { it.contains("xiaoai", true) }) scopes += ScopeApplication.SUPER_XIAOAI_IME
     return scopes
 }
@@ -540,7 +539,11 @@ private fun Root(
     val homeMaterialStore = remember(context) { HomeMaterialSettingsStore(context) }
     var homeMaterialSettings by remember { mutableStateOf(homeMaterialStore.settings) }
     val settingsAppStore = remember(context) { SettingsAppPreferencesStore(context) }
+    val superXiaoAiStore = remember(context) { SuperXiaoAiPreferencesStore(context) }
+    val systemUpdateStore = remember(context) { SystemUpdatePreferencesStore(context) }
     var settingsApp by remember { mutableStateOf(settingsAppStore.settings) }
+    var superXiaoAi by remember { mutableStateOf(superXiaoAiStore.settings) }
+    var systemUpdate by remember { mutableStateOf(systemUpdateStore.settings) }
     var pendingRestartTargets by remember { mutableStateOf(emptySet<ScopeApplication>()) }
     val markRestartTargets: (Set<ScopeApplication>) -> Unit = { targets ->
         if (targets.isNotEmpty()) pendingRestartTargets = pendingRestartTargets + targets
@@ -852,6 +855,8 @@ private fun Root(
             homeFolderStore.syncRemote(it)
             homeMaterialStore.syncRemote(it)
             settingsAppStore.syncRemote(it)
+            superXiaoAiStore.syncRemote(it)
+            systemUpdateStore.syncRemote(it)
             settings = hooks.settings
             navigationSettings = navigation.settings
             lockscreenCapsuleSettings = lockscreenCapsules.settings
@@ -866,6 +871,8 @@ private fun Root(
             homeFolderSettings = homeFolderStore.settings
             homeMaterialSettings = homeMaterialStore.settings
             settingsApp = settingsAppStore.settings
+            superXiaoAi = superXiaoAiStore.settings
+            systemUpdate = systemUpdateStore.settings
         }
     }
     MiuixTheme(controller = controller) {
@@ -923,10 +930,24 @@ private fun Root(
                 markRestartTargets(suggestedScopesForHookChange(before, settings))
             },
             settingsApp = settingsApp,
+            superXiaoAi = superXiaoAi,
+            updateSuperXiaoAi = { transform ->
+                superXiaoAiStore.update(service, transform)
+                superXiaoAi = superXiaoAiStore.settings
+            },
+            systemUpdate = systemUpdate,
+            updateSystemUpdate = { transform ->
+                val before = systemUpdateStore.settings
+                systemUpdateStore.update(service, transform)
+                systemUpdate = systemUpdateStore.settings
+                if (before != systemUpdate) markRestartTargets(setOf(ScopeApplication.SYSTEM_UPDATE))
+            },
             updateSettingsApp = { transform ->
                 val before = settingsAppStore.settings
                 settingsAppStore.update(service, transform)
                 settingsApp = settingsAppStore.settings
+            superXiaoAi = superXiaoAiStore.settings
+            systemUpdate = systemUpdateStore.settings
                 // Everything here is applied inside the Settings process.
                 if (before != settingsApp) markRestartTargets(setOf(ScopeApplication.SETTINGS))
             },
@@ -1149,8 +1170,12 @@ private fun Shell(
     homeMaterialSettings: HomeMaterialSettings,
     service: XposedService?,
     settingsApp: SettingsAppPreferences,
+    superXiaoAi: SuperXiaoAiPreferences,
+    systemUpdate: SystemUpdatePreferences,
     update: ((HookSettings) -> HookSettings) -> Unit,
     updateSettingsApp: ((SettingsAppPreferences) -> SettingsAppPreferences) -> Unit,
+    updateSuperXiaoAi: ((SuperXiaoAiPreferences) -> SuperXiaoAiPreferences) -> Unit,
+    updateSystemUpdate: ((SystemUpdatePreferences) -> SystemUpdatePreferences) -> Unit,
     updateLockscreenCapsule: ((LockscreenCapsuleSettings) -> LockscreenCapsuleSettings) -> Unit,
     updateNavigation: ((ModuleNavigationSettings) -> ModuleNavigationSettings) -> Unit,
     updateDock: ((DockSettings) -> DockSettings) -> Unit,
@@ -1316,7 +1341,7 @@ private fun Shell(
                 detailPage, settings, lockscreenCapsuleSettings, cameras, deviceProfile, appearance, musicWhitelist, dockSettings, homeRecentsSettings, homeFolderSettings, homeMaterialSettings, airDropSettings,
                 update, updateLockscreenCapsule, updateDock, updateHomeRecents, updateHomeFolder, updateHomeMaterial, updateCamera,
                 updateDeviceProfile, updateAppearance, updateMusicWhitelist, presetActions, updateAirDrop,
-                settingsApp = settingsApp, updateSettingsApp = updateSettingsApp,
+                settingsApp = settingsApp, updateSettingsApp = updateSettingsApp, superXiaoAi = superXiaoAi, updateSuperXiaoAi = updateSuperXiaoAi, systemUpdate = systemUpdate, updateSystemUpdate = updateSystemUpdate,
                 openPage = openNestedPage, back = dismissPage,
                 onDebugMode = { showDebug = true }, captcha = captcha,
                 onPickRasterImages = onPickRasterImages, onApplyRasterWallpaper = onApplyRasterWallpaper,
@@ -3464,7 +3489,6 @@ OverlayDropdownPreference(
             Group(tr("settingsEntryLabelsGroup", "设置入口文案")) {
                 ArrowPreference(
                     title = tr("settingsEntryLabels", "自定义系统设置入口文案"),
-                    summary = tr("settingsEntryLabelsSummary", "修改系统设置首页各入口显示的文字"),
                     onClick = { open(PageId.SETTINGS_ENTRY_LABELS) },
                 )
             }
@@ -3516,6 +3540,7 @@ private fun settingsEntryLabelCatalog(): List<SettingsEntryLabel> = listOf(
     SettingsEntryLabel("satellite_settings", tr("卫星通信", "卫星通信")),
     SettingsEntryLabel("interconnection_settings", tr("互联互通", "互联互通")),
     SettingsEntryLabel("header_google_settings", tr("Google", "Google")),
+    SettingsEntryLabel("xiao_mi_hyperos_ai", tr("小米澎湃AI", "小米澎湃AI")),
     SettingsEntryLabel("system_apps_updater", tr("系统应用更新", "系统应用更新")),
 )
 
@@ -3527,14 +3552,6 @@ private fun SettingsEntryLabelsPage(
 ) = AppPage(tr("settingsEntryLabels", "自定义系统设置入口文案"), back, restartScopes = setOf(ScopeApplication.SETTINGS)) { padding, scroll ->
     var editing by remember { mutableStateOf<SettingsEntryLabel?>(null) }
     AppList(padding, scroll) {
-        item {
-            Text(
-                tr("settingsEntryLabelsHint", "留空则使用系统默认文案；修改后需要重启“设置”应用生效。"),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                style = MiuixTheme.textStyles.body2,
-            )
-        }
         item {
             Group(tr("settingsEntryLabelsGroup", "设置入口文案")) {
                 settingsEntryLabelCatalog().forEach { entry ->
@@ -3587,6 +3604,7 @@ private fun DeviceProfileEditor(
         tr("分辨率", "分辨率") to profile.resolution,
     )
     val allInfoFields = listOf(
+        tr("认证型号", "认证型号") to profile.detailModel,
         tr("处理器", "处理器") to profile.detailProcessor,
         tr("摄像头", "摄像头") to profile.camera,
         tr("OS 版本", "OS 版本") to profile.osVersion,
@@ -3629,6 +3647,7 @@ private fun DeviceProfileEditor(
                         summary = value.ifBlank { tr("未设置", "未设置") },
                         onClick = { editingField = ProfileField(title = label, value = value, setter = { p, v ->
                             when (label) {
+                                tr("认证型号", "认证型号") -> p.copy(detailModel = v)
                                 tr("处理器", "处理器") -> p.copy(detailProcessor = v)
                                 tr("摄像头", "摄像头") -> p.copy(camera = v)
                                 tr("OS 版本", "OS 版本") -> p.copy(osVersion = v)
@@ -4366,7 +4385,11 @@ private fun Detail(
     presetActions: ShadePresetActions,
     updateAirDrop: (((AirDropSettings) -> AirDropSettings) -> Unit),
     settingsApp: SettingsAppPreferences,
+    superXiaoAi: SuperXiaoAiPreferences,
+    systemUpdate: SystemUpdatePreferences,
     updateSettingsApp: ((SettingsAppPreferences) -> SettingsAppPreferences) -> Unit,
+    updateSuperXiaoAi: ((SuperXiaoAiPreferences) -> SuperXiaoAiPreferences) -> Unit,
+    updateSystemUpdate: ((SystemUpdatePreferences) -> SystemUpdatePreferences) -> Unit,
     onDebugMode: () -> Unit,
     captcha: String,
     onPickRasterImages: () -> Unit,
@@ -4446,10 +4469,10 @@ private fun Detail(
         PageId.LOCKSCREEN_WIDGET_BACKGROUND -> LockscreenWidgetBackgroundSettings(settings, update, back)
         PageId.LYRIC_LIBRARY -> LyricLibraryPage(back)
         PageId.RASTER_WALLPAPER -> RasterWallpaper(settings, update, onPickRasterImages, onApplyRasterWallpaper, back)
-        PageId.SUPER_XIAOAI -> SuperXiaoAi(settings, update, back)
+        PageId.SUPER_XIAOAI -> SuperXiaoAi(settings, superXiaoAi, updateSuperXiaoAi, back)
         PageId.CAMERA -> Camera(cameras, updateCamera, openPage, back)
         PageId.CAMERA_PALETTE -> CameraPalette(cameras, updateCamera, back)
-        PageId.SYSTEM_UPDATE -> SystemUpdate(settings, update, back)
+        PageId.SYSTEM_UPDATE -> SystemUpdate(systemUpdate, updateSystemUpdate, back)
         PageId.SYSTEM_SETTINGS -> SystemSettings(settingsApp, updateSettingsApp, deviceProfile, updateDeviceProfile, appearance, updateAppearance, openPage, onPickAppearanceLogo, onClearAppearanceLogo, back)
         PageId.DEVICE_PROFILE -> DeviceProfileEditor(deviceProfile, updateDeviceProfile, back)
         PageId.SETTINGS_ENTRY_LABELS -> SettingsEntryLabelsPage(settingsApp, updateSettingsApp, back)
@@ -5022,7 +5045,8 @@ private fun XiaoAiGlassSliders(value: XiaoAiGlassParameters, update: (XiaoAiGlas
 @Composable
 private fun SuperXiaoAi(
     settings: HookSettings,
-    update: ((HookSettings) -> HookSettings) -> Unit,
+    superXiaoAi: SuperXiaoAiPreferences,
+    update: ((SuperXiaoAiPreferences) -> SuperXiaoAiPreferences) -> Unit,
     back: () -> Unit,
 ) = AppPage(tr("超级小爱", "超级小爱"), back, restartScopes = setOf(ScopeApplication.SUPER_XIAOAI, ScopeApplication.SUPER_XIAOAI_IME)) { padding, scroll ->
     val context = LocalContext.current
@@ -5061,33 +5085,33 @@ private fun SuperXiaoAi(
             Group(tr("\u5916\u89c2", "\u5916\u89c2")) {
                 SwitchPreference(
                     title = tr("\u5168\u5c40\u4f7f\u7528\u641c\u7d22\u9875\u5916\u89c2", "\u5168\u5c40\u4f7f\u7528\u641c\u7d22\u9875\u5916\u89c2"),
-                    checked = settings.superXiaoAiGlobalSearchAppearance,
+                    checked = superXiaoAi.globalSearchAppearance,
                     onCheckedChange = { enabled ->
-                        update { it.copy(superXiaoAiGlobalSearchAppearance = enabled) }
+                        update { it.copy(globalSearchAppearance = enabled) }
                     },
                 )
             }
         }
         item {
             Group(tr("superXiaoAiRestrictions", "\u529f\u80fd\u9650\u5236")) {
-                SwitchPreference(title = tr("superXiaoAiBlacklist", "\u53bb\u9664\u9ed1\u540d\u5355\u8bcd\u5e93\u9650\u5236"), checked = settings.superXiaoAiBlacklistUnblocked, onCheckedChange = { value -> update { it.copy(superXiaoAiBlacklistUnblocked = value) } })
-                SwitchPreference(title = tr("superXiaoAiClipboard", "\u53bb\u9664\u526a\u5207\u677f\u9650\u5236"), checked = settings.superXiaoAiClipboardUnblocked, onCheckedChange = { value -> update { it.copy(superXiaoAiClipboardUnblocked = value) } })
-                SwitchPreference(title = tr("superXiaoAiAiSafety", "\u53bb\u9664 AI \u5b89\u5168\u9650\u5236"), checked = settings.superXiaoAiAiSafetyUnblocked, onCheckedChange = { value -> update { it.copy(superXiaoAiAiSafetyUnblocked = value) } })
-                SwitchPreference(title = tr("superXiaoAiVoiceSafety", "\u53bb\u9664\u8bed\u97f3\u8f93\u5165\u5b89\u5168\u9650\u5236"), checked = settings.superXiaoAiVoiceSafetyUnblocked, onCheckedChange = { value -> update { it.copy(superXiaoAiVoiceSafetyUnblocked = value) } })
+                SwitchPreference(title = tr("superXiaoAiBlacklist", "\u53bb\u9664\u9ed1\u540d\u5355\u8bcd\u5e93\u9650\u5236"), checked = superXiaoAi.blacklistUnblocked, onCheckedChange = { value -> update { it.copy(blacklistUnblocked = value) } })
+                SwitchPreference(title = tr("superXiaoAiClipboard", "\u53bb\u9664\u526a\u5207\u677f\u9650\u5236"), checked = superXiaoAi.clipboardUnblocked, onCheckedChange = { value -> update { it.copy(clipboardUnblocked = value) } })
+                SwitchPreference(title = tr("superXiaoAiAiSafety", "\u53bb\u9664 AI \u5b89\u5168\u9650\u5236"), checked = superXiaoAi.aiSafetyUnblocked, onCheckedChange = { value -> update { it.copy(aiSafetyUnblocked = value) } })
+                SwitchPreference(title = tr("superXiaoAiVoiceSafety", "\u53bb\u9664\u8bed\u97f3\u8f93\u5165\u5b89\u5168\u9650\u5236"), checked = superXiaoAi.voiceSafetyUnblocked, onCheckedChange = { value -> update { it.copy(voiceSafetyUnblocked = value) } })
             }
         }
         item {
             Group(tr("superXiaoAiKeyboardAppearance", "\u952e\u76d8\u5916\u89c2")) {
-                OverlayDropdownPreference(title = tr("superXiaoAiKeyboardColorMode", "\u952e\u76d8\u989c\u8272\u6a21\u5f0f"), items = listOf(tr("followSystem", "\u8ddf\u968f\u7cfb\u7edf"), tr("superXiaoAiLightMode", "\u6d45\u8272\u6a21\u5f0f"), tr("superXiaoAiDarkMode", "\u6df1\u8272\u6a21\u5f0f")), selectedIndex = settings.superXiaoAiKeyboardColorMode, onSelectedIndexChange = { value -> update { it.copy(superXiaoAiKeyboardColorMode = value) } })
-                SwitchPreference(title = tr("superXiaoAiKeyboardTuning", "\u952e\u76d8\u5916\u89c2\u53c2\u6570\u8c03\u6574"), checked = settings.superXiaoAiKeyboardStyleEnabled, onCheckedChange = { value -> update { it.copy(superXiaoAiKeyboardStyleEnabled = value) } })
-                if (settings.superXiaoAiKeyboardStyleEnabled) {
-                    ParameterDpSlide(tr("superXiaoAiKeyboardCorner", "\u952e\u76d8\u5706\u89d2"), settings.superXiaoAiKeyboardCornerRadius, 0f..48f, defaultValue = 24f) { value -> update { it.copy(superXiaoAiKeyboardCornerRadius = value) } }
-                    ParameterIntSlide(tr("superXiaoAiKeyboardOpacity", "\u952e\u76d8\u80cc\u666f\u4e0d\u900f\u660e\u5ea6"), settings.superXiaoAiKeyboardOpacity, 0..100, "%", defaultValue = 56) { value -> update { it.copy(superXiaoAiKeyboardOpacity = value) } }
-                    ParameterDpSlide(tr("superXiaoAiKeyboardBlur", "\u952e\u76d8\u80cc\u666f\u6a21\u7cca\u5ea6"), settings.superXiaoAiKeyboardBlur, 0f..45f, defaultValue = 15f) { value -> update { it.copy(superXiaoAiKeyboardBlur = value) } }
-                    ParameterIntSlide(tr("superXiaoAiKeyboardHighlight", "\u952e\u76d8\u9876\u90e8\u9ad8\u5149"), settings.superXiaoAiKeyboardHighlight, 0..100, "%", defaultValue = 100) { value -> update { it.copy(superXiaoAiKeyboardHighlight = value) } }
-                    ParameterIntSlide(tr("superXiaoAiKeyboardShadow", "\u952e\u76d8\u9634\u5f71\u5f3a\u5ea6"), settings.superXiaoAiKeyboardShadow, 0..100, "%", defaultValue = 10) { value -> update { it.copy(superXiaoAiKeyboardShadow = value) } }
-                    ParameterDpSlide(tr("superXiaoAiKeyboardStrokeWidth", "\u952e\u76d8\u8fb9\u7f18\u63cf\u8fb9\u5bbd\u5ea6"), settings.superXiaoAiKeyboardStrokeWidth, 0f..4f, defaultValue = 2f) { value -> update { it.copy(superXiaoAiKeyboardStrokeWidth = value) } }
-                    ParameterIntSlide(tr("superXiaoAiKeyboardBottomHighlight", "\u952e\u76d8\u5e95\u90e8\u9ad8\u5149"), settings.superXiaoAiKeyboardBottomHighlight, 0..100, "%", defaultValue = 100) { value -> update { it.copy(superXiaoAiKeyboardBottomHighlight = value) } }
+                OverlayDropdownPreference(title = tr("superXiaoAiKeyboardColorMode", "\u952e\u76d8\u989c\u8272\u6a21\u5f0f"), items = listOf(tr("followSystem", "\u8ddf\u968f\u7cfb\u7edf"), tr("superXiaoAiLightMode", "\u6d45\u8272\u6a21\u5f0f"), tr("superXiaoAiDarkMode", "\u6df1\u8272\u6a21\u5f0f")), selectedIndex = superXiaoAi.keyboardColorMode, onSelectedIndexChange = { value -> update { it.copy(keyboardColorMode = value) } })
+                SwitchPreference(title = tr("superXiaoAiKeyboardTuning", "\u952e\u76d8\u5916\u89c2\u53c2\u6570\u8c03\u6574"), checked = superXiaoAi.keyboardStyleEnabled, onCheckedChange = { value -> update { it.copy(keyboardStyleEnabled = value) } })
+                if (superXiaoAi.keyboardStyleEnabled) {
+                    ParameterDpSlide(tr("superXiaoAiKeyboardCorner", "\u952e\u76d8\u5706\u89d2"), superXiaoAi.keyboardCornerRadius, 0f..48f, defaultValue = 24f) { value -> update { it.copy(keyboardCornerRadius = value) } }
+                    ParameterIntSlide(tr("superXiaoAiKeyboardOpacity", "\u952e\u76d8\u80cc\u666f\u4e0d\u900f\u660e\u5ea6"), superXiaoAi.keyboardOpacity, 0..100, "%", defaultValue = 56) { value -> update { it.copy(keyboardOpacity = value) } }
+                    ParameterDpSlide(tr("superXiaoAiKeyboardBlur", "\u952e\u76d8\u80cc\u666f\u6a21\u7cca\u5ea6"), superXiaoAi.keyboardBlur, 0f..45f, defaultValue = 15f) { value -> update { it.copy(keyboardBlur = value) } }
+                    ParameterIntSlide(tr("superXiaoAiKeyboardHighlight", "\u952e\u76d8\u9876\u90e8\u9ad8\u5149"), superXiaoAi.keyboardHighlight, 0..100, "%", defaultValue = 100) { value -> update { it.copy(keyboardHighlight = value) } }
+                    ParameterIntSlide(tr("superXiaoAiKeyboardShadow", "\u952e\u76d8\u9634\u5f71\u5f3a\u5ea6"), superXiaoAi.keyboardShadow, 0..100, "%", defaultValue = 10) { value -> update { it.copy(keyboardShadow = value) } }
+                    ParameterDpSlide(tr("superXiaoAiKeyboardStrokeWidth", "\u952e\u76d8\u8fb9\u7f18\u63cf\u8fb9\u5bbd\u5ea6"), superXiaoAi.keyboardStrokeWidth, 0f..4f, defaultValue = 2f) { value -> update { it.copy(keyboardStrokeWidth = value) } }
+                    ParameterIntSlide(tr("superXiaoAiKeyboardBottomHighlight", "\u952e\u76d8\u5e95\u90e8\u9ad8\u5149"), superXiaoAi.keyboardBottomHighlight, 0..100, "%", defaultValue = 100) { value -> update { it.copy(keyboardBottomHighlight = value) } }
                 }
             }
         }
@@ -5096,8 +5120,8 @@ private fun SuperXiaoAi(
 
 @Composable
 private fun SystemUpdate(
-    settings: HookSettings,
-    update: ((HookSettings) -> HookSettings) -> Unit,
+    systemUpdate: SystemUpdatePreferences,
+    update: ((SystemUpdatePreferences) -> SystemUpdatePreferences) -> Unit,
     back: () -> Unit,
 ) = AppPage(tr("\u7cfb\u7edf\u66f4\u65b0", "\u7cfb\u7edf\u66f4\u65b0"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UPDATE)) { padding, scroll ->
     var editingVersion by remember { mutableStateOf<SystemUpdateVersionField?>(null) }
@@ -5107,14 +5131,14 @@ private fun SystemUpdate(
                 SwitchPreference(
                     title = tr("\u7981\u7528\u7cfb\u7edf\u66f4\u65b0", "\u7981\u7528\u7cfb\u7edf\u66f4\u65b0"),
                     summary = tr("\u963b\u6b62\u5f00\u673a\u3001\u5b9a\u65f6\u548c\u624b\u52a8\u89e6\u53d1\u7684\u7cfb\u7edf\u66f4\u65b0\u68c0\u67e5", "\u963b\u6b62\u5f00\u673a\u3001\u5b9a\u65f6\u548c\u624b\u52a8\u89e6\u53d1\u7684\u7cfb\u7edf\u66f4\u65b0\u68c0\u67e5"),
-                    checked = settings.systemUpdateDisabled,
-                    onCheckedChange = { enabled -> update { it.copy(systemUpdateDisabled = enabled) } },
+                    checked = systemUpdate.disabled,
+                    onCheckedChange = { enabled -> update { it.copy(disabled = enabled) } },
                 )
                 SwitchPreference(
                     title = tr("\u79fb\u9664 OTA \u9650\u5236", "\u79fb\u9664 OTA \u9650\u5236"),
                     summary = tr("\u4ec5\u9002\u7528\u4e8e VAB \u8bbe\u5907\uff0c\u4f1a\u8df3\u8fc7 OTA \u6821\u9a8c", "\u4ec5\u9002\u7528\u4e8e VAB \u8bbe\u5907\uff0c\u4f1a\u8df3\u8fc7 OTA \u6821\u9a8c"),
-                    checked = settings.systemUpdateOtaLimitRemoved,
-                    onCheckedChange = { enabled -> update { it.copy(systemUpdateOtaLimitRemoved = enabled) } },
+                    checked = systemUpdate.otaLimitRemoved,
+                    onCheckedChange = { enabled -> update { it.copy(otaLimitRemoved = enabled) } },
                 )
             }
         }
@@ -5123,19 +5147,19 @@ private fun SystemUpdate(
                 SwitchPreference(
                     title = tr("\u542f\u7528\u7248\u672c\u4f2a\u88c5", "\u542f\u7528\u7248\u672c\u4f2a\u88c5"),
                     summary = tr("\u4ec5\u5bf9\u7cfb\u7edf\u66f4\u65b0\u5e94\u7528\u751f\u6548", "\u4ec5\u5bf9\u7cfb\u7edf\u66f4\u65b0\u5e94\u7528\u751f\u6548"),
-                    checked = settings.systemUpdateVersionSpoofEnabled,
-                    onCheckedChange = { enabled -> update { it.copy(systemUpdateVersionSpoofEnabled = enabled) } },
+                    checked = systemUpdate.versionSpoofEnabled,
+                    onCheckedChange = { enabled -> update { it.copy(versionSpoofEnabled = enabled) } },
                 )
                 ArrowPreference(
                     title = tr("\u4f2a\u88c5\u7248\u672c", "\u4f2a\u88c5\u7248\u672c"),
-                    summary = settings.systemUpdateVersion.ifBlank { tr("\u672a\u8bbe\u7f6e", "\u672a\u8bbe\u7f6e") },
-                    enabled = settings.systemUpdateVersionSpoofEnabled,
+                    summary = systemUpdate.version.ifBlank { tr("\u672a\u8bbe\u7f6e", "\u672a\u8bbe\u7f6e") },
+                    enabled = systemUpdate.versionSpoofEnabled,
                     onClick = { editingVersion = SystemUpdateVersionField.SYSTEM },
                 )
                 ArrowPreference(
                     title = tr("\u4f2a\u88c5 SOTA \u7248\u672c", "\u4f2a\u88c5 SOTA \u7248\u672c"),
-                    summary = settings.systemUpdateSotaVersion.ifBlank { tr("\u672a\u8bbe\u7f6e", "\u672a\u8bbe\u7f6e") },
-                    enabled = settings.systemUpdateVersionSpoofEnabled,
+                    summary = systemUpdate.sotaVersion.ifBlank { tr("\u672a\u8bbe\u7f6e", "\u672a\u8bbe\u7f6e") },
+                    enabled = systemUpdate.versionSpoofEnabled,
                     onClick = { editingVersion = SystemUpdateVersionField.SOTA },
                 )
             }
@@ -5143,8 +5167,8 @@ private fun SystemUpdate(
     }
     editingVersion?.let { field ->
         val current = when (field) {
-            SystemUpdateVersionField.SYSTEM -> settings.systemUpdateVersion
-            SystemUpdateVersionField.SOTA -> settings.systemUpdateSotaVersion
+            SystemUpdateVersionField.SYSTEM -> systemUpdate.version
+            SystemUpdateVersionField.SOTA -> systemUpdate.sotaVersion
         }
         SystemUpdateVersionDialog(
             title = when (field) {
@@ -5156,8 +5180,8 @@ private fun SystemUpdate(
             onSave = { value ->
                 update {
                     when (field) {
-                        SystemUpdateVersionField.SYSTEM -> it.copy(systemUpdateVersion = value)
-                        SystemUpdateVersionField.SOTA -> it.copy(systemUpdateSotaVersion = value)
+                        SystemUpdateVersionField.SYSTEM -> it.copy(version = value)
+                        SystemUpdateVersionField.SOTA -> it.copy(sotaVersion = value)
                     }
                 }
                 editingVersion = null
