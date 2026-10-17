@@ -1061,8 +1061,9 @@ class HyperSystemUiModule : XposedModule() {
         fun on(block: (FrameworkPreferences) -> Boolean): Boolean {
             val result = runCatching { block(readFrameworkPreferences(prefs)) }.getOrDefault(false)
             if (seenChecks.size < 24) {
-                val line = Throwable().stackTrace
-                    .firstOrNull { it.className.endsWith("HyperSystemUiModule") }?.lineNumber ?: 0
+                // Skip the on() frame so the reported line is the actual call site.
+                val line = Throwable().stackTrace.drop(1)
+                    .firstOrNull { it.className.contains("HyperSystemUiModule") }?.lineNumber ?: 0
                 if (line != 0 && seenChecks.putIfAbsent(line, true) == null) {
                     traceSystemServer("check@$line -> $result")
                 }
