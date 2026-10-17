@@ -1104,6 +1104,24 @@ class HyperSystemUiModule : XposedModule() {
             }
         }
         runCatching {
+            // The instance already exists before the hooks are installed, so the constructor hook
+            // never fires. This method runs on every freeform task add and is the reliable trigger.
+            // Note the typo in the real name: onMiuiFreeFormStasckAdded, not StackAdded.
+            val cls = miuiLoader.loadClass("com.android.server.wm.MiuiFreeFormStackDisplayStrategy")
+            val field = cls.getDeclaredField("mDefaultMaxFreeformCount").apply { isAccessible = true }
+            cls.declaredMethods.filter { it.name == "onMiuiFreeFormStasckAdded" }.forEach { method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("hyperchanger:fw-multiple-freeform-added")
+                    .intercept { chain ->
+                        if (on { it.multipleFreeform }) {
+                            runCatching { field.setInt(chain.thisObject, 64) }
+                        }
+                        chain.proceed()
+                    }
+            }
+        }
+        runCatching {
             val cls = loader.loadClass("android.app.ActivityTaskManager")
             cls.declaredMethods.filter { it.name == "supportsSplitScreen" }.forEach { method ->
                 hook(method)
