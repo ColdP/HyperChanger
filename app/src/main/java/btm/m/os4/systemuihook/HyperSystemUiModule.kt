@@ -309,6 +309,10 @@ class HyperSystemUiModule : XposedModule() {
     internal fun installHook(member: java.lang.reflect.Executable) = hook(member)
 
     override fun onSystemServerStarting(param: SystemServerStartingParam) {
+        // system_server never goes through onPackageLoaded, so its hooks have to be installed here.
+        runCatching {
+            installFrameworkHooks(param.classLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+        }.onFailure { error -> log(Log.ERROR, TAG, "Could not install system framework hooks", error) }
     }
 
     private var customTileHookInstalled = false
@@ -1352,13 +1356,6 @@ class HyperSystemUiModule : XposedModule() {
             runCatching {
                 installMiSettingsHooks(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
             }.onFailure { error -> log(Log.ERROR, TAG, "Could not install Xiaomi Settings hooks", error) }
-            return
-        }
-        // The framework hooks live in system_server, which LSPosed exposes as the "system" package.
-        if (param.packageName == "system") {
-            runCatching {
-                installFrameworkHooks(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
-            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install system framework hooks", error) }
             return
         }
         if (param.packageName == "com.miui.home") {
