@@ -1085,6 +1085,25 @@ class HyperSystemUiModule : XposedModule() {
             }
         }
         runCatching {
+            // getMaxMiuiFreeFormStackCount is private and gets inlined, so its calls never reach the
+            // hook above. It simply returns mDefaultMaxFreeformCount, which is a plain field set to 2
+            // and never written again - raising it in the constructor is what actually lifts the cap.
+            val cls = miuiLoader.loadClass("com.android.server.wm.MiuiFreeFormStackDisplayStrategy")
+            val field = cls.getDeclaredField("mDefaultMaxFreeformCount").apply { isAccessible = true }
+            cls.declaredConstructors.forEach { constructor ->
+                hook(constructor)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("hyperchanger:fw-multiple-freeform-ctor")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        if (on { it.multipleFreeform }) {
+                            runCatching { field.setInt(chain.thisObject, 64) }
+                        }
+                        result
+                    }
+            }
+        }
+        runCatching {
             val cls = loader.loadClass("android.app.ActivityTaskManager")
             cls.declaredMethods.filter { it.name == "supportsSplitScreen" }.forEach { method ->
                 hook(method)

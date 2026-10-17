@@ -3410,7 +3410,7 @@ private fun FrameworkPage(back: () -> Unit) {
             item {
                 Group(tr("音量", "音量")) {
                     OverlayDropdownPreference(
-                        title = tr("移出高音量安全提示", "移出高音量安全提示"),
+                        title = tr("移除高音量安全提示", "移除高音量安全提示"),
                         items = listOf(
                             tr("系统默认", "系统默认"),
                             tr("所有情况", "所有情况"),

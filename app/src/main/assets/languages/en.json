@@ -95,7 +95,7 @@
     "贴边小窗允许后台活动": "Keep edge-pinned windows active",
     "小窗贴边后仍按前台处理，避免应用被冻结。": "Treat an edge-pinned window as foreground so the app is not frozen",
     "音量": "Volume",
-    "移出高音量安全提示": "Remove the high volume warning",
+    "移除高音量安全提示": "Remove the high volume warning",
     "系统默认": "System default",
     "所有情况": "Always",
     "仅对耳机连接时生效": "Only with a headset connected",
