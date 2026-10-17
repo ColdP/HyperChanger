@@ -1057,11 +1057,15 @@ class HyperSystemUiModule : XposedModule() {
                 "name=${initial.disableDeviceNameCheck} quick=${initial.quickScreenshot} " +
                 "anywhere=${initial.screenshotAnywhere}",
         )
-        val firstCheck = java.util.concurrent.atomic.AtomicBoolean(false)
+        val seenChecks = java.util.concurrent.ConcurrentHashMap<Int, Boolean>()
         fun on(block: (FrameworkPreferences) -> Boolean): Boolean {
             val result = runCatching { block(readFrameworkPreferences(prefs)) }.getOrDefault(false)
-            if (firstCheck.compareAndSet(false, true)) {
-                traceSystemServer("first switch check -> $result")
+            if (seenChecks.size < 24) {
+                val line = Throwable().stackTrace
+                    .firstOrNull { it.className.endsWith("HyperSystemUiModule") }?.lineNumber ?: 0
+                if (line != 0 && seenChecks.putIfAbsent(line, true) == null) {
+                    traceSystemServer("check@$line -> $result")
+                }
             }
             return result
         }
@@ -1396,6 +1400,17 @@ class HyperSystemUiModule : XposedModule() {
             runCatching {
                 installMiSettingsHooks(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
             }.onFailure { error -> log(Log.ERROR, TAG, "Could not install Xiaomi Settings hooks", error) }
+            return
+        }
+        if (param.packageName == "system") {
+            // HyperCeiler hooks system_server through onPackageLoaded, so this path is known to work
+            // even though onSystemServerStarting also fires. Either one installs the framework hooks.
+            traceSystemServer("onPackageLoaded(system) entered")
+            runCatching {
+                installFrameworkHooks(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+            }.onFailure { error ->
+                traceSystemServer("onPackageLoaded install failed: ${error.javaClass.name}")
+            }
             return
         }
         if (param.packageName == "com.miui.home") {
