@@ -279,7 +279,7 @@ private enum class PageId {
     SHADE_NOTIFICATION_BACKGROUND,
     SHADE_CONTROL_CENTER_BACKGROUND,
     GESTURE_HANDLE_STYLE, DESKTOP, DESKTOP_MATERIAL,
-    ISLAND, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, DEVICE_PROFILE,
+    ISLAND, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
     SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, OTHER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION,
@@ -351,6 +351,12 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
         tr("category_search_settings_description", "调整设置应用首页、设备信息和外观。"),
         setOf(ScopeApplication.SETTINGS),
         PageId.SYSTEM_SETTINGS,
+    ),
+    CategorySearchItem(
+        tr("系统框架", "系统框架"),
+        tr("category_search_framework_description", "调整小窗、音量、截图与系统服务行为。"),
+        setOf(ScopeApplication.SETTINGS),
+        PageId.SYSTEM_FRAMEWORK,
     ),
     CategorySearchItem(
         tr("背屏", "背屏"),
@@ -1646,6 +1652,7 @@ private fun CategoryHome(
                     CategoryGroup(
                         title = tr("系统功能", "系统功能"),
                         entries = listOf(
+                            CategoryPageEntry(tr("系统框架", "系统框架"), PageId.SYSTEM_FRAMEWORK),
                             CategoryPageEntry(tr("超级小爱", "超级小爱"), PageId.SUPER_XIAOAI),
                             CategoryPageEntry(tr("相机与相册编辑", "相机与相册编辑"), PageId.CAMERA),
                             CategoryPageEntry(tr("系统更新", "系统更新"), PageId.SYSTEM_UPDATE),
@@ -3356,6 +3363,128 @@ private fun HomeMaterialPage(
 }
 
 @Composable
+private fun FrameworkPage(back: () -> Unit) {
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    val store = remember(context) { FrameworkPreferencesStore(context) }
+    var framework by remember { mutableStateOf(store.settings) }
+    LaunchedEffect(service) {
+        service?.let {
+            store.syncRemote(it)
+            framework = store.settings
+        }
+    }
+    fun apply(transform: (FrameworkPreferences) -> FrameworkPreferences) {
+        store.update(service, transform)
+        framework = store.settings
+    }
+    AppPage(tr("系统框架", "系统框架"), back) { padding, scroll ->
+        AppList(padding, scroll) {
+            item {
+                Group(tr("小窗", "小窗")) {
+                    SwitchPreference(
+                        title = tr("允许多小窗", "允许多小窗"),
+                        summary = tr("放宽小窗数量上限，可同时打开多个小窗。", "放宽小窗数量上限，可同时打开多个小窗。"),
+                        checked = framework.multipleFreeform,
+                        onCheckedChange = { value -> apply { it.copy(multipleFreeform = value) } },
+                    )
+                    SwitchPreference(
+                        title = tr("强制允许小窗", "强制允许小窗"),
+                        summary = tr("忽略应用的小窗黑名单与可调整大小限制。", "忽略应用的小窗黑名单与可调整大小限制。"),
+                        checked = framework.forceFreeform,
+                        onCheckedChange = { value -> apply { it.copy(forceFreeform = value) } },
+                    )
+                    SwitchPreference(
+                        title = tr("记住状态和位置", "记住状态和位置"),
+                        summary = tr("下次从小窗应用进入时恢复它的小窗位置与大小。", "下次从小窗应用进入时恢复它的小窗位置与大小。"),
+                        checked = framework.rememberFreeform,
+                        onCheckedChange = { value -> apply { it.copy(rememberFreeform = value) } },
+                    )
+                    SwitchPreference(
+                        title = tr("贴边小窗允许后台活动", "贴边小窗允许后台活动"),
+                        summary = tr("小窗贴边后仍按前台处理，避免应用被冻结。", "小窗贴边后仍按前台处理，避免应用被冻结。"),
+                        checked = framework.freeformBackground,
+                        onCheckedChange = { value -> apply { it.copy(freeformBackground = value) } },
+                    )
+                }
+            }
+            item {
+                Group(tr("音量", "音量")) {
+                    OverlayDropdownPreference(
+                        title = tr("移出高音量安全提示", "移出高音量安全提示"),
+                        items = listOf(
+                            tr("系统默认", "系统默认"),
+                            tr("所有情况", "所有情况"),
+                            tr("仅对耳机连接时生效", "仅对耳机连接时生效"),
+                        ),
+                        selectedIndex = framework.volumeSafeMode.coerceIn(0, VOLUME_SAFE_HEADSET_ONLY),
+                        onSelectedIndexChange = { index ->
+                            apply { it.copy(volumeSafeMode = index.coerceIn(0, VOLUME_SAFE_HEADSET_ONLY)) }
+                        },
+                    )
+                    SwitchPreference(
+                        title = tr("音量即时调整", "音量即时调整"),
+                        summary = tr("按住音量键时立即调整音量，无需先取消静音。", "按住音量键时立即调整音量，无需先取消静音。"),
+                        checked = framework.volumeInstant,
+                        onCheckedChange = { value -> apply { it.copy(volumeInstant = value) } },
+                    )
+                }
+            }
+            item {
+                Group(tr("功能", "功能")) {
+                    SwitchPreference(
+                        title = tr("允许所有应用启用强制深色模式", "允许所有应用启用强制深色模式"),
+                        summary = tr("让第三方应用也能出现在强制深色模式的应用列表中。", "让第三方应用也能出现在强制深色模式的应用列表中。"),
+                        checked = framework.forceDarkAllApps,
+                        onCheckedChange = { value -> apply { it.copy(forceDarkAllApps = value) } },
+                    )
+                    SwitchPreference(
+                        title = tr("增强最近任务可见性", "增强最近任务可见性"),
+                        summary = tr("让声明隐藏于最近任务的应用重新出现在最近任务中。", "让声明隐藏于最近任务的应用重新出现在最近任务中。"),
+                        checked = framework.recentsVisibility,
+                        onCheckedChange = { value -> apply { it.copy(recentsVisibility = value) } },
+                    )
+                    SwitchPreference(
+                        title = tr("使用原生安装器", "使用原生安装器"),
+                        summary = tr("安装应用时使用系统原生安装器界面。", "安装应用时使用系统原生安装器界面。"),
+                        checked = framework.nativeInstaller,
+                        onCheckedChange = { value -> apply { it.copy(nativeInstaller = value) } },
+                    )
+                    SwitchPreference(
+                        title = tr("禁用每72小时必须输入锁屏密码的功能", "禁用每72小时必须输入锁屏密码的功能"),
+                        summary = tr("不再强制要求定期输入锁屏密码进行强身份验证。", "不再强制要求定期输入锁屏密码进行强身份验证。"),
+                        checked = framework.disablePin72h,
+                        onCheckedChange = { value -> apply { it.copy(disablePin72h = value) } },
+                    )
+                    SwitchPreference(
+                        title = tr("禁用设备名称校验", "禁用设备名称校验"),
+                        summary = tr("跳过修改设备名称与蓝牙名称时的合规校验。", "跳过修改设备名称与蓝牙名称时的合规校验。"),
+                        checked = framework.disableDeviceNameCheck,
+                        onCheckedChange = { value -> apply { it.copy(disableDeviceNameCheck = value) } },
+                    )
+                }
+            }
+            item {
+                Group(tr("截图", "截图")) {
+                    SwitchPreference(
+                        title = tr("允许即时截图", "允许即时截图"),
+                        summary = tr("去掉按键截屏的长按等待，按下即触发。", "去掉按键截屏的长按等待，按下即触发。"),
+                        checked = framework.quickScreenshot,
+                        onCheckedChange = { value -> apply { it.copy(quickScreenshot = value) } },
+                    )
+                    SwitchPreference(
+                        title = tr("允许在任意界面截屏", "允许在任意界面截屏"),
+                        summary = tr("忽略应用的截屏限制标记，允许对受保护界面截图。", "忽略应用的截屏限制标记，允许对受保护界面截图。"),
+                        checked = framework.screenshotAnywhere,
+                        onCheckedChange = { value -> apply { it.copy(screenshotAnywhere = value) } },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun SystemSettings(
     settingsApp: SettingsAppPreferences,
     updateSettingsApp: ((SettingsAppPreferences) -> SettingsAppPreferences) -> Unit,
@@ -4610,7 +4739,8 @@ private fun Detail(
         PageId.CAMERA -> Camera(cameras, updateCamera, openPage, back)
         PageId.CAMERA_PALETTE -> CameraPalette(cameras, updateCamera, back)
         PageId.SYSTEM_UPDATE -> SystemUpdate(systemUpdate, updateSystemUpdate, back)
-        PageId.SYSTEM_SETTINGS -> SystemSettings(settingsApp, updateSettingsApp, deviceProfile, updateDeviceProfile, appearance, updateAppearance, openPage, onPickAppearanceLogo, onClearAppearanceLogo, back)
+        PageId.SYSTEM_FRAMEWORK -> FrameworkPage(back)
+    PageId.SYSTEM_SETTINGS -> SystemSettings(settingsApp, updateSettingsApp, deviceProfile, updateDeviceProfile, appearance, updateAppearance, openPage, onPickAppearanceLogo, onClearAppearanceLogo, back)
         PageId.DEVICE_PROFILE -> DeviceProfileEditor(deviceProfile, updateDeviceProfile, back)
         PageId.SETTINGS_ENTRY_LABELS -> SettingsEntryLabelsPage(settingsApp, updateSettingsApp, back)
         PageId.SETTINGS_APPEARANCE_HOME -> SettingsAppearancePage(APPEARANCE_SLOT_HOME, appearance, updateAppearance, onPickAppearanceHome, onClearAppearanceHome, back)

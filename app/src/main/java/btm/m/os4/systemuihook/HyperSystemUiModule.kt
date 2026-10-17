@@ -986,6 +986,260 @@ class HyperSystemUiModule : XposedModule() {
     private val boseLogoResId = java.util.concurrent.atomic.AtomicInteger(0)
 
     /**
+     * Hooks for the "System Framework" page. Everything here runs inside system_server.
+     *
+     * Each block is guarded on its own so that one missing class on a given ROM cannot disable the
+     * rest. The switches are re-read on every call, so toggling one takes effect without restarting
+     * system_server.
+     */
+    private fun installFrameworkHooks(loader: ClassLoader, prefs: SharedPreferences) {
+        fun on(block: (FrameworkPreferences) -> Boolean): Boolean =
+            runCatching { block(readFrameworkPreferences(prefs)) }.getOrDefault(false)
+
+        // ---- Small window ----
+        runCatching {
+            val cls = loader.loadClass("com.android.server.wm.MiuiFreeFormStackDisplayStrategy")
+            cls.methods.filter {
+                it.parameterCount == 0 &&
+                    (it.name == "getMaxMiuiFreeFormStackCount" || it.name == "getMaxMiuiFreeFormStackCountForFlashBack")
+            }.forEach { method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("hyperchanger:fw-multiple-freeform-${method.name}")
+                    .intercept { chain -> if (on { it.multipleFreeform }) 256 else chain.proceed() }
+            }
+        }
+        runCatching {
+            val cls = loader.loadClass("android.app.ActivityTaskManager")
+            cls.methods.filter { it.name == "supportsSplitScreen" }.forEach { method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("hyperchanger:fw-force-freeform-split")
+                    .intercept { chain -> if (on { it.forceFreeform }) true else chain.proceed() }
+            }
+        }
+        runCatching {
+            val cls = loader.loadClass("com.android.server.wm.Task")
+            cls.methods.filter { it.name == "isResizeable" && it.parameterCount == 0 }.forEach { method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("hyperchanger:fw-force-freeform-resizeable")
+                    .intercept { chain -> if (on { it.forceFreeform }) true else chain.proceed() }
+            }
+        }
+        runCatching {
+            val cls = loader.loadClass("com.android.server.wm.ActivityTaskManagerService")
+            cls.methods.filter { it.name == "retrieveSettings" }.forEach { method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("hyperchanger:fw-force-freeform-settings")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        if (on { it.forceFreeform }) {
+                            runCatching {
+                                cls.getDeclaredField("mDevEnableNonResizableMultiWindow")
+                                    .apply { isAccessible = true }
+                                    .setBoolean(chain.thisObject, true)
+                            }
+                        }
+                        result
+                    }
+            }
+        }
+        runCatching {
+            val cls = loader.loadClass("com.android.server.wm.WindowManagerService\$SettingsObserver")
+            cls.methods.filter { it.name == "updateDevEnableNonResizableMultiWindow" }.forEach { method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("hyperchanger:fw-force-freeform-observer")
+                    .intercept { chain -> if (on { it.forceFreeform }) null else chain.proceed() }
+            }
+        }
+        runCatching {
+            val cls = loader.loadClass("com.android.server.wm.MiuiFreeFormGestureController")
+            val target = cls.methods.firstOrNull { it.name == "needForegroundPin" && it.parameterCount == 1 }
+                ?: return@runCatching
+            hook(target)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("hyperchanger:fw-freeform-background")
+                .intercept { chain -> if (on { it.freeformBackground }) true else chain.proceed() }
+        }
+        // Remembering the window bounds needs the whole launch pipeline, so only the restore side is
+        // hooked: the last bounds saved by the system are reapplied when the app returns.
+        runCatching {
+            val cls = loader.loadClass("com.android.server.wm.ActivityStarterInjector")
+            val target = cls.methods.firstOrNull {
+                it.name == "modifyLaunchActivityOptionIfNeed" && it.parameterCount == 8
+            } ?: return@runCatching
+            hook(target)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("hyperchanger:fw-remember-freeform")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    if (on { it.rememberFreeform }) {
+                        runCatching {
+                            val intent = chain.getArg(5) as? android.content.Intent
+                            val record = chain.getArg(7) ?: return@runCatching
+                            val recordIntent = record.javaClass.getDeclaredField("intent")
+                                .apply { isAccessible = true }
+                                .get(record) as? android.content.Intent
+                            if (intent != null && recordIntent != null &&
+                                intent.component?.packageName != recordIntent.component?.packageName
+                            ) {
+                                // Different app: keep the freeform bounds the caller already set.
+                                intent.putExtra("hyperchanger_freeform_keep_bounds", true)
+                            }
+                        }
+                    }
+                    result
+                }
+        }
+
+        // ---- Volume ----
+        runCatching {
+            val cls = loader.loadClass("com.android.server.audio.SoundDoseHelperStubImpl")
+            val target = cls.methods.firstOrNull {
+                it.name == "updateSafeMediaVolumeIndex" && it.parameterCount == 1
+            } ?: return@runCatching
+            hook(target)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("hyperchanger:fw-volume-safe")
+                .intercept { chain ->
+                    when {
+                        on { it.volumeSafeMode == VOLUME_SAFE_ALWAYS } -> 2147483646
+                        on { it.volumeSafeMode == VOLUME_SAFE_HEADSET_ONLY } && hasHeadsetOutput() -> 2147483646
+                        else -> chain.proceed()
+                    }
+                }
+        }
+        runCatching {
+            val cls = loader.loadClass("com.android.server.audio.AudioService\$VolumeController")
+            val target = cls.methods.firstOrNull { it.name == "suppressAdjustment" && it.parameterCount == 3 }
+                ?: return@runCatching
+            hook(target)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("hyperchanger:fw-volume-instant")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    val streamType = chain.getArg(0) as? Int
+                    val isMuteAdjust = chain.getArg(2) as? Boolean
+                    if (on { it.volumeInstant } && streamType == android.media.AudioManager.STREAM_MUSIC && isMuteAdjust == false) {
+                        false
+                    } else {
+                        result
+                    }
+                }
+        }
+
+        // ---- Features ----
+        runCatching {
+            val cls = loader.loadClass("com.android.server.ForceDarkAppListManager")
+            val buildCls = loader.loadClass("miui.os.Build")
+            val flag = buildCls.getDeclaredField("IS_INTERNATIONAL_BUILD").apply { isAccessible = true }
+            cls.methods.filter { it.name == "getDarkModeAppList" }.forEach { method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("hyperchanger:fw-force-dark-list")
+                    .intercept { chain ->
+                        if (!on { it.forceDarkAllApps }) return@intercept chain.proceed()
+                        val original = runCatching { flag.getBoolean(null) }.getOrDefault(false)
+                        runCatching { flag.setBoolean(null, true) }
+                        try {
+                            chain.proceed()
+                        } finally {
+                            runCatching { flag.setBoolean(null, original) }
+                        }
+                    }
+            }
+            cls.methods.filter { it.name == "shouldShowInSettings" && it.parameterCount == 1 }.forEach { method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("hyperchanger:fw-force-dark-show")
+                    .intercept { chain ->
+                        if (!on { it.forceDarkAllApps }) return@intercept chain.proceed()
+                        val info = chain.getArg(0) as? android.content.pm.ApplicationInfo
+                        info != null && info.uid >= 10000 &&
+                            info.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM == 0
+                    }
+            }
+        }
+        runCatching {
+            val cls = loader.loadClass("android.content.Intent")
+            cls.methods.filter { it.name == "setFlags" && it.parameterCount == 1 }.forEach { method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("hyperchanger:fw-recents-visibility")
+                    .intercept { chain ->
+                        val flags = chain.getArg(0) as? Int ?: return@intercept chain.proceed()
+                        if (!on { it.recentsVisibility }) return@intercept chain.proceed()
+                        // 0x00800000 is FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS.
+                        chain.proceed(arrayOf<Any?>(flags and 0xFF7FFFFF.toInt()))
+                    }
+            }
+        }
+        runCatching {
+            val cls = loader.loadClass("com.android.server.pm.PackageManagerServiceImpl")
+            val isCts = cls.methods.firstOrNull { it.name == "isCTS" && it.parameterCount == 0 }
+            isCts?.let { method ->
+                hook(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("hyperchanger:fw-native-installer-cts")
+                    .intercept { chain -> if (on { it.nativeInstaller }) true else chain.proceed() }
+            }
+        }
+        runCatching {
+            val cls = loader.loadClass("com.android.server.locksettings.LockSettingsStrongAuth")
+            val target = cls.methods.firstOrNull { it.name == "rescheduleStrongAuthTimeoutAlarm" }
+                ?: return@runCatching
+            hook(target)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("hyperchanger:fw-pin-72h")
+                .intercept { chain -> if (on { it.disablePin72h }) null else chain.proceed() }
+        }
+
+        // ---- Screenshot ----
+        runCatching {
+            val cls = loader.loadClass("com.android.server.policy.PhoneWindowManager")
+            val target = cls.methods.firstOrNull {
+                it.name == "getScreenshotChordLongPressDelay" && it.parameterCount == 0
+            } ?: return@runCatching
+            hook(target)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("hyperchanger:fw-quick-screenshot")
+                .intercept { chain -> if (on { it.quickScreenshot }) 0L else chain.proceed() }
+        }
+        runCatching {
+            val cls = loader.loadClass("com.android.server.wm.WindowState")
+            val target = cls.methods.firstOrNull { it.name == "isSecureLocked" && it.parameterCount == 0 }
+                ?: return@runCatching
+            hook(target)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("hyperchanger:fw-screenshot-anywhere")
+                .intercept { chain -> if (on { it.screenshotAnywhere }) false else chain.proceed() }
+        }
+    }
+
+    /** True when a headset is currently connected, used by the headset-only volume mode. */
+    private fun hasHeadsetOutput(): Boolean = runCatching {
+        val context = Class.forName("android.app.ActivityThread")
+            .getMethod("currentApplication")
+            .invoke(null) as? android.content.Context ?: return@runCatching false
+        val audio = context.getSystemService(android.content.Context.AUDIO_SERVICE) as? android.media.AudioManager
+            ?: return@runCatching false
+        audio.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS).any { device ->
+            when (device.type) {
+                android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+                android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET,
+                android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+                android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+                android.media.AudioDeviceInfo.TYPE_USB_HEADSET,
+                -> true
+                else -> false
+            }
+        }
+    }.getOrDefault(false)
+
+    /**
      * Adds extra refresh rates to the Xiaomi Settings picker.
      *
      * `FeatureParser.getIntArray("fpsList")` is what the display settings page reads to build its
@@ -1026,6 +1280,26 @@ class HyperSystemUiModule : XposedModule() {
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("hyperchanger:settings-old-control-center")
                     .intercept { false }
+            }
+        }
+        if (readFrameworkPreferences(prefs).disableDeviceNameCheck) {
+            runCatching {
+                val cls = loader.loadClass("com.android.settings.bluetooth.MiuiBTUtils")
+                cls.methods.filter { it.name == "isInternationalBuild" && it.parameterCount == 0 }
+                    .forEach { method ->
+                        hook(method)
+                            .setExceptionMode(ExceptionMode.PROTECTIVE)
+                            .setId("hyperchanger:fw-device-name-intl")
+                            .intercept { true }
+                    }
+                cls.methods.filter {
+                    it.name == "isSupportNameComplianceCheck" && it.parameterCount == 1
+                }.forEach { method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("hyperchanger:fw-device-name-compliance")
+                        .intercept { false }
+                }
             }
         }
     }
@@ -1081,6 +1355,9 @@ class HyperSystemUiModule : XposedModule() {
             return
         }
         if (param.packageName == "android" || param.packageName == "system") {
+            runCatching {
+                installFrameworkHooks(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install system framework hooks", error) }
             return
         }
         if (param.packageName == "com.miui.home") {
