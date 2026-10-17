@@ -1266,6 +1266,26 @@ class HyperSystemUiModule : XposedModule() {
                 .setId("hyperchanger:fw-screenshot-anywhere")
                 .intercept { chain -> if (on { it.screenshotAnywhere }) false else chain.proceed() }
         }
+        runCatching {
+            // Clearing isSecureLocked only drops the surface flag; the capture path still filters
+            // protected content, so the secure content policy has to be relaxed as well.
+            val cls = loader.loadClass("android.window.ScreenCaptureInternal")
+            val argsCls = loader.loadClass("android.window.ScreenCaptureInternal\$CaptureArgs")
+            val policy = argsCls.getDeclaredField("mSecureContentPolicy").apply { isAccessible = true }
+            listOf("nativeCaptureDisplay", "nativeCaptureLayers").forEach { name ->
+                cls.declaredMethods.filter { it.name == name }.forEach { method ->
+                    hook(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("hyperchanger:fw-screen-capture-$name")
+                        .intercept { chain ->
+                            if (on { it.screenshotAnywhere }) {
+                                runCatching { policy.setInt(chain.getArg(0), 1) }
+                            }
+                            chain.proceed()
+                        }
+                }
+            }
+        }
     }
 
     /** True when a headset is currently connected, used by the headset-only volume mode. */
