@@ -3,7 +3,6 @@ system
 com.miui.home
 com.miui.miwallpaper
 miui.systemui.plugin
-android
 com.miui.aod
 com.android.camera
 com.miui.gallery

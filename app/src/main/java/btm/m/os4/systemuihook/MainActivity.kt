@@ -3187,21 +3187,9 @@ private fun Desktop(
 
                 SwitchPreference(
                     title = tr("为桌面添加 Dock", "为桌面添加 Dock"),
-                    summary = tr("需要勾选\"系统框架\"作用域，初次使用需要重启手机", "需要勾选\"系统框架\"作用域，初次使用需要重启手机"),
                     checked = settings.enabled,
                     onCheckedChange = { enabled -> update { it.copy(enabled = enabled) } },
                 )
-                AnimatedVisibility(
-                    visible = settings.enabled,
-                    enter = fadeIn(tween(180)),
-                    exit = fadeOut(tween(140)),
-                ) {
-                    SwitchPreference(
-                        title = tr("Dock 入场动画", "Dock 入场动画"),
-                        checked = settings.entryAnimation,
-                        onCheckedChange = { enabled -> update { it.copy(entryAnimation = enabled) } },
-                    )
-                }
             }
         }
         item {

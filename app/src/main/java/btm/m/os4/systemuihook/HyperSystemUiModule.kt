@@ -1354,7 +1354,8 @@ class HyperSystemUiModule : XposedModule() {
             }.onFailure { error -> log(Log.ERROR, TAG, "Could not install Xiaomi Settings hooks", error) }
             return
         }
-        if (param.packageName == "android" || param.packageName == "system") {
+        // The framework hooks live in system_server, which LSPosed exposes as the "system" package.
+        if (param.packageName == "system") {
             runCatching {
                 installFrameworkHooks(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
             }.onFailure { error -> log(Log.ERROR, TAG, "Could not install system framework hooks", error) }
