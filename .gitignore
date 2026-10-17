@@ -83,3 +83,6 @@ hyperos4-glass-blur-main/
 /.gradle-user-home/
 /build-tmp/
 /DOCK_ANIMATION_HANDOFF.md
+
+# Handoff documents are kept locally and out of version control
+/HANDOFF/

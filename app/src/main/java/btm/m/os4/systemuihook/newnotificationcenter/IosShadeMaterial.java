@@ -201,8 +201,10 @@ public final class IosShadeMaterial {
             case 1: return 1;
             case 2:
                 int radius = saved[2] instanceof Number ? ((Number) saved[2]).intValue() : 0;
-                // Keep the panel's native animated radius; rows and clear-all need their own.
-                return isPanel(view) ? radius : (radius > 0 ? radius : 80);
+                // The panel reports no native radius of its own, so honouring that value verbatim
+                // left the iOS shade with refraction only: a transparent glass with no blur at all.
+                // Fall back to the row radius whenever the native value is missing.
+                return radius > 0 ? radius : 80;
             case 3: return false;
             case 4: return false; // Include the wallpaper sibling below NotificationPanelView.
             default: throw new IllegalArgumentException();

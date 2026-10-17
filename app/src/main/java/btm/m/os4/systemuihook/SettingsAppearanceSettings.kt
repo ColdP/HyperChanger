@@ -19,6 +19,12 @@ const val APPEARANCE_SLOT_LOGO = "logo"
  * never disturbs the device-interface LOGO.
  */
 const val APPEARANCE_SLOT_CPU_ICON = "cpu_icon"
+
+/**
+ * Dedicated slot for the audio tuning badge. Same provider/file pipeline as the other appearance
+ * slots, kept separate so importing an audio logo never disturbs the device LOGO or the CPU icon.
+ */
+const val APPEARANCE_SLOT_AUDIO_LOGO = "audio_logo"
 const val APPEARANCE_SLOT_DEVICE_IMAGE = "device_image"
 const val APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO = "custom_device_logo"
 const val APPEARANCE_SLOT_STYLE1_UPDATE_BACKGROUND = "style1_update_background"

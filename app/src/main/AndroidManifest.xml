@@ -17,9 +17,13 @@
         android:enableOnBackInvokedCallback="true"
         android:icon="@drawable/ic_hyperchanger"
         android:label="@string/app_name"
+        android:description="@string/xposed_description"
         android:roundIcon="@drawable/ic_hyperchanger"
         android:supportsRtl="true"
         android:theme="@style/Theme.HyperSystemUIHook">
+        <meta-data
+            android:name="xposeddescription"
+            android:resource="@string/xposed_description" />
         <activity
             android:name=".MainActivity"
             android:exported="true">

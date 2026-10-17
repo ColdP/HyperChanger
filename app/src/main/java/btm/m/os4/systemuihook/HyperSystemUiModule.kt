@@ -833,12 +833,218 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
+    /** Sound effect support for com.miui.misound: unlock BOSE and rebrand its badge. */
+    private fun installSoundEffectHooks(loader: ClassLoader, prefs: SharedPreferences) {
+        runCatching {
+            val getBoolean = Class.forName("android.os.SystemProperties").getDeclaredMethod(
+                "getBoolean", String::class.java, Boolean::class.javaPrimitiveType,
+            )
+            hook(getBoolean)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("hyperchanger:sound-effect-props")
+                .intercept { chain ->
+                    val key = chain.getArg(0) as? String
+                    if (key == AUDIO_PROP_BOSE) readSoundEffectPreferences(prefs).boseEnabled else chain.proceed()
+                }
+        }
+        runCatching {
+            val gate = loader.loadClass("z.m")
+            gate.methods.firstOrNull { it.name == "B" && it.parameterCount == 0 }?.let { target ->
+                hook(target)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("hyperchanger:sound-effect-gate")
+                    .intercept { readSoundEffectPreferences(prefs).boseEnabled }
+            }
+        }
+        runCatching {
+            val taGet = android.content.res.TypedArray::class.java.getDeclaredMethod(
+                "getDrawable", Int::class.javaPrimitiveType,
+            )
+            hook(taGet)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("hyperchanger:audio-logo-ta")
+                .intercept { chain ->
+                    val typed = chain.thisObject as? android.content.res.TypedArray
+                    val index = chain.getArg(0) as? Int
+                    val replacement = if (typed != null && index != null) {
+                        val resId = typed.getResourceId(index, 0)
+                        if (resId != 0) audioLogoDrawable(typed.resources, resId, prefs) else null
+                    } else null
+                    if (replacement != null) replacement else chain.proceed()
+                }
+        }
+        runCatching {
+            val getDrawable = Resources::class.java.getDeclaredMethod(
+                "getDrawable", Int::class.javaPrimitiveType, Resources.Theme::class.java,
+            )
+            hook(getDrawable)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("hyperchanger:audio-logo-res")
+                .intercept { chain ->
+                    val res = chain.thisObject as? Resources
+                    val id = chain.getArg(0) as? Int
+                    val replacement = if (res != null && id != null) audioLogoDrawable(res, id, prefs) else null
+                    if (replacement != null) replacement else chain.proceed()
+                }
+        }
+        runCatching {
+            val setImage = ImageView::class.java.getMethod("setImageResource", Int::class.javaPrimitiveType)
+            hook(setImage)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("hyperchanger:audio-logo-setter")
+                .intercept { chain ->
+                    val view = chain.thisObject as? ImageView
+                    val resId = chain.getArg(0) as? Int
+                    val replacement = if (view != null && resId != null) audioLogoDrawable(view.resources, resId, prefs) else null
+                    if (replacement != null) { view!!.setImageDrawable(replacement); null } else chain.proceed()
+                }
+        }
+        runCatching {
+            val fragCls = loader.loadClass("androidx.preference.PreferenceFragmentCompat")
+            val onCreateView = fragCls.getMethod(
+                "onCreateView", android.view.LayoutInflater::class.java,
+                android.view.ViewGroup::class.java, android.os.Bundle::class.java,
+            )
+            hook(onCreateView)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("hyperchanger:audio-logo-view")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    (result as? android.view.ViewGroup)?.let { root ->
+                        runCatching { attachAudioBadge(chain.thisObject, root, prefs) }
+                    }
+                    result
+                }
+        }
+    }
+
+    /** Badge drawable for the selected mode, or null to leave the stock one alone. */
+    private fun audioLogoDrawable(res: Resources, id: Int, prefs: SharedPreferences): Drawable? {
+        val settings = readSoundEffectPreferences(prefs)
+        if (!settings.boseEnabled) return null
+        if (settings.logoMode == AUDIO_LOGO_NONE || settings.logoMode == AUDIO_LOGO_BOSE) return null
+        var cached = boseLogoResId.get()
+        if (cached <= 0) {
+            cached = runCatching { res.getIdentifier("bose_logo", "drawable", "com.miui.misound") }.getOrDefault(0)
+            if (cached > 0) boseLogoResId.set(cached)
+        }
+        if (cached <= 0 || id != cached) return null
+        val appContext = runCatching {
+            Class.forName("android.app.ActivityThread").getMethod("currentApplication").invoke(null)
+        }.getOrNull() as? android.content.Context ?: return null
+        val moduleContext = runCatching {
+            appContext.createPackageContext(BuildConfig.APPLICATION_ID, android.content.Context.CONTEXT_IGNORE_SECURITY)
+        }.getOrNull() ?: return null
+        val drawable = audioLogoFor(settings.logoMode, appContext, moduleContext) ?: return null
+        val night = res.configuration.uiMode and
+            android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        return drawable.mutate().apply { setTint(if (night) 0x33FFFFFF.toInt() else 0x33000000.toInt()) }
+    }
+
+    private fun audioLogoFor(mode: Int, appContext: android.content.Context, moduleContext: android.content.Context): Drawable? =
+        when (mode) {
+            AUDIO_LOGO_XIAOMI -> moduleContext.getDrawable(R.drawable.ic_audio_logo_xiaomi)
+            AUDIO_LOGO_HARMAN -> moduleContext.getDrawable(R.drawable.ic_audio_logo_harman)
+            AUDIO_LOGO_DOLBY -> moduleContext.getDrawable(R.drawable.ic_audio_logo_dolby)
+            AUDIO_LOGO_CUSTOM -> {
+                val source = SettingsAppearanceSources.query(appContext, APPEARANCE_SLOT_AUDIO_LOGO)
+                if (source.exists) LogoDrawableLoader.load(appContext, source) else null
+            }
+            else -> null
+        }
+
+    /** Adds the badge as a bottom-aligned view on the regular sound page when BOSE is off. */
+    private fun attachAudioBadge(fragment: Any?, root: android.view.ViewGroup, prefs: SharedPreferences) {
+        val settings = readSoundEffectPreferences(prefs)
+        if (settings.boseEnabled || settings.logoMode == AUDIO_LOGO_NONE) return
+        if (fragment == null) return
+        val screen = runCatching {
+            fragment.javaClass.getMethod("getPreferenceScreen").invoke(fragment)
+        }.getOrNull() ?: return
+        val findPreference = runCatching {
+            screen.javaClass.getMethod("findPreference", CharSequence::class.java)
+        }.getOrNull() ?: return
+        if (runCatching { findPreference.invoke(screen, "effect_selection") }.getOrNull() == null) return
+        val context = root.context
+        val moduleContext = runCatching {
+            context.createPackageContext(BuildConfig.APPLICATION_ID, android.content.Context.CONTEXT_IGNORE_SECURITY)
+        }.getOrNull() ?: return
+        val drawable = audioLogoFor(settings.logoMode, context, moduleContext) ?: return
+        val night = root.resources.configuration.uiMode and
+            android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        drawable.mutate().setTint(if (night) 0x33FFFFFF.toInt() else 0x33000000.toInt())
+        val density = root.resources.displayMetrics.density
+        val image = ImageView(context)
+        image.scaleType = ImageView.ScaleType.FIT_CENTER
+        image.setImageDrawable(drawable)
+        val params = android.widget.FrameLayout.LayoutParams((130 * density).toInt(), (24 * density).toInt())
+        params.gravity = android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL
+        params.bottomMargin = (36 * density).toInt()
+        root.addView(image, params)
+    }
+
+    private val boseLogoResId = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /** Best-effort tweaks that reshape the system Settings app itself. */
+    private fun installSettingsAppScopeHooks(loader: ClassLoader, prefs: SharedPreferences) {
+        val settings = readSettingsAppScopePreferences(prefs)
+        if (settings.oldControlCenter) {
+            runCatching {
+                val cls = loader.loadClass("com.android.settings.utils.StatusBarUtils")
+                val target = cls.methods.firstOrNull {
+                    it.name == "isForceUseControlPanel" && it.parameterCount == 1
+                } ?: return@runCatching
+                hook(target)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("hyperchanger:settings-old-control-center")
+                    .intercept { false }
+            }
+        }
+    }
+
+    /** Clears the "force new control center" flag so the legacy shade comes back. */
+    private fun installOldControlCenterHook(loader: ClassLoader, prefs: SharedPreferences) {
+        if (!readSettingsAppScopePreferences(prefs).oldControlCenter) return
+        listOf(
+            "com.miui.systemui.controlcenter.data.repository.ControlCenterSettingsRepositoryImpl" to "forceUseControlCenter",
+            "com.android.systemui.controlcenter.policy.ControlCenterControllerImpl" to "forceUseControlCenterPanel",
+        ).forEach { (className, fieldName) ->
+            runCatching {
+                val cls = loader.loadClass(className)
+                cls.declaredConstructors.forEach { constructor ->
+                    hook(constructor)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("hyperchanger:old-cc-${cls.simpleName}")
+                        .intercept { chain ->
+                            val result = chain.proceed()
+                            runCatching {
+                                cls.getDeclaredField(fieldName).apply { isAccessible = true }
+                                    .setBoolean(chain.thisObject, false)
+                            }
+                            result
+                        }
+                }
+            }
+        }
+    }
+
     override fun onPackageLoaded(param: PackageLoadedParam) {
         if (!OsCompatibility.areHooksAllowed()) return
         if (param.packageName == "com.android.systemui") {
             runCatching {
                 installLiftToWakeScheduleHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
             }.onFailure { error -> log(Log.ERROR, TAG, "Could not install lift-to-wake schedule hook", error) }
+        }
+        if (param.packageName == "com.miui.misound") {
+            runCatching {
+                installSoundEffectHooks(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install sound effect hooks", error) }
+            return
+        }
+        if (param.packageName == "com.android.systemui") {
+            runCatching {
+                installOldControlCenterHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install old control center hook", error) }
         }
         if (param.packageName == "android" || param.packageName == "system") {
             return
@@ -863,6 +1069,9 @@ class HyperSystemUiModule : XposedModule() {
             return
         }
         if (param.packageName == SETTINGS_PACKAGE) {
+            runCatching {
+                installSettingsAppScopeHooks(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install Settings app scope hooks", error) }
             runCatching {
                 installSettingsAppEntryHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
             }.onFailure { error -> log(Log.ERROR, TAG, "Could not install Settings app entry hook", error) }

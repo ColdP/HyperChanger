@@ -2744,6 +2744,7 @@ private fun RestartScopesPage(
         ScopeApplication.PERSONAL_ASSISTANT,
         ScopeApplication.SUBSCREEN_CENTER,
         ScopeApplication.SYSTEM_UPDATE,
+        ScopeApplication.SOUND_EFFECT,
         ScopeApplication.SCREEN_RECORDER,
         ScopeApplication.SUPER_XIAOAI,
         ScopeApplication.SUPER_XIAOAI_IME,
@@ -3365,8 +3366,40 @@ private fun SystemSettings(
     onPickLogo: () -> Unit,
     onClearLogo: () -> Unit,
     back: () -> Unit,
-) = AppPage(tr("系统设置", "系统设置"), back, restartScopes = setOf(ScopeApplication.SETTINGS)) { padding, scroll ->
+) = AppPage(tr("系统设置", "系统设置"), back, restartScopes = setOf(ScopeApplication.SETTINGS, ScopeApplication.SOUND_EFFECT)) { padding, scroll ->
     val cpuIconContext = LocalContext.current
+    val soundEffectService by HookApplication.service.collectAsStateWithLifecycle()
+    val appScopeService by HookApplication.service.collectAsStateWithLifecycle()
+    val appScopeStore = remember(cpuIconContext) { SettingsAppScopePreferencesStore(cpuIconContext) }
+    var appScope by remember { mutableStateOf(appScopeStore.settings) }
+    LaunchedEffect(appScopeService) {
+        appScopeService?.let {
+            appScopeStore.syncRemote(it)
+            appScope = appScopeStore.settings
+        }
+    }
+    val soundEffectStore = remember(cpuIconContext) { SoundEffectPreferencesStore(cpuIconContext) }
+    var soundEffect by remember { mutableStateOf(soundEffectStore.settings) }
+    LaunchedEffect(soundEffectService) {
+        soundEffectService?.let {
+            soundEffectStore.syncRemote(it)
+            soundEffect = soundEffectStore.settings
+        }
+    }
+    var audioLogoImported by remember {
+        mutableStateOf(runCatching { appearanceFile(cpuIconContext, APPEARANCE_SLOT_AUDIO_LOGO).exists() }.getOrDefault(false))
+    }
+    val pickAudioLogo = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                copyAppearanceFile(cpuIconContext, APPEARANCE_SLOT_AUDIO_LOGO, uri)
+                audioLogoImported = true
+                Toast.makeText(cpuIconContext, tr("已导入", "已导入"), Toast.LENGTH_SHORT).show()
+            }.onFailure {
+                Toast.makeText(cpuIconContext, tr("导入失败", "导入失败"), Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
     var cpuIconImported by remember {
         mutableStateOf(runCatching { appearanceFile(cpuIconContext, APPEARANCE_SLOT_CPU_ICON).exists() }.getOrDefault(false))
     }
@@ -3382,6 +3415,71 @@ private fun SystemSettings(
         }
     }
     AppList(padding, scroll) {
+        item {
+            Group(tr("音效设置", "音效设置")) {
+                SwitchPreference(
+                    title = tr("启用 BOSE 音效", "启用 BOSE 音效"),
+                    summary = tr("在音效设置中启用 BOSE 调音。仅解锁系统隐藏的调音方案，不保证对音质有提升作用。", "在音效设置中启用 BOSE 调音。仅解锁系统隐藏的调音方案，不保证对音质有提升作用。"),
+                    checked = soundEffect.boseEnabled,
+                    onCheckedChange = { value ->
+                        soundEffectStore.update(soundEffectService) { it.copy(boseEnabled = value) }
+                        soundEffect = soundEffectStore.settings
+                    },
+                )
+                Column(Modifier.fillMaxWidth()) {
+                    val logoItems = if (soundEffect.boseEnabled) {
+                        listOf(
+                            tr("BOSE", "BOSE"),
+                            tr("Xiaomi", "Xiaomi"),
+                            tr("Harman Kardon", "Harman Kardon"),
+                            tr("Dolby Atmos", "Dolby Atmos"),
+                            tr("自定义", "自定义"),
+                        )
+                    } else {
+                        listOf(
+                            tr("不显示", "不显示"),
+                            tr("BOSE", "BOSE"),
+                            tr("Xiaomi", "Xiaomi"),
+                            tr("Harman Kardon", "Harman Kardon"),
+                            tr("Dolby Atmos", "Dolby Atmos"),
+                            tr("自定义", "自定义"),
+                        )
+                    }
+                    // Without BOSE the badge is an extra element, so "hide it" is a valid choice.
+                    val logoOffset = if (soundEffect.boseEnabled) 1 else 0
+                    OverlayDropdownPreference(
+                        title = tr("音效徽标", "音效徽标"),
+                        items = logoItems,
+                        selectedIndex = (soundEffect.logoMode - logoOffset).coerceIn(0, logoItems.size - 1),
+                        onSelectedIndexChange = { index ->
+                            soundEffectStore.update(soundEffectService) { it.copy(logoMode = index + logoOffset) }
+                            soundEffect = soundEffectStore.settings
+                        },
+                    )
+                    AnimatedVisibility(
+                        visible = soundEffect.needsCustomLogo,
+                        enter = expandVertically(animationSpec = tween(220)) + fadeIn(animationSpec = tween(180)),
+                        exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(animationSpec = tween(120)),
+                    ) {
+                        Column(Modifier.fillMaxWidth()) {
+                            ArrowPreference(
+                                title = tr("导入徽标", "导入徽标"),
+                                summary = if (audioLogoImported) tr("已导入", "已导入") else tr("未导入", "未导入"),
+                                onClick = { pickAudioLogo.launch(arrayOf("image/*", "application/xml", "text/xml")) },
+                            )
+                            ArrowPreference(
+                                title = tr("清除徽标", "清除徽标"),
+                                summary = if (audioLogoImported) tr("已导入", "已导入") else tr("无图标", "无图标"),
+                                onClick = {
+                                    runCatching { appearanceFile(cpuIconContext, APPEARANCE_SLOT_AUDIO_LOGO).delete() }
+                                    audioLogoImported = false
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
         item {
             Group(tr("设置应用", "设置应用")) {
                 SwitchPreference(
@@ -3449,6 +3547,15 @@ private fun SystemSettings(
                     title = tr("显示已保存 WiFi 的密码", "显示已保存 WiFi 的密码"),
                     checked = settingsApp.showSavedWifiPasswords,
                     onCheckedChange = { enabled -> updateSettingsApp { it.copy(showSavedWifiPasswords = enabled) } },
+                )
+                SwitchPreference(
+                    title = tr("解锁旧版控制中心样式", "解锁旧版控制中心样式"),
+                    summary = tr("恢复旧版控制中心的下拉样式。需要同时勾选并重启“设置”和“系统界面”两个作用域应用，不保证功能能在所有设备和系统上生效。", "恢复旧版控制中心的下拉样式。需要同时勾选并重启“设置”和“系统界面”两个作用域应用，不保证功能能在所有设备和系统上生效。"),
+                    checked = appScope.oldControlCenter,
+                    onCheckedChange = { value ->
+                        appScopeStore.update(appScopeService) { it.copy(oldControlCenter = value) }
+                        appScope = appScopeStore.settings
+                    },
                 )
             }
         }

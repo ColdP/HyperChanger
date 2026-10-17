@@ -1,5 +1,5 @@
-minApiVersion=101
+minApiVersion=102
 targetApiVersion=102
 staticScope=true
 autoHotReload=true
-description=HyperChanger for HyperOS 4 control center, notification shade, lock screen, and camera customization.
+description=Shape HyperOS your way.
