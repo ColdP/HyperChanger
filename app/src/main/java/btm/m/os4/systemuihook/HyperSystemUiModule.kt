@@ -392,7 +392,7 @@ class HyperSystemUiModule : XposedModule() {
         val availability = param.defaultClassLoader.loadClass(AIRDROP_AVAILABILITY_CLASS)
         listOf("c", "e").forEach { methodName ->
             val method = availability.getDeclaredMethod(methodName).apply { isAccessible = true }
-            hook(method)
+            hookDeoptimized(method)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("hyperchanger:airdrop-force-enable:$methodName")
                 .intercept { true }
@@ -431,7 +431,7 @@ class HyperSystemUiModule : XposedModule() {
                 }
                 .forEach { method ->
                     method.isAccessible = true
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("hyperchanger:mishare-device-profile:${method.name}:${method.parameterTypes.size}")
                         .intercept { chain ->
@@ -473,7 +473,7 @@ class HyperSystemUiModule : XposedModule() {
             promiseClass,
         ).apply { isAccessible = true }
         val resolve = promiseClass.getMethod("resolve", Any::class.java)
-        hook(method)
+        hookDeoptimized(method)
             .setExceptionMode(ExceptionMode.PROTECTIVE)
             .setId("hyperchanger:mi-health-watch-face-unlimited-trial")
             .intercept { chain ->
@@ -562,7 +562,7 @@ class HyperSystemUiModule : XposedModule() {
         return runCatching {
             val plugin = loader.loadClass("miui.systemui.quicksettings.LocalMiuiQSTilePlugin")
             val method = plugin.methods.first { it.name == "getAllPluginTiles" && it.parameterCount == 0 }
-            hook(method).setExceptionMode(ExceptionMode.PROTECTIVE).setId("hyperchanger:custom-plugin-tiles").intercept { chain ->
+            hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE).setId("hyperchanger:custom-plugin-tiles").intercept { chain ->
                 val rawMap = chain.proceed()
                 val map = rawMap as? MutableMap<Any?, Any?> ?: return@intercept rawMap
                 val host = map.values.firstOrNull { it != null } ?: return@intercept map
@@ -869,7 +869,7 @@ class HyperSystemUiModule : XposedModule() {
         runCatching {
             val gate = loader.loadClass("z.m")
             gate.methods.firstOrNull { it.name == "B" && it.parameterCount == 0 }?.let { target ->
-                hook(target)
+                hookDeoptimized(target)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("hyperchanger:sound-effect-gate")
                     .intercept { readSoundEffectPreferences(prefs).boseEnabled }
@@ -1027,6 +1027,16 @@ class HyperSystemUiModule : XposedModule() {
         return cache.values.firstOrNull() as? ClassLoader
     }
 
+    /**
+     * Hooks [member] after asking ART to drop any inlined copy of it.
+     *
+     * Private methods that the compiler inlined never reach the hook, which is what happened to
+     * getMaxMiuiFreeFormStackCount. HyperCeiler does the same through Deoptimizers.deoptimize.
+     */
+    private fun hookDeoptimized(member: java.lang.reflect.Executable) = runCatching {
+        deoptimize(member)
+    }.let { hook(member) }
+
     private fun installFrameworkHooks(loader: ClassLoader, prefs: SharedPreferences) {
         traceSystemServer("installFrameworkHooks start")
         val miuiLoader = resolveMiuiServicesLoader(loader) ?: loader
@@ -1078,7 +1088,7 @@ class HyperSystemUiModule : XposedModule() {
                 it.name == "getMaxMiuiFreeFormStackCount" ||
                     it.name == "getMaxMiuiFreeFormStackCountForFlashBack"
             }.forEach { method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("hyperchanger:fw-multiple-freeform-${method.name}")
                     .intercept { chain -> if (on { it.multipleFreeform }) 256 else chain.proceed() }
@@ -1110,7 +1120,7 @@ class HyperSystemUiModule : XposedModule() {
             val cls = miuiLoader.loadClass("com.android.server.wm.MiuiFreeFormStackDisplayStrategy")
             val field = cls.getDeclaredField("mDefaultMaxFreeformCount").apply { isAccessible = true }
             cls.declaredMethods.filter { it.name == "onMiuiFreeFormStasckAdded" }.forEach { method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("hyperchanger:fw-multiple-freeform-added")
                     .intercept { chain ->
@@ -1124,7 +1134,7 @@ class HyperSystemUiModule : XposedModule() {
         runCatching {
             val cls = loader.loadClass("android.app.ActivityTaskManager")
             cls.declaredMethods.filter { it.name == "supportsSplitScreen" }.forEach { method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("hyperchanger:fw-force-freeform-split")
                     .intercept { chain -> if (on { it.forceFreeform }) true else chain.proceed() }
@@ -1133,7 +1143,7 @@ class HyperSystemUiModule : XposedModule() {
         runCatching {
             val cls = loader.loadClass("com.android.server.wm.Task")
             cls.declaredMethods.filter { it.name == "isResizeable" && it.parameterCount == 0 }.forEach { method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("hyperchanger:fw-force-freeform-resizeable")
                     .intercept { chain -> if (on { it.forceFreeform }) true else chain.proceed() }
@@ -1142,7 +1152,7 @@ class HyperSystemUiModule : XposedModule() {
         runCatching {
             val cls = loader.loadClass("com.android.server.wm.ActivityTaskManagerService")
             cls.declaredMethods.filter { it.name == "retrieveSettings" }.forEach { method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("hyperchanger:fw-force-freeform-settings")
                     .intercept { chain ->
@@ -1161,7 +1171,7 @@ class HyperSystemUiModule : XposedModule() {
         runCatching {
             val cls = loader.loadClass("com.android.server.wm.WindowManagerService\$SettingsObserver")
             cls.declaredMethods.filter { it.name == "updateDevEnableNonResizableMultiWindow" }.forEach { method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("hyperchanger:fw-force-freeform-observer")
                     .intercept { chain -> if (on { it.forceFreeform }) null else chain.proceed() }
@@ -1171,7 +1181,7 @@ class HyperSystemUiModule : XposedModule() {
             val cls = miuiLoader.loadClass("com.android.server.wm.MiuiFreeFormGestureController")
             val target = cls.declaredMethods.firstOrNull { it.name == "needForegroundPin" && it.parameterCount == 1 }
                 ?: return@runCatching
-            hook(target)
+            hookDeoptimized(target)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("hyperchanger:fw-freeform-background")
                 .intercept { chain -> if (on { it.freeformBackground }) true else chain.proceed() }
@@ -1186,7 +1196,7 @@ class HyperSystemUiModule : XposedModule() {
             val target = cls.declaredMethods.firstOrNull {
                 it.name == "safeMediaVolumeIndex" && it.parameterCount == 1
             } ?: return@runCatching
-            hook(target)
+            hookDeoptimized(target)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("hyperchanger:fw-volume-safe")
                 .intercept { chain ->
@@ -1201,7 +1211,7 @@ class HyperSystemUiModule : XposedModule() {
             val cls = loader.loadClass("com.android.server.audio.AudioService\$VolumeController")
             val target = cls.declaredMethods.firstOrNull { it.name == "suppressAdjustment" && it.parameterCount == 3 }
                 ?: return@runCatching
-            hook(target)
+            hookDeoptimized(target)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("hyperchanger:fw-volume-instant")
                 .intercept { chain ->
@@ -1222,7 +1232,7 @@ class HyperSystemUiModule : XposedModule() {
             val buildCls = loader.loadClass("miui.os.Build")
             val flag = buildCls.getDeclaredField("IS_INTERNATIONAL_BUILD").apply { isAccessible = true }
             cls.declaredMethods.filter { it.name == "getDarkModeAppList" }.forEach { method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("hyperchanger:fw-force-dark-list")
                     .intercept { chain ->
@@ -1237,7 +1247,7 @@ class HyperSystemUiModule : XposedModule() {
                     }
             }
             cls.declaredMethods.filter { it.name == "shouldShowInSettings" && it.parameterCount == 1 }.forEach { method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("hyperchanger:fw-force-dark-show")
                     .intercept { chain ->
@@ -1251,7 +1261,7 @@ class HyperSystemUiModule : XposedModule() {
         runCatching {
             val cls = loader.loadClass("android.content.Intent")
             cls.declaredMethods.filter { it.name == "setFlags" && it.parameterCount == 1 }.forEach { method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("hyperchanger:fw-recents-visibility")
                     .intercept { chain ->
@@ -1266,7 +1276,7 @@ class HyperSystemUiModule : XposedModule() {
             val cls = miuiLoader.loadClass("com.android.server.pm.PackageManagerServiceImpl")
             val isCts = cls.declaredMethods.firstOrNull { it.name == "isCTS" && it.parameterCount == 0 }
             isCts?.let { method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("hyperchanger:fw-native-installer-cts")
                     .intercept { chain -> if (on { it.nativeInstaller }) true else chain.proceed() }
@@ -1276,7 +1286,7 @@ class HyperSystemUiModule : XposedModule() {
             val cls = loader.loadClass("com.android.server.locksettings.LockSettingsStrongAuth")
             val target = cls.declaredMethods.firstOrNull { it.name == "rescheduleStrongAuthTimeoutAlarm" }
                 ?: return@runCatching
-            hook(target)
+            hookDeoptimized(target)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("hyperchanger:fw-pin-72h")
                 .intercept { chain -> if (on { it.disablePin72h }) null else chain.proceed() }
@@ -1289,7 +1299,7 @@ class HyperSystemUiModule : XposedModule() {
             val target = cls.declaredMethods.firstOrNull {
                 it.name == "getScreenshotChordLongPressDelay" && it.parameterCount == 0
             } ?: return@runCatching
-            hook(target)
+            hookDeoptimized(target)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("hyperchanger:fw-quick-screenshot")
                 .intercept { chain -> if (on { it.quickScreenshot }) 0L else chain.proceed() }
@@ -1298,7 +1308,7 @@ class HyperSystemUiModule : XposedModule() {
             val cls = loader.loadClass("com.android.server.wm.WindowState")
             val target = cls.declaredMethods.firstOrNull { it.name == "isSecureLocked" && it.parameterCount == 0 }
                 ?: return@runCatching
-            hook(target)
+            hookDeoptimized(target)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("hyperchanger:fw-screenshot-anywhere")
                 .intercept { chain -> if (on { it.screenshotAnywhere }) false else chain.proceed() }
@@ -1311,7 +1321,7 @@ class HyperSystemUiModule : XposedModule() {
             val policy = argsCls.getDeclaredField("mSecureContentPolicy").apply { isAccessible = true }
             listOf("nativeCaptureDisplay", "nativeCaptureLayers").forEach { name ->
                 cls.declaredMethods.filter { it.name == name }.forEach { method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("hyperchanger:fw-screen-capture-$name")
                         .intercept { chain ->
@@ -1360,7 +1370,7 @@ class HyperSystemUiModule : XposedModule() {
                 it.name == "getIntArray" && it.parameterCount == 1 &&
                     it.parameterTypes[0] == String::class.java
             } ?: return@runCatching
-            hook(target)
+            hookDeoptimized(target)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("hyperchanger:mi-settings-fps")
                 .intercept { chain ->
@@ -1382,7 +1392,7 @@ class HyperSystemUiModule : XposedModule() {
                 val target = cls.declaredMethods.firstOrNull {
                     it.name == "isForceUseControlPanel" && it.parameterCount == 1
                 } ?: return@runCatching
-                hook(target)
+                hookDeoptimized(target)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("hyperchanger:settings-old-control-center")
                     .intercept { false }
@@ -1393,7 +1403,7 @@ class HyperSystemUiModule : XposedModule() {
                 val cls = loader.loadClass("com.android.settings.bluetooth.MiuiBTUtils")
                 cls.declaredMethods.filter { it.name == "isInternationalBuild" && it.parameterCount == 0 }
                     .forEach { method ->
-                        hook(method)
+                        hookDeoptimized(method)
                             .setExceptionMode(ExceptionMode.PROTECTIVE)
                             .setId("hyperchanger:fw-device-name-intl")
                             .intercept { true }
@@ -1401,7 +1411,7 @@ class HyperSystemUiModule : XposedModule() {
                 cls.declaredMethods.filter {
                     it.name == "isSupportNameComplianceCheck" && it.parameterCount == 1
                 }.forEach { method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("hyperchanger:fw-device-name-compliance")
                         .intercept { false }
@@ -2084,7 +2094,7 @@ class HyperSystemUiModule : XposedModule() {
                         java.util.List::class.java.isAssignableFrom(method.returnType)
                 }
                 availabilityMethods.forEachIndexed { index, method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("control-center:hide-edit-button-$index")
                         .intercept { chain ->
@@ -2095,7 +2105,7 @@ class HyperSystemUiModule : XposedModule() {
                         }
                 }
                 listMethods.forEachIndexed { index, method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("control-center:hide-edit-button-items-$index")
                         .intercept { chain ->
@@ -2121,7 +2131,7 @@ class HyperSystemUiModule : XposedModule() {
                     method.name == "onBindViewHolder" && method.parameterCount == 0
                 }
                 bindMethods.forEachIndexed { index, method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("control-center:top-buttons-bind-$index")
                             .intercept { chain ->
@@ -2164,7 +2174,7 @@ class HyperSystemUiModule : XposedModule() {
                     method.parameterCount == 0 &&
                     java.util.List::class.java.isAssignableFrom(method.returnType)
             }?.let { method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("control-center:hide-edit-button-controllers")
                     .intercept { chain ->
@@ -2248,7 +2258,7 @@ class HyperSystemUiModule : XposedModule() {
                 method.name == "onCreate" && method.parameterCount == 0
             }
             methods.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("control-center:top-buttons-main-panel-$index")
                     .intercept { chain ->
@@ -2294,7 +2304,7 @@ class HyperSystemUiModule : XposedModule() {
             headerClass.methods.filter { method ->
                 method.name in setOf("onCreate", "onMainPanelVisibleChanged", "onModeChanged")
             }.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("control-center:top-buttons-header-$index")
                     .intercept { chain ->
@@ -2348,7 +2358,7 @@ class HyperSystemUiModule : XposedModule() {
                     method.parameterTypes[0] == MotionEvent::class.java &&
                     method.returnType == Boolean::class.javaPrimitiveType
             }.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("control-center:top-buttons-touch-$index")
                     .intercept { chain ->
@@ -2399,7 +2409,7 @@ class HyperSystemUiModule : XposedModule() {
                     method.returnType == Boolean::class.javaPrimitiveType
             }
             methods.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("control-center:top-buttons-event-handler-$index")
                     .intercept { chain ->
@@ -2497,7 +2507,7 @@ class HyperSystemUiModule : XposedModule() {
                     (method.name == "onStop" && method.parameterCount == 0) ||
                     (method.name == "onExpandFinish" && method.parameterCount == 1)
             }.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("control-center:top-buttons-expand-$index")
                     .intercept { chain ->
@@ -3175,7 +3185,7 @@ class HyperSystemUiModule : XposedModule() {
                         else -> false
                     }
                 }.forEachIndexed { index, method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("control-center:global-actions-${className.hashCode()}-$index")
                         .intercept { chain ->
@@ -3279,7 +3289,7 @@ class HyperSystemUiModule : XposedModule() {
                     method.parameterTypes.contentEquals(arrayOf(String::class.java)) &&
                     method.returnType == String::class.java
             }?.let { method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("rear-music-whitelist:business")
                     .intercept { chain ->
@@ -3294,7 +3304,7 @@ class HyperSystemUiModule : XposedModule() {
                     method.parameterTypes.isEmpty() &&
                     Set::class.java.isAssignableFrom(method.returnType)
             }?.let { method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("rear-music-whitelist:supported-apps")
                     .intercept { chain ->
@@ -3311,7 +3321,7 @@ class HyperSystemUiModule : XposedModule() {
                     method.parameterTypes.contentEquals(arrayOf(String::class.java)) &&
                     method.returnType == Boolean::class.javaPrimitiveType
             }?.let { method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("rear-music-whitelist:is-music")
                     .intercept { chain ->
@@ -3332,7 +3342,7 @@ class HyperSystemUiModule : XposedModule() {
                     Map::class.java.isAssignableFrom(method.parameterTypes[2]) &&
                     method.returnType == Boolean::class.javaPrimitiveType
             }?.let { method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("rear-music-whitelist:is-enabled")
                     .intercept { chain ->
@@ -3363,7 +3373,7 @@ class HyperSystemUiModule : XposedModule() {
                 deviceUtils.methods.filter {
                     it.name == "a" && it.parameterTypes.isEmpty() && it.returnType == Boolean::class.javaPrimitiveType
                 }.forEach { method ->
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-app-widget:device-capability")
                         .intercept { true }
                 }
@@ -3373,7 +3383,7 @@ class HyperSystemUiModule : XposedModule() {
                 deviceHelper.methods.filter {
                     it.name == "toq" && it.parameterTypes.isEmpty() && it.returnType == Boolean::class.javaPrimitiveType
                 }.forEach { method ->
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-app-widget:device-helper-capability")
                         .intercept { true }
                 }
@@ -3389,7 +3399,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.name in setOf("q", "toq")
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-app-widget:theme-rear-function:${method.name}")
                         .intercept { true }
                 }
@@ -3401,7 +3411,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.returnType == Boolean::class.javaPrimitiveType
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-app-widget:theme-device-support-guard")
                         .intercept { true }
                 }
@@ -3420,7 +3430,7 @@ class HyperSystemUiModule : XposedModule() {
                         java.util.HashMap::class.java.isAssignableFrom(method.returnType)
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-app-widget:subscreen-migrated-card-switches")
                         .intercept { chain ->
                             @Suppress("UNCHECKED_CAST")
@@ -3442,7 +3452,7 @@ class HyperSystemUiModule : XposedModule() {
                 }
                 .forEach { method ->
                     method.isAccessible = true
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-app-widget:property:${method.name}:${method.parameterTypes.size}")
                         .intercept { chain ->
@@ -3488,7 +3498,7 @@ class HyperSystemUiModule : XposedModule() {
                 }
                 ?.forEach { method ->
                     method.isAccessible = true
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-app-widget:miui-property:${method.name}:${method.parameterTypes.size}")
                         .intercept { chain ->
@@ -3532,7 +3542,7 @@ class HyperSystemUiModule : XposedModule() {
                 }
                 .forEach { method ->
                     method.isAccessible = true
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-app-widget:secure:${method.name}:${method.parameterTypes.size}")
                         .intercept { chain ->
@@ -3557,7 +3567,7 @@ class HyperSystemUiModule : XposedModule() {
                 method.name == "zy" && method.parameterTypes.size == 1 && method.returnType == Boolean::class.javaPrimitiveType
             }?.let { method ->
                 method.isAccessible = true
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("rear-screen-app-widget:theme-manager-setting-repository")
                     .intercept { chain ->
@@ -3590,7 +3600,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.returnType.name == "okhttp3.v"
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-app-card:request-scope")
                         .intercept { chain ->
@@ -3614,7 +3624,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.returnType == JSONObject::class.java
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-app-card:environment-signal")
                         .intercept { chain ->
@@ -3643,7 +3653,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.returnType == JSONObject::class.java
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-app-card:json-device-fields")
                         .intercept { chain ->
@@ -3684,7 +3694,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.returnType.name == "okhttp3.o"
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-app-card:device-form")
                         .intercept { chain ->
@@ -3736,7 +3746,7 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     .forEach { method ->
                         method.isAccessible = true
-                        hook(method)
+                        hookDeoptimized(method)
                             .setExceptionMode(ExceptionMode.PROTECTIVE)
                             .setId("rear-screen-app-card:personal-assistant-os-version")
                             .intercept { 4 }
@@ -3756,7 +3766,7 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     .forEach { method ->
                         method.isAccessible = true
-                        hook(method)
+                        hookDeoptimized(method)
                             .setExceptionMode(ExceptionMode.PROTECTIVE)
                             .setId("rear-screen-app-card:personal-assistant-catalog-filter")
                             .intercept { chain ->
@@ -3785,7 +3795,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.name == "d" && method.parameterTypes.isEmpty()
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-app-card:augment-installed-package-list")
                         .intercept { chain ->
@@ -3820,7 +3830,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.returnType == String::class.java
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-app-card:refresh-installed-package-cache")
                         .intercept { chain ->
@@ -3845,7 +3855,7 @@ class HyperSystemUiModule : XposedModule() {
                         ) && method.returnType == Boolean::class.javaPrimitiveType
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-app-card:personal-assistant-bound-app-installed")
                         .intercept { true }
                 }
@@ -3865,7 +3875,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.returnType == Boolean::class.javaPrimitiveType
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-app-card:default-service-filter")
                         .intercept { chain ->
                             val widget = chain.getArg(0)
@@ -3989,7 +3999,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.parameterTypes[0] == String::class.java
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-feature:remove-imported-ai-app-files")
                         .intercept { chain ->
                             val productId = chain.getArg(0) as? String
@@ -4020,7 +4030,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.parameterTypes[0] == String::class.java
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-feature:remove-applied-ai-app-files")
                         .intercept { chain ->
                             val productId = chain.getArg(0) as? String
@@ -4047,7 +4057,7 @@ class HyperSystemUiModule : XposedModule() {
                     method.name == methodName && method.returnType == Boolean::class.javaPrimitiveType
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE).setId(id).intercept { false }
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE).setId(id).intercept { false }
                 }
             }
             // Demo-device checks hide locally generated rear-screen items and personalization.
@@ -4068,7 +4078,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.returnType == Any::class.java
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-feature:theme-ai-device-trust-direct")
                         .intercept { true }
                 }
@@ -4083,7 +4093,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.returnType == Any::class.java
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-feature:ai-app-device-trust")
                         .intercept { true }
                 }
@@ -4092,7 +4102,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.returnType == Any::class.java
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-feature:ai-app-block-reason")
                         .intercept { null }
                 }
@@ -4103,7 +4113,7 @@ class HyperSystemUiModule : XposedModule() {
                     method.name == "zsr0" && method.parameterTypes.size == 1 && method.returnType == Any::class.java
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-feature:theme-ai-device-trust")
                         .intercept { true }
                 }
@@ -4120,7 +4130,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.returnType == Int::class.javaPrimitiveType
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-feature:theme-version-for-ai-preset-filter")
                         .intercept { 10278 }
                 }
@@ -4135,7 +4145,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.returnType == Boolean::class.javaPrimitiveType
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-feature:theme-ai-preset-filter")
                         .intercept { false }
                 }
@@ -4154,7 +4164,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.returnType == Void.TYPE
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-feature:theme-ai-preset-sanitizer")
                         .intercept { }
                 }
@@ -4170,7 +4180,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.returnType == Boolean::class.javaPrimitiveType
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-feature:miui-version-capability")
                         .intercept { true }
                 }
@@ -4183,7 +4193,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.returnType == Boolean::class.javaPrimitiveType
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-feature:setting-module-entry")
                         .intercept { true }
                     }
@@ -4200,7 +4210,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.returnType.name == "okhttp3.Request"
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-feature:theme-final-network-profile")
                         .intercept { chain ->
                             val requestText = runCatching { chain.getArg(0)?.toString().orEmpty() }.getOrDefault("")
@@ -4243,7 +4253,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.returnType == Boolean::class.javaPrimitiveType
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-feature:keep-ai-categories")
                         .intercept { false }
                 }
@@ -4252,7 +4262,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.returnType == Void.TYPE
                 }.forEach { method ->
                     method.isAccessible = true
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("rear-screen-feature:unshield-ai-categories")
                         .intercept { chain ->
                             val incoming = chain.getArg(1) as? Iterable<*>
@@ -4720,7 +4730,7 @@ class HyperSystemUiModule : XposedModule() {
             batteryViewClass.declaredMethods
                 .filter { it.name == "onMiuiThemeChanged" || it.name == "updateResources" }
                 .forEachIndexed { index, method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("status-bar:battery-theme-$index")
                         .intercept { chain ->
@@ -4743,7 +4753,7 @@ class HyperSystemUiModule : XposedModule() {
                     it.name == "updateAll\u00241" || it.name == "onBatteryStyleChanged"
             }
             refreshMethods.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("status-bar:battery-text-refresh-$index")
                     .intercept { chain ->
@@ -4767,7 +4777,7 @@ class HyperSystemUiModule : XposedModule() {
                 iconClass.declaredMethods
                     .filter { it.name == "onMiuiThemeChanged" || it.name == "updateResources" }
                     .forEachIndexed { index, method ->
-                        hook(method)
+                        hookDeoptimized(method)
                             .setExceptionMode(ExceptionMode.PROTECTIVE)
                             .setId("status-bar:battery-icon-theme-${className.substringAfterLast('.')}-${index}")
                             .intercept { chain ->
@@ -4841,7 +4851,7 @@ class HyperSystemUiModule : XposedModule() {
             TextView::class.java.declaredMethods
                 .filter { it.name == "setText" && it.parameterTypes.isNotEmpty() }
                 .forEachIndexed { index, method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("status-bar:battery-internal-text-$index")
                         .intercept { chain ->
@@ -4870,7 +4880,7 @@ class HyperSystemUiModule : XposedModule() {
                 .filter { it.name == "onDraw" && it.parameterTypes.size == 1 &&
                     it.parameterTypes[0] == Canvas::class.java }
                 .forEachIndexed { index, method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("status-bar:battery-hollow-text-$index")
                         .intercept { chain ->
@@ -4983,7 +4993,7 @@ class HyperSystemUiModule : XposedModule() {
                     candidate.declaredMethods
                         .filter { it.name.startsWith("onMiuiThemeChanged") }
                         .forEach { method ->
-                            hook(method)
+                            hookDeoptimized(method)
                                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                                 .setId("status-bar:icon-theme-${candidate.name}")
                                 .intercept { chain ->
@@ -5134,7 +5144,7 @@ class HyperSystemUiModule : XposedModule() {
                 it.name == "updateBackgroundBg" && it.parameterTypes.size == 2 && it.parameterTypes[0] == View::class.java
             }.forEachIndexed { index, method ->
                 method.isAccessible = true
-                hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("dynamic-island-expanded-corner-material:$index")
                     .intercept { chain ->
                         val result = chain.proceed()
@@ -5164,7 +5174,7 @@ class HyperSystemUiModule : XposedModule() {
             val holder = classLoader.loadClass("miui.systemui.dynamicisland.module.IslandIconViewHolder")
             holder.declaredMethods.filter { it.name == "setSmallIcon" && it.parameterCount == 1 }.forEachIndexed { index, method ->
                 method.isAccessible = true
-                hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("dynamic-island-small-media-icon-corner:$index")
                     .intercept { chain ->
                         val result = chain.proceed()
@@ -5257,7 +5267,7 @@ class HyperSystemUiModule : XposedModule() {
                 check(methods.isNotEmpty()) { "$className#bindMediaData not found" }
                 methods.forEachIndexed { index, method ->
                     method.isAccessible = true
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("media-card-adjustments:$sourceIconKey:$index")
                         .intercept { chain ->
                             val result = chain.proceed()
@@ -5332,7 +5342,7 @@ class HyperSystemUiModule : XposedModule() {
             }
             updateMethods.forEachIndexed { index, method ->
                 method.isAccessible = true
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("dynamic-island-mini-bar:$index")
                     .intercept { chain ->
@@ -5417,7 +5427,7 @@ class HyperSystemUiModule : XposedModule() {
                     it.name == "checkSignatures" && it.returnType == Boolean::class.javaPrimitiveType
                 }.forEachIndexed { index, method ->
                     method.isAccessible = true
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("unlock-all-focus:signature:$index")
                         .intercept { chain ->
                             if (preferences.getBoolean(KEY_UNLOCK_ALL_FOCUS, false)) true else chain.proceed()
@@ -5775,7 +5785,7 @@ class HyperSystemUiModule : XposedModule() {
                     "setDrawable" -> backgroundClass.getMethod(name, Drawable::class.java)
                     else -> backgroundClass.getMethod(name, Int::class.javaPrimitiveType)
                 }
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("dynamic-island-background-$name")
                     .intercept { chain ->
@@ -5827,7 +5837,7 @@ class HyperSystemUiModule : XposedModule() {
                 }
                 check(methods.isNotEmpty()) { "$className has no updateBigIslandLayout method" }
                 methods.forEachIndexed { index, method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("dynamic-island-layout:${layoutClass.name}#$index")
                         .intercept { chain ->
@@ -5874,7 +5884,7 @@ class HyperSystemUiModule : XposedModule() {
             val baseClass = classLoader.loadClass(DYNAMIC_ISLAND_BASE_CONTENT_CLASS)
             val method = baseClass.getDeclaredMethod("updateBackgroundBg", View::class.java, Boolean::class.javaPrimitiveType).apply { isAccessible = true }
             val tokenField = baseClass.getDeclaredField("EXPANDED_GLASS_TOKEN").apply { isAccessible = true }
-            hook(method).setExceptionMode(ExceptionMode.PROTECTIVE).setId("dynamic-island-expanded-native-material").intercept { chain ->
+            hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE).setId("dynamic-island-expanded-native-material").intercept { chain ->
                 val result = chain.proceed()
                 applyExpandedIslandNativeMaterial(chain.getArg(0) as? View, tokenField.get(null), preferences, classLoader)
                 result
@@ -5918,7 +5928,7 @@ class HyperSystemUiModule : XposedModule() {
         runCatching {
             val glowClass = classLoader.loadClass(DYNAMIC_ISLAND_GLOW_EFFECT_CLASS)
             glowClass.declaredMethods.filter { it.name == "startGlowEffect\$miui_dynamicisland_release" || it.name == "setAlphaOfGlowEffect\$miui_dynamicisland_release" }.forEachIndexed { index, method ->
-                hook(method).setExceptionMode(ExceptionMode.PROTECTIVE).setId("dynamic-island-bottom-glow:$index").intercept { chain ->
+                hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE).setId("dynamic-island-bottom-glow:$index").intercept { chain ->
                     val result = chain.proceed()
                     if (preferences.getBoolean(KEY_DISABLE_MEDIA_ISLAND_BOTTOM_GLOW, false) && chain.thisObject?.javaClass?.name == DYNAMIC_ISLAND_EXPANDED_VIEW_CLASS) {
                         runCatching { chain.thisObject?.javaClass?.getMethod("getMGlowEffectBottomView")?.invoke(chain.thisObject) }.getOrNull()?.let { (it as? View)?.alpha = 0f }
@@ -6233,7 +6243,7 @@ class HyperSystemUiModule : XposedModule() {
             val method = classLoader.loadClass(CLOCK_BEAN_CLASS)
                 .getDeclaredMethod(CLOCK_BEAN_IS_COLON_SHOW_METHOD)
                 .apply { isAccessible = true }
-            hook(method)
+            hookDeoptimized(method)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("lockscreen-clock-colon:$scope")
                 .intercept { chain ->
@@ -6255,7 +6265,7 @@ class HyperSystemUiModule : XposedModule() {
     ): Boolean = runCatching {
         val carrierClass = classLoader.loadClass("com.android.systemui.controlcenter.shade.ControlCenterCarrierText")
         val method = carrierClass.getDeclaredMethod("shouldShow").apply { isAccessible = true }
-        hook(method)
+        hookDeoptimized(method)
             .setExceptionMode(ExceptionMode.PROTECTIVE)
             .setId("lockscreen-carrier-hide")
             .intercept { chain ->
@@ -6413,7 +6423,7 @@ class HyperSystemUiModule : XposedModule() {
                     method.name == "bind" && method.parameterCount > 0 &&
                         method.parameterTypes[0].name.contains("PhoneStatusBarView")
                 }.forEach { method ->
-                    hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("status-bar:icons-left-order")
                         .intercept { chain ->
                             val result = chain.proceed()
@@ -6439,7 +6449,7 @@ class HyperSystemUiModule : XposedModule() {
             check(methods.isNotEmpty()) { "$EXPANDABLE_NOTIFICATION_ROW_INJECTOR_CLASS#updateMiniWindowBar not found" }
             methods.forEachIndexed { index, method ->
                 method.isAccessible = true
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("notification-mini-window-bar-hide:$index")
                     .intercept { chain ->
@@ -6478,7 +6488,7 @@ class HyperSystemUiModule : XposedModule() {
             check(computeMethods.isNotEmpty()) { "No AllInOneUtil.computeForScreen method found" }
             computeMethods.forEachIndexed { index, method ->
                 method.isAccessible = true
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("lockscreen-big-clock-compute:$scope:$index")
                     .intercept { chain ->
@@ -6508,7 +6518,7 @@ class HyperSystemUiModule : XposedModule() {
                 .declaredMethods
                 .single { it.name == "createEditRect\$default" && it.returnType == Rect::class.java }
                 .apply { isAccessible = true }
-            hook(method)
+            hookDeoptimized(method)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("lockscreen-big-clock-width:$scope")
                 .intercept { chain ->
@@ -6537,7 +6547,7 @@ class HyperSystemUiModule : XposedModule() {
             val method = classLoader.loadClass(ALL_IN_ONE_TEMPLATE_VIEW_CLASS)
                 .getDeclaredMethod("getMaxDragAllowedRect")
                 .apply { isAccessible = true }
-            hook(method)
+            hookDeoptimized(method)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("lockscreen-big-clock-editor-width")
                 .intercept { chain ->
@@ -6568,7 +6578,7 @@ class HyperSystemUiModule : XposedModule() {
             val method = baseClass
                 .getDeclaredMethod("setClockViewRect", Rect::class.java)
                 .apply { isAccessible = true }
-            hook(method)
+            hookDeoptimized(method)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("lockscreen-clock-horizontal-rect:$scope")
                 .intercept { chain ->
@@ -6677,7 +6687,7 @@ class HyperSystemUiModule : XposedModule() {
                 }
             editorClass.declaredMethods.filter { it.name == "onMiuiClockViewCreated" }.forEachIndexed { index, method ->
                 method.isAccessible = true
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("lockscreen-clock-horizontal-editor-create:$index")
                     .intercept { chain ->
@@ -6697,7 +6707,7 @@ class HyperSystemUiModule : XposedModule() {
             editorClass.methods.firstOrNull { it.name == "generateEditFrames" && it.parameterCount == 0 }
                 ?.let { method ->
                     method.isAccessible = true
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("lockscreen-clock-horizontal-editor-generate-frames")
                         .intercept { chain ->
@@ -6928,7 +6938,7 @@ class HyperSystemUiModule : XposedModule() {
                     it.parameterTypes[1] == Int::class.javaPrimitiveType
             } ?: error("computeSupportedClockEffect was not found")
             method.isAccessible = true
-            hook(method)
+            hookDeoptimized(method)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("aod-editor-clock-material-limit")
                 .intercept { chain ->
@@ -6943,7 +6953,7 @@ class HyperSystemUiModule : XposedModule() {
             }
             disableGlass?.let { method ->
                 method.isAccessible = true
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("aod-editor-glass-selection-limit")
                     .intercept { chain ->
@@ -6982,7 +6992,7 @@ class HyperSystemUiModule : XposedModule() {
                 it.name == "effectDisable" && it.parameterCount == 1
             }?.let { method ->
                 method.isAccessible = true
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("aod-editor-clock-effect-selection")
                     .intercept { chain ->
@@ -7039,7 +7049,7 @@ class HyperSystemUiModule : XposedModule() {
                     it.name in setOf("supportGlassEffect", "supportDiffEffect", "supportDiffEffectAndGradientEffect") + aliases
             }.forEach { method ->
                 method.isAccessible = true
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("clock-material-capability-${method.name}")
                     .intercept { chain ->
@@ -7057,7 +7067,7 @@ class HyperSystemUiModule : XposedModule() {
             val configClass = classLoader.loadClass("com.miui.keyguard.editor.data.bean.CommonConfig")
             val method = companion.getDeclaredMethod("k", configClass, Int::class.javaPrimitiveType)
             method.isAccessible = true
-            hook(method)
+            hookDeoptimized(method)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("theme-manager-editor-clock-material-limit")
                 .intercept { chain ->
@@ -7403,7 +7413,7 @@ class HyperSystemUiModule : XposedModule() {
             }
             if (typeMethods.isEmpty()) error("MiuiMobileIconInteractorImpl.getMobileTypeName was not found")
             typeMethods.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("status-bar:mobile-network-type-$index")
                     .intercept { chain ->
@@ -7509,7 +7519,7 @@ class HyperSystemUiModule : XposedModule() {
                 .filter { it.name == "setColorFilter" }
                 .distinctBy { method -> method.parameterTypes.toList() }
                 .forEachIndexed { index, method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("status-bar:stacked-mobile-color-filter-$index")
                         .intercept { chain ->
@@ -7523,7 +7533,7 @@ class HyperSystemUiModule : XposedModule() {
             ImageView::class.java.methods
                 .firstOrNull { it.name == "clearColorFilter" && it.parameterCount == 0 }
                 ?.let { method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("status-bar:stacked-mobile-clear-color-filter")
                         .intercept { chain ->
@@ -7590,7 +7600,7 @@ class HyperSystemUiModule : XposedModule() {
                 .filter { it.name == "setTextColor" }
                 .distinctBy { method -> method.parameterTypes.toList() }
                 .forEachIndexed { index, method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("status-bar:independent-mobile-type-color-$index")
                         .intercept { chain ->
@@ -8672,7 +8682,7 @@ class HyperSystemUiModule : XposedModule() {
             injectorClass.declaredMethods
                 .filter { it.name == "updateFullAodAnimState" }
                 .forEachIndexed { index, method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("focus-notification-normal-material:full-aod-$index")
                         .intercept { chain ->
@@ -8839,7 +8849,7 @@ class HyperSystemUiModule : XposedModule() {
                             method.parameterTypes[0] == Int::class.javaPrimitiveType)
                 }
                 .forEachIndexed { index, method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("focus-notification-transparent-background-$index")
                         .intercept { chain ->
@@ -9237,7 +9247,7 @@ class HyperSystemUiModule : XposedModule() {
             visibilityProvider.declaredMethods
                 .filter { it.name == "shouldHideNotification" && it.parameterCount in 1..2 }
                 .forEachIndexed { index, method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("notification-limits:keep:$index")
                         .intercept { chain ->
@@ -9263,7 +9273,7 @@ class HyperSystemUiModule : XposedModule() {
             expanded.declaredMethods
                 .filter { it.name == "canShowOnKeyguard" && it.parameterCount == 0 }
                 .forEachIndexed { index, method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("notification-limits:lockscreen-entry:$index")
                         .intercept { chain ->
@@ -9276,7 +9286,7 @@ class HyperSystemUiModule : XposedModule() {
                 expanded.declaredMethods
                     .filter { it.name == name && it.parameterCount == 0 }
                     .forEachIndexed { index, method ->
-                        hook(method)
+                        hookDeoptimized(method)
                             .setExceptionMode(ExceptionMode.PROTECTIVE)
                             .setId("notification-limits:heads-up-entry:$name:$index")
                             .intercept { chain ->
@@ -9291,7 +9301,7 @@ class HyperSystemUiModule : XposedModule() {
             settings.declaredMethods
                 .filter { it.name == "canShowOnKeyguard" && it.parameterCount == 3 }
                 .forEachIndexed { index, method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("notification-limits:lockscreen-settings:$index")
                         .intercept { chain ->
@@ -9303,7 +9313,7 @@ class HyperSystemUiModule : XposedModule() {
             settings.declaredMethods
                 .filter { it.name == "canFloat" && it.parameterCount == 3 }
                 .forEachIndexed { index, method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("notification-limits:heads-up-settings:$index")
                         .intercept { chain ->
@@ -9323,7 +9333,7 @@ class HyperSystemUiModule : XposedModule() {
             listener.declaredMethods
                 .filter { it.name == "onSilentStatusBarIconsVisibilityChanged" && it.parameterCount == 1 }
                 .forEachIndexed { index, method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("notification-limits:importance-icons:$index")
                         .intercept { chain ->
@@ -9343,7 +9353,7 @@ class HyperSystemUiModule : XposedModule() {
             foldCoordinator.declaredMethods
                 .filter { it.name == "attach" && it.parameterCount == 1 }
                 .forEachIndexed { index, method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("notification-limits:disable-fold-coordinator:$index")
                         .intercept { chain ->
@@ -9356,7 +9366,7 @@ class HyperSystemUiModule : XposedModule() {
             utility.declaredMethods
                 .filter { it.name == "shouldSuppressFold" && it.parameterCount == 0 }
                 .forEachIndexed { index, method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("notification-limits:suppress-fold:$index")
                         .intercept { chain ->
@@ -9709,7 +9719,7 @@ class HyperSystemUiModule : XposedModule() {
                 .filter { it.name == "addShortcutViews" && it.parameterCount == 1 }
             check(shortcutMethods.isNotEmpty()) { "MiuiShortcutController.addShortcutViews was not found" }
             shortcutMethods.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("lockscreen-shortcut-glass-$index")
                     .intercept { chain ->
@@ -9769,7 +9779,7 @@ class HyperSystemUiModule : XposedModule() {
                 "KeyguardViewMediatorInjector.keyguardGoingAway was not found"
             }
             goingAwayMethods.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("lockscreen-widget:keyguard-going-away-early-$index")
                     .intercept { chain ->
@@ -9791,7 +9801,7 @@ class HyperSystemUiModule : XposedModule() {
                 "KeyguardUpdateMonitor.setKeyguardGoingAway was not found"
             }
             goingAwayMethods.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("lockscreen-widget:keyguard-going-away-state-$index")
                     .intercept { chain ->
@@ -9817,7 +9827,7 @@ class HyperSystemUiModule : XposedModule() {
                 "KeyguardStateControllerImpl.notifyKeyguardState was not found"
             }
             keyguardStateMethods.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("lockscreen-widget:keyguard-showing-state-$index")
                     .intercept { chain ->
@@ -9841,7 +9851,7 @@ class HyperSystemUiModule : XposedModule() {
             }
             check(dozingMethods.isNotEmpty()) { "StatusBarStateControllerImpl.setIsDozing was not found" }
             dozingMethods.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("lockscreen-widget:aod-scene-$index")
                     .intercept { chain ->
@@ -9860,7 +9870,7 @@ class HyperSystemUiModule : XposedModule() {
             }
             check(stateMethods.isNotEmpty()) { "KeyguardEditorHelper.setEditorState was not found" }
             stateMethods.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("lockscreen-widget:editor-scene-$index")
                     .intercept { chain ->
@@ -9889,7 +9899,7 @@ class HyperSystemUiModule : XposedModule() {
                 "MiuiChargeAnimationView visibility methods were not found"
             }
             showMethods.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("lockscreen-widget:charging-scene-show-$index")
                     .intercept { chain ->
@@ -9903,7 +9913,7 @@ class HyperSystemUiModule : XposedModule() {
                     }
             }
             hideMethods.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("lockscreen-widget:charging-scene-hide-$index")
                     .intercept { chain ->
@@ -9923,7 +9933,7 @@ class HyperSystemUiModule : XposedModule() {
             }
             check(stateMethods.isNotEmpty()) { "ControlCenter expand-state listener was not found" }
             stateMethods.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("lockscreen-widget:control-center-scene-$index")
                     .intercept { chain ->
@@ -10272,7 +10282,7 @@ class HyperSystemUiModule : XposedModule() {
             }
             check(bindMethods.isNotEmpty()) { "KeyguardPanelViewController.onKeyguardViewBind was not found" }
             bindMethods.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("lockscreen-music-lockscreen-bind-$index")
                     .intercept { chain ->
@@ -11088,7 +11098,7 @@ class HyperSystemUiModule : XposedModule() {
                         )
                 }
                 methods.forEach { method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("lockscreen-clock-date-follow:${className.substringAfterLast('.')}")
                         .intercept { chain ->
@@ -11538,7 +11548,7 @@ class HyperSystemUiModule : XposedModule() {
             }
             check(methods.isNotEmpty()) { "NotificationMediaManager media-update methods were not found" }
             methods.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("lockscreen-media-manager-bridge-$index")
                     .intercept { chain ->
@@ -11624,7 +11634,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.parameterTypes.any { it == Boolean::class.javaPrimitiveType }
                 }
                 stateMethods.forEachIndexed { index, method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("lockscreen-hide-media-notification:keyguard-callback-$index")
                         .intercept { chain ->
@@ -11680,7 +11690,7 @@ class HyperSystemUiModule : XposedModule() {
                 method.name == "onMediaDataChanged" && method.parameterCount > 0
             }
             dataMethods.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("lockscreen-hide-media-notification:media-header-data-$index")
                     .intercept { chain ->
@@ -11753,7 +11763,7 @@ class HyperSystemUiModule : XposedModule() {
                 controllerClass.declaredMethods.filter {
                     it.name == "updateLayout\$1" && it.parameterCount == 0
                 }.forEachIndexed { index, method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("lockscreen-media-presentation:update-layout-$index")
                         .intercept { chain ->
@@ -12148,7 +12158,7 @@ class HyperSystemUiModule : XposedModule() {
             .distinctBy { method -> method.parameterTypes.toList() }
             .toList()
         methods.forEachIndexed { index, method ->
-            hook(method)
+            hookDeoptimized(method)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("lockscreen-lyrics-button:status-bar-state-$index")
                 .intercept { chain ->
@@ -12296,7 +12306,7 @@ class HyperSystemUiModule : XposedModule() {
                         method.parameterTypes[0].isAssignableFrom(entryClass)
                 }
                 methods.forEachIndexed { index, method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("lockscreen-hide-media-notification:provider:${className.substringAfterLast('.')}:$index")
                         .intercept { chain ->
@@ -12668,7 +12678,7 @@ class HyperSystemUiModule : XposedModule() {
                 method.name == "setSizeInternal" &&
                     method.parameterTypes.contentEquals(arrayOf(Float::class.javaPrimitiveType))
             }.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("lockscreen-native-clock-size-$index")
                     .intercept { chain ->
@@ -12945,7 +12955,7 @@ class HyperSystemUiModule : XposedModule() {
             }
             check(displayMethods.isNotEmpty()) { "MiuiGxzwIconView display methods were not found" }
             displayMethods.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("lockscreen-fod-icon-transparent-$index")
                     .intercept { chain ->
@@ -13137,7 +13147,7 @@ class HyperSystemUiModule : XposedModule() {
             }
 
             iconResources.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("lockscreen-fod-animation-icon-resource-$index")
                     .intercept { chain ->
@@ -13151,7 +13161,7 @@ class HyperSystemUiModule : XposedModule() {
                     }
             }
             recognizingItems.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("lockscreen-fod-animation-recognizing-item-$index")
                     .intercept { chain ->
@@ -13631,7 +13641,7 @@ class HyperSystemUiModule : XposedModule() {
                 "mNavigationModeControllerInjector",
             ).apply { isAccessible = true }
             controllerClass.declaredMethods.filter { it.name == "createNavigationBar" }.forEach { method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("global-gesture-handle:controller-create")
                     .intercept { chain ->
@@ -13719,7 +13729,7 @@ class HyperSystemUiModule : XposedModule() {
             }.getOrNull(),
         )
         methods.forEachIndexed { index, method ->
-            hook(method)
+            hookDeoptimized(method)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("heads-up-notification-color-$index")
                 .intercept { chain ->
@@ -13761,7 +13771,7 @@ class HyperSystemUiModule : XposedModule() {
                         Context::class.java.isAssignableFrom(it.parameterTypes[1])
                 }
                 methods.forEachIndexed { index, method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("heads-up-soft-glass:${effectClass.simpleName}:$index")
                         .intercept { chain ->
@@ -13902,7 +13912,7 @@ class HyperSystemUiModule : XposedModule() {
                 return@runCatching
             }
             refreshMethods.forEachIndexed { index, method ->
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("lockscreen-bottom-text-view-$index")
                     .intercept { chain ->
@@ -13918,7 +13928,7 @@ class HyperSystemUiModule : XposedModule() {
                 animateClass.declaredMethods
                     .filter { it.name == "animateUpdateViewVisibility" && it.parameterCount >= 1 }
                     .forEachIndexed { index, method ->
-                        hook(method)
+                        hookDeoptimized(method)
                             .setExceptionMode(ExceptionMode.PROTECTIVE)
                             .setId("lockscreen-bottom-text-animation-$index")
                             .intercept { chain ->
@@ -14031,7 +14041,7 @@ class HyperSystemUiModule : XposedModule() {
             }
             .forEach { method ->
                 if (method.name == "setMiGlass") {
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("shade-override-glass:${name}")
                         .intercept { chain ->
@@ -14067,7 +14077,7 @@ class HyperSystemUiModule : XposedModule() {
                             }
                         }
                 } else {
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("shade-override-glass-radius:${name}")
                         .intercept { chain ->
@@ -14213,7 +14223,7 @@ class HyperSystemUiModule : XposedModule() {
             }
             methods.forEach { method ->
                 method.isAccessible = true
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("editor-video-wallpaper-glass-support-${method.name}")
                     .intercept { true }
@@ -14334,7 +14344,7 @@ class HyperSystemUiModule : XposedModule() {
             val wallpaperClass = classLoader.loadClass("com.miui.keyguard.editor.edit.wallpaper.CombinedWallpaperView")
             wallpaperClass.declaredMethods.filter { it.name == "switchWallpaperView" }.forEach { method ->
                 method.isAccessible = true
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("aod-editor-background-sync-${method.parameterTypes.size}")
                     .intercept { chain ->
@@ -14448,7 +14458,7 @@ class HyperSystemUiModule : XposedModule() {
                 Int::class.javaPrimitiveType,
                 Int::class.javaPrimitiveType,
             )
-            hook(method)
+            hookDeoptimized(method)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("background-blur-radius-dispatch")
                 .intercept { chain ->
@@ -14592,7 +14602,7 @@ class HyperSystemUiModule : XposedModule() {
                 targetClass.declaredMethods
                     .filter { it.name in VOLUME_PANEL_REFRESH_METHODS }
                     .forEach { method ->
-                        hook(method)
+                        hookDeoptimized(method)
                             .setExceptionMode(ExceptionMode.PROTECTIVE)
                             .setId("volume-panel:" + method.name + ":" + method.parameterCount)
                             .intercept { chain ->
@@ -14607,7 +14617,7 @@ class HyperSystemUiModule : XposedModule() {
                 targetClass.declaredMethods
                     .filter { it.name == "setRadius" && it.parameterTypes.size == 1 }
                     .forEach { method ->
-                        hook(method)
+                        hookDeoptimized(method)
                             .setExceptionMode(ExceptionMode.PROTECTIVE)
                             .setId("volume-panel-native-radius")
                             .intercept { chain ->
@@ -14630,7 +14640,7 @@ class HyperSystemUiModule : XposedModule() {
             dialogClass.declaredMethods
                 .filter { it.name == "onCreate" || it.name == "show" }
                 .forEach { method ->
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("volume-panel:aosp:${method.name}:${method.parameterCount}")
                         .intercept { chain ->
@@ -14892,7 +14902,7 @@ class HyperSystemUiModule : XposedModule() {
     ) {
         runCatching {
             val method = targetClass.getMethod("setCornerRadius", Float::class.javaPrimitiveType)
-            hook(method)
+            hookDeoptimized(method)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("radius:$QS_ITEM_VIEW_HOLDER_CLASS#setCornerRadius")
                 .intercept { chain ->
@@ -14923,7 +14933,7 @@ class HyperSystemUiModule : XposedModule() {
     ) {
         runCatching {
             val method = targetClass.getMethod(methodName, Float::class.javaPrimitiveType)
-            hook(method)
+            hookDeoptimized(method)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("radius:${targetClass.name}#$methodName")
                 .intercept { chain ->
@@ -14954,7 +14964,7 @@ class HyperSystemUiModule : XposedModule() {
             }
             .forEach { method ->
                 runCatching {
-                    hook(method)
+                    hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("material-style:${method.parameterCount}")
                         .intercept { chain ->
@@ -14977,7 +14987,7 @@ class HyperSystemUiModule : XposedModule() {
     private fun hookDeviceCenterOutline(targetClass: Class<*>, preferences: SharedPreferences) {
         runCatching {
             val method = targetClass.getMethod("onFinishInflate")
-            hook(method)
+            hookDeoptimized(method)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("radius:$DEVICE_CENTER_ENTRY#onFinishInflate")
                 .intercept { chain ->
@@ -15081,7 +15091,7 @@ class HyperSystemUiModule : XposedModule() {
         listOf("setOutlineRadius").forEach { methodName ->
             runCatching {
                 val method = targetClass.getMethod(methodName, Float::class.javaPrimitiveType)
-                hook(method)
+                hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("radius:${targetClass.name}#$methodName")
                     .intercept { chain ->
