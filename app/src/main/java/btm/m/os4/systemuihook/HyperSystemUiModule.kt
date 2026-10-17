@@ -310,9 +310,24 @@ class HyperSystemUiModule : XposedModule() {
 
     override fun onSystemServerStarting(param: SystemServerStartingParam) {
         // system_server never goes through onPackageLoaded, so its hooks have to be installed here.
+        traceSystemServer("onSystemServerStarting entered")
         runCatching {
             installFrameworkHooks(param.classLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
-        }.onFailure { error -> log(Log.ERROR, TAG, "Could not install system framework hooks", error) }
+        }.onFailure { error ->
+            traceSystemServer("installFrameworkHooks failed: ${error.javaClass.name}: ${error.message}")
+            log(Log.ERROR, TAG, "Could not install system framework hooks", error)
+        }
+        traceSystemServer("onSystemServerStarting done")
+    }
+
+    /** Temporary diagnostics for the system server side; removed once the hooks are confirmed. */
+    private fun traceSystemServer(message: String) {
+        runCatching {
+            java.io.File("/data/system/hyperchanger_framework.log").appendText(
+                java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date()) +
+                    " " + message + "\n",
+            )
+        }
     }
 
     private var customTileHookInstalled = false
@@ -996,16 +1011,51 @@ class HyperSystemUiModule : XposedModule() {
      * rest. The switches are re-read on every call, so toggling one takes effect without restarting
      * system_server.
      */
+    /**
+     * Resolves the classloader that holds `miui-services.jar`.
+     *
+     * The platform keeps its MIUI implementations in that jar and loads it through
+     * `MiuiStubRegistry` as a separate PathClassLoader, so those classes are not visible from the
+     * system server loader. The registry caches the loader, which is the cheapest way to reach it.
+     */
+    private fun resolveMiuiServicesLoader(loader: ClassLoader): ClassLoader? {
+        val registry = runCatching { loader.loadClass("com.miui.base.MiuiStubRegistry") }.getOrNull()
+            ?: return null
+        val cache = runCatching {
+            registry.getDeclaredField("sExtClassLoaderCache").apply { isAccessible = true }.get(null)
+        }.getOrNull() as? java.util.HashMap<Any?, Any?> ?: return null
+        return cache.values.firstOrNull() as? ClassLoader
+    }
+
     private fun installFrameworkHooks(loader: ClassLoader, prefs: SharedPreferences) {
+        traceSystemServer("installFrameworkHooks start")
+        val miuiLoader = resolveMiuiServicesLoader(loader) ?: loader
+        traceSystemServer("miui-services loader: ${miuiLoader.javaClass.name}")
+        listOf(
+            "com.android.server.wm.MiuiFreeFormStackDisplayStrategy",
+            "com.android.server.wm.MiuiFreeFormGestureController",
+            "com.android.server.wm.ActivityStarterInjector",
+            "com.android.server.audio.SoundDoseHelper",
+            "com.android.server.ForceDarkAppListManager",
+            "com.android.server.pm.PackageManagerServiceImpl",
+            "com.android.server.input.KeyGestureController",
+            "com.android.server.wm.WindowState",
+            "com.android.server.locksettings.LockSettingsStrongAuth",
+            "com.android.server.wm.ActivityTaskManagerService",
+        ).forEach { name ->
+            val viaSystem = runCatching { loader.loadClass(name) }.isSuccess
+            val viaMiui = !viaSystem && runCatching { miuiLoader.loadClass(name) }.isSuccess
+            traceSystemServer("class $name -> system=$viaSystem miui=$viaMiui")
+        }
         fun on(block: (FrameworkPreferences) -> Boolean): Boolean =
             runCatching { block(readFrameworkPreferences(prefs)) }.getOrDefault(false)
 
         // ---- Small window ----
         runCatching {
-            val cls = loader.loadClass("com.android.server.wm.MiuiFreeFormStackDisplayStrategy")
-            cls.methods.filter {
-                it.parameterCount == 0 &&
-                    (it.name == "getMaxMiuiFreeFormStackCount" || it.name == "getMaxMiuiFreeFormStackCountForFlashBack")
+            val cls = miuiLoader.loadClass("com.android.server.wm.MiuiFreeFormStackDisplayStrategy")
+            cls.declaredMethods.filter {
+                it.name == "getMaxMiuiFreeFormStackCount" ||
+                    it.name == "getMaxMiuiFreeFormStackCountForFlashBack"
             }.forEach { method ->
                 hook(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
@@ -1060,7 +1110,7 @@ class HyperSystemUiModule : XposedModule() {
             }
         }
         runCatching {
-            val cls = loader.loadClass("com.android.server.wm.MiuiFreeFormGestureController")
+            val cls = miuiLoader.loadClass("com.android.server.wm.MiuiFreeFormGestureController")
             val target = cls.methods.firstOrNull { it.name == "needForegroundPin" && it.parameterCount == 1 }
                 ?: return@runCatching
             hook(target)
@@ -1068,36 +1118,8 @@ class HyperSystemUiModule : XposedModule() {
                 .setId("hyperchanger:fw-freeform-background")
                 .intercept { chain -> if (on { it.freeformBackground }) true else chain.proceed() }
         }
-        // Remembering the window bounds needs the whole launch pipeline, so only the restore side is
-        // hooked: the last bounds saved by the system are reapplied when the app returns.
-        runCatching {
-            val cls = loader.loadClass("com.android.server.wm.ActivityStarterInjector")
-            val target = cls.methods.firstOrNull {
-                it.name == "modifyLaunchActivityOptionIfNeed" && it.parameterCount == 8
-            } ?: return@runCatching
-            hook(target)
-                .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("hyperchanger:fw-remember-freeform")
-                .intercept { chain ->
-                    val result = chain.proceed()
-                    if (on { it.rememberFreeform }) {
-                        runCatching {
-                            val intent = chain.getArg(5) as? android.content.Intent
-                            val record = chain.getArg(7) ?: return@runCatching
-                            val recordIntent = record.javaClass.getDeclaredField("intent")
-                                .apply { isAccessible = true }
-                                .get(record) as? android.content.Intent
-                            if (intent != null && recordIntent != null &&
-                                intent.component?.packageName != recordIntent.component?.packageName
-                            ) {
-                                // Different app: keep the freeform bounds the caller already set.
-                                intent.putExtra("hyperchanger_freeform_keep_bounds", true)
-                            }
-                        }
-                    }
-                    result
-                }
-        }
+        // "Remember state and position" has no hook yet: ActivityStarterInjector only exposes
+        // startActivityUncheckedBefore on this build, and the bounds persistence lives behind it.
 
         // ---- Volume ----
         runCatching {
@@ -1138,7 +1160,7 @@ class HyperSystemUiModule : XposedModule() {
 
         // ---- Features ----
         runCatching {
-            val cls = loader.loadClass("com.android.server.ForceDarkAppListManager")
+            val cls = miuiLoader.loadClass("com.android.server.ForceDarkAppListManager")
             val buildCls = loader.loadClass("miui.os.Build")
             val flag = buildCls.getDeclaredField("IS_INTERNATIONAL_BUILD").apply { isAccessible = true }
             cls.methods.filter { it.name == "getDarkModeAppList" }.forEach { method ->
@@ -1183,7 +1205,7 @@ class HyperSystemUiModule : XposedModule() {
             }
         }
         runCatching {
-            val cls = loader.loadClass("com.android.server.pm.PackageManagerServiceImpl")
+            val cls = miuiLoader.loadClass("com.android.server.pm.PackageManagerServiceImpl")
             val isCts = cls.methods.firstOrNull { it.name == "isCTS" && it.parameterCount == 0 }
             isCts?.let { method ->
                 hook(method)
