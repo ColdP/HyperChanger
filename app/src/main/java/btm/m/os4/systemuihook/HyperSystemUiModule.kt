@@ -1057,11 +1057,14 @@ class HyperSystemUiModule : XposedModule() {
                 "name=${initial.disableDeviceNameCheck} quick=${initial.quickScreenshot} " +
                 "anywhere=${initial.screenshotAnywhere}",
         )
-        fun on(block: (FrameworkPreferences) -> Boolean): Boolean = runCatching {
-            // Re-read on every call: at system server start the remote binding may not be live yet,
-            // and the switches have to follow whatever the app wrote afterwards.
-            block(readFrameworkPreferences(getRemotePreferences(REMOTE_PREFERENCE_GROUP)))
-        }.getOrDefault(false)
+        val firstCheck = java.util.concurrent.atomic.AtomicBoolean(false)
+        fun on(block: (FrameworkPreferences) -> Boolean): Boolean {
+            val result = runCatching { block(readFrameworkPreferences(prefs)) }.getOrDefault(false)
+            if (firstCheck.compareAndSet(false, true)) {
+                traceSystemServer("first switch check -> $result")
+            }
+            return result
+        }
 
         // ---- Small window ----
         runCatching {
