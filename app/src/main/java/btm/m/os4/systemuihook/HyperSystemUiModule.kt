@@ -1101,9 +1101,10 @@ class HyperSystemUiModule : XposedModule() {
 
         // ---- Volume ----
         runCatching {
-            val cls = loader.loadClass("com.android.server.audio.SoundDoseHelperStubImpl")
-            val target = cls.methods.firstOrNull {
-                it.name == "updateSafeMediaVolumeIndex" && it.parameterCount == 1
+            // SoundDoseHelperStub is an interface resolved through MiuiStubUtil, so hook the consumer.
+            val cls = loader.loadClass("com.android.server.audio.SoundDoseHelper")
+            val target = cls.declaredMethods.firstOrNull {
+                it.name == "safeMediaVolumeIndex" && it.parameterCount == 1
             } ?: return@runCatching
             hook(target)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
@@ -1203,8 +1204,9 @@ class HyperSystemUiModule : XposedModule() {
 
         // ---- Screenshot ----
         runCatching {
-            val cls = loader.loadClass("com.android.server.policy.PhoneWindowManager")
-            val target = cls.methods.firstOrNull {
+            // Moved out of PhoneWindowManager into KeyGestureController on this platform.
+            val cls = loader.loadClass("com.android.server.input.KeyGestureController")
+            val target = cls.declaredMethods.firstOrNull {
                 it.name == "getScreenshotChordLongPressDelay" && it.parameterCount == 0
             } ?: return@runCatching
             hook(target)
