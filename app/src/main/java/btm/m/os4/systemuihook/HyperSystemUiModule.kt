@@ -1035,7 +1035,13 @@ class HyperSystemUiModule : XposedModule() {
      */
     private fun hookDeoptimized(member: java.lang.reflect.Executable) = runCatching {
         deoptimize(member)
-    }.let { hook(member) }
+    }.let {
+        hook(member).also {
+            traceSystemServer(
+                "installed ${member.declaringClass.simpleName}.${member.name}/${member.parameterCount}",
+            )
+        }
+    }
 
     private fun installFrameworkHooks(loader: ClassLoader, prefs: SharedPreferences) {
         traceSystemServer("installFrameworkHooks start")
