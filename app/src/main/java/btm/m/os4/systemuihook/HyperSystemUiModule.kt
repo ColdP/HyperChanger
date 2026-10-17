@@ -1086,7 +1086,7 @@ class HyperSystemUiModule : XposedModule() {
         }
         runCatching {
             val cls = loader.loadClass("android.app.ActivityTaskManager")
-            cls.methods.filter { it.name == "supportsSplitScreen" }.forEach { method ->
+            cls.declaredMethods.filter { it.name == "supportsSplitScreen" }.forEach { method ->
                 hook(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("hyperchanger:fw-force-freeform-split")
@@ -1095,7 +1095,7 @@ class HyperSystemUiModule : XposedModule() {
         }
         runCatching {
             val cls = loader.loadClass("com.android.server.wm.Task")
-            cls.methods.filter { it.name == "isResizeable" && it.parameterCount == 0 }.forEach { method ->
+            cls.declaredMethods.filter { it.name == "isResizeable" && it.parameterCount == 0 }.forEach { method ->
                 hook(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("hyperchanger:fw-force-freeform-resizeable")
@@ -1104,7 +1104,7 @@ class HyperSystemUiModule : XposedModule() {
         }
         runCatching {
             val cls = loader.loadClass("com.android.server.wm.ActivityTaskManagerService")
-            cls.methods.filter { it.name == "retrieveSettings" }.forEach { method ->
+            cls.declaredMethods.filter { it.name == "retrieveSettings" }.forEach { method ->
                 hook(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("hyperchanger:fw-force-freeform-settings")
@@ -1123,7 +1123,7 @@ class HyperSystemUiModule : XposedModule() {
         }
         runCatching {
             val cls = loader.loadClass("com.android.server.wm.WindowManagerService\$SettingsObserver")
-            cls.methods.filter { it.name == "updateDevEnableNonResizableMultiWindow" }.forEach { method ->
+            cls.declaredMethods.filter { it.name == "updateDevEnableNonResizableMultiWindow" }.forEach { method ->
                 hook(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("hyperchanger:fw-force-freeform-observer")
@@ -1132,7 +1132,7 @@ class HyperSystemUiModule : XposedModule() {
         }
         runCatching {
             val cls = miuiLoader.loadClass("com.android.server.wm.MiuiFreeFormGestureController")
-            val target = cls.methods.firstOrNull { it.name == "needForegroundPin" && it.parameterCount == 1 }
+            val target = cls.declaredMethods.firstOrNull { it.name == "needForegroundPin" && it.parameterCount == 1 }
                 ?: return@runCatching
             hook(target)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
@@ -1162,7 +1162,7 @@ class HyperSystemUiModule : XposedModule() {
         }
         runCatching {
             val cls = loader.loadClass("com.android.server.audio.AudioService\$VolumeController")
-            val target = cls.methods.firstOrNull { it.name == "suppressAdjustment" && it.parameterCount == 3 }
+            val target = cls.declaredMethods.firstOrNull { it.name == "suppressAdjustment" && it.parameterCount == 3 }
                 ?: return@runCatching
             hook(target)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
@@ -1184,7 +1184,7 @@ class HyperSystemUiModule : XposedModule() {
             val cls = miuiLoader.loadClass("com.android.server.ForceDarkAppListManager")
             val buildCls = loader.loadClass("miui.os.Build")
             val flag = buildCls.getDeclaredField("IS_INTERNATIONAL_BUILD").apply { isAccessible = true }
-            cls.methods.filter { it.name == "getDarkModeAppList" }.forEach { method ->
+            cls.declaredMethods.filter { it.name == "getDarkModeAppList" }.forEach { method ->
                 hook(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("hyperchanger:fw-force-dark-list")
@@ -1199,7 +1199,7 @@ class HyperSystemUiModule : XposedModule() {
                         }
                     }
             }
-            cls.methods.filter { it.name == "shouldShowInSettings" && it.parameterCount == 1 }.forEach { method ->
+            cls.declaredMethods.filter { it.name == "shouldShowInSettings" && it.parameterCount == 1 }.forEach { method ->
                 hook(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("hyperchanger:fw-force-dark-show")
@@ -1213,7 +1213,7 @@ class HyperSystemUiModule : XposedModule() {
         }
         runCatching {
             val cls = loader.loadClass("android.content.Intent")
-            cls.methods.filter { it.name == "setFlags" && it.parameterCount == 1 }.forEach { method ->
+            cls.declaredMethods.filter { it.name == "setFlags" && it.parameterCount == 1 }.forEach { method ->
                 hook(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("hyperchanger:fw-recents-visibility")
@@ -1227,7 +1227,7 @@ class HyperSystemUiModule : XposedModule() {
         }
         runCatching {
             val cls = miuiLoader.loadClass("com.android.server.pm.PackageManagerServiceImpl")
-            val isCts = cls.methods.firstOrNull { it.name == "isCTS" && it.parameterCount == 0 }
+            val isCts = cls.declaredMethods.firstOrNull { it.name == "isCTS" && it.parameterCount == 0 }
             isCts?.let { method ->
                 hook(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
@@ -1237,7 +1237,7 @@ class HyperSystemUiModule : XposedModule() {
         }
         runCatching {
             val cls = loader.loadClass("com.android.server.locksettings.LockSettingsStrongAuth")
-            val target = cls.methods.firstOrNull { it.name == "rescheduleStrongAuthTimeoutAlarm" }
+            val target = cls.declaredMethods.firstOrNull { it.name == "rescheduleStrongAuthTimeoutAlarm" }
                 ?: return@runCatching
             hook(target)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
@@ -1259,7 +1259,7 @@ class HyperSystemUiModule : XposedModule() {
         }
         runCatching {
             val cls = loader.loadClass("com.android.server.wm.WindowState")
-            val target = cls.methods.firstOrNull { it.name == "isSecureLocked" && it.parameterCount == 0 }
+            val target = cls.declaredMethods.firstOrNull { it.name == "isSecureLocked" && it.parameterCount == 0 }
                 ?: return@runCatching
             hook(target)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
@@ -1299,7 +1299,7 @@ class HyperSystemUiModule : XposedModule() {
         if (!readMiSettingsPreferences(prefs).showMoreFps) return
         runCatching {
             val cls = loader.loadClass("miui.util.FeatureParser")
-            val target = cls.methods.firstOrNull {
+            val target = cls.declaredMethods.firstOrNull {
                 it.name == "getIntArray" && it.parameterCount == 1 &&
                     it.parameterTypes[0] == String::class.java
             } ?: return@runCatching
@@ -1322,7 +1322,7 @@ class HyperSystemUiModule : XposedModule() {
         if (settings.oldControlCenter) {
             runCatching {
                 val cls = loader.loadClass("com.android.settings.utils.StatusBarUtils")
-                val target = cls.methods.firstOrNull {
+                val target = cls.declaredMethods.firstOrNull {
                     it.name == "isForceUseControlPanel" && it.parameterCount == 1
                 } ?: return@runCatching
                 hook(target)
@@ -1334,14 +1334,14 @@ class HyperSystemUiModule : XposedModule() {
         if (readFrameworkPreferences(prefs).disableDeviceNameCheck) {
             runCatching {
                 val cls = loader.loadClass("com.android.settings.bluetooth.MiuiBTUtils")
-                cls.methods.filter { it.name == "isInternationalBuild" && it.parameterCount == 0 }
+                cls.declaredMethods.filter { it.name == "isInternationalBuild" && it.parameterCount == 0 }
                     .forEach { method ->
                         hook(method)
                             .setExceptionMode(ExceptionMode.PROTECTIVE)
                             .setId("hyperchanger:fw-device-name-intl")
                             .intercept { true }
                     }
-                cls.methods.filter {
+                cls.declaredMethods.filter {
                     it.name == "isSupportNameComplianceCheck" && it.parameterCount == 1
                 }.forEach { method ->
                     hook(method)
