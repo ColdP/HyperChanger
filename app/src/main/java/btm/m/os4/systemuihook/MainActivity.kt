@@ -2745,6 +2745,7 @@ private fun RestartScopesPage(
         ScopeApplication.SUBSCREEN_CENTER,
         ScopeApplication.SYSTEM_UPDATE,
         ScopeApplication.SOUND_EFFECT,
+        ScopeApplication.MI_SETTINGS,
         ScopeApplication.SCREEN_RECORDER,
         ScopeApplication.SUPER_XIAOAI,
         ScopeApplication.SUPER_XIAOAI_IME,
@@ -3366,10 +3367,19 @@ private fun SystemSettings(
     onPickLogo: () -> Unit,
     onClearLogo: () -> Unit,
     back: () -> Unit,
-) = AppPage(tr("系统设置", "系统设置"), back, restartScopes = setOf(ScopeApplication.SETTINGS, ScopeApplication.SOUND_EFFECT)) { padding, scroll ->
+) = AppPage(tr("系统设置", "系统设置"), back, restartScopes = setOf(ScopeApplication.SETTINGS, ScopeApplication.SOUND_EFFECT, ScopeApplication.MI_SETTINGS)) { padding, scroll ->
     val cpuIconContext = LocalContext.current
     val soundEffectService by HookApplication.service.collectAsStateWithLifecycle()
     val appScopeService by HookApplication.service.collectAsStateWithLifecycle()
+    val miSettingsService by HookApplication.service.collectAsStateWithLifecycle()
+    val miSettingsStore = remember(cpuIconContext) { MiSettingsPreferencesStore(cpuIconContext) }
+    var miSettings by remember { mutableStateOf(miSettingsStore.settings) }
+    LaunchedEffect(miSettingsService) {
+        miSettingsService?.let {
+            miSettingsStore.syncRemote(it)
+            miSettings = miSettingsStore.settings
+        }
+    }
     val appScopeStore = remember(cpuIconContext) { SettingsAppScopePreferencesStore(cpuIconContext) }
     var appScope by remember { mutableStateOf(appScopeStore.settings) }
     LaunchedEffect(appScopeService) {
@@ -3555,6 +3565,20 @@ private fun SystemSettings(
                     onCheckedChange = { value ->
                         appScopeStore.update(appScopeService) { it.copy(oldControlCenter = value) }
                         appScope = appScopeStore.settings
+                    },
+                )
+            }
+        }
+        item {
+            SmallTitle(tr("小米设置", "小米设置"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp))
+            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                SwitchPreference(
+                    title = tr("显示更多帧率选项", "显示更多帧率选项"),
+                    summary = tr("在显示设置的刷新率列表中增加更多帧率选项。仅改变可选列表，不保证能修改真实帧率。", "在显示设置的刷新率列表中增加更多帧率选项。仅改变可选列表，不保证能修改真实帧率。"),
+                    checked = miSettings.showMoreFps,
+                    onCheckedChange = { value ->
+                        miSettingsStore.update(miSettingsService) { it.copy(showMoreFps = value) }
+                        miSettings = miSettingsStore.settings
                     },
                 )
             }

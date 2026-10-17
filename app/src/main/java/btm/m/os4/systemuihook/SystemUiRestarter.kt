@@ -117,5 +117,6 @@ enum class ScopeApplication(val title: String, val packageName: String) {
     XIAOMI_HEALTH("小米运动健康", "com.mi.health"),
     LUCKIN_COFFEE("瑞幸咖啡", "com.lucky.luckyclient"),
     SOUND_EFFECT("音质音效", "com.miui.misound"),
+    MI_SETTINGS("小米设置", "com.xiaomi.misettings"),
     AIRDROP("小米互传", "com.miui.mishare.connectivity"),
 }

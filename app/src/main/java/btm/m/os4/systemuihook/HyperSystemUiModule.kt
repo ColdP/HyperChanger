@@ -985,6 +985,34 @@ class HyperSystemUiModule : XposedModule() {
 
     private val boseLogoResId = java.util.concurrent.atomic.AtomicInteger(0)
 
+    /**
+     * Adds extra refresh rates to the Xiaomi Settings picker.
+     *
+     * `FeatureParser.getIntArray("fpsList")` is what the display settings page reads to build its
+     * list, so replacing that array is enough to add choices. This does not change the panel itself:
+     * anything above the hardware rating will be offered but will not really apply.
+     */
+    private fun installMiSettingsHooks(loader: ClassLoader, prefs: SharedPreferences) {
+        if (!readMiSettingsPreferences(prefs).showMoreFps) return
+        runCatching {
+            val cls = loader.loadClass("miui.util.FeatureParser")
+            val target = cls.methods.firstOrNull {
+                it.name == "getIntArray" && it.parameterCount == 1 &&
+                    it.parameterTypes[0] == String::class.java
+            } ?: return@runCatching
+            hook(target)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("hyperchanger:mi-settings-fps")
+                .intercept { chain ->
+                    if (chain.getArg(0) == "fpsList") {
+                        intArrayOf(240, 185, 165, 144, 120, 90, 60, 30, 10)
+                    } else {
+                        chain.proceed()
+                    }
+                }
+        }
+    }
+
     /** Best-effort tweaks that reshape the system Settings app itself. */
     private fun installSettingsAppScopeHooks(loader: ClassLoader, prefs: SharedPreferences) {
         val settings = readSettingsAppScopePreferences(prefs)
@@ -1045,6 +1073,12 @@ class HyperSystemUiModule : XposedModule() {
             runCatching {
                 installOldControlCenterHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
             }.onFailure { error -> log(Log.ERROR, TAG, "Could not install old control center hook", error) }
+        }
+        if (param.packageName == "com.xiaomi.misettings") {
+            runCatching {
+                installMiSettingsHooks(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install Xiaomi Settings hooks", error) }
+            return
         }
         if (param.packageName == "android" || param.packageName == "system") {
             return
