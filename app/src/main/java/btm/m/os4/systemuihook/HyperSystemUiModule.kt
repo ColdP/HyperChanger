@@ -1219,7 +1219,13 @@ class HyperSystemUiModule : XposedModule() {
                     val streamType = chain.getArg(0) as? Int
                     val isMuteAdjust = chain.getArg(2) as? Boolean
                     if (on { it.volumeInstant } && streamType == android.media.AudioManager.STREAM_MUSIC && isMuteAdjust == false) {
-                        false
+                        // The platform rule only clears the result when a controller is attached,
+                        // otherwise the mute-first behaviour is required to reach the controller.
+                        val controller = runCatching {
+                            cls.getDeclaredField("mController").apply { isAccessible = true }
+                                .get(chain.thisObject)
+                        }.getOrNull()
+                        if (controller != null) false else result
                     } else {
                         result
                     }
@@ -1267,20 +1273,43 @@ class HyperSystemUiModule : XposedModule() {
                     .intercept { chain ->
                         val flags = chain.getArg(0) as? Int ?: return@intercept chain.proceed()
                         if (!on { it.recentsVisibility }) return@intercept chain.proceed()
-                        // 0x00800000 is FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS.
-                        chain.proceed(arrayOf<Any?>(flags and 0xFF7FFFFF.toInt()))
+                        // 0x00800000 is FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS. Rewriting the argument is
+                        // what the platform-level rule does; passing new args re-enters the method.
+                        runCatching { chain.args[0] = flags and 0xFF7FFFFF.toInt() }
+                        chain.proceed()
                     }
             }
         }
         runCatching {
             val cls = miuiLoader.loadClass("com.android.server.pm.PackageManagerServiceImpl")
-            val isCts = cls.declaredMethods.firstOrNull { it.name == "isCTS" && it.parameterCount == 0 }
-            isCts?.let { method ->
+            // isCTS alone is not enough: the installer only takes the stock path while the caller is
+            // inside one of these three methods, so the flag has to be scoped to them.
+            val fakeCts = java.util.concurrent.atomic.AtomicBoolean(false)
+            cls.declaredMethods.firstOrNull { it.name == "isCTS" && it.parameterCount == 0 }?.let { method ->
                 hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("hyperchanger:fw-native-installer-cts")
-                    .intercept { chain -> if (on { it.nativeInstaller }) true else chain.proceed() }
+                    .intercept { chain ->
+                        if (on { it.nativeInstaller } && fakeCts.get()) true else chain.proceed()
+                    }
             }
+            listOf("hookChooseBestActivity", "updateDefaultPkgInstallerLocked", "assertValidApkAndInstaller")
+                .forEach { name ->
+                    cls.declaredMethods.filter { it.name == name }.forEach { method ->
+                        hookDeoptimized(method)
+                            .setExceptionMode(ExceptionMode.PROTECTIVE)
+                            .setId("hyperchanger:fw-native-installer-$name")
+                            .intercept { chain ->
+                                if (!on { it.nativeInstaller }) return@intercept chain.proceed()
+                                fakeCts.set(true)
+                                try {
+                                    chain.proceed()
+                                } finally {
+                                    fakeCts.set(false)
+                                }
+                            }
+                    }
+                }
         }
         runCatching {
             val cls = loader.loadClass("com.android.server.locksettings.LockSettingsStrongAuth")
