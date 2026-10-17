@@ -3381,6 +3381,17 @@ private fun FrameworkPage(back: () -> Unit) {
     AppPage(tr("系统框架", "系统框架"), back) { padding, scroll ->
         AppList(padding, scroll) {
             item {
+                Text(
+                    tr(
+                        "本页的功能全部需要重启手机才能生效。",
+                        "本页的功能全部需要重启手机才能生效。",
+                    ),
+                    style = MiuixTheme.textStyles.body2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
+                )
+            }
+            item {
                 Group(tr("小窗", "小窗")) {
                     SwitchPreference(
                         title = tr("允许多小窗", "允许多小窗"),
