@@ -1047,8 +1047,21 @@ class HyperSystemUiModule : XposedModule() {
             val viaMiui = !viaSystem && runCatching { miuiLoader.loadClass(name) }.isSuccess
             traceSystemServer("class $name -> system=$viaSystem miui=$viaMiui")
         }
-        fun on(block: (FrameworkPreferences) -> Boolean): Boolean =
-            runCatching { block(readFrameworkPreferences(prefs)) }.getOrDefault(false)
+        val initial = readFrameworkPreferences(prefs)
+        traceSystemServer(
+            "prefs: multi=${initial.multipleFreeform} force=${initial.forceFreeform} " +
+                "remember=${initial.rememberFreeform} bg=${initial.freeformBackground} " +
+                "vol=${initial.volumeSafeMode} instant=${initial.volumeInstant} " +
+                "dark=${initial.forceDarkAllApps} recents=${initial.recentsVisibility} " +
+                "installer=${initial.nativeInstaller} pin=${initial.disablePin72h} " +
+                "name=${initial.disableDeviceNameCheck} quick=${initial.quickScreenshot} " +
+                "anywhere=${initial.screenshotAnywhere}",
+        )
+        fun on(block: (FrameworkPreferences) -> Boolean): Boolean = runCatching {
+            // Re-read on every call: at system server start the remote binding may not be live yet,
+            // and the switches have to follow whatever the app wrote afterwards.
+            block(readFrameworkPreferences(getRemotePreferences(REMOTE_PREFERENCE_GROUP)))
+        }.getOrDefault(false)
 
         // ---- Small window ----
         runCatching {
