@@ -786,10 +786,29 @@ public final class IosNotificationCenterPresentation {
     private static void performNativeClear() {
         findClearButton();
         if (clearButton == null) return;
+        boolean clickable = clearButton.isClickable();
+        boolean enabled = clearButton.isEnabled();
         try {
-            clearButton.performClick();
+            // CircleAndTickAnimView temporarily clears its clickable flag while the native
+            // dismiss animation is settling. The custom header remains the active affordance,
+            // so replay the same listener once and restore the native state afterward.
+            if (!clickable) clearButton.setClickable(true);
+            if (!enabled) clearButton.setEnabled(true);
+            boolean handled = clearButton.performClick();
+            if (!handled && stack != null) {
+                // Some HyperOS builds expose the dismiss view without its listener after the
+                // shade header is rebound. Keep the same clear-all behavior as that listener.
+                try {
+                    Xp.callMethod(stack, "clearNotifications", 0, true, true);
+                } catch (Throwable fallbackError) {
+                    Xp.log(TAG + "clear-all fallback unavailable: " + fallbackError);
+                }
+            }
         } catch (Throwable error) {
             Xp.log(TAG + "clear-all click unavailable: " + error);
+        } finally {
+            if (!clickable && clearButton != null) clearButton.setClickable(false);
+            if (!enabled && clearButton != null) clearButton.setEnabled(false);
         }
     }
 
@@ -1395,11 +1414,25 @@ public final class IosNotificationCenterPresentation {
             clear = new ClearButtonView(context);
             clear.setOnClickListener(v -> performNativeClear());
             clear.setContentDescription(localized(context, "清除", "Clear", "消去"));
+            setOnTouchListener((view, event) -> {
+                if (!isInsideClear(event.getX(), event.getY())) return false;
+                int action = event.getActionMasked();
+                if (action == MotionEvent.ACTION_DOWN) return true;
+                if (action == MotionEvent.ACTION_UP) {
+                    performNativeClear();
+                }
+                return true;
+            });
             FrameLayout.LayoutParams clearParams = new FrameLayout.LayoutParams(dp(84), dpScaled(40),
                     Gravity.END | Gravity.CENTER_VERTICAL);
             clearParams.rightMargin = dp(23);
             addView(clear, clearParams);
             setClearEnabled(false);
+        }
+
+        private boolean isInsideClear(float x, float y) {
+            return x >= clear.getLeft() && x < clear.getRight()
+                    && y >= clear.getTop() && y < clear.getBottom();
         }
 
         void setClearEnabled(boolean enabled) {
