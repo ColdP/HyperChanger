@@ -97,6 +97,8 @@ private data class VolumeTuningSnapshot(
     val viewCount: Int,
 )
 
+private data class VolumeCornerSnapshot(val radius: Float, val width: Int, val height: Int)
+
 private data class StackedMobileSubscription(
     val slot: Int,
     val dataSim: Boolean?,
@@ -6268,13 +6270,19 @@ class HyperSystemUiModule : XposedModule() {
         generateSequence<View>(view) { it.parent as? View }.any { it.javaClass.name.contains("dynamicisland", true) }
 
     private var softGlassRuntime: SoftGlassRuntimeSettings? = null
+    private var volumeGlassRuntime: VolumePanelGlassRuntimeSettings? = null
+    private val volumeGlobalRecipes = WeakHashMap<View, SoftGlassRecipeCache>()
+    private val volumeGlobalCorners = WeakHashMap<View, VolumeCornerSnapshot>()
+    private val volumeResourceNames = WeakHashMap<View, Pair<Int, String>>()
     private val softGlassBaselines = WeakHashMap<View, MutableMap<Method, Array<Any?>>>()
     private val softGlassLegacyBlends = WeakHashMap<View, ArrayList<Point>>()
-    private val softGlassDimLayers = WeakHashMap<View, Boolean>()
+    private val volumeOriginalDrawableAlphas = WeakHashMap<Drawable, Int>()
     private val softGlassArrayPairs = WeakHashMap<View, Pair<FloatArray, FloatArray>>()
     private val softGlassRefreshHandler = Handler(Looper.getMainLooper())
     private val softGlassRefreshing = ThreadLocal<Boolean>()
     private val softGlassBlendDispatching = ThreadLocal<Boolean>()
+    private val volumeMaterialDispatching = ThreadLocal<Boolean>()
+    private val standaloneSoftGlassSurfaces = Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap<View, Boolean>()))
     private val softGlassRefresh = Runnable {
         val surfaces = synchronized(softGlassBaselines) {
             softGlassBaselines.map { (view, setters) -> view to setters.toMap() }
@@ -6297,7 +6305,15 @@ class HyperSystemUiModule : XposedModule() {
         } finally {
             softGlassRefreshing.remove()
             if (softGlassRuntime?.settings?.enabled != true) {
-                synchronized(softGlassBaselines) { softGlassBaselines.clear(); softGlassArrayPairs.clear(); softGlassLegacyBlends.clear(); softGlassDimLayers.clear() }
+                synchronized(softGlassBaselines) { softGlassBaselines.clear(); softGlassArrayPairs.clear(); softGlassLegacyBlends.clear(); volumeGlobalRecipes.clear() }
+                standaloneSoftGlassSurfaces.clear()
+            } else if (!volumeGlobalGlassSelected()) {
+                // Restore once when leaving global mode, then retire the old volume
+                // snapshots so later shade edits cannot replay stale volume recipes.
+                synchronized(softGlassBaselines) {
+                    val retired = softGlassBaselines.keys.filter(::isVolumePanelSurface)
+                    retired.forEach { softGlassBaselines.remove(it); softGlassArrayPairs.remove(it); softGlassLegacyBlends.remove(it); volumeGlobalRecipes.remove(it); standaloneSoftGlassSurfaces.remove(it) }
+                }
             }
         }
     }
@@ -6307,13 +6323,43 @@ class HyperSystemUiModule : XposedModule() {
         synchronized(softGlassBaselines) { softGlassBaselines.getOrPut(view) { mutableMapOf() }[method] = arguments }
     }
 
-    private fun isSoftGlassSurface(view: View): Boolean =
-        softGlassRefreshing.get() == true || isNotificationRowBackground(view) || isShadeBackgroundView(view) ||
+    private fun volumeGlobalGlassSelected(): Boolean = volumeGlassRuntime?.state?.globalSelected == true
+
+    private fun isSoftGlassSurface(view: View): Boolean {
+        if (isVolumePanelSurface(view) || stackContainsClass("com.android.systemui.miui.volume.")) {
+            // Some anonymous volume views receive their first recipe before attachment.
+            volumePanelSurfaceRoots.add(view)
+            return volumeGlobalGlassSelected()
+        }
+        return softGlassRefreshing.get() == true || isNotificationRowBackground(view) || isShadeBackgroundView(view) ||
             isControlCenterCall() || isNotificationCenterCall() || isMediaNotificationView(view)
+    }
 
     private fun isSoftGlassPanelLayer(view: View): Boolean =
-        isShadeBackgroundView(view) || stackContainsClass("ShadeBlendBlurController") ||
+        (volumeGlobalGlassSelected() && (isVolumePanelSurface(view) || stackContainsClass("com.android.systemui.miui.volume."))) ||
+            isShadeBackgroundView(view) || stackContainsClass("ShadeBlendBlurController") ||
             stackContainsClass("ShadeWindowBlurController") || stackContainsClass("ShadeSolidBackgroundController")
+
+    private fun isSoftGlassBlendSurface(view: View): Boolean {
+        if (isVolumePanelSurface(view)) return volumeGlobalGlassSelected()
+        return (isNotificationRowBackground(view) && isHeadsUpNotificationSurface(view)) ||
+            isSoftGlassPanelLayer(view) || softGlassRefreshing.get() == true
+    }
+
+    private fun usesStandaloneSoftGlass(view: View): Boolean =
+        softGlassRuntime?.settings?.enabled == true && standaloneSoftGlassSurfaces.contains(view) &&
+            (if (isVolumePanelSurface(view)) volumeGlobalGlassSelected() else isHeadsUpNotificationSurface(view))
+
+    private fun updateStandaloneSoftGlass(view: View, active: Boolean) {
+        if (!active) {
+            standaloneSoftGlassSurfaces.remove(view)
+            return
+        }
+        if (!standaloneSoftGlassSurfaces.add(view)) return
+        // Keep the native blend points: MIUI uses them to enable the background sampling
+        // layer even when a Bionics recipe is active. Their alpha is normalized below so the
+        // global opacity is not multiplied into the same glass surface a second time.
+    }
 
     private fun softGlassBlendPoints(original: ArrayList<*>, percent: Int): ArrayList<Point> =
         ArrayList<Point>(original.size).apply {
@@ -6336,9 +6382,36 @@ class HyperSystemUiModule : XposedModule() {
                     val view = chain.thisObject as? View ?: return@intercept chain.proceed()
                     val original = chain.getArg(0) as? FloatArray ?: return@intercept chain.proceed()
                     val settings = softGlassRuntime?.settings
+                    if (isVolumePanelSurface(view)) {
+                        if (settings?.enabled != true || !volumeGlobalGlassSelected()) {
+                            updateStandaloneSoftGlass(view, false)
+                            return@intercept chain.proceed()
+                        }
+                        if (!hasSoftGlassRecipe(original)) {
+                            updateStandaloneSoftGlass(view, false)
+                            return@intercept chain.proceed()
+                        }
+                        val cache = synchronized(softGlassBaselines) { volumeGlobalRecipes.getOrPut(view) { SoftGlassRecipeCache() } }
+                        val previous = cache.baseline
+                        // HyperLight's unified path uses the normal glass recipe for volume
+                        // surfaces before applying global slots. This avoids carrying the
+                        // darker collapsed volume token into the shared material.
+                        val unified = normalNotificationGlassParams(view) ?: original
+                        val tuned = cache.tune(
+                            unified,
+                            settings,
+                            standaloneBackground = true,
+                            contextBrightness = 0.48f,
+                        )
+                        if (cache.baseline !== previous) rememberSoftGlassBaseline(view, method, arrayOf(original.copyOf()))
+                        val result = chain.proceedWith(view, arrayOf(tuned))
+                        updateStandaloneSoftGlass(view, hasSoftGlassRecipe(tuned))
+                        return@intercept result
+                    }
                     val normal = if (original.size >= 42 && original.any { it != 0f } &&
                         shouldUseNormalNotificationMaterial(view, preferences)) normalNotificationGlassParams(view) else null
                     if (settings?.enabled != true || !isSoftGlassSurface(view)) {
+                        updateStandaloneSoftGlass(view, false)
                         return@intercept if (normal != null) chain.proceedWith(view, arrayOf(normal)) else chain.proceed()
                     }
                     val baseline = synchronized(softGlassBaselines) {
@@ -6346,9 +6419,22 @@ class HyperSystemUiModule : XposedModule() {
                         if (original === previous?.second) previous.first else original.copyOf()
                     }
                     rememberSoftGlassBaseline(view, method, arrayOf(baseline))
-                    val tuned = tuneSoftGlass(normal ?: baseline, settings)
+                    val standalone = isNotificationRowBackground(view) && isHeadsUpNotificationSurface(view)
+                    val tuned = tuneSoftGlass(
+                        normal ?: baseline,
+                        settings,
+                        standaloneBackground = standalone,
+                        // HeadsUpNotificationGlassEffect already supplies the correct
+                        // light/dark recipe.  HyperModifier preserves that mode-specific
+                        // payload and only adjusts its slots; adding the unified +0.48
+                        // compensation here makes light-mode heads-up backgrounds glow and
+                        // washes out notification text.
+                        contextBrightness = 0f,
+                    )
                     synchronized(softGlassBaselines) { softGlassArrayPairs[view] = baseline to tuned }
-                    chain.proceedWith(view, arrayOf(tuned))
+                    val result = chain.proceedWith(view, arrayOf(tuned))
+                    updateStandaloneSoftGlass(view, standalone && hasSoftGlassRecipe(tuned))
+                    result
                 }
         }.onFailure { error -> log(Log.INFO, TAG, "Soft glass API unavailable: setMiGlass", error) }
         runCatching {
@@ -6401,9 +6487,9 @@ class HyperSystemUiModule : XposedModule() {
                     if (softGlassBlendDispatching.get() == true) return@intercept chain.proceed()
                     val view = chain.thisObject as? View ?: return@intercept chain.proceed()
                     val original = chain.getArg(0) as? ArrayList<*> ?: return@intercept chain.proceed()
-                    val normal = normalNotificationBlendPoints(view, preferences)
+                    val normal = if (isVolumePanelSurface(view)) null else normalNotificationBlendPoints(view, preferences)
                     val settings = softGlassRuntime?.settings
-                    if (settings?.enabled != true || (!isSoftGlassPanelLayer(view) && softGlassRefreshing.get() != true)) {
+                    if (settings?.enabled != true || !isSoftGlassBlendSurface(view)) {
                         return@intercept if (normal != null) chain.proceedWith(view, arrayOf(normal)) else chain.proceed()
                     }
                     // New batch setter and old addMiBackgroundBlendColor are alternatives.
@@ -6413,7 +6499,10 @@ class HyperSystemUiModule : XposedModule() {
                     if (softGlassRefreshing.get() != true) synchronized(softGlassBaselines) { softGlassLegacyBlends.remove(view) }
                     val percent = settings.backgroundOpacity
                     softGlassBlendDispatching.set(true)
-                    try { chain.proceedWith(view, arrayOf(softGlassBlendPoints(normal ?: copy, percent))) }
+                    try {
+                        val points = softGlassBlendPoints(normal ?: copy, if (usesStandaloneSoftGlass(view)) 100 else percent)
+                        chain.proceedWith(view, arrayOf(points))
+                    }
                     finally { softGlassBlendDispatching.remove() }
                 }
         }.onFailure { error -> log(Log.INFO, TAG, "Soft glass API unavailable: setMiBackgroundBlendColors", error) }
@@ -6432,11 +6521,14 @@ class HyperSystemUiModule : XposedModule() {
                 val view = chain.thisObject as? View ?: return@intercept chain.proceed()
                 val settings = softGlassRuntime?.settings ?: return@intercept chain.proceed()
                 if (softGlassBlendDispatching.get() == true) return@intercept chain.proceed()
-                if (!settings.enabled || (!isSoftGlassPanelLayer(view) && softGlassRefreshing.get() != true)) return@intercept chain.proceed()
+                if (!settings.enabled || !isSoftGlassBlendSurface(view)) return@intercept chain.proceed()
                 if (softGlassRefreshing.get() != true) synchronized(softGlassBaselines) {
                     softGlassLegacyBlends.getOrPut(view) { arrayListOf() }.add(Point(chain.getArg(0) as Int, chain.getArg(1) as Int))
                 }
-                chain.proceedWith(view, arrayOf(softGlassColorAlpha(chain.getArg(0) as Int, settings.backgroundOpacity), chain.getArg(1)))
+                // Native glass still needs the points for its backdrop sampler. Keep their
+                // original alpha for volume and heads-up surfaces to avoid double dimming.
+                val percent = if (usesStandaloneSoftGlass(view)) 100 else settings.backgroundOpacity
+                chain.proceedWith(view, arrayOf(softGlassColorAlpha(chain.getArg(0) as Int, percent), chain.getArg(1)))
             }
         }.onFailure { error -> log(Log.INFO, TAG, "Legacy blend API unavailable", error) }
         runCatching {
@@ -6447,11 +6539,12 @@ class HyperSystemUiModule : XposedModule() {
                 .intercept { chain ->
                     val view = chain.thisObject as? View ?: return@intercept chain.proceed()
                     val settings = softGlassRuntime?.settings ?: return@intercept chain.proceed()
+                    if (isVolumePanelSurface(view)) return@intercept chain.proceed()
                     if (!settings.enabled || (!stackContainsClass("ShadeWindowBlurController") && softGlassRefreshing.get() != true)) return@intercept chain.proceed()
                     val original = chain.getArg(1) as? ArrayList<*> ?: return@intercept chain.proceed()
                     val copy = ArrayList(original.filterIsInstance<Point>().map { Point(it.x, it.y) })
                     rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0), copy))
-                    val percent = settings.backgroundOpacity * settings.backgroundDarkening / 100
+                    val percent = settings.backgroundOpacity
                     softGlassBlendDispatching.set(true)
                     try { chain.proceedWith(view, arrayOf(softGlassBlur(chain.getArg(0) as Int, settings.backgroundBlur), softGlassBlendPoints(copy, percent))) }
                     finally { softGlassBlendDispatching.remove() }
@@ -6466,13 +6559,12 @@ class HyperSystemUiModule : XposedModule() {
                     val view = chain.thisObject as? View ?: return@intercept chain.proceed()
                     val settings = softGlassRuntime?.settings ?: return@intercept chain.proceed()
                     if (!settings.enabled) return@intercept chain.proceed()
+                    if (isVolumePanelSurface(view)) return@intercept chain.proceed()
                     val dim = stackContainsClass("ShadeWindowBlurController")
                     val solid = stackContainsClass("ShadeSolidBackgroundController")
                     if (!settings.enabled || (!dim && !solid && softGlassRefreshing.get() != true)) return@intercept chain.proceed()
                     rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0)))
-                    if (softGlassRefreshing.get() != true) synchronized(softGlassBaselines) { softGlassDimLayers[view] = dim }
-                    val isDim = dim || synchronized(softGlassBaselines) { softGlassDimLayers[view] == true }
-                    val percent = if (isDim) settings.backgroundOpacity * settings.backgroundDarkening / 100 else settings.backgroundOpacity
+                    val percent = settings.backgroundOpacity
                     chain.proceedWith(view, arrayOf(softGlassColorAlpha(chain.getArg(0) as Int, percent)))
                 }
         }.onFailure { error -> log(Log.INFO, TAG, "Soft glass API unavailable: setBackgroundColor", error) }
@@ -9139,7 +9231,7 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun notificationTuningFor(view: View, preferences: SharedPreferences): GlassTuning? {
-        if (!isNotificationRowBackground(view)) return null
+        if (!isNotificationRowBackground(view) || isHeadsUpNotificationSurface(view)) return null
         val onKeyguard = notificationOnKeyguard(view)
         val type = notificationTypeFor(view)
         val contextIsLockscreen = !preferences.getBoolean(KEY_NOTIFICATION_CONTEXT_UNIFIED, true) && onKeyguard
@@ -9170,6 +9262,7 @@ class HyperSystemUiModule : XposedModule() {
      * not from the anonymous child view receiving the setter call.
      */
     private fun materialTuningFor(view: View, preferences: SharedPreferences): GlassTuning? = when {
+        isHeadsUpNotificationSurface(view) -> null
         isNotificationRowBackground(view) &&
             (!isMediaNotificationView(view) || preferences.getBoolean(KEY_UNIFY_NOTIFICATION_MATERIAL, false)) ->
             notificationTuningFor(view, preferences)
@@ -9245,7 +9338,7 @@ class HyperSystemUiModule : XposedModule() {
         preferences: SharedPreferences,
     ): Boolean {
         if (view == null || !preferences.getBoolean(KEY_UNIFY_NOTIFICATION_MATERIAL, false) ||
-            stackContainsClass("HeadsUpNotification")) return false
+            isHeadsUpNotificationSurface(view)) return false
         return isMediaNotificationView(view) ||
             (isNotificationRowBackground(view) && notificationTypeFor(view) != NotificationMaterialType.NORMAL)
     }
@@ -9261,13 +9354,20 @@ class HyperSystemUiModule : XposedModule() {
             normalNotificationGlassParamsCache[resources]?.get(resourceName)?.let { return it.copyOf() }
         }
         val params = runCatching {
-            val resourceId = resources.getIdentifier(
+            val localId = resources.getIdentifier(
                 resourceName,
                 "array",
                 SYSTEM_UI,
             )
+            // Volume views belong to MiuiSystemUIPlugin. Its Resources cannot resolve
+            // SystemUI's arrays even when getIdentifier receives the SystemUI package.
+            // Falling back to the incoming collapsed token retains its black inner tint.
+            val recipeResources = if (localId != 0) resources else
+                view.context.createPackageContext(SYSTEM_UI, 0).resources
+            val resourceId = if (localId != 0) localId else
+                recipeResources.getIdentifier(resourceName, "array", SYSTEM_UI)
             if (resourceId == 0) return@runCatching null
-            resources.getStringArray(resourceId)
+            recipeResources.getStringArray(resourceId)
                 .map { it.toFloatOrNull() ?: return@runCatching null }
                 .toFloatArray()
                 .takeIf { it.size >= MIN_GLASS_PARAMS_SIZE }
@@ -9279,7 +9379,8 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun normalNotificationBlendColors(view: View?, preferences: SharedPreferences): IntArray? {
-        if (view == null || !preferences.getBoolean(KEY_UNIFY_NOTIFICATION_MATERIAL, false)) return null
+        if (view == null || !preferences.getBoolean(KEY_UNIFY_NOTIFICATION_MATERIAL, false) ||
+            isHeadsUpNotificationSurface(view)) return null
         val isNotification = isNotificationRowBackground(view) || isMediaNotificationView(view)
         if (!isNotification || !isNotificationMaterialCall()) return null
         // The switch makes focus and MEDIA notifications use the normal notification recipe.
@@ -13863,83 +13964,111 @@ class HyperSystemUiModule : XposedModule() {
                 resourceId.let { resources.getResourceEntryName(it) } in HEADS_UP_NOTIFICATION_COLOR_NAMES
         }.getOrDefault(false)
 
+    private val headsUpGlassDispatching = ThreadLocal<Boolean>()
+    private val convertedHeadsUpRows = Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap<View, Boolean>()))
+
+    private fun isHeadsUpNotificationSurface(view: View): Boolean {
+        if (headsUpGlassDispatching.get() == true || stackContainsClass("HeadsUpNotification")) return true
+        return generateSequence(view) { it.parent as? View }.any { candidate ->
+            candidate.javaClass.name.endsWith("ExpandableNotificationRow") &&
+                runCatching { candidate.javaClass.getMethod("isHeadsUpState").invoke(candidate) == true }.getOrDefault(false)
+        }
+    }
+
     private fun installHeadsUpNotificationSoftGlassHooks(
         preferences: SharedPreferences,
         classLoader: ClassLoader,
     ) {
-        var installed = 0
-        HEADS_UP_NOTIFICATION_GLASS_EFFECT_CLASSES.forEach { className ->
-            runCatching {
-                val effectClass = classLoader.loadClass(className)
-                val methods = effectClass.declaredMethods.filter {
-                    it.name == "apply" && it.parameterCount == 2 &&
-                        Context::class.java.isAssignableFrom(it.parameterTypes[1])
-                }
-                methods.forEachIndexed { index, method ->
-                    hookDeoptimized(method)
-                        .setExceptionMode(ExceptionMode.PROTECTIVE)
-                        .setId("heads-up-soft-glass:${effectClass.simpleName}:$index")
-                        .intercept { chain ->
-                            val result = chain.proceed()
-                            if (preferences.getBoolean(KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS, false) &&
-                                !effectClass.simpleName.contains("Glass")) {
+        runCatching {
+            val prefix = "com.android.systemui.statusbar.notification.style.vieweffect."
+            val blur = classLoader.loadClass(prefix + "HeadsUpNotificationBlurEffect")
+            val rowBlur = classLoader.loadClass(prefix + "NotificationRowBlurEffect")
+
+            fun applyResourceGlass(row: View, materialType: Int): Boolean {
+                val background = runCatching {
+                    val injector = row.javaClass.getMethod("getInjector").invoke(row)
+                    injector?.javaClass?.getMethod("getBackgroundNormal")?.invoke(injector) as? View
+                }.getOrNull() ?: return false
+                val params = normalNotificationGlassParams(background) ?: return false
+                val glassCompat = Class.forName(MI_GLASS_COMPAT_CLASS, false, classLoader)
+                glassCompat.getMethod("setMiGlassCompat", View::class.java, FloatArray::class.java)
+                    .invoke(null, background, params)
+                glassCompat.getMethod(
+                    "setMiViewMaterialTypeCompat",
+                    Int::class.javaPrimitiveType,
+                    View::class.java,
+                ).invoke(null, materialType, background)
+                return true
+            }
+
+            fun dispatch(row: View, context: Context?, clear: Boolean): Boolean {
+                return runCatching {
+                    val instance = rowBlur.getField("INSTANCE").get(null)
+                    val method = rowBlur.declaredMethods.first {
+                        it.name == (if (clear) "clear" else "apply") && it.parameterCount == (if (clear) 1 else 2)
+                    }
+                    headsUpGlassDispatching.set(true)
+                    try {
+                        if (clear) method.invoke(instance, row) else method.invoke(instance, row, context)
+                        applyResourceGlass(row, if (clear) 0 else 1)
+                    } finally { headsUpGlassDispatching.remove() }
+                    true
+                }.onFailure { log(Log.DEBUG, TAG, "Heads-up platform glass dispatch unavailable", it) }.getOrDefault(false)
+            }
+            blur.declaredMethods.filter { it.name == "apply" && it.parameterCount == 2 }.forEach { method ->
+                hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("heads-up-soft-glass:platform-apply").intercept { chain ->
+                        val row = chain.getArg(0) as? View
+                        val context = chain.getArg(1) as? Context
+                        // Replace the plain blur entry with the same normal-resource glass path
+                        // used by the imported SystemUI dex.
+                        if (row != null && context != null && headsUpGlassDispatching.get() != true &&
+                            !stackContainsClass("HeadsUpNotificationGlass") &&
+                            preferences.getBoolean(KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS, false) &&
+                            dispatch(row, context, false)) {
+                            convertedHeadsUpRows.add(row)
+                            null
+                        } else chain.proceed()
+                    }
+            }
+            blur.declaredMethods.filter { it.name == "clear" && it.parameterCount == 1 }.forEach { method ->
+                hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("heads-up-soft-glass:platform-clear").intercept { chain ->
+                        val row = chain.getArg(0) as? View
+                        // Also clear the 42-slot recipe/material type when a converted blur
+                        // effect is dismissed, even if its preference was just switched off.
+                        if (row != null && headsUpGlassDispatching.get() != true && convertedHeadsUpRows.remove(row) &&
+                            dispatch(row, null, true)) null else chain.proceed()
+                    }
+            }
+            listOf("HeadsUpNotificationGlassEffect", "HeadsUpNotificationGlassDarkEffect")
+                .forEach { className ->
+                    val effect = classLoader.loadClass(prefix + className)
+                    effect.declaredMethods.filter { it.name == "apply" && it.parameterCount == 2 }.forEach { method ->
+                        hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                            .setId("heads-up-soft-glass:resource-apply:$className")
+                            .intercept { chain ->
                                 val row = chain.getArg(0) as? View
                                 val context = chain.getArg(1) as? Context
-                                if (row != null && context != null) {
-                                    applyHeadsUpNotificationSoftGlass(row, context, classLoader)
-                                }
+                                if (row != null && context != null && headsUpGlassDispatching.get() != true &&
+                                    preferences.getBoolean(KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS, false) &&
+                                    dispatch(row, context, false)
+                                ) null else chain.proceed()
                             }
-                            result
-                        }
-                    installed++
+                    }
+                    effect.declaredMethods.filter { it.name == "clear" && it.parameterCount == 1 }.forEach { method ->
+                        hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                            .setId("heads-up-soft-glass:resource-clear:$className")
+                            .intercept { chain ->
+                                val row = chain.getArg(0) as? View
+                                if (row != null && headsUpGlassDispatching.get() != true &&
+                                    preferences.getBoolean(KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS, false) &&
+                                    dispatch(row, null, true)
+                                ) null else chain.proceed()
+                            }
+                    }
                 }
-            }.onFailure { error ->
-                log(Log.DEBUG, TAG, "Heads-up glass effect hook unavailable for $className", error)
-            }
-        }
-        log(Log.INFO, TAG, "Installed heads-up soft-glass hooks ($installed methods)")
-    }
-
-    private fun applyHeadsUpNotificationSoftGlass(
-        row: View,
-        context: Context,
-        classLoader: ClassLoader,
-    ) {
-        runCatching {
-            val injector = row.javaClass.methods.firstOrNull {
-                it.name == "getInjector" && it.parameterCount == 0
-            }?.invoke(row) ?: return@runCatching
-            val background = injector.javaClass.methods.firstOrNull {
-                it.name == "getBackgroundNormal" && it.parameterCount == 0
-            }?.invoke(injector) as? View ?: return@runCatching
-            val resourceId = context.resources.getIdentifier(
-                HEADS_UP_NOTIFICATION_GLASS_PARAMS_ARRAY,
-                "array",
-                SYSTEM_UI,
-            )
-            if (resourceId == 0) return@runCatching
-            val params = context.resources.getStringArray(resourceId)
-                .mapNotNull { it.toFloatOrNull() }
-                .toFloatArray()
-                .takeIf { it.isNotEmpty() } ?: return@runCatching
-            val loaders = LinkedHashSet<ClassLoader>().apply {
-                add(classLoader)
-                row.javaClass.classLoader?.let(::add)
-                add(context.classLoader)
-            }
-            val glassCompat = loaders.asSequence().mapNotNull { loader ->
-                runCatching { Class.forName(MI_GLASS_COMPAT_CLASS, false, loader) }.getOrNull()
-            }.firstOrNull() ?: return@runCatching
-            glassCompat.getMethod("setMiGlassCompat", View::class.java, FloatArray::class.java)
-                .invoke(null, background, params)
-            glassCompat.getMethod(
-                "setMiViewMaterialTypeCompat",
-                Int::class.javaPrimitiveType,
-                View::class.java,
-            ).invoke(null, 1, background)
-        }.onFailure { error ->
-            log(Log.DEBUG, TAG, "Could not apply heads-up soft glass", error)
-        }
+        }.onFailure { log(Log.DEBUG, TAG, "Heads-up soft glass hooks unavailable", it) }
     }
 
     private fun installCornerRadiusHooks(preferences: SharedPreferences) {
@@ -14455,6 +14584,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        volumeGlassRuntime = VolumePanelGlassRuntimeSettings(preferences)
         installVolumeNativeParameterHooks(preferences)
         installBackgroundBlurRadiusDispatchHook(classLoader, preferences)
         runCatching {
@@ -14463,6 +14593,8 @@ class HyperSystemUiModule : XposedModule() {
         }.onFailure { error ->
             log(Log.DEBUG, TAG, "Volume panel classes are deferred until ClassLoader discovery", error)
         }
+        runCatching { installLoadedVolumePanelHook(classLoader.loadClass("com.android.systemui.miui.volume.Util"), preferences) }
+        runCatching { installLoadedVolumePanelHook(classLoader.loadClass(MI_BACKGROUND_STYLE_CLASS), preferences) }
     }
 
     /**
@@ -14488,12 +14620,13 @@ class HyperSystemUiModule : XposedModule() {
                 .setId("background-blur-radius-dispatch")
                 .intercept { chain ->
                     val view = chain.getArg(0) as? View
+                    if (volumeGlobalGlassSelected()) return@intercept chain.proceed()
                     val materialEnabled = preferences.getBoolean(KEY_VOLUME_PANEL_MATERIAL_ENABLED, true)
                     val volumeCall = view != null && (
                         isVolumePanelSurface(view) ||
                             stackContainsClass("com.android.systemui.miui.volume.VolumePanel")
                         )
-                    if (materialEnabled && volumeCall) {
+                    if (materialEnabled && volumeCall && !volumePanelUsesGlobalGlass(preferences)) {
                         val blur = preferences.getInt(KEY_VOLUME_PANEL_BLUR_RADIUS, 24)
                             .coerceIn(0, 120)
                         val glass = preferences.getInt(KEY_VOLUME_PANEL_GLASS_STRENGTH, 50)
@@ -14527,7 +14660,7 @@ class HyperSystemUiModule : XposedModule() {
                 .setId("volume-panel-native-background-blur")
                 .intercept { chain ->
                     val view = chain.thisObject as? View
-                    if (preferences.getBoolean(KEY_VOLUME_PANEL_MATERIAL_ENABLED, true) &&
+                    if (volumeGlassRuntime?.state?.let { it.materialEnabled && !it.useGlobal } == true &&
                         view != null && isVolumePanelSurface(view)
                     ) {
                         val radius = preferences.getInt(KEY_VOLUME_PANEL_BLUR_RADIUS, 24).coerceIn(0, 120)
@@ -14550,7 +14683,7 @@ class HyperSystemUiModule : XposedModule() {
                 .setId("volume-panel-native-glass-blur")
                 .intercept { chain ->
                     val view = chain.thisObject as? View
-                    if (preferences.getBoolean(KEY_VOLUME_PANEL_MATERIAL_ENABLED, true) &&
+                    if (volumeGlassRuntime?.state?.let { it.materialEnabled && !it.useGlobal } == true &&
                         view != null && isVolumePanelSurface(view)
                     ) {
                         val strength = preferences
@@ -14575,7 +14708,7 @@ class HyperSystemUiModule : XposedModule() {
                 .intercept { chain ->
                     val result = chain.proceed()
                     val view = chain.thisObject as? View
-                    if (preferences.getBoolean(KEY_VOLUME_PANEL_MATERIAL_ENABLED, true) &&
+                    if (volumeGlassRuntime?.state?.let { it.materialEnabled && !it.useGlobal } == true &&
                         view != null && isVolumePanelSurface(view)
                     ) {
                         val strength = preferences
@@ -14592,7 +14725,7 @@ class HyperSystemUiModule : XposedModule() {
                 .setId("volume-panel-native-background-opacity")
                 .intercept { chain ->
                     val view = chain.thisObject as? View
-                    if (preferences.getBoolean(KEY_VOLUME_PANEL_MATERIAL_ENABLED, true) &&
+                    if (volumeGlassRuntime?.state?.let { it.materialEnabled && !it.useGlobal } == true &&
                         view != null && isVolumePanelSurface(view)
                     ) {
                         val opacity = preferences.getInt(KEY_VOLUME_PANEL_BACKGROUND_OPACITY, 100)
@@ -14623,6 +14756,51 @@ class HyperSystemUiModule : XposedModule() {
     private fun installLoadedVolumePanelHook(targetClass: Class<*>, preferences: SharedPreferences) {
         if (!volumePanelHookedClasses.add(targetClass)) return
         when (targetClass.name) {
+            MI_BACKGROUND_STYLE_CLASS -> {
+                runCatching {
+                    val bionics = targetClass.classLoader.loadClass("miui.systemui.util.MaterialMode\$Bionics")
+                        .getField("INSTANCE").get(null)
+                    hookDeoptimized(targetClass.getDeclaredMethod("getMaterialMode"))
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("volume-panel-global-material:mode").intercept { chain ->
+                            // Util's capability flags alone are insufficient: MiBackgroundStyle
+                            // independently reads the repository and may still apply Classic.
+                            if (volumeMaterialDispatching.get() == true) bionics else chain.proceed()
+                        }
+                    targetClass.declaredMethods.filter {
+                        it.name == "setMiBackgroundStyle" && it.parameterTypes.firstOrNull() == View::class.java
+                    }.forEach { method ->
+                        hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                            .setId("volume-panel-global-material:style:${method.parameterCount}").intercept { chain ->
+                                val view = chain.getArg(0) as? View
+                                val forceGlass = volumeGlobalGlassSelected() && softGlassRuntime?.settings?.enabled == true &&
+                                    view != null && (isVolumePanelSurface(view) || stackContainsClass("com.android.systemui.miui.volume."))
+                                if (!forceGlass) return@intercept chain.proceed()
+                                volumePanelSurfaceRoots.add(view!!)
+                                val previous = volumeMaterialDispatching.get()
+                                volumeMaterialDispatching.set(true)
+                                try { chain.proceed() } finally {
+                                    if (previous == null) volumeMaterialDispatching.remove() else volumeMaterialDispatching.set(previous)
+                                }
+                            }
+                    }
+                }.onFailure { log(Log.DEBUG, TAG, "Volume native material dispatch unavailable", it) }
+            }
+            "com.android.systemui.miui.volume.Util" -> {
+                // HyperLight r71.q: enable only the volume material branch. No sizing,
+                // visibility, dialog-motion or global feature-flag hooks are imported.
+                targetClass.declaredMethods.filter {
+                    it.name in setOf("isBionicsAdvancedMaterialEnabled", "isAdvancedMaterialEffective") &&
+                        it.returnType == Boolean::class.javaPrimitiveType &&
+                        it.parameterTypes.contentEquals(arrayOf(Context::class.java))
+                }.forEach { method ->
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("volume-panel-global-material:${method.name}").intercept { chain ->
+                            if (volumeGlobalGlassSelected() && softGlassRuntime?.settings?.enabled == true) true
+                            else chain.proceed()
+                        }
+                }
+            }
             VOLUME_PANEL_CONTROLLER_CLASS -> {
                 targetClass.declaredMethods
                     .filter { it.name in VOLUME_PANEL_REFRESH_METHODS }
@@ -14632,7 +14810,11 @@ class HyperSystemUiModule : XposedModule() {
                             .setId("volume-panel:" + method.name + ":" + method.parameterCount)
                             .intercept { chain ->
                                 val result = chain.proceed()
-                                applyVolumePanelNativeTuning(chain.thisObject, preferences)
+                                // Column updates run for every drag tick. Material is already
+                                // handled by View setters; walk corners only on panel lifecycle.
+                                if (!volumeGlobalGlassSelected() || method.name in VOLUME_PANEL_LAYOUT_METHODS) {
+                                    applyVolumePanelNativeTuning(chain.thisObject, preferences)
+                                }
                                 result
                             }
                     }
@@ -14647,7 +14829,7 @@ class HyperSystemUiModule : XposedModule() {
                             .setId("volume-panel-native-radius")
                             .intercept { chain ->
                                 val result = chain.proceed()
-                                applyVolumeColumnRadius(chain.thisObject, preferences)
+                                applyVolumeColumnRadius(chain.thisObject)
                                 result
                             }
                     }
@@ -14707,12 +14889,38 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun applyVolumePanelRootTuning(root: View, preferences: SharedPreferences) {
-        if (!preferences.getBoolean(KEY_VOLUME_PANEL_MATERIAL_ENABLED, true)) {
+        val runtime = volumeGlassRuntime?.state ?: return
+        if (!runtime.materialEnabled) {
             synchronized(volumePanelAppliedTuning) {
                 volumePanelAppliedTuning.remove(root)
             }
             return
         }
+        if (runtime.useGlobal) {
+            // Leave the stock recipe, blur radii, opacity and animation progress to the
+            // common global setter hooks. Reapplying custom defaults here would both
+            // overwrite the system baseline and multiply the global adjustments twice.
+            synchronized(volumePanelAppliedTuning) { volumePanelAppliedTuning.remove(root) }
+            val radius = dpToPixels(root, runtime.cornerRadius)
+            fun visitCorners(view: View) {
+                view.background?.let { background ->
+                    synchronized(volumeOriginalDrawableAlphas) { volumeOriginalDrawableAlphas.remove(background) }
+                        ?.let { background.alpha = it }
+                }
+                val id = volumeResourceName(view)
+                val snapshot = VolumeCornerSnapshot(radius, view.width, view.height)
+                if (volumeGlobalCorners[view] != snapshot) {
+                    if (view.javaClass.name == VOLUME_ROUND_RECT_CLASS) invokeIfPresent(view, "setRadius", arrayOf(radius.toInt()))
+                    if (view.javaClass.name.endsWith("VolumeBlurFrameLayout") || view.javaClass.name.endsWith("ExpandBlurFrameLayout") ||
+                        id == "volume_column_slider_bg_glass" || id == "volume_column_slider_bg_blend") invokeMiBlurOutline(view, radius)
+                    volumeGlobalCorners[view] = snapshot
+                }
+                if (view is ViewGroup) repeat(view.childCount) { visitCorners(view.getChildAt(it)) }
+            }
+            visitCorners(root)
+            return
+        }
+        volumeGlobalCorners.clear()
         val blurRadius = preferences.getInt(KEY_VOLUME_PANEL_BLUR_RADIUS, 24).coerceIn(0, 120)
         val glassStrength = preferences.getInt(KEY_VOLUME_PANEL_GLASS_STRENGTH, 50).coerceIn(0, 100)
         val backgroundOpacity = preferences.getInt(KEY_VOLUME_PANEL_BACKGROUND_OPACITY, 100).coerceIn(0, 100)
@@ -14768,12 +14976,14 @@ class HyperSystemUiModule : XposedModule() {
                     idName.contains("blur_frame") ||
                     idName.contains("background") ||
                     idName.contains("bg_blur"))) {
+                synchronized(volumeOriginalDrawableAlphas) { volumeOriginalDrawableAlphas.putIfAbsent(background, background.alpha) }
                 background.alpha = (backgroundOpacity * 255 / 100).coerceIn(0, 255)
             }
             if (background != null && (idName.contains("glass") ||
                     idName.contains("bg_blur") ||
                     className.contains("VolumeBlurFrameLayout"))) {
                 // The plugin already owns this glass drawable; tune its native surface opacity.
+                synchronized(volumeOriginalDrawableAlphas) { volumeOriginalDrawableAlphas.putIfAbsent(background, background.alpha) }
                 background.alpha = (glassStrength * 255 / 100).coerceIn(0, 255)
             }
             if (view.javaClass.name == VOLUME_ROUND_RECT_CLASS) {
@@ -14793,13 +15003,14 @@ class HyperSystemUiModule : XposedModule() {
         return count
     }
 
-    private fun applyVolumeColumnRadius(column: Any?, preferences: SharedPreferences) {
-        if (!preferences.getBoolean(KEY_VOLUME_PANEL_MATERIAL_ENABLED, true)) return
+    private fun applyVolumeColumnRadius(column: Any?) {
+        val runtime = volumeGlassRuntime?.state ?: return
+        if (!runtime.materialEnabled) return
         if (column == null) return
         val view = readField(column, "view") as? View ?: return
         val radius = dpToPixels(
             view,
-            preferences.getFloat(KEY_VOLUME_PANEL_CORNER_RADIUS, DEFAULT_CORNER_RADIUS),
+            runtime.cornerRadius,
         )
         val radiusInt = radius.toInt()
         writeField(column, "radius", radiusInt)
@@ -15199,26 +15410,38 @@ class HyperSystemUiModule : XposedModule() {
         return idName == "progress_bg" && isControlCenterSliderPart(view)
     }
 
+    private fun volumeResourceName(view: View): String = synchronized(volumeResourceNames) {
+        val id = view.id
+        volumeResourceNames[view]?.takeIf { it.first == id }?.second ?: run {
+            val name = if (id == View.NO_ID || id == 0) "" else runCatching { view.resources.getResourceEntryName(id) }.getOrDefault("")
+            volumeResourceNames[view] = id to name
+            name
+        }
+    }
+
     private fun isVolumePanelSurface(view: View): Boolean {
         if (volumePanelSurfaceRoots.contains(view)) return true
         var current: View? = view
         while (current != null) {
-            if (volumePanelSurfaceRoots.contains(current)) return true
+            if (volumePanelSurfaceRoots.contains(current)) {
+                volumePanelSurfaceRoots.add(view)
+                return true
+            }
             val className = current.javaClass.name
             if (className == VOLUME_PANEL_VIEW_CLASS ||
                 className.endsWith("ExpandBlurFrameLayout") ||
                 className.endsWith("VolumeBlurFrameLayout")
             ) {
+                volumePanelSurfaceRoots.add(view)
                 return true
             }
-            val idName = runCatching {
-                current.resources.getResourceEntryName(current.id)
-            }.getOrNull()
+            val idName = volumeResourceName(current)
             if (idName == "blur_frame" ||
                 idName == "volume_column_slider" ||
                 idName == "volume_column_slider_bg_glass" ||
                 idName == "volume_column_slider_bg_blend"
             ) {
+                volumePanelSurfaceRoots.add(view)
                 return true
             }
             current = current.parent as? View
@@ -15344,8 +15567,7 @@ class HyperSystemUiModule : XposedModule() {
         private const val LOCKSCREEN_MEDIA_PRESENTATION_REAPPLY_SHORT_DELAY_MS = 96L
         private const val LOCKSCREEN_MEDIA_PRESENTATION_REAPPLY_SETTLE_DELAY_MS = 320L
         private const val MI_GLASS_COMPAT_CLASS = "com.miui.systemui.util.MiGlassCompat"
-        private const val HEADS_UP_NOTIFICATION_GLASS_PARAMS_ARRAY = "notification_glass_params_normal"
-        private const val HEADS_UP_NOTIFICATION_TEXT_COLOR = 0xE2FFFFFF.toInt()
+        private const val HEADS_UP_NOTIFICATION_TEXT_COLOR = 0xE8FFFFFF.toInt()
         private val HEADS_UP_NOTIFICATION_COLOR_NAMES = setOf(
             "notification_action_text_color",
             "notification_time_color",
@@ -15353,10 +15575,6 @@ class HyperSystemUiModule : XposedModule() {
             "notification_primary_text_color_light",
             "notification_secondary_text_color_light",
             "optimized_heads_up_notification_action_text",
-        )
-        private val HEADS_UP_NOTIFICATION_GLASS_EFFECT_CLASSES = listOf(
-            "com.android.systemui.statusbar.notification.style.vieweffect.HeadsUpNotificationGlassEffect",
-            "com.android.systemui.statusbar.notification.style.vieweffect.HeadsUpNotificationGlassDarkEffect",
         )
         private const val CHARGING_INDICATION_TYPE = 3
         private const val IMAGE_THRESHOLD_FIELD = "IMAGE_THRESHOLD"
@@ -15479,6 +15697,7 @@ class HyperSystemUiModule : XposedModule() {
             "updateTempColumnH",
             "updateExpandedH",
         )
+        private val VOLUME_PANEL_LAYOUT_METHODS = setOf("initPanelView", "showVolumePanelH", "showH", "updateExpandedH")
         private const val SLIDER_VIEW_HOLDER_CLASS =
             "miui.systemui.controlcenter.panel.main.recyclerview.ToggleSliderViewHolder"
         private const val BRIGHTNESS_PANEL_SLIDER_DELEGATE_CLASS =

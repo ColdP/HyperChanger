@@ -17,15 +17,17 @@ internal fun readSoftGlassSettings(p: SharedPreferences) = SoftGlassSettings(
     backgroundBlur = p.getInt("${PREFIX}blur_percent", p.getInt("${PREFIX}element_blur", 100)),
     backgroundScale = p.getInt("${PREFIX}scale_percent", p.getInt("${PREFIX}element_scale", 100)),
     backgroundOpacity = p.getInt("${PREFIX}opacity_percent", 100),
-    backgroundDarkening = p.getInt("${PREFIX}darkening_percent", 100),
-    adjustments = softGlassParameters.associate { it.key to p.getInt("$PREFIX${it.key}", 0) },
+    adjustments = softGlassParameters.associate { it.key to if (it.key == "edge_feather") {
+        if (p.contains("${PREFIX}edge_feather_inverse")) p.getInt("${PREFIX}edge_feather_inverse", 0)
+        else migrateSoftGlassFeather(p.getInt("${PREFIX}reflection", 0), p.getInt("${PREFIX}edge_softness", 0))
+    } else p.getInt("$PREFIX${it.key}", 0) },
 ).normalized()
 
 /** Keep View setter hooks free of preference deserialization on every animation frame. */
 internal class SoftGlassRuntimeSettings(private val preferences: SharedPreferences, onChanged: () -> Unit = {}) {
     @Volatile var settings = readSoftGlassSettings(preferences); private set
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == null || key.startsWith(PREFIX)) {
+        if (key == null || key.startsWith(PREFIX) || key == KEY_VOLUME_PANEL_GLOBAL_GLASS || key == "volume_panel_material_enabled") {
             settings = readSoftGlassSettings(preferences)
             onChanged()
         }
@@ -34,8 +36,8 @@ internal class SoftGlassRuntimeSettings(private val preferences: SharedPreferenc
     init { preferences.registerOnSharedPreferenceChangeListener(listener) }
 }
 
-internal class SoftGlassSettingsStore(context: Context) {
-    private val local = context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE)
+internal class SoftGlassSettingsStore(private val local: SharedPreferences) {
+    constructor(context: Context) : this(context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE))
     var settings = readSoftGlassSettings(local); private set
     var presets = SoftGlassPresetCodec.decodeLibrary(local.getString(KEY_SOFT_GLASS_PRESETS, "[]") ?: "[]"); private set
 
@@ -45,31 +47,43 @@ internal class SoftGlassSettingsStore(context: Context) {
     }
 
     fun syncRemote(service: XposedService) {
-        val remote = service.getRemotePreferences(REMOTE_PREFERENCE_GROUP)
+        syncPreferences(service.getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+    }
+
+    internal fun syncPreferences(remote: SharedPreferences) {
         settings = readSoftGlassSettings(if (remote.contains(KEY_SOFT_GLASS_ENABLED)) remote else local)
-        if (remote.contains(KEY_SOFT_GLASS_PRESETS)) {
-            presets = SoftGlassPresetCodec.decodeLibrary(remote.getString(KEY_SOFT_GLASS_PRESETS, "[]") ?: "[]")
-        }
+        // The app owns the library. Remote preferences can lag behind a just-saved
+        // preset; only recover from them when no local library has ever been saved.
+        val library = if (local.contains(KEY_SOFT_GLASS_PRESETS)) local else remote
+        presets = SoftGlassPresetCodec.decodeLibrary(library.getString(KEY_SOFT_GLASS_PRESETS, "[]") ?: "[]")
         write(local)
         write(remote)
+        writePresets(local)
+        writePresets(remote)
     }
 
     fun update(service: XposedService?, transform: (SoftGlassSettings) -> SoftGlassSettings) {
-        settings = transform(settings).normalized()
+        settings = transform(readSoftGlassSettings(local)).normalized()
         write(local)
         service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.let(::write)
     }
 
     fun savePreset(service: XposedService?, preset: SoftGlassPreset) {
+        reload()
         presets = (presets.filterNot { it.id == preset.id } + preset.copy(builtIn = false)).takeLast(100)
-        write(local)
-        service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.let(::write)
+        writePresets(local)
+        service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.let(::writePresets)
     }
 
     fun deletePreset(service: XposedService?, id: String) {
+        reload()
         presets = presets.filterNot { it.id == id }
-        write(local)
-        service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.let(::write)
+        writePresets(local)
+        service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.let(::writePresets)
+    }
+
+    private fun writePresets(p: SharedPreferences) {
+        p.edit().putString(KEY_SOFT_GLASS_PRESETS, SoftGlassPresetCodec.encodeLibrary(presets)).apply()
     }
 
     private fun write(p: SharedPreferences) {
@@ -79,10 +93,12 @@ internal class SoftGlassSettingsStore(context: Context) {
             putInt("${PREFIX}blur_percent", settings.backgroundBlur)
             putInt("${PREFIX}scale_percent", settings.backgroundScale)
             putInt("${PREFIX}opacity_percent", settings.backgroundOpacity)
-            putInt("${PREFIX}darkening_percent", settings.backgroundDarkening)
+            remove("${PREFIX}darkening_percent")
+            remove("${PREFIX}edge_feather")
+            remove("${PREFIX}edge_softness")
+            remove("${PREFIX}reflection")
             listOf("element_blur", "background_blur", "element_scale", "background_scale").forEach { remove("$PREFIX$it") }
-            softGlassParameters.forEach { putInt("$PREFIX${it.key}", settings.adjustments[it.key] ?: 0) }
-            putString(KEY_SOFT_GLASS_PRESETS, SoftGlassPresetCodec.encodeLibrary(presets))
+            softGlassParameters.forEach { putInt("$PREFIX${if (it.key == "edge_feather") "edge_feather_inverse" else it.key}", settings.adjustments[it.key] ?: 0) }
         }.apply()
     }
 }

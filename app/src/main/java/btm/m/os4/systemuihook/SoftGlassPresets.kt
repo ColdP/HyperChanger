@@ -5,25 +5,14 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-internal enum class SoftGlassPresetScope(val wireName: String, val title: String) {
-    ALL("all", "玻璃与背景"), GLASS("glass", "仅玻璃参数"), BACKGROUND("background", "仅背景参数"),
-}
-
 internal data class SoftGlassPreset(
     val name: String,
     val settings: SoftGlassSettings,
-    val scope: SoftGlassPresetScope = SoftGlassPresetScope.ALL,
     val id: String = UUID.randomUUID().toString(),
     val builtIn: Boolean = false,
 ) {
     fun applyTo(current: SoftGlassSettings): SoftGlassSettings {
-        val glass = if (scope != SoftGlassPresetScope.BACKGROUND) current.copy(
-            adjustments = settings.adjustments, refractionBlur = settings.refractionBlur,
-        ) else current
-        return (if (scope != SoftGlassPresetScope.GLASS) glass.copy(
-            backgroundBlur = settings.backgroundBlur, backgroundScale = settings.backgroundScale,
-            backgroundOpacity = settings.backgroundOpacity, backgroundDarkening = settings.backgroundDarkening,
-        ) else glass).normalized() // Never change the master switch while importing/applying.
+        return settings.copy(enabled = current.enabled).normalized()
     }
 }
 
@@ -32,17 +21,16 @@ internal object SoftGlassPresetCodec {
 
     fun encode(preset: SoftGlassPreset): String = JSONObject().apply {
         put("type", "HyperChangerSoftGlassPreset")
-        put("version", 3)
+        put("version", 5)
         put("name", preset.name.trim().take(40))
-        put("scope", preset.scope.wireName)
         val s = preset.settings.normalized()
-        if (preset.scope != SoftGlassPresetScope.BACKGROUND) put("glass", JSONObject().apply {
+        put("glass", JSONObject().apply {
             softGlassParameters.forEach { put(it.key, s.adjustments[it.key] ?: 0) }
             put("refraction_blur", s.refractionBlur)
         })
-        if (preset.scope != SoftGlassPresetScope.GLASS) put("background", JSONObject().apply {
+        put("background", JSONObject().apply {
             put("blur", s.backgroundBlur); put("scale", s.backgroundScale)
-            put("opacity", s.backgroundOpacity); put("darkening", s.backgroundDarkening)
+            put("opacity", s.backgroundOpacity)
         })
     }.toString()
 
@@ -51,18 +39,22 @@ internal object SoftGlassPresetCodec {
         val root = JSONObject(payload)
         require(root.get("type") == "HyperChangerSoftGlassPreset" && root.get("version") is Number)
         val version = root.getDouble("version")
-        require(version == 1.0 || version == 2.0 || version == 3.0)
-        require(root.keys().asSequence().all { it in setOf("type", "version", "name", "scope", "glass", "background") })
-        val scope = SoftGlassPresetScope.entries.firstOrNull { it.wireName == root.getString("scope") }
-            ?: error("Unknown preset scope")
+        require(version in setOf(1.0, 2.0, 3.0, 4.0, 5.0))
+        val rootKeys = setOf("type", "version", "name", "glass", "background") + if (version < 4.0) setOf("scope") else emptySet()
+        require(root.keys().asSequence().all { it in rootKeys })
+        // Old partial presets become complete presets, with stock values for their
+        // missing half. Keep custom libraries/imports usable without retaining scopes.
+        val scope = if (version < 4.0) root.getString("scope") else "all"
+        require(scope in setOf("all", "glass", "background"))
         require(root.get("name") is String)
         val name = root.getString("name").trim()
         require(name.isNotEmpty() && name.length <= 40)
-        val glass = if (scope != SoftGlassPresetScope.BACKGROUND) root.getJSONObject("glass") else null
-        val background = if (scope != SoftGlassPresetScope.GLASS) root.getJSONObject("background") else null
-        require(scope != SoftGlassPresetScope.GLASS || !root.has("background"))
-        require(scope != SoftGlassPresetScope.BACKGROUND || !root.has("glass"))
-        require(background == null || background.keys().asSequence().all { it in setOf("blur", "scale", "opacity", "darkening") })
+        val glass = if (scope != "background") root.getJSONObject("glass") else null
+        val background = if (scope != "glass") root.getJSONObject("background") else null
+        require(scope != "glass" || !root.has("background"))
+        require(scope != "background" || !root.has("glass"))
+        val backgroundKeys = setOf("blur", "scale", "opacity") + if (version < 4.0) setOf("darkening") else emptySet()
+        require(background == null || background.keys().asSequence().all { it in backgroundKeys })
         fun JSONObject.number(key: String, range: IntRange): Int {
             val raw = get(key)
             require(raw is Number)
@@ -70,13 +62,19 @@ internal object SoftGlassPresetCodec {
             require(n.isFinite() && n == raw.toInt().toDouble() && raw.toInt() in range)
             return raw.toInt()
         }
+        if (version < 4.0 && background != null) background.number("darkening", 0..200)
         val adjustments = glass?.let { obj ->
             require(obj.keys().asSequence().all { key ->
                 softGlassParameters.any { it.key == key && (key != "edge_feather" || version >= 3.0) } ||
+                    (version < 5.0 && key == "reflection") ||
                     (version >= 2.0 && key == "refraction_blur")
             })
-            softGlassParameters.associate {
-                it.key to if (it.key == "edge_feather" && version < 3.0) 0 else obj.number(it.key, -100..200)
+            val legacyReflection = if (version < 5.0) obj.number("reflection", -100..200) else 0
+            softGlassParameters.associate { definition ->
+                definition.key to if (definition.key == "edge_feather" && version < 5.0) {
+                    val oldFeather = if (version >= 3.0) obj.number(definition.key, -100..200) else 0
+                    migrateSoftGlassFeather(legacyReflection, if (version >= 4.0) oldFeather else 0)
+                } else obj.number(definition.key, definition.adjustmentRange)
             }
         }.orEmpty()
         return SoftGlassPreset(name, SoftGlassSettings(
@@ -89,8 +87,7 @@ internal object SoftGlassPresetCodec {
             backgroundBlur = background?.number("blur", 0..200) ?: 100,
             backgroundScale = background?.number("scale", 0..200) ?: 100,
             backgroundOpacity = background?.number("opacity", 0..200) ?: 100,
-            backgroundDarkening = background?.number("darkening", 0..200) ?: 100,
-        ).normalized(), scope)
+        ).normalized())
     }
 
     fun encodeLibrary(presets: List<SoftGlassPreset>): String = JSONArray().apply {
@@ -106,23 +103,72 @@ internal object SoftGlassPresetCodec {
     }.getOrDefault(emptyList())
 }
 
-/** An ordered progression: reduce refraction/edge shading while increasing Gaussian blur. */
-internal fun builtInSoftGlassPresets(): List<SoftGlassPreset> {
-    val names = listOf("通透玻璃", "清澈玻璃", "轻柔玻璃", "均衡柔光", "柔雾玻璃", "磨砂玻璃", "深度磨砂", "高斯模糊")
-    val blur = listOf(0, 15, 30, 55, 80, 110, 150, 200)
-    return names.mapIndexed { i, name ->
-        val optical = listOf(25, 15, 0, -15, -35, -55, -80, -100)[i]
-        SoftGlassPreset(name, SoftGlassSettings(
-            refractionBlur = listOf(70, 85, 100, 120, 140, 160, 180, 200)[i],
-            backgroundBlur = blur[i], backgroundScale = listOf(40, 50, 65, 80, 90, 100, 60, 0)[i],
-            backgroundOpacity = listOf(20, 30, 40, 55, 65, 80, 90, 100)[i],
-            backgroundDarkening = listOf(30, 40, 50, 60, 70, 80, 90, 100)[i],
-            adjustments = mapOf(
-                "luminance" to (optical.coerceAtMost(0)), "saturation" to 0,
-                "alpha" to -100, "refraction" to listOf(5, 0, -10, -25, -40, -60, -80, -100)[i], "thickness" to optical,
-                "reflection" to optical, "edge" to optical, "reflection_offset" to optical,
-                "light" to optical, "darker" to -100, "burn" to -100,
-            ),
-        ).normalized(), id = "builtin-$i", builtIn = true)
-    }
-}
+/** User-tuned A–F recipes, ordered from clear to blurred by their visual appearance. */
+internal fun builtInSoftGlassPresets(): List<SoftGlassPreset> = listOf(
+    // A.json
+    SoftGlassPreset("澄光", SoftGlassSettings(
+        refractionBlur = 13, backgroundBlur = 12, backgroundScale = 32, backgroundOpacity = 53,
+        adjustments = mapOf(
+            "luminance" to 0, "saturation" to 0, "brightness" to 0,
+            "alpha" to 0, "refraction" to 0, "thickness" to 0,
+            "background_saturation" to 0, "background_brightness" to -38, "burn" to 0,
+            "edge" to 200, "edge_feather" to 75, "reflection_offset" to 0,
+            "light" to 0, "darker" to -100,
+        ),
+    ).normalized(), id = "builtin-custom-a", builtIn = true),
+    // B.json
+    SoftGlassPreset("薄纱", SoftGlassSettings(
+        refractionBlur = 22, backgroundBlur = 29, backgroundScale = 32, backgroundOpacity = 53,
+        adjustments = mapOf(
+            "luminance" to 0, "saturation" to 0, "brightness" to 0,
+            "alpha" to 0, "refraction" to 0, "thickness" to 0,
+            "background_saturation" to 0, "background_brightness" to -38, "burn" to 0,
+            "edge" to 200, "edge_feather" to 75, "reflection_offset" to 0,
+            "light" to 0, "darker" to -100,
+        ),
+    ).normalized(), id = "builtin-custom-b", builtIn = true),
+    // C.json
+    SoftGlassPreset("浮影", SoftGlassSettings(
+        refractionBlur = 44, backgroundBlur = 36, backgroundScale = 0, backgroundOpacity = 73,
+        adjustments = mapOf(
+            "luminance" to -79, "saturation" to -20, "brightness" to 5,
+            "alpha" to 110, "refraction" to 200, "thickness" to -16,
+            "background_saturation" to 107, "background_brightness" to -59, "burn" to 80,
+            "edge" to 200, "edge_feather" to 100, "reflection_offset" to 200,
+            "light" to 31, "darker" to -100,
+        ),
+    ).normalized(), id = "builtin-custom-c", builtIn = true),
+    // D.json
+    SoftGlassPreset("朦光", SoftGlassSettings(
+        refractionBlur = 55, backgroundBlur = 28, backgroundScale = 0, backgroundOpacity = 73,
+        adjustments = mapOf(
+            "luminance" to -79, "saturation" to -20, "brightness" to 5,
+            "alpha" to 4, "refraction" to 132, "thickness" to -16,
+            "background_saturation" to 107, "background_brightness" to -59, "burn" to 62,
+            "edge" to 126, "edge_feather" to 100, "reflection_offset" to 200,
+            "light" to 31, "darker" to -100,
+        ),
+    ).normalized(), id = "builtin-custom-d", builtIn = true),
+    // E.json
+    SoftGlassPreset("凝雾", SoftGlassSettings(
+        refractionBlur = 115, backgroundBlur = 81, backgroundScale = 0, backgroundOpacity = 73,
+        adjustments = mapOf(
+            "luminance" to -79, "saturation" to -20, "brightness" to 5,
+            "alpha" to 4, "refraction" to 132, "thickness" to -16,
+            "background_saturation" to 107, "background_brightness" to -59, "burn" to 62,
+            "edge" to 126, "edge_feather" to 100, "reflection_offset" to 200,
+            "light" to 31, "darker" to -100,
+        ),
+    ).normalized(), id = "builtin-custom-e", builtIn = true),
+    // F.json
+    SoftGlassPreset("云隐", SoftGlassSettings(
+        refractionBlur = 117, backgroundBlur = 74, backgroundScale = 32, backgroundOpacity = 59,
+        adjustments = mapOf(
+            "luminance" to 0, "saturation" to 0, "brightness" to 0,
+            "alpha" to 0, "refraction" to 0, "thickness" to 0,
+            "background_saturation" to 0, "background_brightness" to -51, "burn" to 0,
+            "edge" to 48, "edge_feather" to 75, "reflection_offset" to 0,
+            "light" to 0, "darker" to -100,
+        ),
+    ).normalized(), id = "builtin-custom-f", builtIn = true),
+)

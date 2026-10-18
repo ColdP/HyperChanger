@@ -17,7 +17,16 @@ if ((Get-FileHash -LiteralPath $json -Algorithm SHA256).Hash -ne '3CF6CD6892E32E
 }
 $zxing = Get-ChildItem -LiteralPath (Join-Path $project '.reverse-tmp\build-env\gradle\caches\modules-2\files-2.1\com.google.zxing\core') -Filter 'core-*.jar' -Recurse | Select-Object -First 1 -ExpandProperty FullName
 if (!$zxing) { throw 'The existing app ZXing dependency is required for QR checks.' }
-& java "-Djava.io.tmpdir=$output" -cp "$gradleLib\*" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler -no-stdlib -no-reflect -classpath "$stdlib;$annotations;$json;$zxing" -d "$output\classes" "$project\app\src\main\java\btm\m\os4\systemuihook\SoftGlassParameters.kt" "$project\app\src\main\java\btm\m\os4\systemuihook\SoftGlassPresets.kt" "$project\app\src\main\java\btm\m\os4\systemuihook\PresetQrPayload.kt" "$PSScriptRoot\SoftGlassParametersTest.kt"
+$sdkLine = Get-Content (Join-Path $project 'local.properties') | Where-Object { $_ -match '^sdk.dir=' }
+$sdk = $sdkLine.Substring(8).Replace('\:', ':').Replace('\\', '\')
+$android = Get-ChildItem -LiteralPath (Join-Path $sdk 'platforms') -Filter 'android.jar' -Recurse | Select-Object -Last 1 -ExpandProperty FullName
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$serviceAar = Get-ChildItem -LiteralPath (Join-Path $project '.reverse-tmp\build-env\gradle\caches\modules-2\files-2.1\io.github.libxposed\service') -Filter '*.aar' -Recurse | Select-Object -First 1 -ExpandProperty FullName
+$serviceJar = Join-Path $output 'xposed-service.jar'
+$archive = [System.IO.Compression.ZipFile]::OpenRead($serviceAar)
+try { [System.IO.Compression.ZipFileExtensions]::ExtractToFile($archive.GetEntry('classes.jar'), $serviceJar, $true) } finally { $archive.Dispose() }
+$testClasspath = "$stdlib;$annotations;$json;$zxing;$android;$serviceJar"
+& java "-Djava.io.tmpdir=$output" -cp "$gradleLib\*" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler -no-stdlib -no-reflect -classpath $testClasspath -d "$output\classes" "$project\app\src\main\java\btm\m\os4\systemuihook\SoftGlassParameters.kt" "$project\app\src\main\java\btm\m\os4\systemuihook\SoftGlassPresets.kt" "$project\app\src\main\java\btm\m\os4\systemuihook\PresetQrPayload.kt" "$project\app\src\main\java\btm\m\os4\systemuihook\SoftGlassSettings.kt" "$project\app\src\main\java\btm\m\os4\systemuihook\SoftGlassRefractionBlurSettings.kt" "$project\app\src\main\java\btm\m\os4\systemuihook\VolumePanelGlassSettings.kt" "$PSScriptRoot\SoftGlassParametersTest.kt" "$PSScriptRoot\SoftGlassSettingsStoreTest.kt"
 if ($LASTEXITCODE -ne 0) { throw 'Kotlin regression checks failed to compile.' }
-& java "-Djava.io.tmpdir=$output" -cp "$output\classes;$stdlib;$json;$zxing" btm.m.os4.systemuihook.SoftGlassParametersTestKt
+& java "-Djava.io.tmpdir=$output" -cp "$output\classes;$testClasspath" btm.m.os4.systemuihook.SoftGlassParametersTestKt
 if ($LASTEXITCODE -ne 0) { throw 'Soft glass regression checks failed.' }

@@ -9,6 +9,7 @@ internal data class SoftGlassParameter(
     val title: String,
     val slot: Int,
     val bounds: ClosedFloatingPointRange<Float>,
+    val adjustmentRange: IntRange = -100..200,
 )
 
 internal val softGlassParameters = listOf(
@@ -18,12 +19,12 @@ internal val softGlassParameters = listOf(
     SoftGlassParameter("alpha", "内层不透明度", 14, 0f..2f),
     SoftGlassParameter("refraction", "折射率", 32, 1f..5f),
     SoftGlassParameter("thickness", "光学厚度", 21, 0f..120f),
-    SoftGlassParameter("reflection", "反射强度", 24, 0f..2f),
     SoftGlassParameter("background_saturation", "采样背景饱和度", 33, 0f..3f),
     SoftGlassParameter("background_brightness", "采样背景亮度", 34, -1f..1f),
     SoftGlassParameter("burn", "背景烧灼强度", 35, 0f..1f),
     SoftGlassParameter("edge", "边缘宽度", 19, 0f..100f),
-    SoftGlassParameter("edge_feather", "边缘羽化", 20, .1f..12f),
+    // The former reflection-strength slider, with its sign reversed.
+    SoftGlassParameter("edge_feather", "边缘羽化", 24, 0f..2f, -200..100),
     SoftGlassParameter("reflection_offset", "反射偏移", 22, 0f..1000f),
     SoftGlassParameter("light", "高光强度", 28, 0f..2f),
     SoftGlassParameter("darker", "压暗强度", 7, 0f..1f),
@@ -35,7 +36,6 @@ internal data class SoftGlassSettings(
     val backgroundBlur: Int = 100,
     val backgroundScale: Int = 100,
     val backgroundOpacity: Int = 100,
-    val backgroundDarkening: Int = 100,
     val adjustments: Map<String, Int> = emptyMap(),
 ) {
     fun normalized() = copy(
@@ -43,17 +43,29 @@ internal data class SoftGlassSettings(
         backgroundBlur = backgroundBlur.coerceIn(0, 200),
         backgroundScale = backgroundScale.coerceIn(0, 200),
         backgroundOpacity = backgroundOpacity.coerceIn(0, 200),
-        backgroundDarkening = backgroundDarkening.coerceIn(0, 200),
-        adjustments = softGlassParameters.associate { it.key to (adjustments[it.key] ?: 0).coerceIn(-100, 200) },
+        adjustments = softGlassParameters.associate { it.key to (adjustments[it.key] ?: 0).coerceIn(it.adjustmentRange) },
     )
+
+    fun resetParameters() = SoftGlassSettings(
+        enabled = enabled,
+        adjustments = mapOf("darker" to -100),
+    ).normalized()
 }
 
-/** Zero adjustments preserve every stock value, including light/dark variants and clear payloads. */
-internal fun tuneSoftGlass(original: FloatArray, settings: SoftGlassSettings): FloatArray {
-    if (!settings.enabled || original.size < 42 || original.all { it == 0f } || original.any { !it.isFinite() }) return original
+internal fun hasSoftGlassRecipe(params: FloatArray): Boolean =
+    params.size >= 42 && params.all { it.isFinite() } && params.any { it != 0f }
+
+internal fun tuneSoftGlass(
+    original: FloatArray,
+    settings: SoftGlassSettings,
+    standaloneBackground: Boolean = false,
+    contextBrightness: Float = 0f,
+): FloatArray {
+    if (!settings.enabled || !hasSoftGlassRecipe(original)) return original
     return original.copyOf().apply {
         softGlassParameters.forEach { definition ->
-            val delta = (settings.adjustments[definition.key] ?: 0).coerceIn(-100, 200)
+            val selected = (settings.adjustments[definition.key] ?: 0).coerceIn(definition.adjustmentRange)
+            val delta = if (definition.key == "edge_feather") -selected else selected
             if (delta != 0) {
                 val base = original[definition.slot]
                 // HyperLight scales nonzero defaults. Limit the zero fallback to hundredths,
@@ -62,6 +74,39 @@ internal fun tuneSoftGlass(original: FloatArray, settings: SoftGlassSettings): F
                 this[definition.slot] = adjusted.coerceIn(definition.bounds)
             }
         }
+        if (contextBrightness != 0f) {
+            // HyperLight raises the unified notification/volume backdrop brightness after
+            // applying the global slots. Those surfaces otherwise retain their darker native
+            // token even though the same global recipe is selected.
+            this[34] = (this[34] + contextBrightness).coerceIn(-1f, 1f)
+        }
+    }
+}
+
+/** Collapse the previous two controls into one inverted reflection adjustment. */
+internal fun migrateSoftGlassFeather(reflection: Int, oldFeather: Int = 0): Int {
+    val reflectScale = 1f + reflection.coerceIn(-100, 200) / 100f
+    val feather = oldFeather.coerceIn(-100, 200)
+    val featherScale = if (feather > 0) 1f / (1f + feather / 100f) else 1f - feather / 100f
+    return ((1f - reflectScale * featherScale) * 100f).roundToInt().coerceIn(-200, 100)
+}
+
+/** Reuse unchanged volume recipes while preserving in-place animation input changes. */
+internal class SoftGlassRecipeCache {
+    var baseline: FloatArray? = null; private set
+    private var output: FloatArray? = null
+    private var settings: SoftGlassSettings? = null
+    private var standaloneBackground: Boolean = false
+    private var contextBrightness: Float = 0f
+
+    fun tune(input: FloatArray, current: SoftGlassSettings, standaloneBackground: Boolean = false, contextBrightness: Float = 0f): FloatArray {
+        val source = if (input === output) baseline ?: input else input
+        if (settings === current && this.standaloneBackground == standaloneBackground && this.contextBrightness == contextBrightness && baseline?.contentEquals(source) == true) return output!!
+        baseline = source.copyOf()
+        settings = current
+        this.standaloneBackground = standaloneBackground
+        this.contextBrightness = contextBrightness
+        return tuneSoftGlass(baseline!!, current, standaloneBackground, contextBrightness).also { output = it }
     }
 }
 
@@ -76,7 +121,6 @@ internal fun softGlassScale(scale: Float, percent: Int): Float =
 /** Scale the platform color's alpha, keeping RGB, mode, and animation-zero intact. */
 internal fun softGlassColorAlpha(color: Int, percent: Int): Int {
     if (percent == 100) return color
-    // Two independent 0..200% controls can compound to 400% on the dim layer.
-    val alpha = ((color ushr 24) * percent.coerceIn(0, 400) / 100f).roundToInt().coerceIn(0, 255)
+    val alpha = ((color ushr 24) * percent.coerceIn(0, 200) / 100f).roundToInt().coerceIn(0, 255)
     return (color and 0x00ffffff) or (alpha shl 24)
 }

@@ -842,6 +842,7 @@ private fun Root(
         service?.let {
             hooks.syncRemote(it)
             SoftGlassSettingsStore(context).syncRemote(it)
+            VolumePanelGlassSettingsStore(context).syncRemote(it)
             SuperXiaoAiInputGlassSettingsStore(context).syncRemote(it)
             navigation.syncRemote(it)
             lockscreenCapsules.syncRemote(it)
@@ -5825,7 +5826,7 @@ private fun SoftGlassParametersPage(openPage: (PageId) -> Unit, back: () -> Unit
                     ArrowPreference(title = tr("softGlassPresets", "柔光玻璃预设"), onClick = { openPage(PageId.SOFT_GLASS_PRESETS) })
                     ArrowPreference(
                         title = tr("softGlassReset", "恢复柔光玻璃默认参数"),
-                        onClick = { updateGlass { SoftGlassSettings(enabled = it.enabled) } },
+                        onClick = { updateGlass { it.resetParameters() } },
                     )
                 }
             }
@@ -5836,12 +5837,12 @@ private fun SoftGlassParametersPage(openPage: (PageId) -> Unit, back: () -> Unit
                             updateGlass { it.copy(refractionBlur = n) }
                         }
                         Text(
-                            tr("softGlassOpticsHint", "0% 保持系统原值，负值减弱、正值增强；原值为零时按小幅偏移调整。点击数值可精确输入或恢复默认。"),
+                            tr("softGlassOpticsHint", "0% 保持系统原值。边缘羽化越高，反射越弱；100% 关闭边缘反射。其余参数负值减弱、正值增强；原值为零时按小幅偏移调整。点击数值可精确输入或恢复默认。"),
                             modifier = Modifier.padding(16.dp), style = MiuixTheme.textStyles.body2,
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
                         softGlassParameters.forEach { definition ->
-                            ParameterIntSlide(tr(definition.title, definition.title), value.adjustments[definition.key] ?: 0, -100..200, "%", 0) { n ->
+                            ParameterIntSlide(tr(definition.title, definition.title), value.adjustments[definition.key] ?: 0, definition.adjustmentRange, "%", if (definition.key == "darker") -100 else 0) { n ->
                                 updateGlass { it.copy(adjustments = it.adjustments + (definition.key to n)) }
                             }
                         }
@@ -5851,14 +5852,13 @@ private fun SoftGlassParametersPage(openPage: (PageId) -> Unit, back: () -> Unit
                 item {
                     Group(tr("背景调整", "背景调整")) {
                         Text(
-                            tr("softGlassBackgroundHint", "统一调整通知中心、控制中心及柔光玻璃采样背景。100% 保持系统值，0% 关闭对应效果；不透明度与压暗保留系统展开动画，系统原值为零时不会额外着色。"),
+                            tr("softGlassBackgroundHint", "统一调整通知中心、控制中心及柔光玻璃采样背景。100% 保持系统值，0% 关闭对应效果；不透明度保留系统展开动画，系统原值为零时不会额外着色。"),
                             modifier = Modifier.padding(16.dp), style = MiuixTheme.textStyles.body2,
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
                         ParameterIntSlide(tr("softGlassBackgroundBlur", "背景模糊度"), value.backgroundBlur, 0..200, "%", 100) { n -> updateGlass { it.copy(backgroundBlur = n) } }
                         ParameterIntSlide(tr("softGlassBackgroundScale", "背景缩放程度"), value.backgroundScale, 0..200, "%", 100) { n -> updateGlass { it.copy(backgroundScale = n) } }
                         ParameterIntSlide(tr("背景不透明度", "背景不透明度"), value.backgroundOpacity, 0..200, "%", 100) { n -> updateGlass { it.copy(backgroundOpacity = n) } }
-                        ParameterIntSlide(tr("背景压暗", "背景压暗"), value.backgroundDarkening, 0..200, "%", 100) { n -> updateGlass { it.copy(backgroundDarkening = n) } }
                     }
                 }
             }
@@ -5873,8 +5873,6 @@ private fun SoftGlassPresetsPage(back: () -> Unit) {
     val changed = LocalNotificationSettingsChanged.current
     val store = remember(context) { SoftGlassSettingsStore(context) }
     var presets by remember { mutableStateOf(store.presets) }
-    var scopeIndex by rememberSaveable { mutableIntStateOf(0) }
-    val scope = SoftGlassPresetScope.entries[scopeIndex]
     var showSave by remember { mutableStateOf(false) }
     var showImport by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<SoftGlassPreset?>(null) }
@@ -5972,9 +5970,8 @@ private fun SoftGlassPresetsPage(back: () -> Unit) {
     AppPage(tr("softGlassPresets", "柔光玻璃预设"), back) { padding, scroll ->
         AppList(padding, scroll, 28) {
             item {
-                Group(tr("softGlassPresetScope", "预设范围")) {
-                    Text(tr("softGlassPresetHint", "选择保存、导出及应用内置预设的范围。导入和自定义预设保留各自范围，不会更改总开关。长按预设可导出或删除。"), modifier = Modifier.padding(16.dp), style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                    GlassSegmentedTabs(SoftGlassPresetScope.entries.map { tr(it.title, it.title) }, scopeIndex, { scopeIndex = it }, Modifier.padding(horizontal = 12.dp))
+                Group(tr("softGlassPresets", "柔光玻璃预设")) {
+                    Text(tr("softGlassPresetHint", "所有预设同时应用玻璃与背景参数，不会更改总开关。旧版单独预设缺少的部分恢复系统默认值。长按预设可导出或删除。"), modifier = Modifier.padding(16.dp), style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                     ArrowPreference(title = tr("保存当前预设", "保存当前预设"), onClick = { showSave = true })
                     ArrowPreference(title = tr("导入预设", "导入预设"), onClick = { showImport = true })
                 }
@@ -5982,8 +5979,7 @@ private fun SoftGlassPresetsPage(back: () -> Unit) {
             item {
                 Group(tr("内置预设", "内置预设")) {
                     builtInSoftGlassPresets().forEach { preset ->
-                        val scoped = preset.copy(scope = scope)
-                        PresetRow(display(scoped), onUse = { applyPreset(scoped) }, onLongPress = { selected = scoped })
+                        PresetRow(display(preset), onUse = { applyPreset(preset) }, onLongPress = { selected = preset })
                     }
                 }
             }
@@ -5991,7 +5987,7 @@ private fun SoftGlassPresetsPage(back: () -> Unit) {
                 Group(tr("用户预设", "用户预设")) {
                     if (presets.isEmpty()) Text(tr("暂无保存的用户预设", "暂无保存的用户预设"), modifier = Modifier.padding(16.dp), style = MiuixTheme.textStyles.body2)
                     presets.forEach { preset ->
-                        PresetRow(display(preset).copy(name = preset.name + " · " + tr(preset.scope.title, preset.scope.title)), onUse = { applyPreset(preset) }, onLongPress = { selected = preset })
+                        PresetRow(display(preset), onUse = { applyPreset(preset) }, onLongPress = { selected = preset })
                     }
                 }
             }
@@ -5999,7 +5995,7 @@ private fun SoftGlassPresetsPage(back: () -> Unit) {
     }
     SavePresetDialog(showSave, { showSave = false }) { name ->
         store.reload()
-        val preset = SoftGlassPreset(name.trim(), store.settings, scope)
+        val preset = SoftGlassPreset(name.trim(), store.settings)
         store.savePreset(service, preset)
         presets = store.presets
         showSave = false
@@ -6032,6 +6028,15 @@ private fun VolumePanelPreferences(
     s: HookSettings,
     update: ((HookSettings) -> HookSettings) -> Unit,
 ) {
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    val changed = LocalNotificationSettingsChanged.current
+    val store = remember(context) { VolumePanelGlassSettingsStore(context) }
+    var useGlobal by remember { mutableStateOf(store.useGlobal) }
+    LaunchedEffect(service) {
+        service?.let(store::syncRemote)
+        useGlobal = store.useGlobal
+    }
     SwitchPreference(
         title = tr("\u542f\u7528\u6750\u8d28\u8c03\u6574", "\u542f\u7528\u6750\u8d28\u8c03\u6574"),
         checked = s.volumePanelMaterialEnabled,
@@ -6045,17 +6050,34 @@ private fun VolumePanelPreferences(
         exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
     ) {
         Column {
-            ParameterIntSlide(tr("\u80cc\u666f\u4e0d\u900f\u660e\u5ea6", "\u80cc\u666f\u4e0d\u900f\u660e\u5ea6"), s.volumePanelBackgroundOpacity, 0..100, "%", defaultValue = 100) { value ->
-                update { it.copy(volumePanelBackgroundOpacity = value) }
-            }
-            ParameterIntSlide(tr("\u524d\u666f\u4e0d\u900f\u660e\u5ea6", "\u524d\u666f\u4e0d\u900f\u660e\u5ea6"), s.volumePanelBlurRadius, 0..120, " px", defaultValue = 24) { value ->
-                update { it.copy(volumePanelBlurRadius = value) }
+            SwitchPreference(
+                title = tr("使用全局柔光玻璃参数", "使用全局柔光玻璃参数"),
+                checked = useGlobal,
+                onCheckedChange = { enabled ->
+                    useGlobal = enabled
+                    store.update(service, enabled)
+                    changed()
+                },
+            )
+            AnimatedVisibility(
+                visible = !useGlobal,
+                enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+            ) {
+                Column {
+                    ParameterIntSlide(tr("背景不透明度", "背景不透明度"), s.volumePanelBackgroundOpacity, 0..100, "%", defaultValue = 100) { value ->
+                        update { it.copy(volumePanelBackgroundOpacity = value) }
+                    }
+                    ParameterIntSlide(tr("背景模糊度", "背景模糊度"), s.volumePanelBlurRadius, 0..120, " px", defaultValue = 24) { value ->
+                        update { it.copy(volumePanelBlurRadius = value) }
+                    }
+                    ParameterIntSlide(tr("玻璃模糊", "玻璃模糊"), s.volumePanelGlassStrength, 0..100, "%", defaultValue = 50) { value ->
+                        update { it.copy(volumePanelGlassStrength = value) }
+                    }
+                }
             }
             FloatSlide(tr("\u5706\u89d2", "\u5706\u89d2"), s.volumePanelCornerRadius, 0f..60f, defaultValue = 24f) { value ->
                 update { it.copy(volumePanelCornerRadius = value) }
-            }
-            ParameterIntSlide(tr("\u80cc\u666f\u6a21\u7cca\u5ea6", "\u80cc\u666f\u6a21\u7cca\u5ea6"), s.volumePanelGlassStrength, 0..100, "%", defaultValue = 50) { value ->
-                update { it.copy(volumePanelGlassStrength = value) }
             }
         }
     }
