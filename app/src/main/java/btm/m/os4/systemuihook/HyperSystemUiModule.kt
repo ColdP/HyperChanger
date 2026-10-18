@@ -6267,7 +6267,10 @@ class HyperSystemUiModule : XposedModule() {
     private fun isDynamicIslandView(view: View): Boolean =
         generateSequence<View>(view) { it.parent as? View }.any { it.javaClass.name.contains("dynamicisland", true) }
 
+    private var softGlassRuntime: SoftGlassRuntimeSettings? = null
+
     private fun installShadeMaterialHooks(preferences: SharedPreferences, classLoader: ClassLoader) {
+        softGlassRuntime = SoftGlassRuntimeSettings(preferences)
         runCatching {
             installFocusNotificationMaterialEnforcementHooks(preferences, classLoader)
             installFocusNotificationBackgroundHook(preferences, classLoader)
@@ -6293,13 +6296,13 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     val tuning = elementMaterialOverride(preferences, view, controlCenter, notification)
                     if (original != null && original.size >= MIN_GLASS_PARAMS_SIZE &&
-                        (normalNotificationMaterial != null || tuning?.enabled == true)
+                        (normalNotificationMaterial != null || (tuning?.enabled == true && original.any { it != 0f }))
                     ) {
                         logControlCenterMaterialHit(view, "glass-material")
                         val material = normalNotificationMaterial ?: original
                         chain.proceedWith(
                             chain.thisObject,
-                            arrayOf(if (tuning?.enabled == true) applyMaterialOverride(material, tuning) else material),
+                            arrayOf(if (tuning?.enabled == true) tuneSoftGlass(material, tuning) else material),
                         )
                     } else {
                         chain.proceed()
@@ -6322,147 +6325,14 @@ class HyperSystemUiModule : XposedModule() {
                         isControlCenterCall(),
                         isNotificationCenterCall(),
                     )
-                    if (tuning?.enabled == true && tuning.glassRadius > 0) {
-                        logControlCenterMaterialHit(view, "glass-radius")
-                        chain.proceedWith(
-                            chain.thisObject,
-                            arrayOf(tuning.glassRadius, tuning.glassRadius),
-                        )
-                    } else {
-                        chain.proceed()
-                    }
+                    if (tuning?.enabled == true) {
+                        val percent = if (isShadeBackgroundView(view) || isShadeBlurProviderCall()) tuning.backgroundBlur else tuning.elementBlur
+                        chain.proceedWith(chain.thisObject, arrayOf(
+                            softGlassBlur(chain.getArg(0) as Int, percent),
+                            softGlassBlur(chain.getArg(1) as Int, percent),
+                        ))
+                    } else chain.proceed()
                 }
-
-            // Exact NotificationRowGlassEffect path from hyperos4-glass-blur-main.
-            hook(View::class.java.getDeclaredMethod("onAttachedToWindow"))
-                .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("notification-row-glass-on-attach")
-                .intercept { chain ->
-                    val result = chain.proceed()
-                    (chain.thisObject as? View)?.let { view ->
-                        requestNotificationRowGlass(view, preferences, "attach")
-                    }
-                    result
-                }
-
-            hook(View::class.java.getMethod("setBackground", Drawable::class.java))
-                .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("notification-row-glass-on-background")
-                .intercept { chain ->
-                    val result = chain.proceed()
-                    (chain.thisObject as? View)?.let { view ->
-                        requestNotificationRowGlass(view, preferences, "background")
-                    }
-                    result
-                }
-
-            // Keyguard keeps notification rows attached between screen-off cycles. Reapply the
-            // platform's row effect when a reused background becomes visible again.
-            hook(View::class.java.getMethod("setVisibility", Int::class.javaPrimitiveType))
-                .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("notification-row-glass-on-visibility")
-                .intercept { chain ->
-                    val result = chain.proceed()
-                    val view = chain.thisObject as? View
-                    if (chain.getArg(0) == View.VISIBLE && view != null) {
-                        requestNotificationRowGlass(view, preferences, "visible")
-                    }
-                    result
-                }
-
-            hook(View::class.java.getMethod("onVisibilityAggregated", Boolean::class.javaPrimitiveType))
-                .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("notification-row-glass-on-visibility-aggregated")
-                .intercept { chain ->
-                    val result = chain.proceed()
-                    val view = chain.thisObject as? View
-                    if (chain.getArg(0) == true && view != null) {
-                        requestNotificationRowGlass(view, preferences, "visible-aggregated")
-                    }
-                    result
-                }
-
-            // NotificationRowBlurEffect may reset the material type to BLUR after the
-            // system glass recipe has been applied; retain the GLASS material for rows.
-            val setMaterialType = View::class.java.getMethod(
-                "setMiViewMaterialType",
-                Int::class.javaPrimitiveType,
-            )
-            hook(setMaterialType)
-                .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("notification-row-glass-material-type")
-                .intercept { chain ->
-                    val view = chain.thisObject as? View
-                    if (view != null && notificationMaterialTarget(view, preferences) &&
-                        (!isMediaNotificationView(view) || (chain.getArg(0) as Int) == 1) &&
-                        notificationMaterialEnabled(preferences)
-                    ) {
-                        chain.proceedWith(chain.thisObject, arrayOf(1))
-                    } else {
-                        chain.proceed()
-                    }
-                }
-
-            // Glass outlines are cleared by the blur recipe on some OS 4 builds.
-            runCatching {
-                val setBlurEnhanceFlag = View::class.java.getMethod(
-                    "setMiBackgroundBlurEnhanceFlag",
-                    Int::class.javaPrimitiveType,
-                    Int::class.javaPrimitiveType,
-                )
-                hook(setBlurEnhanceFlag)
-                    .setExceptionMode(ExceptionMode.PROTECTIVE)
-                    .setId("notification-row-glass-outline")
-                    .intercept { chain ->
-                        val view = chain.thisObject as? View
-                        if (view != null && notificationMaterialTarget(view, preferences) &&
-                            notificationMaterialEnabled(preferences)
-                        ) {
-                            val flags = chain.getArg(0) as Int
-                            val mask = chain.getArg(1) as Int
-                            chain.proceedWith(chain.thisObject, arrayOf(flags or 8192, mask or 8192))
-                        } else {
-                            chain.proceed()
-                        }
-                    }
-            }.onFailure { error ->
-                log(Log.INFO, TAG, "Notification glass outline API is unavailable", error)
-            }
-
-            // The final notification background is sometimes stretched to the
-            // bottom of the shade.  This is the reference module's SDF-height
-            // guard, keeping the Glass layer within the visible row content.
-            runCatching {
-                val setSdfMaxSize = View::class.java.getMethod(
-                    "setMiGlassSdfMaxSize",
-                    Float::class.javaPrimitiveType,
-                    Float::class.javaPrimitiveType,
-                )
-                hook(setSdfMaxSize)
-                    .setExceptionMode(ExceptionMode.PROTECTIVE)
-                    .setId("notification-row-glass-sdf-size")
-                    .intercept { chain ->
-                        val view = chain.thisObject as? View
-                        if (view != null && notificationMaterialTarget(view, preferences) &&
-                            notificationMaterialEnabled(preferences)
-                        ) {
-                            val visibleHeight = notificationVisibleHeight(view)
-                            val wantedHeight = chain.getArg(1) as Float
-                            if (visibleHeight > 0 && wantedHeight > visibleHeight) {
-                                chain.proceedWith(
-                                    chain.thisObject,
-                                    arrayOf(chain.getArg(0), visibleHeight.toFloat()),
-                                )
-                            } else {
-                                chain.proceed()
-                            }
-                        } else {
-                            chain.proceed()
-                        }
-                    }
-            }.onFailure { error ->
-                log(Log.INFO, TAG, "Notification glass SDF API is unavailable", error)
-            }
 
             val setBackgroundBlur = View::class.java.getMethod(
                 "setMiBackgroundBlurRadius",
@@ -6473,11 +6343,11 @@ class HyperSystemUiModule : XposedModule() {
                 .setId("shade-panel-background-radius")
                 .intercept { chain ->
                     val view = chain.thisObject as? View
-                    val tuning = backgroundMaterialOverride(preferences)
-                    if (tuning?.enabled == true && isShadePanelBackgroundCall()) {
+                    val tuning = softGlassTargetSettings(preferences, view)
+                    if (tuning?.enabled == true) {
                         chain.proceedWith(
                             chain.thisObject,
-                            arrayOf((chain.getArg(0) as Int) * tuning.blurPercent / 100),
+                            arrayOf(softGlassBlur(chain.getArg(0) as Int, if (isShadeBackgroundView(view) || isShadeBlurProviderCall()) tuning.backgroundBlur else tuning.elementBlur)),
                         )
                     } else {
                         chain.proceed()
@@ -6492,11 +6362,11 @@ class HyperSystemUiModule : XposedModule() {
                 .setId("shade-panel-background-scale")
                 .intercept { chain ->
                     val view = chain.thisObject as? View
-                    val tuning = backgroundMaterialOverride(preferences)
-                    if (tuning?.enabled == true && isShadePanelBackgroundCall(view)) {
+                    val tuning = softGlassTargetSettings(preferences, view)
+                    if (tuning?.enabled == true) {
                         chain.proceedWith(
                             chain.thisObject,
-                            arrayOf((chain.getArg(0) as Float) * tuning.scalePercent / 100f),
+                            arrayOf(softGlassScale(chain.getArg(0) as Float, if (isShadeBackgroundView(view) || isShadeBlurProviderCall()) tuning.backgroundScale else tuning.elementScale)),
                         )
                     } else chain.proceed()
                 }
@@ -6506,7 +6376,6 @@ class HyperSystemUiModule : XposedModule() {
                 .setId("shade-panel-background-tint")
                 .intercept { chain ->
                     val view = chain.thisObject as? View
-                    val tuning = backgroundMaterialOverride(preferences)
                     val original = chain.getArg(0) as? ArrayList<*>
                     val normalBlend = if (original != null) {
                         normalNotificationBlendPoints(view, preferences)
@@ -6515,13 +6384,6 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     if (normalBlend != null) {
                         chain.proceedWith(chain.thisObject, arrayOf(normalBlend))
-                    } else if (tuning?.enabled == true && tuning.tintEnabled && tuning.tintStrength > 0 &&
-                        original != null && isShadePanelBackgroundCall(view)
-                    ) {
-                        chain.proceedWith(
-                            chain.thisObject,
-                            arrayOf(applyBackgroundTint(original, tuning)),
-                        )
                     } else chain.proceed()
                 }
             log(Log.INFO, TAG, "Installed configurable notification and control-center material hooks")
@@ -9292,52 +9154,14 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
-    private fun requestNotificationRowGlass(
-        view: View,
-        preferences: SharedPreferences,
-        source: String,
-    ) {
-        if (!isNotificationRowBackground(view) ||
-            isMediaNotificationView(view) ||
-            !notificationMaterialEnabled(preferences) ||
-            notificationGlassApplying.get() == true
-        ) {
-            return
-        }
-        val shouldApply = synchronized(notificationGlassAppliedViews) {
-            notificationGlassAppliedViews.add(view)
-        }
-        if (!shouldApply) return
-        val applied = applySystemNotificationRowGlass(view, source)
-        if (!applied) {
-            synchronized(notificationGlassAppliedViews) { notificationGlassAppliedViews.remove(view) }
-            // Notification backgrounds can be attached before their parent row has finished
-            // binding. Retry only when the first attempt could not resolve the owning row.
-            view.post {
-                if (view.isAttachedToWindow && notificationMaterialEnabled(preferences)) {
-                    requestNotificationRowGlass(view, preferences, "$source-post")
-                }
-            }
-        }
-    }
-
     private fun shouldUseNormalNotificationMaterial(
         view: View?,
         preferences: SharedPreferences,
     ): Boolean {
-        if (view == null || !preferences.getBoolean(KEY_UNIFY_NOTIFICATION_MATERIAL, false)) return false
+        if (view == null || !preferences.getBoolean(KEY_UNIFY_NOTIFICATION_MATERIAL, false) ||
+            stackContainsClass("HeadsUpNotification")) return false
         return isMediaNotificationView(view) ||
             (isNotificationRowBackground(view) && notificationTypeFor(view) != NotificationMaterialType.NORMAL)
-    }
-
-    private fun notificationMaterialTarget(
-        view: View?,
-        preferences: SharedPreferences,
-    ): Boolean {
-        if (view == null) return false
-        if (isNotificationRowBackground(view)) return true
-        return isMediaNotificationView(view) &&
-            preferences.getBoolean(KEY_UNIFY_NOTIFICATION_MATERIAL, false)
     }
 
     private fun normalNotificationGlassParams(view: View): FloatArray? {
@@ -9677,35 +9501,6 @@ class HyperSystemUiModule : XposedModule() {
         log(Log.INFO, TAG, "Installed notification restriction-removal hooks")
     }
 
-    private fun applySystemNotificationRowGlass(background: View, source: String): Boolean {
-        if (!isNotificationRowBackground(background) || notificationGlassApplying.get() == true) return false
-        notificationGlassApplying.set(true)
-        try {
-            val row = generateSequence(background.parent) { it.parent }
-                .filterIsInstance<View>()
-                .firstOrNull { it.javaClass.name.contains("ExpandableNotificationRow") }
-                ?: return false
-            val effectClass = row.javaClass.classLoader?.loadClass(NOTIFICATION_ROW_GLASS_EFFECT_CLASS)
-                ?: return false
-            val instance = effectClass.fields.firstOrNull { it.name == "INSTANCE" }?.get(null)
-                ?: effectClass.declaredFields.firstOrNull { it.name == "INSTANCE" }
-                    ?.apply { isAccessible = true }
-                    ?.get(null)
-                ?: return false
-            val apply = effectClass.methods.firstOrNull {
-                it.name == "apply" && it.parameterCount == 2
-            } ?: return false
-            apply.invoke(instance, row, background.context)
-            log(Log.DEBUG, TAG, "Applied system notification glass through $source")
-            return true
-        } catch (error: Throwable) {
-            log(Log.ERROR, TAG, "Could not apply system notification glass", error)
-            return false
-        } finally {
-            notificationGlassApplying.remove()
-        }
-    }
-
     private fun hasCustomizedNotificationTuning(view: View, preferences: SharedPreferences): Boolean =
         notificationTuningFor(view, preferences)?.let { it != GlassTuning() } == true
 
@@ -9731,16 +9526,6 @@ class HyperSystemUiModule : XposedModule() {
             .filterIsInstance<View>()
             .any(::matches)
     }
-
-    private fun notificationVisibleHeight(view: View): Int = runCatching {
-        val actualHeight = (view.javaClass.methods.firstOrNull {
-            it.name == "getActualHeight" && it.parameterCount == 0
-        }?.invoke(view) as? Number)?.toInt() ?: view.height
-        val injector = readInstanceField(view, "mNotificationBackgroundViewInjector") ?: return@runCatching actualHeight
-        val clipBottom = (readInstanceField(injector, "clipBottomAmount") as? Number)?.toInt() ?: 0
-        val extClipBottom = (readInstanceField(injector, "extClipBottomAmount") as? Number)?.toInt() ?: 0
-        (actualHeight - maxOf(clipBottom, extClipBottom)).coerceAtLeast(0)
-    }.getOrDefault(view.height)
 
     private fun hasAncestorClass(view: View, classNamePart: String): Boolean =
         generateSequence(view.parent) { it.parent }
@@ -9849,62 +9634,12 @@ class HyperSystemUiModule : XposedModule() {
         view: View?,
         controlCenter: Boolean,
         notification: Boolean,
-    ): MaterialOverride? = when {
-        // Media controls have their own progress/background renderer. Applying the generic
-        // notification recipe to those child views can make the seek bar disappear while the
-        // asynchronous glass layer is rebuilding.
-        view != null && isMediaNotificationView(view) &&
-            !preferences.getBoolean(KEY_UNIFY_NOTIFICATION_MATERIAL, false) -> null
-        view != null && isNotificationRowBackground(view) ->
-            preferences.getMaterialOverride(KEY_NOTIFICATION_ELEMENTS_MATERIAL)
-        controlCenter -> preferences.getMaterialOverride(KEY_CONTROL_CENTER_ELEMENTS_MATERIAL)
-        notification -> preferences.getMaterialOverride(KEY_NOTIFICATION_ELEMENTS_MATERIAL)
-        else -> null
-    }
+    ): SoftGlassSettings? = if (view != null && (
+        isNotificationRowBackground(view) || isShadeBackgroundView(view) || controlCenter || notification
+    )) softGlassRuntime?.settings else null
 
-    private fun backgroundMaterialOverride(preferences: SharedPreferences): MaterialOverride? = when {
-        isControlCenterCall() ->
-            preferences.getMaterialOverride(KEY_CONTROL_CENTER_BACKGROUND_MATERIAL)
-        isNotificationCenterCall() || isShadeBlurProviderCall() ->
-            preferences.getMaterialOverride(KEY_NOTIFICATION_CENTER_BACKGROUND_MATERIAL)
-        else -> null
-    }
-
-    private fun notificationMaterialEnabled(preferences: SharedPreferences): Boolean =
-        preferences.getMaterialOverride(KEY_NOTIFICATION_ELEMENTS_MATERIAL).enabled
-
-    private fun applyMaterialOverride(original: FloatArray, tuning: MaterialOverride): FloatArray = original.clone().apply {
-        this[6] += tuning.brightness / 100f
-        this[7] = (this[7] + tuning.darker / 100f).coerceAtLeast(0f)
-        this[32] += tuning.refraction / 100f
-        this[35] = (this[35] + tuning.burn / 100f).coerceAtLeast(0f)
-        this[5] += tuning.saturation / 100f
-        this[14] = (this[14] + tuning.alpha / 100f).coerceAtLeast(0f)
-        this[21] += tuning.edgeThickness / 100f
-        this[24] += tuning.reflection / 100f
-        this[28] += tuning.directionalLight / 100f
-        this[33] += tuning.backgroundSaturation / 100f
-        this[34] += tuning.backgroundBrightness / 100f
-        if (tuning.tintEnabled && tuning.tintStrength > 0) {
-            val strength = tuning.tintStrength / 100f
-            this[11] += Color.red(tuning.tintColor) / 255f * strength
-            this[12] += Color.green(tuning.tintColor) / 255f * strength
-            this[13] += Color.blue(tuning.tintColor) / 255f * strength
-        }
-    }
-
-    private fun applyBackgroundTint(original: ArrayList<*>, tuning: MaterialOverride): ArrayList<Point> =
-        ArrayList<Point>(original.size).also { tuned ->
-            original.filterIsInstance<Point>().forEach { point ->
-                val color = Color.argb(
-                    (tuning.tintStrength * 255 / 100).coerceIn(0, 255),
-                    Color.red(tuning.tintColor),
-                    Color.green(tuning.tintColor),
-                    Color.blue(tuning.tintColor),
-                )
-                tuned += Point(color, point.y)
-            }
-        }
+    private fun softGlassTargetSettings(preferences: SharedPreferences, view: View?): SoftGlassSettings? =
+        elementMaterialOverride(preferences, view, isControlCenterCall(), isNotificationCenterCall())
 
     private fun applyBlendColorTuning(original: ArrayList<*>, tuning: GlassTuning): ArrayList<Point> =
         ArrayList<Point>(original.size).also { tuned ->
@@ -14072,7 +13807,8 @@ class HyperSystemUiModule : XposedModule() {
                         .setId("heads-up-soft-glass:${effectClass.simpleName}:$index")
                         .intercept { chain ->
                             val result = chain.proceed()
-                            if (preferences.getBoolean(KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS, false)) {
+                            if (preferences.getBoolean(KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS, false) &&
+                                !effectClass.simpleName.contains("Glass")) {
                                 val row = chain.getArg(0) as? View
                                 val context = chain.getArg(1) as? Context
                                 if (row != null && context != null) {
@@ -14315,87 +14051,6 @@ class HyperSystemUiModule : XposedModule() {
             type = type.superclass
         }
         return null
-    }
-
-    /**
-     * Some HyperOS builds override the glass setters on their concrete Control Center views.
-     * A hook on android.view.View then misses the override dispatch, so install the same
-     * material policy on declared overrides as classes are resolved by the plugin loader.
-     */
-    private fun installLoadedShadeMaterialHook(targetClass: Class<*>, preferences: SharedPreferences) {
-        val name = targetClass.name
-        if (!name.contains("controlcenter", ignoreCase = true) &&
-            !name.contains("notification", ignoreCase = true)
-        ) return
-        if (!shadeMaterialHookedClasses.add(targetClass)) return
-        targetClass.declaredMethods
-            .filter { method ->
-                (method.name == "setMiGlass" && method.parameterTypes.contentEquals(arrayOf(FloatArray::class.java))) ||
-                    (method.name == "setMiGlassBlurRadius" && method.parameterCount == 2 &&
-                        method.parameterTypes[0] == Int::class.javaPrimitiveType &&
-                        method.parameterTypes[1] == Int::class.javaPrimitiveType)
-            }
-            .forEach { method ->
-                if (method.name == "setMiGlass") {
-                    hookDeoptimized(method)
-                        .setExceptionMode(ExceptionMode.PROTECTIVE)
-                        .setId("shade-override-glass:${name}")
-                        .intercept { chain ->
-                            val view = chain.thisObject as? View
-                            val tuning = elementMaterialOverride(
-                                preferences,
-                                view,
-                                isControlCenterCall(),
-                                isNotificationCenterCall(),
-                            )
-                            val original = chain.getArg(0) as? FloatArray
-                            val normalNotificationMaterial = if (
-                                original != null &&
-                                original.size >= MIN_GLASS_PARAMS_SIZE &&
-                                original.any { it != 0f } &&
-                                shouldUseNormalNotificationMaterial(view, preferences)
-                            ) {
-                                view?.let(::normalNotificationGlassParams)
-                            } else {
-                                null
-                            }
-                            if (original != null && original.size >= MIN_GLASS_PARAMS_SIZE &&
-                                (normalNotificationMaterial != null || tuning?.enabled == true)
-                            ) {
-                                logControlCenterMaterialHit(view, "glass-material-override")
-                                val material = normalNotificationMaterial ?: original
-                                chain.proceedWith(
-                                    chain.thisObject,
-                                    arrayOf(if (tuning?.enabled == true) applyMaterialOverride(material, tuning) else material),
-                                )
-                            } else {
-                                chain.proceed()
-                            }
-                        }
-                } else {
-                    hookDeoptimized(method)
-                        .setExceptionMode(ExceptionMode.PROTECTIVE)
-                        .setId("shade-override-glass-radius:${name}")
-                        .intercept { chain ->
-                            val view = chain.thisObject as? View
-                            val tuning = elementMaterialOverride(
-                                preferences,
-                                view,
-                                isControlCenterCall(),
-                                isNotificationCenterCall(),
-                            )
-                            if (tuning?.enabled == true && tuning.glassRadius > 0) {
-                                logControlCenterMaterialHit(view, "glass-radius-override")
-                                chain.proceedWith(
-                                    chain.thisObject,
-                                    arrayOf(tuning.glassRadius, tuning.glassRadius),
-                                )
-                            } else {
-                                chain.proceed()
-                            }
-                        }
-                }
-            }
     }
 
     private fun installThirdPartyWallpaperDepthHook(
@@ -16200,9 +15855,6 @@ private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_d
             WeakHashMap<View, LockscreenMusicLockscreenController>(),
         )
         private val fodEnrollmentFlowOverrides = WeakHashMap<Any, Any>()
-        private val notificationGlassAppliedViews =
-            Collections.newSetFromMap(WeakHashMap<View, Boolean>())
-        private val notificationGlassApplying = ThreadLocal<Boolean>()
         private val mediaMaterialApplying = ThreadLocal<Boolean>()
         private val normalNotificationGlassParamsCache =
             WeakHashMap<Resources, MutableMap<String, FloatArray>>()
@@ -16218,7 +15870,6 @@ private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_d
         // being torn down. WeakHashMap-backed sets are not safe for that path and can corrupt
         // their table, leaving the main thread stuck in WeakHashMap.put during an ANR.
         private val cornerTargetClasses = Collections.synchronizedSet(mutableSetOf<Class<*>>())
-        private val shadeMaterialHookedClasses = Collections.synchronizedSet(mutableSetOf<Class<*>>())
         private val volumePanelHookedClasses = Collections.synchronizedSet(mutableSetOf<Class<*>>())
         private val volumePanelNativeApiLogged = Collections.synchronizedSet(mutableSetOf<String>())
         private val volumeNativeParameterHookHits = Collections.synchronizedSet(mutableSetOf<String>())

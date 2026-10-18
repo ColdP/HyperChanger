@@ -275,10 +275,7 @@ private fun defaultModulePresetFileName(): String {
 private enum class PageId {
     SHADE,
     SHADE_PRESETS,
-    SHADE_NOTIFICATION_ELEMENTS,
-    SHADE_CONTROL_CENTER_ELEMENTS,
-    SHADE_NOTIFICATION_BACKGROUND,
-    SHADE_CONTROL_CENTER_BACKGROUND,
+    SOFT_GLASS_PARAMETERS,
     GESTURE_HANDLE_STYLE, DESKTOP, DESKTOP_MATERIAL,
     ISLAND, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
@@ -843,6 +840,7 @@ private fun Root(
     LaunchedEffect(service) {
         service?.let {
             hooks.syncRemote(it)
+            SoftGlassSettingsStore(context).syncRemote(it)
             SuperXiaoAiInputGlassSettingsStore(context).syncRemote(it)
             navigation.syncRemote(it)
             lockscreenCapsules.syncRemote(it)
@@ -4691,34 +4689,7 @@ private fun Detail(
         PageId.DESKTOP -> Desktop(dockSettings, updateDock, homeRecentsSettings, updateHomeRecents, homeFolderSettings, updateHomeFolder, homeMaterialSettings, updateHomeMaterial, openPage, back)
         PageId.DESKTOP_MATERIAL -> HomeMaterialPage(homeMaterialSettings, updateHomeMaterial, back)
         PageId.SHADE_PRESETS -> ShadePresets(settings, update, presetActions, back)
-        PageId.SHADE_NOTIFICATION_ELEMENTS -> MaterialOverrideAdvancedPage(
-            tr("通知元素", "通知元素"), settings.notificationElementsMaterial, false,
-            back,
-        ) { update { value ->
-            val next = value.copy(notificationElementsMaterial = it)
-            if (value.shadeSettingsUnified) next.copy(controlCenterElementsMaterial = it) else next
-        } }
-        PageId.SHADE_CONTROL_CENTER_ELEMENTS -> MaterialOverrideAdvancedPage(
-            tr("控制中心元素", "控制中心元素"), settings.controlCenterElementsMaterial, false,
-            back,
-        ) { update { value ->
-            val next = value.copy(controlCenterElementsMaterial = it)
-            if (value.shadeSettingsUnified) next.copy(notificationElementsMaterial = it) else next
-        } }
-        PageId.SHADE_NOTIFICATION_BACKGROUND -> MaterialOverrideAdvancedPage(
-            tr("通知中心背景", "通知中心背景"), settings.notificationCenterBackgroundMaterial, true,
-            back,
-        ) { update { value ->
-            val next = value.copy(notificationCenterBackgroundMaterial = it)
-            if (value.shadeSettingsUnified) next.copy(controlCenterBackgroundMaterial = it) else next
-        } }
-        PageId.SHADE_CONTROL_CENTER_BACKGROUND -> MaterialOverrideAdvancedPage(
-            tr("控制中心背景", "控制中心背景"), settings.controlCenterBackgroundMaterial, true,
-            back,
-        ) { update { value ->
-            val next = value.copy(controlCenterBackgroundMaterial = it)
-            if (value.shadeSettingsUnified) next.copy(notificationCenterBackgroundMaterial = it) else next
-        } }
+        PageId.SOFT_GLASS_PARAMETERS -> SoftGlassParametersPage(back)
         PageId.GESTURE_HANDLE_STYLE -> GestureHandleStylePage(back)
         PageId.ISLAND -> Island(openPage, onRequestNotificationPermission, back)
         PageId.UNLOCK_ISLAND -> UnlockIslandPage(back)
@@ -5531,7 +5502,6 @@ private fun Shade(
     ScopeApplication.AOD,
     ScopeApplication.THEME_MANAGER,
 )) { p, scroll ->
-    var showSavePresetDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val service by HookApplication.service.collectAsStateWithLifecycle()
     val gesturePrefs = remember(context) { context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE) }
@@ -5583,10 +5553,6 @@ private fun Shade(
                 )
             }
         }
-        item { Group(tr("\u9884\u8bbe", "\u9884\u8bbe")) {
-            ArrowPreference(title = tr("\u9884\u8bbe", "\u9884\u8bbe"), onClick = { openPage(PageId.SHADE_PRESETS) })
-            ArrowPreference(title = tr("\u4fdd\u5b58\u5f53\u524d\u9884\u8bbe", "\u4fdd\u5b58\u5f53\u524d\u9884\u8bbe"), onClick = { showSavePresetDialog = true })
-        } }
         item {
             Group(tr("iosNotificationCenter", "iOS 风格通知中心")) {
                 SwitchPreference(
@@ -5746,55 +5712,11 @@ private fun Shade(
             }
         }
         item {
-            Group(tr("\u63a7\u5236\u4e2d\u5fc3\u4e0e\u901a\u77e5\u4e2d\u5fc3\u6750\u8d28\u8c03\u6574", "\u63a7\u5236\u4e2d\u5fc3\u4e0e\u901a\u77e5\u4e2d\u5fc3\u6750\u8d28\u8c03\u6574")) {
-                SwitchPreference(
-                    title = tr("\u63a7\u5236\u4e2d\u5fc3\u548c\u901a\u77e5\u4e2d\u5fc3\u7edf\u4e00\u8bbe\u7f6e", "\u63a7\u5236\u4e2d\u5fc3\u548c\u901a\u77e5\u4e2d\u5fc3\u7edf\u4e00\u8bbe\u7f6e"),
-                    checked = s.shadeSettingsUnified,
-                    onCheckedChange = { enabled ->
-                        update { value ->
-                            if (enabled) {
-                                value.copy(
-                                    shadeSettingsUnified = true,
-                                    controlCenterElementsMaterial = value.notificationElementsMaterial,
-                                    controlCenterBackgroundMaterial = value.notificationCenterBackgroundMaterial,
-                                )
-                            } else {
-                                value.copy(shadeSettingsUnified = false)
-                            }
-                        }
-                    },
+            Group(tr("柔光玻璃参数调整", "柔光玻璃参数调整")) {
+                ArrowPreference(
+                    title = tr("柔光玻璃参数调整", "柔光玻璃参数调整"),
+                    onClick = { openPage(PageId.SOFT_GLASS_PARAMETERS) },
                 )
-                if (s.shadeSettingsUnified) {
-                    MaterialOverrideCard(tr("\u5143\u7d20", "\u5143\u7d20"), s.notificationElementsMaterial, false, { openPage(PageId.SHADE_NOTIFICATION_ELEMENTS) }, wrapCard = false) {
-                        update { value ->
-                            value.copy(
-                                notificationElementsMaterial = it,
-                                controlCenterElementsMaterial = it,
-                            )
-                        }
-                    }
-                    MaterialOverrideCard(tr("\u80cc\u666f", "\u80cc\u666f"), s.notificationCenterBackgroundMaterial, true, { openPage(PageId.SHADE_NOTIFICATION_BACKGROUND) }, wrapCard = false) {
-                        update { value ->
-                            value.copy(
-                                notificationCenterBackgroundMaterial = it,
-                                controlCenterBackgroundMaterial = it,
-                            )
-                        }
-                    }
-                } else {
-                    MaterialOverrideCard(tr("\u901a\u77e5\u4e2d\u5fc3\u5143\u7d20", "\u901a\u77e5\u4e2d\u5fc3\u5143\u7d20"), s.notificationElementsMaterial, false, { openPage(PageId.SHADE_NOTIFICATION_ELEMENTS) }, wrapCard = false) {
-                        update { value -> value.copy(notificationElementsMaterial = it) }
-                    }
-                    MaterialOverrideCard(tr("\u901a\u77e5\u4e2d\u5fc3\u80cc\u666f", "\u901a\u77e5\u4e2d\u5fc3\u80cc\u666f"), s.notificationCenterBackgroundMaterial, true, { openPage(PageId.SHADE_NOTIFICATION_BACKGROUND) }, wrapCard = false) {
-                        update { value -> value.copy(notificationCenterBackgroundMaterial = it) }
-                    }
-                    MaterialOverrideCard(tr("\u63a7\u5236\u4e2d\u5fc3\u5143\u7d20", "\u63a7\u5236\u4e2d\u5fc3\u5143\u7d20"), s.controlCenterElementsMaterial, false, { openPage(PageId.SHADE_CONTROL_CENTER_ELEMENTS) }, wrapCard = false) {
-                        update { value -> value.copy(controlCenterElementsMaterial = it) }
-                    }
-                    MaterialOverrideCard(tr("\u63a7\u5236\u4e2d\u5fc3\u80cc\u666f", "\u63a7\u5236\u4e2d\u5fc3\u80cc\u666f"), s.controlCenterBackgroundMaterial, true, { openPage(PageId.SHADE_CONTROL_CENTER_BACKGROUND) }, wrapCard = false) {
-                        update { value -> value.copy(controlCenterBackgroundMaterial = it) }
-                    }
-                }
                 ArrowPreference(title = tr("\u63a7\u5236\u4e2d\u5fc3\u5706\u89d2\u8be6\u7ec6\u8bbe\u7f6e", "\u63a7\u5236\u4e2d\u5fc3\u5706\u89d2\u8be6\u7ec6\u8bbe\u7f6e"), onClick = { openPage(PageId.CONTROL) })
             }
         }
@@ -5804,64 +5726,86 @@ private fun Shade(
             }
         }
     }
-    SavePresetDialog(
-        show = showSavePresetDialog,
-        onDismiss = { showSavePresetDialog = false },
-        onSave = { name ->
-            presetActions.saveUserPreset(name)
-            showSavePresetDialog = false
-        },
-    )
+
 }
 
 @Composable
-private fun MaterialOverrideCard(
-    title: String,
-    value: MaterialOverride,
-    isBackground: Boolean,
-    openAdvanced: () -> Unit,
-    wrapCard: Boolean = true,
-    onChange: (MaterialOverride) -> Unit,
-) {
-    var expanded by rememberSaveable(title) { mutableStateOf(false) }
-    val content: @Composable () -> Unit = {
-        ArrowPreference(title = title, onClick = { expanded = !expanded })
-        AnimatedVisibility(
-            visible = expanded,
-            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .98f),
-            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .98f),
-        ) {
-            Column {
-        SwitchPreference(
-            title = tr("\u542f\u7528\u6750\u8d28\u8c03\u6574", "\u542f\u7528\u6750\u8d28\u8c03\u6574"),
-            checked = value.enabled,
-            onCheckedChange = { enabled -> onChange(enableMaterialOverride(value, isBackground, enabled)) },
-        )
-        AnimatedVisibility(
-            visible = value.enabled,
-            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
-            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
-        ) {
-            Column {
-                ParameterIntSlide(tr("\u6a21\u7cca\u6bd4\u4f8b", "\u6a21\u7cca\u6bd4\u4f8b"), value.blurPercent.coerceIn(0, if (isBackground) 100 else 200), 0..if (isBackground) 100 else 200, "%", defaultValue = 100) { onChange(value.copy(blurPercent = it)) }
-                if (isBackground) ParameterIntSlide(tr("\u80cc\u666f\u7f29\u653e\u6bd4\u4f8b", "\u80cc\u666f\u7f29\u653e\u6bd4\u4f8b"), value.scalePercent, 0..200, "%", defaultValue = 100) { onChange(value.copy(scalePercent = it)) }
-                if (isBackground) {
-                    ParameterIntSlide(tr("\u80cc\u666f\u4e0d\u900f\u660e\u5ea6", "\u80cc\u666f\u4e0d\u900f\u660e\u5ea6"), (value.alpha + 100).coerceIn(0, 100), 0..100, "%", defaultValue = 100) { onChange(value.copy(alpha = it - 100)) }
-                    ParameterIntSlide(tr("\u6df7\u8272\u5f3a\u5ea6", "\u6df7\u8272\u5f3a\u5ea6"), value.tintStrength, 0..50, " x0.01", defaultValue = 0) { onChange(value.copy(tintEnabled = it > 0, tintStrength = it)) }
-                } else {
-                    ParameterIntSlide(tr("Glass \u6a21\u7cca\u534a\u5f84", "Glass \u6a21\u7cca\u534a\u5f84"), value.glassRadius.coerceIn(0, 40), 0..40, " px", defaultValue = 0) { onChange(value.copy(glassRadius = it)) }
-                    ParameterIntSlide(tr("\u73bb\u7483\u5f3a\u5ea6", "\u73bb\u7483\u5f3a\u5ea6"), (value.refraction / 2 + 50).coerceIn(0, 100), 0..100, "%", defaultValue = 50) { onChange(applyCompactGlassStrength(value, it)) }
-                    ParameterIntSlide(tr("\u4e0d\u900f\u660e\u5ea6", "\u4e0d\u900f\u660e\u5ea6"), value.alpha + 50, 0..100, "%", defaultValue = 50) { onChange(value.copy(alpha = it - 50)) }
-                    ParameterIntSlide(tr("\u8fb9\u7f18\u4e0e\u53cd\u5c04", "\u8fb9\u7f18\u4e0e\u53cd\u5c04"), value.reflection + 50, 0..100, "%", defaultValue = 50) { onChange(applyCompactReflection(value, it)) }
-                    ParameterIntSlide(tr("\u8272\u5f69", "\u8272\u5f69"), value.saturation + 50, 0..100, "%", defaultValue = 50) { onChange(applyCompactColor(value, it)) }
+private fun SoftGlassParametersPage(back: () -> Unit) = AppPage(
+    tr("柔光玻璃参数调整", "柔光玻璃参数调整"), back,
+    restartScopes = setOf(ScopeApplication.SYSTEM_UI),
+) { padding, scroll ->
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    val changed = LocalNotificationSettingsChanged.current
+    val store = remember(context) { SoftGlassSettingsStore(context) }
+    var value by remember { mutableStateOf(store.settings) }
+    var advanced by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(service) {
+        service?.let(store::syncRemote)
+        value = store.settings
+    }
+    val updateGlass: ((SoftGlassSettings) -> SoftGlassSettings) -> Unit = { transform ->
+        store.update(service, transform)
+        value = store.settings
+        changed()
+    }
+    AppList(padding, scroll, 28) {
+        item {
+            Group(tr("柔光玻璃参数调整", "柔光玻璃参数调整")) {
+                SwitchPreference(
+                    title = tr("柔光玻璃参数调整", "柔光玻璃参数调整"),
+                    summary = tr("softGlassScope", "统一调整通知、控制中心与悬浮通知的柔光玻璃，保留系统浅色与深色材质差异。"),
+                    checked = value.enabled,
+                    onCheckedChange = { enabled -> updateGlass { it.copy(enabled = enabled) } },
+                )
+                ArrowPreference(
+                    title = tr("softGlassReset", "恢复柔光玻璃默认参数"),
+                    onClick = { updateGlass { SoftGlassSettings(enabled = it.enabled) } },
+                )
+            }
+        }
+        if (value.enabled) {
+            item {
+                Group(tr("softGlassBlurScale", "模糊与缩放")) {
+                    Text(
+                        tr("softGlassBlurHint", "100% 保持系统效果，0% 关闭对应模糊或缩放；缩放仅影响系统已有的背景采样缩放。"),
+                        modifier = Modifier.padding(16.dp), style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    ParameterIntSlide(tr("softGlassElementBlur", "元素模糊度"), value.elementBlur, 0..200, "%", 100) { n -> updateGlass { it.copy(elementBlur = n) } }
+                    ParameterIntSlide(tr("softGlassBackgroundBlur", "背景模糊度"), value.backgroundBlur, 0..200, "%", 100) { n -> updateGlass { it.copy(backgroundBlur = n) } }
+                    ParameterIntSlide(tr("softGlassElementScale", "元素缩放程度"), value.elementScale, 0..200, "%", 100) { n -> updateGlass { it.copy(elementScale = n) } }
+                    ParameterIntSlide(tr("softGlassBackgroundScale", "背景缩放程度"), value.backgroundScale, 0..200, "%", 100) { n -> updateGlass { it.copy(backgroundScale = n) } }
                 }
-                ArrowPreference(title = tr("\u9ad8\u7ea7\u6a21\u5f0f", "\u9ad8\u7ea7\u6a21\u5f0f"), onClick = openAdvanced)
+            }
+            item {
+                Group(tr("softGlassOptics", "玻璃光学参数")) {
+                    Text(
+                        tr("softGlassOpticsHint", "0% 保持系统原值，负值减弱、正值增强；原值为零时按小幅偏移调整。点击数值可精确输入或恢复默认。"),
+                        modifier = Modifier.padding(16.dp), style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    softGlassParameters.filter { !it.advanced }.forEach { definition ->
+                        ParameterIntSlide(tr(definition.title, definition.title), value.adjustments[definition.key] ?: 0, -100..200, "%", 0) { n ->
+                            updateGlass { it.copy(adjustments = it.adjustments + (definition.key to n)) }
+                        }
+                    }
+                    SwitchPreference(title = tr("softGlassAdvanced", "显示高级光学参数"), checked = advanced, onCheckedChange = { advanced = it })
+                }
+            }
+            if (advanced) {
+                softGlassParameters.filter { it.advanced }.forEach { definition ->
+                    item(key = definition.key) {
+                        Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                            ParameterIntSlide(tr(definition.title, definition.title), value.adjustments[definition.key] ?: 0, -100..200, "%", 0) { n ->
+                                updateGlass { it.copy(adjustments = it.adjustments + (definition.key to n)) }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
-    }
-}
-    if (wrapCard) Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) { content() } else content()
 }
 
 @Composable
@@ -5895,58 +5839,6 @@ private fun VolumePanelPreferences(
                 update { it.copy(volumePanelGlassStrength = value) }
             }
         }
-    }
-}
-
-@Composable
-private fun MaterialOverrideAdvancedPage(
-    title: String,
-    value: MaterialOverride,
-    isBackground: Boolean,
-    back: () -> Unit,
-    onChange: (MaterialOverride) -> Unit,
-) = AppPage(title, back) { p, scroll ->
-    AppList(p, scroll, 28) {
-        item { Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-            SwitchPreference(
-                title = tr("\u542f\u7528\u6750\u8d28\u8c03\u6574", "\u542f\u7528\u6750\u8d28\u8c03\u6574"),
-                checked = value.enabled,
-                onCheckedChange = { enabled -> onChange(enableMaterialOverride(value, isBackground, enabled)) },
-            )
-            AnimatedVisibility(value.enabled) {
-                Column {
-                    ParameterIntSlide(tr("\u6a21\u7cca\u6bd4\u4f8b", "\u6a21\u7cca\u6bd4\u4f8b"), value.blurPercent.coerceIn(0, if (isBackground) 100 else 200), 0..if (isBackground) 100 else 200, "%", defaultValue = 100) { onChange(value.copy(blurPercent = it)) }
-                    if (isBackground) {
-                        ParameterIntSlide(tr("\u80cc\u666f\u7f29\u653e\u6bd4\u4f8b", "\u80cc\u666f\u7f29\u653e\u6bd4\u4f8b"), value.scalePercent, 0..200, "%", defaultValue = 100) { onChange(value.copy(scalePercent = it)) }
-                        ParameterIntSlide(tr("\u80cc\u666f\u4e0d\u900f\u660e\u5ea6", "\u80cc\u666f\u4e0d\u900f\u660e\u5ea6"), (value.alpha + 100).coerceIn(0, 100), 0..100, "%", defaultValue = 100) { onChange(value.copy(alpha = it - 100)) }
-                    } else {
-                        ParameterIntSlide(tr("Glass \u6a21\u7cca\u534a\u5f84", "Glass \u6a21\u7cca\u534a\u5f84"), value.glassRadius.coerceIn(0, 40), 0..40, " px", defaultValue = 0) { onChange(value.copy(glassRadius = it)) }
-                        ParameterIntSlide(tr("\u4eae\u5ea6\u504f\u79fb", "\u4eae\u5ea6\u504f\u79fb"), value.brightness, -30..30, " x0.01", defaultValue = 0) { onChange(value.copy(brightness = it)) }
-                        ParameterIntSlide(tr("\u538b\u6697\u504f\u79fb", "\u538b\u6697\u504f\u79fb"), value.darker, -50..50, " x0.01", defaultValue = 0) { onChange(value.copy(darker = it)) }
-                        ParameterIntSlide(tr("\u6298\u5c04\u504f\u79fb", "\u6298\u5c04\u504f\u79fb"), value.refraction, -100..100, " x0.01", defaultValue = 0) { onChange(value.copy(refraction = it)) }
-                        ParameterIntSlide(tr("\u70e7\u707c\u504f\u79fb", "\u70e7\u707c\u504f\u79fb"), value.burn, -50..50, " x0.01", defaultValue = 0) { onChange(value.copy(burn = it)) }
-                        ParameterIntSlide(tr("\u9971\u548c\u5ea6\u504f\u79fb", "\u9971\u548c\u5ea6\u504f\u79fb"), value.saturation, -100..100, " x0.01", defaultValue = 0) { onChange(value.copy(saturation = it)) }
-                        ParameterIntSlide(tr("\u4e0d\u900f\u660e\u5ea6\u504f\u79fb", "\u4e0d\u900f\u660e\u5ea6\u504f\u79fb"), value.alpha, -50..50, " x0.01", defaultValue = 0) { onChange(value.copy(alpha = it)) }
-                        ParameterIntSlide(tr("\u8fb9\u7f18\u539a\u5ea6", "\u8fb9\u7f18\u539a\u5ea6"), value.edgeThickness, -100..100, " x0.01", defaultValue = 0) { onChange(value.copy(edgeThickness = it)) }
-                        ParameterIntSlide(tr("\u53cd\u5c04\u5f3a\u5ea6", "\u53cd\u5c04\u5f3a\u5ea6"), value.reflection, -100..100, " x0.01", defaultValue = 0) { onChange(value.copy(reflection = it)) }
-                        ParameterIntSlide(tr("\u65b9\u5411\u5149\u5f3a\u5ea6", "\u65b9\u5411\u5149\u5f3a\u5ea6"), value.directionalLight, -100..100, " x0.01", defaultValue = 0) { onChange(value.copy(directionalLight = it)) }
-                        ParameterIntSlide(tr("\u80cc\u666f\u9971\u548c\u5ea6", "\u80cc\u666f\u9971\u548c\u5ea6"), value.backgroundSaturation, -100..100, " x0.01", defaultValue = 0) { onChange(value.copy(backgroundSaturation = it)) }
-                        ParameterIntSlide(tr("\u80cc\u666f\u4eae\u5ea6", "\u80cc\u666f\u4eae\u5ea6"), value.backgroundBrightness, -100..100, " x0.01", defaultValue = 0) { onChange(value.copy(backgroundBrightness = it)) }
-                    }
-                    SwitchPreference(
-                        title = tr("\u81ea\u5b9a\u4e49\u6df7\u8272", "\u81ea\u5b9a\u4e49\u6df7\u8272"),
-                        checked = value.tintEnabled,
-                        onCheckedChange = { onChange(value.copy(tintEnabled = it)) },
-                    )
-                    AnimatedVisibility(value.tintEnabled) {
-                        Column {
-                            ShortcutBackgroundColorPreference(tr("\u6df7\u8272\u989c\u8272", "\u6df7\u8272\u989c\u8272"), value.tintColor) { onChange(value.copy(tintColor = it)) }
-                            ParameterIntSlide(tr("\u6df7\u8272\u5f3a\u5ea6", "\u6df7\u8272\u5f3a\u5ea6"), value.tintStrength, 0..50, " x0.01", defaultValue = 0) { onChange(value.copy(tintStrength = it)) }
-                        }
-                    }
-                }
-            }
-        } }
     }
 }
 
