@@ -41,6 +41,12 @@ import btm.m.liquidglass.NavigationStyle
 import btm.m.os4.systemuihook.tr
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Contacts
+import top.yukonga.miuix.kmp.icon.extended.Home
+import top.yukonga.miuix.kmp.icon.extended.Messages
+import top.yukonga.miuix.kmp.icon.extended.Play
+import top.yukonga.miuix.kmp.icon.extended.Search
 import java.lang.reflect.Method
 import java.util.IdentityHashMap
 import java.util.WeakHashMap
@@ -2951,7 +2957,7 @@ object AppBottomNavHooks {
         }
 
         private fun parseWeiboTabs(candidate: ViewGroup): List<DetectedTab>? {
-            if (resourceEntryName(candidate) != "main_radio" || candidate.childCount != 5) return null
+            if (resourceEntryName(candidate) != "main_radio" || candidate.childCount !in 4..5) return null
             val tabs = (0 until candidate.childCount).map { index ->
                 val child = candidate.getChildAt(index)
                 val clickTarget = findClickable(child) ?: return null
@@ -2972,9 +2978,17 @@ object AppBottomNavHooks {
                 DetectedTab(key, weiboDisplayLabel(key), child, clickTarget)
             }
             val keys = tabs.map { it.key }
-            if (keys.toSet().size != 5 || !keys.containsAll(config.requiredTabs) ||
-                keys.count { it in setOf(TabKey.VIDEO, TabKey.SUPERGROUP, TabKey.FIND,
-                    TabKey.FEATURED, TabKey.SHORT_DRAMA) } != 1
+            val optionalCount = keys.count {
+                it in setOf(
+                    TabKey.VIDEO,
+                    TabKey.SUPERGROUP,
+                    TabKey.FIND,
+                    TabKey.FEATURED,
+                    TabKey.SHORT_DRAMA
+                )
+            }
+            if (keys.toSet().size != keys.size || !keys.containsAll(config.requiredTabs) ||
+                optionalCount != candidate.childCount - config.requiredTabs.size
             ) return null
             return tabs.sortedBy { IntArray(2).also(it.view::getLocationInWindow)[0] }
         }
@@ -3108,7 +3122,14 @@ object AppBottomNavHooks {
         private fun extractedTabIcon(key: TabKey) = when (config) {
             xiaohongshu -> ExtractedNavIcons.forTab("xiaohongshu", key.name)
             qqMusic -> ExtractedNavIcons.forTab("qqmusic", key.name)
-            weibo -> ExtractedNavIcons.forTab("weibo", key.name)
+            weibo -> when (key) {
+                TabKey.HOME -> MiuixIcons.Regular.Home
+                TabKey.VIDEO, TabKey.SHORT_DRAMA -> MiuixIcons.Regular.Play
+                TabKey.DISCOVER, TabKey.FIND, TabKey.FEATURED, TabKey.SUPERGROUP -> MiuixIcons.Regular.Search
+                TabKey.MESSAGES -> MiuixIcons.Regular.Messages
+                TabKey.PROFILE -> MiuixIcons.Regular.Contacts
+                else -> null
+            }
             reddit -> ExtractedNavIcons.forTab("reddit", key.name)
             else -> null
         }
