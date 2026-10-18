@@ -560,6 +560,23 @@ private fun Root(
     val markRestartTargets: (Set<ScopeApplication>) -> Unit = { targets ->
         if (targets.isNotEmpty()) pendingRestartTargets = pendingRestartTargets + targets
     }
+    val restartRecommendationScope = rememberCoroutineScope()
+    val restartTracker = remember(context, service) {
+        val groups = listOf(REMOTE_PREFERENCE_GROUP, "settings", DEVICE_PROFILE_PREFERENCES, SETTINGS_APPEARANCE_PREFERENCES)
+        val sources = groups.flatMap { group ->
+            buildList {
+                add(group to context.getSharedPreferences(group, Context.MODE_PRIVATE))
+                service?.getRemotePreferences(group)?.let { add(group to it) }
+            }
+        }
+        RestartRecommendationTracker(sources, ::restartRecommendationSnapshot) { targets ->
+            restartRecommendationScope.launch { markRestartTargets(targets) }
+        }
+    }
+    DisposableEffect(restartTracker) {
+        restartTracker.start()
+        onDispose { restartTracker.close() }
+    }
     fun importAppearance(slot: String, uri: Uri?) {
         if (uri == null) return
         runCatching {
@@ -842,51 +859,53 @@ private fun Root(
     }
     LaunchedEffect(service) {
         service?.let {
-            hooks.syncRemote(it)
-            SoftGlassSettingsStore(context).syncRemote(it)
-            VolumePanelGlassSettingsStore(context).syncRemote(it)
-            SuperXiaoAiInputGlassSettingsStore(context).syncRemote(it)
-            navigation.syncRemote(it)
-            lockscreenCapsules.syncRemote(it)
-            cameras.syncRemote(it)
-            deviceProfiles.syncRemote(it)
-            appearances.syncRemote(it)
-            airDrop.syncRemote(it)
-            IslandWidthSettingsStore(context).syncRemote(it)
-            NotificationIslandSettingsStore(context).syncRemote(it)
-            ControlCenterHeaderHeightSettingsStore(context).syncRemote(it)
-            IosNotificationBottomOffsetSettingsStore(context).syncRemote(it)
-            ControlCenterCarrierSettingsStore(context).syncRemote(it)
-            ControlCenterClockSettingsStore(context).syncRemote(it)
-            IslandSmoothingSettingsStore(context).syncRemote(it)
-            IslandSpacingSettingsStore(context).syncRemote(it)
-            DynamicIslandAppearanceSettingsStore(context).syncRemote(it)
-            LockscreenFaceUnlockSettingsStore(context).syncRemote(it)
-            musicStore.syncRemote(it)
-            dockStore.syncRemote(it)
-            homeRecentsStore.syncRemote(it)
-            homeMultiSplitStore.syncRemote(it)
-            homeFolderStore.syncRemote(it)
-            homeMaterialStore.syncRemote(it)
-            settingsAppStore.syncRemote(it)
-            superXiaoAiStore.syncRemote(it)
-            systemUpdateStore.syncRemote(it)
-            settings = hooks.settings
-            navigationSettings = navigation.settings
-            lockscreenCapsuleSettings = lockscreenCapsules.settings
-            cameraSettings = cameras.settings
-            deviceProfile = deviceProfiles.settings
-            appearance = appearances.settings
-            airDropSettings = airDrop.settings
-            musicWhitelist = musicStore.apps
-            dockSettings = dockStore.settings
-            homeRecentsSettings = homeRecentsStore.settings
-            homeMultiSplitSettings = homeMultiSplitStore.settings
-            homeFolderSettings = homeFolderStore.settings
-            homeMaterialSettings = homeMaterialStore.settings
-            settingsApp = settingsAppStore.settings
-            superXiaoAi = superXiaoAiStore.settings
-            systemUpdate = systemUpdateStore.settings
+            restartTracker.withoutTracking {
+                hooks.syncRemote(it)
+                SoftGlassSettingsStore(context).syncRemote(it)
+                VolumePanelGlassSettingsStore(context).syncRemote(it)
+                SuperXiaoAiInputGlassSettingsStore(context).syncRemote(it)
+                navigation.syncRemote(it)
+                lockscreenCapsules.syncRemote(it)
+                cameras.syncRemote(it)
+                deviceProfiles.syncRemote(it)
+                appearances.syncRemote(it)
+                airDrop.syncRemote(it)
+                IslandWidthSettingsStore(context).syncRemote(it)
+                NotificationIslandSettingsStore(context).syncRemote(it)
+                ControlCenterHeaderHeightSettingsStore(context).syncRemote(it)
+                IosNotificationBottomOffsetSettingsStore(context).syncRemote(it)
+                ControlCenterCarrierSettingsStore(context).syncRemote(it)
+                ControlCenterClockSettingsStore(context).syncRemote(it)
+                IslandSmoothingSettingsStore(context).syncRemote(it)
+                IslandSpacingSettingsStore(context).syncRemote(it)
+                DynamicIslandAppearanceSettingsStore(context).syncRemote(it)
+                LockscreenFaceUnlockSettingsStore(context).syncRemote(it)
+                musicStore.syncRemote(it)
+                dockStore.syncRemote(it)
+                homeRecentsStore.syncRemote(it)
+                homeMultiSplitStore.syncRemote(it)
+                homeFolderStore.syncRemote(it)
+                homeMaterialStore.syncRemote(it)
+                settingsAppStore.syncRemote(it)
+                superXiaoAiStore.syncRemote(it)
+                systemUpdateStore.syncRemote(it)
+                settings = hooks.settings
+                navigationSettings = navigation.settings
+                lockscreenCapsuleSettings = lockscreenCapsules.settings
+                cameraSettings = cameras.settings
+                deviceProfile = deviceProfiles.settings
+                appearance = appearances.settings
+                airDropSettings = airDrop.settings
+                musicWhitelist = musicStore.apps
+                dockSettings = dockStore.settings
+                homeRecentsSettings = homeRecentsStore.settings
+                homeMultiSplitSettings = homeMultiSplitStore.settings
+                homeFolderSettings = homeFolderStore.settings
+                homeMaterialSettings = homeMaterialStore.settings
+                settingsApp = settingsAppStore.settings
+                superXiaoAi = superXiaoAiStore.settings
+                systemUpdate = systemUpdateStore.settings
+            }
         }
     }
     MiuixTheme(controller = controller) {
