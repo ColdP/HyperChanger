@@ -82,7 +82,7 @@
     "Android 版本": "Android Version",
     "设备型号": "Device Model",
     "HyperChanger 适配版本": "HyperChanger Target Version",
-    "本页的功能全部需要重启手机才能生效。": "Everything on This Page Only Takes Effect After a Reboot.",
+    "系统框架相关的全部功能在设置后，至少要进行软重启才能生效。": "All system framework features take effect only after at least a soft reboot after they are configured.",
     "系统框架": "System Framework",
     "category_search_framework_description": "Adjust the Behavior of Small Windows, Volume, Screenshots and System Services.",
     "小窗": "Small Windows",

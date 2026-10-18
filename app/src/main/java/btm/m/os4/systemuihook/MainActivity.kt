@@ -3371,8 +3371,8 @@ private fun FrameworkPage(back: () -> Unit) {
             item {
                 Text(
                     tr(
-                        "本页的功能全部需要重启手机才能生效。",
-                        "本页的功能全部需要重启手机才能生效。",
+                        "系统框架相关的全部功能在设置后，至少要进行软重启才能生效。",
+                        "系统框架相关的全部功能在设置后，至少要进行软重启才能生效。",
                     ),
                     style = MiuixTheme.textStyles.body2,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,

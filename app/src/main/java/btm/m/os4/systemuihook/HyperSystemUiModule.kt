@@ -310,23 +310,10 @@ class HyperSystemUiModule : XposedModule() {
 
     override fun onSystemServerStarting(param: SystemServerStartingParam) {
         // system_server never goes through onPackageLoaded, so its hooks have to be installed here.
-        traceSystemServer("onSystemServerStarting entered")
         runCatching {
             installFrameworkHooks(param.classLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
         }.onFailure { error ->
-            traceSystemServer("installFrameworkHooks failed: ${error.javaClass.name}: ${error.message}")
             log(Log.ERROR, TAG, "Could not install system framework hooks", error)
-        }
-        traceSystemServer("onSystemServerStarting done")
-    }
-
-    /** Temporary diagnostics for the system server side; removed once the hooks are confirmed. */
-    private fun traceSystemServer(message: String) {
-        runCatching {
-            java.io.File("/data/system/hyperchanger_framework.log").appendText(
-                java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date()) +
-                    " " + message + "\n",
-            )
         }
     }
 
@@ -1073,56 +1060,12 @@ class HyperSystemUiModule : XposedModule() {
      */
     private fun hookDeoptimized(member: java.lang.reflect.Executable) = runCatching {
         deoptimize(member)
-    }.let {
-        hook(member).also {
-            traceSystemServer(
-                "installed ${member.declaringClass.simpleName}.${member.name}/${member.parameterCount}",
-            )
-        }
-    }
+    }.let { hook(member) }
 
     private fun installFrameworkHooks(loader: ClassLoader, prefs: SharedPreferences) {
-        traceSystemServer("installFrameworkHooks start")
         val miuiLoader = resolveMiuiServicesLoader(loader) ?: loader
-        traceSystemServer("miui-services loader: ${miuiLoader.javaClass.name}")
-        listOf(
-            "com.android.server.wm.MiuiFreeFormStackDisplayStrategy",
-            "com.android.server.wm.MiuiFreeFormGestureController",
-            "com.android.server.wm.ActivityStarterInjector",
-            "com.android.server.audio.SoundDoseHelper",
-            "com.android.server.ForceDarkAppListManager",
-            "com.android.server.pm.PackageManagerServiceImpl",
-            "com.android.server.input.KeyGestureController",
-            "com.android.server.wm.WindowState",
-            "com.android.server.locksettings.LockSettingsStrongAuth",
-            "com.android.server.wm.ActivityTaskManagerService",
-        ).forEach { name ->
-            val viaSystem = runCatching { loader.loadClass(name) }.isSuccess
-            val viaMiui = !viaSystem && loadFrameworkClass(loader, miuiLoader, name) != null
-            traceSystemServer("class $name -> system=$viaSystem miui=$viaMiui")
-        }
-        val initial = readFrameworkPreferences(prefs)
-        traceSystemServer(
-            "prefs: multi=${initial.multipleFreeform} force=${initial.forceFreeform} " +
-                "remember=${initial.rememberFreeform} bg=${initial.freeformBackground} " +
-                "vol=${initial.volumeSafeMode} instant=${initial.volumeInstant} " +
-                "dark=${initial.forceDarkAllApps} recents=${initial.recentsVisibility} " +
-                "installer=${initial.nativeInstaller} pin=${initial.disablePin72h} " +
-                "name=${initial.disableDeviceNameCheck} quick=${initial.quickScreenshot} " +
-                "anywhere=${initial.screenshotAnywhere}",
-        )
-        val seenChecks = java.util.concurrent.ConcurrentHashMap<Int, Boolean>()
         fun on(block: (FrameworkPreferences) -> Boolean): Boolean {
-            val result = runCatching { block(readFrameworkPreferences(prefs)) }.getOrDefault(false)
-            if (seenChecks.size < 24) {
-                // Skip the on() frame so the reported line is the actual call site.
-                val line = Throwable().stackTrace.drop(1)
-                    .firstOrNull { it.className.contains("HyperSystemUiModule") }?.lineNumber ?: 0
-                if (line != 0 && seenChecks.putIfAbsent(line, true) == null) {
-                    traceSystemServer("check@$line -> $result")
-                }
-            }
-            return result
+            return runCatching { block(readFrameworkPreferences(prefs)) }.getOrDefault(false)
         }
 
         // ---- Small window ----
@@ -1355,7 +1298,8 @@ class HyperSystemUiModule : XposedModule() {
         runCatching {
             val cls = loadFrameworkClass(loader, miuiLoader, "com.android.server.ForceDarkAppListManager")
                 ?: return@runCatching
-            val buildCls = loader.loadClass("miui.os.Build")
+            val buildCls = loadFrameworkClass(loader, miuiLoader, "miui.os.Build")
+                ?: return@runCatching
             val flag = buildCls.getDeclaredField("IS_INTERNATIONAL_BUILD").apply { isAccessible = true }
             cls.declaredMethods.filter { it.name == "getDarkModeAppList" }.forEach { method ->
                 hookDeoptimized(method)
@@ -1380,7 +1324,8 @@ class HyperSystemUiModule : XposedModule() {
                         if (!on { it.forceDarkAllApps }) return@intercept chain.proceed()
                         val info = chain.getArg(0) as? android.content.pm.ApplicationInfo
                         info != null && info.uid >= 10000 &&
-                            info.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM == 0
+                            info.flags and (android.content.pm.ApplicationInfo.FLAG_SYSTEM or
+                                android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) == 0
                     }
             }
         }
@@ -1443,6 +1388,32 @@ class HyperSystemUiModule : XposedModule() {
         }
 
         // ---- Screenshot ----
+        // These methods are commonly inlined by ART before the first screenshot is taken.  Drop
+        // the compiled copies so the hooks below are reached, matching HyperCeiler's approach.
+        runCatching {
+            listOf(
+                "com.android.server.wm.WindowStateAnimator" to listOf("createSurfaceLocked"),
+                "com.android.server.wm.WindowManagerService" to listOf("relayoutWindow"),
+            ).forEach { (name, methods) ->
+                loader.loadClass(name).declaredMethods
+                    .filter { it.name in methods }
+                    .forEach { deoptimize(it) }
+            }
+            for (index in 0 until 20) {
+                runCatching {
+                    val cls = loader.loadClass("com.android.server.wm.RootWindowContainer\$\$ExternalSyntheticLambda$index")
+                    if (java.util.function.BiConsumer::class.java.isAssignableFrom(cls)) {
+                        cls.declaredMethods.filter { it.name == "accept" }.forEach { deoptimize(it) }
+                    }
+                }
+                runCatching {
+                    val cls = loader.loadClass("com.android.server.wm.DisplayContent\$$index")
+                    if (java.util.function.BiPredicate::class.java.isAssignableFrom(cls)) {
+                        cls.declaredMethods.filter { it.name == "test" }.forEach { deoptimize(it) }
+                    }
+                }
+            }
+        }
         runCatching {
             // Moved out of PhoneWindowManager into KeyGestureController on this platform.
             val cls = loader.loadClass("com.android.server.input.KeyGestureController")
@@ -1461,7 +1432,19 @@ class HyperSystemUiModule : XposedModule() {
             hookDeoptimized(target)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("hyperchanger:fw-screenshot-anywhere")
-                .intercept { chain -> if (on { it.screenshotAnywhere }) false else chain.proceed() }
+                .intercept { chain ->
+                    if (!on { it.screenshotAnywhere }) return@intercept chain.proceed()
+                    // Keep the secure bit when a surface is created, otherwise the framework's
+                    // capture-time checks see a non-secure window while the actual surface still
+                    // remains protected.  This is the same call-site guard used by HyperCeiler.
+                    val preserve = Thread.currentThread().stackTrace
+                        .take(14)
+                        .any { frame ->
+                            frame.methodName == "setInitialSurfaceControlProperties" ||
+                                frame.methodName == "createSurfaceLocked"
+                        }
+                    if (preserve) chain.proceed() else false
+                }
         }
         // HyperOS adds a MIUI policy gate before ScreenCaptureInternal is reached.  Clearing the
         // secure bit alone therefore still returns error code 2 from WindowManagerService.
@@ -1495,24 +1478,117 @@ class HyperSystemUiModule : XposedModule() {
                     .intercept { chain -> if (on { it.screenshotAnywhere }) false else chain.proceed() }
             }
         }
+        // Xiaomi's hotspot/device-name policy lives in the Wi-Fi service extension and is loaded
+        // through SystemServiceManager with its own class loader. Install it both when already
+        // visible and when the service loader is asked for the class later.
         runCatching {
-            // Clearing isSecureLocked only drops the surface flag; the capture path still filters
-            // protected content, so the secure content policy has to be relaxed as well.
-            val cls = loader.loadClass("android.window.ScreenCaptureInternal")
-            val argsCls = loader.loadClass("android.window.ScreenCaptureInternal\$CaptureArgs")
-            val policy = argsCls.getDeclaredField("mSecureContentPolicy").apply { isAccessible = true }
-            listOf("nativeCaptureDisplay", "nativeCaptureLayers").forEach { name ->
-                cls.declaredMethods.filter { it.name == name }.forEach { method ->
+            val hookWifiUtils: (ClassLoader) -> Unit = { wifiLoader ->
+                runCatching {
+                    val cls = wifiLoader.loadClass("com.android.server.wifi.Utils")
+                    cls.declaredMethods.filter { it.name == "checkDeviceNameIsIllegalSync" }.forEach { method ->
+                        hookDeoptimized(method)
+                            .setExceptionMode(ExceptionMode.PROTECTIVE)
+                            .setId("hyperchanger:fw-device-name-wifi-${method.parameterCount}")
+                            .intercept { chain ->
+                                if (on { it.disableDeviceNameCheck }) false else chain.proceed()
+                            }
+                    }
+                }
+            }
+            hookWifiUtils(loader)
+            loadFrameworkClass(loader, miuiLoader, "com.android.server.wifi.Utils")?.classLoader?.let(hookWifiUtils)
+            val manager = loader.loadClass("com.android.server.SystemServiceManager")
+            val installed = java.util.concurrent.atomic.AtomicBoolean(false)
+            manager.declaredMethods.filter { it.name == "loadClassFromLoader" && it.parameterCount == 2 }
+                .forEach { method ->
                     hookDeoptimized(method)
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
-                        .setId("hyperchanger:fw-screen-capture-$name")
+                        .setId("hyperchanger:fw-device-name-wifi-loader")
                         .intercept { chain ->
-                            if (on { it.screenshotAnywhere }) {
-                                runCatching { policy.setInt(chain.getArg(0), 1) }
+                            val name = chain.getArg(0) as? String
+                            val classLoader = chain.getArg(1) as? ClassLoader
+                            if (name == "com.android.server.wifi.WifiService" && classLoader != null &&
+                                installed.compareAndSet(false, true)
+                            ) {
+                                hookWifiUtils(classLoader)
                             }
                             chain.proceed()
                         }
                 }
+        }
+        runCatching {
+            // Clearing isSecureLocked only drops the surface flag; the capture path still filters
+            // protected content, so relax the secure-content policy as well.  Android 15/16 use
+            // ScreenCaptureInternal while older builds expose the same natives on ScreenCapture.
+            val captureTargets = listOf(
+                "android.window.ScreenCaptureInternal" to "android.window.ScreenCaptureInternal\$CaptureArgs",
+                "android.window.ScreenCapture" to "android.window.ScreenCapture\$CaptureArgs",
+            )
+            captureTargets.forEach { (captureName, argsName) ->
+                runCatching {
+                    val cls = loader.loadClass(captureName)
+                    val argsCls = loader.loadClass(argsName)
+                    val policy = runCatching {
+                        argsCls.getDeclaredField("mSecureContentPolicy").apply { isAccessible = true }
+                    }.getOrNull() ?: argsCls.getDeclaredField("mCaptureSecureLayers").apply { isAccessible = true }
+                    listOf("nativeCaptureDisplay", "nativeCaptureLayers").forEach { name ->
+                        cls.declaredMethods.filter { it.name == name }.forEach { method ->
+                            hookDeoptimized(method)
+                                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                                .setId("hyperchanger:fw-screen-capture-$captureName-$name")
+                                .intercept { chain ->
+                                    if (on { it.screenshotAnywhere }) {
+                                        runCatching {
+                                            if (policy.type == Boolean::class.javaPrimitiveType) {
+                                                policy.setBoolean(chain.getArg(0), true)
+                                            } else {
+                                                policy.setInt(chain.getArg(0), 1)
+                                            }
+                                        }
+                                    }
+                                    chain.proceed()
+                                }
+                        }
+                    }
+                }
+            }
+        }
+        runCatching {
+            val cls = loader.loadClass("com.android.server.display.DisplayControl")
+            cls.declaredMethods.filter { it.name == "createVirtualDisplay" }.forEach { method ->
+                hookDeoptimized(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("hyperchanger:fw-screenshot-virtual-display-${method.parameterCount}")
+                    .intercept { chain ->
+                        if (on { it.screenshotAnywhere } && chain.args.size > 1 && chain.getArg(1) is Boolean) {
+                            chain.args[1] = true
+                        }
+                        chain.proceed()
+                    }
+            }
+        }
+        runCatching {
+            val cls = loader.loadClass("com.android.server.display.VirtualDisplayAdapter")
+            cls.declaredMethods.filter { it.name == "createVirtualDisplayLocked" }.forEach { method ->
+                hookDeoptimized(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("hyperchanger:fw-screenshot-virtual-display-locked-${method.parameterCount}")
+                    .intercept { chain ->
+                        if (!on { it.screenshotAnywhere } || chain.args.size <= 3) {
+                            return@intercept chain.proceed()
+                        }
+                        val projection = chain.getArg(1)
+                        val ownerUid = chain.getArg(2) as? Int
+                        if (ownerUid != null && ownerUid >= 10000 && projection == null) {
+                            return@intercept chain.proceed()
+                        }
+                        for (index in 3 until chain.args.size) {
+                            val value = chain.getArg(index) as? Int ?: continue
+                            chain.args[index] = value or android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_SECURE
+                            break
+                        }
+                        chain.proceed()
+                    }
             }
         }
     }
@@ -1581,6 +1657,47 @@ class HyperSystemUiModule : XposedModule() {
             }
         }
         if (readFrameworkPreferences(prefs).disableDeviceNameCheck) {
+            val internationalField = runCatching {
+                loader.loadClass("miui.os.Build").getDeclaredField("IS_INTERNATIONAL_BUILD")
+                    .apply { isAccessible = true }
+            }.getOrNull()
+            fun hookAsInternational(method: java.lang.reflect.Executable, id: String) {
+                hookDeoptimized(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId(id)
+                    .intercept { chain ->
+                        if (internationalField == null) return@intercept chain.proceed()
+                        val original = runCatching { internationalField.getBoolean(null) }.getOrDefault(false)
+                        runCatching { internationalField.setBoolean(null, true) }
+                        try {
+                            chain.proceed()
+                        } finally {
+                            runCatching { internationalField.setBoolean(null, original) }
+                        }
+                    }
+            }
+            // The edit pages branch before DeviceNameCheckManager is called. Temporarily making
+            // the Settings process look international makes them take the direct save path.
+            listOf(
+                "com.android.settings.MiuiDeviceNameEditFragment",
+                "com.android.settings.wifi.EditTetherFragment",
+            ).forEach { className ->
+                runCatching {
+                    loader.loadClass(className).declaredMethods
+                        .filter { it.name == "onSave" && it.parameterCount == 0 }
+                        .forEach { method ->
+                            hookAsInternational(
+                                method,
+                                "hyperchanger:settings-device-name-save-${className.substringAfterLast('.')}",
+                            )
+                        }
+                }
+            }
+            runCatching {
+                loader.loadClass("com.android.settings.DeviceNameCheckManager").declaredMethods
+                    .filter { it.name == "getDeviceNameCheckResult" && it.parameterCount == 4 }
+                    .forEach { method -> hookAsInternational(method, "hyperchanger:settings-device-name-check") }
+            }
             runCatching {
                 val cls = loader.loadClass("com.android.settings.bluetooth.MiuiBTUtils")
                 cls.declaredMethods.filter { it.name == "isInternationalBuild" && it.parameterCount == 0 }
@@ -1655,12 +1772,9 @@ class HyperSystemUiModule : XposedModule() {
         if (param.packageName == "system") {
             // HyperCeiler hooks system_server through onPackageLoaded, so this path is known to work
             // even though onSystemServerStarting also fires. Either one installs the framework hooks.
-            traceSystemServer("onPackageLoaded(system) entered")
             runCatching {
                 installFrameworkHooks(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
-            }.onFailure { error ->
-                traceSystemServer("onPackageLoaded install failed: ${error.javaClass.name}")
-            }
+            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install system framework hooks", error) }
             return
         }
         if (param.packageName == "com.miui.home") {
