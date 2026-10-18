@@ -70,6 +70,7 @@ public final class IosNotificationCenterPresentation {
     private static float layoutProgress;
     private static float lastNotificationY = Float.NaN;
     private static float restingNotificationY = Float.NaN;
+    private static int restingNotificationScrollY = Integer.MIN_VALUE;
     private static final ThreadLocal<Boolean> DRIVING_HOSTED_CLOCK = new ThreadLocal<>();
     private static Drawable lastDepthDrawable;
     private static ViewTreeObserver observer;
@@ -87,6 +88,8 @@ public final class IosNotificationCenterPresentation {
     private static boolean gestureActive;
     private static boolean wallpaperEnabled = true;
     private static ValueAnimator headerExitAnimator;
+    private static ValueAnimator notificationHeaderVisibilityAnimator;
+    private static boolean notificationHeaderHasContent;
     private static NotificationHeaderView notificationHeaderBar;
     private static boolean notificationHeaderEnabled;
     private static int notificationClearStyle;
@@ -127,6 +130,12 @@ public final class IosNotificationCenterPresentation {
         wallpaperSheet = sheet;
         if (progress <= 0f) {
             if (host != null) host.setAlpha(0f);
+            restingNotificationScrollY = Integer.MIN_VALUE;
+            if (clock != null) {
+                clock.setPivotY(0f);
+                clock.setScaleX(1f);
+                clock.setScaleY(1f);
+            }
             // The native window hide is deferred until this endpoint. Restoring alpha here
             // would expose the list for a frame before that hide reaches the view pipeline.
             if (transformedStack != null &&
@@ -165,6 +174,10 @@ public final class IosNotificationCenterPresentation {
         switching = false;
         gestureActive = false;
         if (headerExitAnimator != null) headerExitAnimator.cancel();
+        if (notificationHeaderVisibilityAnimator != null) {
+            notificationHeaderVisibilityAnimator.cancel();
+            notificationHeaderVisibilityAnimator = null;
+        }
         releasePresentation();
         window = null;
     }
@@ -182,6 +195,10 @@ public final class IosNotificationCenterPresentation {
             ValueAnimator animation = headerExitAnimator;
             headerExitAnimator = null;
             animation.cancel();
+        }
+        if (notificationHeaderVisibilityAnimator != null) {
+            notificationHeaderVisibilityAnimator.cancel();
+            notificationHeaderVisibilityAnimator = null;
         }
         releasePresentation();
     }
@@ -254,6 +271,10 @@ public final class IosNotificationCenterPresentation {
             headerExitAnimator = null;
             previousExit.cancel();
         }
+        if (notificationHeaderVisibilityAnimator != null) {
+            notificationHeaderVisibilityAnimator.cancel();
+            notificationHeaderVisibilityAnimator = null;
+        }
         final View[] views = oldHeader;
         final float[] targets = oldHeaderAlpha;
         final View container = notificationHeader;
@@ -273,7 +294,11 @@ public final class IosNotificationCenterPresentation {
         headerExitAnimator.addUpdateListener(animation -> {
             float amount = (Float) animation.getAnimatedValue();
             if (container != null) container.setAlpha(containerTarget * amount);
-            if (customBar != null) customBar.setAlpha(customBarTarget * (1f - amount));
+            if (customBar != null) {
+                customBar.setAlpha(customBarTarget * (1f - amount));
+                customBar.setRenderEffect(amount >= 0.999f ? null : RenderEffect.createBlurEffect(
+                        radius * (1f - amount), radius * (1f - amount), Shader.TileMode.CLAMP));
+            }
             for (int i = 0; views != null && i < views.length; i++) {
                 View view = views[i];
                 if (view == null) continue;
@@ -734,10 +759,15 @@ public final class IosNotificationCenterPresentation {
     }
 
     private static void removeNotificationHeader() {
+        if (notificationHeaderVisibilityAnimator != null) {
+            notificationHeaderVisibilityAnimator.cancel();
+            notificationHeaderVisibilityAnimator = null;
+        }
         if (notificationHeaderBar != null && notificationHeaderBar.getParent() instanceof ViewGroup) {
             ((ViewGroup) notificationHeaderBar.getParent()).removeView(notificationHeaderBar);
         }
         notificationHeaderBar = null;
+        notificationHeaderHasContent = false;
     }
 
     private static void syncNotificationHeader() {
@@ -748,12 +778,7 @@ public final class IosNotificationCenterPresentation {
         ensureNotificationHeader();
         if (notificationHeaderBar == null || stack.getHeight() == 0) return;
         int[] panelPoint = new int[2];
-        int[] stackPoint = new int[2];
         panel.getLocationInWindow(panelPoint);
-        stack.getLocationInWindow(stackPoint);
-        float topPadding = 0f;
-        try { topPadding = ((Number) Xp.callMethod(stack, "getTopPadding")).floatValue(); }
-        catch (Throwable ignored) {}
         int scrollY = 0;
         try { scrollY = ((Number) stack.getClass().getMethod("getOwnScrollY").invoke(stack)).intValue(); }
         catch (Throwable ignored) {}
@@ -762,20 +787,64 @@ public final class IosNotificationCenterPresentation {
         // its top padding was used directly. The row location already includes NSSL scroll.
         float firstTop = firstNotificationTop(stack, panelPoint);
         if (Float.isNaN(firstTop)) {
-            firstTop = stackPoint[1] - panelPoint[1] + topPadding;
+            animateNotificationHeader(false, 0f);
+            if (clock != null) {
+                clock.setScaleX(1f);
+                clock.setScaleY(1f);
+            }
+            restingNotificationScrollY = Integer.MIN_VALUE;
+            return;
         }
         float y = firstTop - dp(60);
         notificationHeaderBar.setTranslationY(y);
-        // iOS compresses the large time after the list is touched. Tie the same subtle
-        // scale to the real NSSL scroll position so the bar and clock feel like one sheet.
-        float shrink = Math.min(1f, Math.max(0f, scrollY / (float) Math.max(1, dp(180))));
-        float clockScale = 1f - .12f * shrink;
+        animateNotificationHeader(true, progress * progress * (3f - 2f * progress));
+        // Match the lock-screen collapse order: compress height first, then begin uniform
+        // shrinking after the list has moved through the first 60% of its travel. The baseline
+        // is captured only after the panel is fully open, so opening the shade itself cannot
+        // shrink the clock before a notification is touched.
+        if (progress >= .95f && restingNotificationScrollY == Integer.MIN_VALUE) {
+            restingNotificationScrollY = scrollY;
+        }
+        int moved = restingNotificationScrollY == Integer.MIN_VALUE
+                ? 0 : Math.max(0, scrollY - restingNotificationScrollY);
+        float travel = Math.min(1f, moved / (float) Math.max(1, dp(180)));
+        float heightPhase = Math.min(1f, travel / .6f);
+        float overallPhase = Math.max(0f, (travel - .6f) / .4f);
+        float heightScale = 1f - .12f * heightPhase;
+        float overallScale = 1f - .12f * overallPhase;
         if (clock != null) {
-            clock.setScaleX(clockScale);
-            clock.setScaleY(clockScale);
+            clock.setPivotY(0f);
+            clock.setScaleX(overallScale);
+            clock.setScaleY(heightScale * overallScale);
         }
         float visual = progress * progress * (3f - 2f * progress);
-        notificationHeaderBar.setAlpha(visual);
+        float blur = 28f * panel.getResources().getDisplayMetrics().density * (1f - visual);
+        notificationHeaderBar.setRenderEffect(blur <= 0f ? null
+                : RenderEffect.createBlurEffect(blur, blur, Shader.TileMode.CLAMP));
+    }
+
+    private static void animateNotificationHeader(boolean show, float targetAlpha) {
+        if (notificationHeaderBar == null) return;
+        if (notificationHeaderHasContent == show) {
+            if (notificationHeaderVisibilityAnimator == null) {
+                notificationHeaderBar.setAlpha(show ? targetAlpha : 0f);
+            }
+            return;
+        }
+        notificationHeaderHasContent = show;
+        if (notificationHeaderVisibilityAnimator != null) notificationHeaderVisibilityAnimator.cancel();
+        float from = notificationHeaderBar.getAlpha();
+        float to = show ? targetAlpha : 0f;
+        notificationHeaderVisibilityAnimator = ValueAnimator.ofFloat(from, to);
+        notificationHeaderVisibilityAnimator.setDuration(180L);
+        notificationHeaderVisibilityAnimator.setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f));
+        notificationHeaderVisibilityAnimator.addUpdateListener(a -> notificationHeaderBar.setAlpha((Float) a.getAnimatedValue()));
+        notificationHeaderVisibilityAnimator.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator animation) {
+                if (notificationHeaderVisibilityAnimator == animation) notificationHeaderVisibilityAnimator = null;
+            }
+        });
+        notificationHeaderVisibilityAnimator.start();
     }
 
     private static int dp(int value) {
@@ -1294,6 +1363,7 @@ public final class IosNotificationCenterPresentation {
         clockInfoOffset = 0f;
         clockInfoBaseTranslation = 0f;
         if (clock != null) {
+            clock.setPivotY(0f);
             clock.setScaleX(1f);
             clock.setScaleY(1f);
         }
@@ -1304,6 +1374,7 @@ public final class IosNotificationCenterPresentation {
         layoutProgress = 0f;
         lastNotificationY = Float.NaN;
         restingNotificationY = Float.NaN;
+        restingNotificationScrollY = Integer.MIN_VALUE;
         lastDepthDrawable = null;
         if (host != null && host.getParent() instanceof ViewGroup) {
             ((ViewGroup) host.getParent()).removeView(host);
