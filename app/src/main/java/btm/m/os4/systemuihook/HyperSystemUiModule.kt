@@ -1023,8 +1023,46 @@ class HyperSystemUiModule : XposedModule() {
             ?: return null
         val cache = runCatching {
             registry.getDeclaredField("sExtClassLoaderCache").apply { isAccessible = true }.get(null)
-        }.getOrNull() as? java.util.HashMap<Any?, Any?> ?: return null
-        return cache.values.firstOrNull() as? ClassLoader
+        }.getOrNull() as? java.util.Map<*, *> ?: return null
+        // More than one framework class loader can be present (for example the framework and
+        // miui-services jars).  The old implementation picked HashMap.values.first(), which is
+        // nondeterministic and frequently selected a loader that cannot see MIUI server classes.
+        val cached = cache.values().asSequence().filterIsInstance<ClassLoader>().toList()
+        val providerLoaders = runCatching {
+            val providers = registry.getDeclaredField("sManifestStubs").apply { isAccessible = true }
+                .get(null) as? java.util.Map<*, *>
+            providers?.values()?.mapNotNull { it?.javaClass?.classLoader } ?: emptyList()
+        }.getOrDefault(emptyList())
+        return (cached + providerLoaders).distinct().firstOrNull { candidate ->
+            runCatching {
+                candidate.loadClass("com.android.server.wm.MiuiFreeFormStackDisplayStrategy")
+            }.isSuccess
+        } ?: (cached + providerLoaders).distinct().firstOrNull()
+    }
+
+    /** Load a framework class from the boot/system loader or any cached MIUI extension loader. */
+    private fun loadFrameworkClass(
+        loader: ClassLoader,
+        miuiLoader: ClassLoader?,
+        name: String,
+    ): Class<*>? {
+        val candidates = LinkedHashSet<ClassLoader>().apply {
+            add(loader)
+            miuiLoader?.let(::add)
+            runCatching {
+                val registry = loader.loadClass("com.miui.base.MiuiStubRegistry")
+                val cache = registry.getDeclaredField("sExtClassLoaderCache").apply { isAccessible = true }
+                    .get(null) as? java.util.Map<*, *>
+                cache?.values()?.filterIsInstance<ClassLoader>()?.forEach(::add)
+                val providers = registry.getDeclaredField("sManifestStubs").apply { isAccessible = true }
+                    .get(null) as? java.util.Map<*, *>
+                providers?.values()?.mapNotNull { it?.javaClass?.classLoader }?.forEach(::add)
+            }
+        }
+        candidates.forEach { candidate ->
+            runCatching { candidate.loadClass(name) }.getOrNull()?.let { return it }
+        }
+        return runCatching { Class.forName(name, false, loader) }.getOrNull()
     }
 
     /**
@@ -1060,7 +1098,7 @@ class HyperSystemUiModule : XposedModule() {
             "com.android.server.wm.ActivityTaskManagerService",
         ).forEach { name ->
             val viaSystem = runCatching { loader.loadClass(name) }.isSuccess
-            val viaMiui = !viaSystem && runCatching { miuiLoader.loadClass(name) }.isSuccess
+            val viaMiui = !viaSystem && loadFrameworkClass(loader, miuiLoader, name) != null
             traceSystemServer("class $name -> system=$viaSystem miui=$viaMiui")
         }
         val initial = readFrameworkPreferences(prefs)
@@ -1089,7 +1127,8 @@ class HyperSystemUiModule : XposedModule() {
 
         // ---- Small window ----
         runCatching {
-            val cls = miuiLoader.loadClass("com.android.server.wm.MiuiFreeFormStackDisplayStrategy")
+            val cls = loadFrameworkClass(loader, miuiLoader, "com.android.server.wm.MiuiFreeFormStackDisplayStrategy")
+                ?: return@runCatching
             cls.declaredMethods.filter {
                 it.name == "getMaxMiuiFreeFormStackCount" ||
                     it.name == "getMaxMiuiFreeFormStackCountForFlashBack"
@@ -1104,7 +1143,8 @@ class HyperSystemUiModule : XposedModule() {
             // getMaxMiuiFreeFormStackCount is private and gets inlined, so its calls never reach the
             // hook above. It simply returns mDefaultMaxFreeformCount, which is a plain field set to 2
             // and never written again - raising it in the constructor is what actually lifts the cap.
-            val cls = miuiLoader.loadClass("com.android.server.wm.MiuiFreeFormStackDisplayStrategy")
+            val cls = loadFrameworkClass(loader, miuiLoader, "com.android.server.wm.MiuiFreeFormStackDisplayStrategy")
+                ?: return@runCatching
             val field = cls.getDeclaredField("mDefaultMaxFreeformCount").apply { isAccessible = true }
             cls.declaredConstructors.forEach { constructor ->
                 hook(constructor)
@@ -1123,7 +1163,8 @@ class HyperSystemUiModule : XposedModule() {
             // The instance already exists before the hooks are installed, so the constructor hook
             // never fires. This method runs on every freeform task add and is the reliable trigger.
             // Note the typo in the real name: onMiuiFreeFormStasckAdded, not StackAdded.
-            val cls = miuiLoader.loadClass("com.android.server.wm.MiuiFreeFormStackDisplayStrategy")
+            val cls = loadFrameworkClass(loader, miuiLoader, "com.android.server.wm.MiuiFreeFormStackDisplayStrategy")
+                ?: return@runCatching
             val field = cls.getDeclaredField("mDefaultMaxFreeformCount").apply { isAccessible = true }
             cls.declaredMethods.filter { it.name == "onMiuiFreeFormStasckAdded" }.forEach { method ->
                 hookDeoptimized(method)
@@ -1147,12 +1188,60 @@ class HyperSystemUiModule : XposedModule() {
             }
         }
         runCatching {
-            val cls = loader.loadClass("com.android.server.wm.Task")
-            cls.declaredMethods.filter { it.name == "isResizeable" && it.parameterCount == 0 }.forEach { method ->
+            val cls = loadFrameworkClass(loader, miuiLoader, "com.android.server.wm.Task")
+                ?: return@runCatching
+            cls.declaredMethods.filter { it.name == "isResizeable" }.forEach { method ->
                 hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
-                    .setId("hyperchanger:fw-force-freeform-resizeable")
+                    .setId("hyperchanger:fw-force-freeform-resizeable-${method.parameterCount}")
                     .intercept { chain -> if (on { it.forceFreeform }) true else chain.proceed() }
+            }
+        }
+        // The framework checks these lists before it reaches Task.isResizeable().  Clear both
+        // static lists and their cloud-backed accessors, matching HyperCeiler's rule.
+        runCatching {
+            val cls = loadFrameworkClass(loader, miuiLoader, "android.util.MiuiMultiWindowAdapter")
+                ?: return@runCatching
+            listOf(
+                "FREEFORM_BLACK_LIST",
+                "ABNORMAL_FREEFORM_BLACK_LIST",
+                "START_FROM_FREEFORM_BLACK_LIST_ACTIVITY",
+                "FOREGROUND_PIN_APP_BLACK_LIST",
+            ).takeIf { on { it.forceFreeform } }?.forEach { fieldName ->
+                runCatching {
+                    cls.getDeclaredField(fieldName).apply { isAccessible = true }.set(null, ArrayList<String>())
+                }
+            }
+            listOf(
+                "getFreeformBlackList",
+                "getFreeformBlackListFromCloud",
+                "getAbnormalFreeformBlackList",
+                "getAbnormalFreeformBlackListFromCloud",
+                "getStartFromFreeformBlackList",
+                "getStartFromFreeformBlackListFromCloud",
+                "getForegroundPinAppBlackList",
+                "getForegroundPinAppBlackListFromCloud",
+            ).forEach { methodName ->
+                cls.declaredMethods.filter { it.name == methodName }.forEach { method ->
+                    hookDeoptimized(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("hyperchanger:fw-force-freeform-list-$methodName-${method.parameterCount}")
+                        .intercept { chain ->
+                            if (on { it.forceFreeform }) ArrayList<Any?>() else chain.proceed()
+                        }
+                }
+            }
+        }
+        runCatching {
+            val cls = loadFrameworkClass(loader, miuiLoader, "android.util.MiuiMultiWindowUtils")
+                ?: return@runCatching
+            listOf("isForceResizeable", "supportFreeform").forEach { methodName ->
+                cls.declaredMethods.filter { it.name == methodName }.forEach { method ->
+                    hookDeoptimized(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("hyperchanger:fw-force-freeform-utils-$methodName-${method.parameterCount}")
+                        .intercept { chain -> if (on { it.forceFreeform }) true else chain.proceed() }
+                }
             }
         }
         runCatching {
@@ -1184,7 +1273,8 @@ class HyperSystemUiModule : XposedModule() {
             }
         }
         runCatching {
-            val cls = miuiLoader.loadClass("com.android.server.wm.MiuiFreeFormGestureController")
+            val cls = loadFrameworkClass(loader, miuiLoader, "com.android.server.wm.MiuiFreeFormGestureController")
+                ?: return@runCatching
             val target = cls.declaredMethods.firstOrNull { it.name == "needForegroundPin" && it.parameterCount == 1 }
                 ?: return@runCatching
             hookDeoptimized(target)
@@ -1198,7 +1288,8 @@ class HyperSystemUiModule : XposedModule() {
         // ---- Volume ----
         runCatching {
             // SoundDoseHelperStub is an interface resolved through MiuiStubUtil, so hook the consumer.
-            val cls = loader.loadClass("com.android.server.audio.SoundDoseHelper")
+            val cls = loadFrameworkClass(loader, miuiLoader, "com.android.server.audio.SoundDoseHelper")
+                ?: return@runCatching
             val target = cls.declaredMethods.firstOrNull {
                 it.name == "safeMediaVolumeIndex" && it.parameterCount == 1
             } ?: return@runCatching
@@ -1212,6 +1303,28 @@ class HyperSystemUiModule : XposedModule() {
                         else -> chain.proceed()
                     }
                 }
+        }
+        runCatching {
+            // SoundDoseHelper delegates the platform limit to this MIUI implementation during
+            // initialization and whenever the safe-volume policy is refreshed.  Hooking only the
+            // consumer below leaves the cached MIUI value unchanged, so the warning immediately
+            // comes back on the next refresh.
+            val cls = loadFrameworkClass(loader, miuiLoader, "com.android.server.audio.SoundDoseHelperStubImpl")
+                ?: return@runCatching
+            cls.declaredMethods.filter {
+                it.name == "updateSafeMediaVolumeIndex" && it.parameterCount == 1
+            }.forEach { method ->
+                hookDeoptimized(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("hyperchanger:fw-volume-safe-stub")
+                    .intercept { chain ->
+                        when {
+                            on { it.volumeSafeMode == VOLUME_SAFE_ALWAYS } -> 2147483646
+                            on { it.volumeSafeMode == VOLUME_SAFE_HEADSET_ONLY } && hasHeadsetOutput() -> 2147483646
+                            else -> chain.proceed()
+                        }
+                    }
+            }
         }
         runCatching {
             val cls = loader.loadClass("com.android.server.audio.AudioService\$VolumeController")
@@ -1240,7 +1353,8 @@ class HyperSystemUiModule : XposedModule() {
 
         // ---- Features ----
         runCatching {
-            val cls = miuiLoader.loadClass("com.android.server.ForceDarkAppListManager")
+            val cls = loadFrameworkClass(loader, miuiLoader, "com.android.server.ForceDarkAppListManager")
+                ?: return@runCatching
             val buildCls = loader.loadClass("miui.os.Build")
             val flag = buildCls.getDeclaredField("IS_INTERNATIONAL_BUILD").apply { isAccessible = true }
             cls.declaredMethods.filter { it.name == "getDarkModeAppList" }.forEach { method ->
@@ -1287,7 +1401,8 @@ class HyperSystemUiModule : XposedModule() {
             }
         }
         runCatching {
-            val cls = miuiLoader.loadClass("com.android.server.pm.PackageManagerServiceImpl")
+            val cls = loadFrameworkClass(loader, miuiLoader, "com.android.server.pm.PackageManagerServiceImpl")
+                ?: return@runCatching
             // isCTS alone is not enough: the installer only takes the stock path while the caller is
             // inside one of these three methods, so the flag has to be scoped to them.
             val fakeCts = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -1347,6 +1462,38 @@ class HyperSystemUiModule : XposedModule() {
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("hyperchanger:fw-screenshot-anywhere")
                 .intercept { chain -> if (on { it.screenshotAnywhere }) false else chain.proceed() }
+        }
+        // HyperOS adds a MIUI policy gate before ScreenCaptureInternal is reached.  Clearing the
+        // secure bit alone therefore still returns error code 2 from WindowManagerService.
+        runCatching {
+            val cls = loadFrameworkClass(loader, miuiLoader, "com.android.server.wm.WindowManagerServiceImpl")
+                ?: return@runCatching
+            cls.declaredMethods.filter { it.name == "notAllowCaptureDisplay" }.forEach { method ->
+                hookDeoptimized(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("hyperchanger:fw-screenshot-anywhere-miui-gate-${method.parameterCount}")
+                    .intercept { chain -> if (on { it.screenshotAnywhere }) false else chain.proceed() }
+            }
+        }
+        // Match HyperCeiler's companion hooks so apps cannot re-enable the capture policy through
+        // screen-capture observer registration while this switch is enabled.
+        runCatching {
+            val cls = loader.loadClass("com.android.server.wm.ActivityTaskManagerService")
+            cls.declaredMethods.filter { it.name == "registerScreenCaptureObserver" }.forEach { method ->
+                hookDeoptimized(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("hyperchanger:fw-screenshot-observer-${method.parameterCount}")
+                    .intercept { chain -> if (on { it.screenshotAnywhere }) null else chain.proceed() }
+            }
+        }
+        runCatching {
+            val cls = loader.loadClass("com.android.server.wm.WindowManagerService")
+            cls.declaredMethods.filter { it.name == "registerScreenRecordingCallback" }.forEach { method ->
+                hookDeoptimized(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("hyperchanger:fw-screen-recording-observer-${method.parameterCount}")
+                    .intercept { chain -> if (on { it.screenshotAnywhere }) false else chain.proceed() }
+            }
         }
         runCatching {
             // Clearing isSecureLocked only drops the surface flag; the capture path still filters
