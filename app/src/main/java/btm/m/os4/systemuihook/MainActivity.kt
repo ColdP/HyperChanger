@@ -4,6 +4,7 @@ package btm.m.os4.systemuihook
 
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsStore
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationBottomOffsetSettingsStore
+import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsStore
 
 import android.app.Activity
 import android.app.DownloadManager
@@ -5536,9 +5537,12 @@ private fun Shade(
     val gesturePrefs = remember(context) { context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE) }
     val iosStore = remember(context) { IosNotificationCenterSettingsStore(context) }
     var iosSettings by remember { mutableStateOf(iosStore.settings) }
+    val iosHeaderStore = remember(context) { IosNotificationHeaderSettingsStore(context) }
+    var iosHeaderSettings by remember { mutableStateOf(iosHeaderStore.settings) }
     val iosOffsetStore = remember(context) { IosNotificationBottomOffsetSettingsStore(context) }
     var iosOffsetDp by remember { mutableStateOf(iosOffsetStore.offsetDp) }
     LaunchedEffect(service) { service?.let(iosStore::syncRemote) }
+    LaunchedEffect(service) { service?.let(iosHeaderStore::syncRemote) }
     LaunchedEffect(service) { service?.let(iosOffsetStore::syncRemote) }
     var hideGlobalGestureHandle by remember { mutableStateOf(gesturePrefs.getBoolean(KEY_HIDE_GLOBAL_GESTURE_HANDLE, false)) }
     LaunchedEffect(service) {
@@ -5616,6 +5620,117 @@ private fun Shade(
                             iosSettings = iosStore.settings
                         },
                     )
+                    SwitchPreference(
+                        title = tr("iosNotificationHeader", "通知顶部显示通知横条"),
+                        summary = tr("iosNotificationHeaderSummary", "在通知顶部显示可滚动的“通知中心”和清除按钮"),
+                        checked = iosHeaderSettings.enabled,
+                        onCheckedChange = { enabled ->
+                            iosHeaderStore.update(service) { it.copy(enabled = enabled) }
+                            iosHeaderSettings = iosHeaderStore.settings
+                        },
+                    )
+                    AnimatedVisibility(iosHeaderSettings.enabled) {
+                        Column {
+                            OverlayDropdownPreference(
+                                title = tr("iosNotificationClearStyle", "清除按钮样式"),
+                                items = listOf(
+                                    tr("iosNotificationClearStyleIconText", "图标和文本"),
+                                    tr("iosNotificationClearStyleIcon", "图标"),
+                                    tr("iosNotificationClearStyleText", "文本"),
+                                ),
+                                selectedIndex = iosHeaderSettings.clearButtonStyle,
+                                onSelectedIndexChange = { value ->
+                                    iosHeaderStore.update(service) { it.copy(clearButtonStyle = value) }
+                                    iosHeaderSettings = iosHeaderStore.settings
+                                },
+                            )
+                            OverlayDropdownPreference(
+                                title = tr("iosNotificationClearMaterial", "清除按钮背景"),
+                                items = listOf(
+                                    tr("iosNotificationMaterialSoftGlass", "柔光玻璃"),
+                                    tr("iosNotificationMaterialAdvanced", "高级材质"),
+                                    tr("iosNotificationMaterialSolid", "纯色"),
+                                ),
+                                selectedIndex = iosHeaderSettings.clearButtonMaterial,
+                                onSelectedIndexChange = { value ->
+                                    iosHeaderStore.update(service) { it.copy(clearButtonMaterial = value) }
+                                    iosHeaderSettings = iosHeaderStore.settings
+                                },
+                            )
+                            ParameterFloatSlide(
+                                tr("iosNotificationClearRadius", "清除按钮圆角"),
+                                iosHeaderSettings.clearButtonCornerRadius,
+                                0f..60f,
+                                22f,
+                            ) { value ->
+                                iosHeaderStore.update(service) { it.copy(clearButtonCornerRadius = value) }
+                                iosHeaderSettings = iosHeaderStore.settings
+                            }
+                            when (iosHeaderSettings.clearButtonMaterial) {
+                                2 -> ShortcutBackgroundColorPreference(
+                                    tr("iosNotificationClearPureColor", "纯色背景颜色"),
+                                    iosHeaderSettings.clearButtonPureColor,
+                                ) { value ->
+                                    iosHeaderStore.update(service) { it.copy(clearButtonPureColor = value) }
+                                    iosHeaderSettings = iosHeaderStore.settings
+                                }
+                                1 -> Column {
+                                    ShortcutBackgroundColorPreference(
+                                        tr("iosNotificationClearAdvancedColor", "高级材质颜色"),
+                                        iosHeaderSettings.clearButtonAdvancedColor,
+                                    ) { value ->
+                                        iosHeaderStore.update(service) { it.copy(clearButtonAdvancedColor = value) }
+                                        iosHeaderSettings = iosHeaderStore.settings
+                                    }
+                                    ParameterIntSlide(tr("iosNotificationClearAdvancedOpacity", "高级材质不透明度"), iosHeaderSettings.clearButtonAdvancedOpacity, 0..100, "%", 14) { value ->
+                                        iosHeaderStore.update(service) { it.copy(clearButtonAdvancedOpacity = value) }
+                                        iosHeaderSettings = iosHeaderStore.settings
+                                    }
+                                    ParameterIntSlide(tr("iosNotificationClearAdvancedBlur", "高级材质模糊半径"), iosHeaderSettings.clearButtonAdvancedBlurRadius, 0..120, " px", 36) { value ->
+                                        iosHeaderStore.update(service) { it.copy(clearButtonAdvancedBlurRadius = value) }
+                                        iosHeaderSettings = iosHeaderStore.settings
+                                    }
+                                    SwitchPreference(
+                                        title = tr("iosNotificationClearAdvancedHighlight", "高级材质高光"),
+                                        checked = iosHeaderSettings.clearButtonAdvancedHighlight,
+                                        onCheckedChange = { value ->
+                                            iosHeaderStore.update(service) { it.copy(clearButtonAdvancedHighlight = value) }
+                                            iosHeaderSettings = iosHeaderStore.settings
+                                        },
+                                    )
+                                }
+                                else -> Column {
+                                    ShortcutBackgroundColorPreference(
+                                        tr("iosNotificationClearSoftColor", "柔光玻璃颜色"),
+                                        iosHeaderSettings.clearButtonSoftGlassColor,
+                                    ) { value ->
+                                        iosHeaderStore.update(service) { it.copy(clearButtonSoftGlassColor = value) }
+                                        iosHeaderSettings = iosHeaderStore.settings
+                                    }
+                                    ParameterIntSlide(tr("iosNotificationClearSoftOpacity", "柔光玻璃不透明度"), iosHeaderSettings.clearButtonSoftGlassOpacity, 0..100, "%", 10) { value ->
+                                        iosHeaderStore.update(service) { it.copy(clearButtonSoftGlassOpacity = value) }
+                                        iosHeaderSettings = iosHeaderStore.settings
+                                    }
+                                    ParameterIntSlide(tr("iosNotificationClearSoftBackdropBlur", "柔光玻璃背景模糊"), iosHeaderSettings.clearButtonSoftGlassBackdropBlurRadius, 0..120, " px", 80) { value ->
+                                        iosHeaderStore.update(service) { it.copy(clearButtonSoftGlassBackdropBlurRadius = value) }
+                                        iosHeaderSettings = iosHeaderStore.settings
+                                    }
+                                    ParameterIntSlide(tr("iosNotificationClearSoftBlur", "柔光玻璃前景模糊"), iosHeaderSettings.clearButtonSoftGlassBlurRadius, 0..120, " px", 36) { value ->
+                                        iosHeaderStore.update(service) { it.copy(clearButtonSoftGlassBlurRadius = value) }
+                                        iosHeaderSettings = iosHeaderStore.settings
+                                    }
+                                    ParameterFloatSlide(tr("iosNotificationClearSoftLuminance", "柔光玻璃亮度"), iosHeaderSettings.clearButtonSoftGlassLuminance, 0f..0.4f, .14f) { value ->
+                                        iosHeaderStore.update(service) { it.copy(clearButtonSoftGlassLuminance = value) }
+                                        iosHeaderSettings = iosHeaderStore.settings
+                                    }
+                                    ParameterIntSlide(tr("iosNotificationClearSoftRefraction", "柔光玻璃折射度"), iosHeaderSettings.clearButtonSoftGlassRefraction, -100..100, " x0.01", 0) { value ->
+                                        iosHeaderStore.update(service) { it.copy(clearButtonSoftGlassRefraction = value) }
+                                        iosHeaderSettings = iosHeaderStore.settings
+                                    }
+                                }
+                            }
+                        }
+                    }
                     EditableSliderPreference(
                         title = tr("iosNotificationBottomOffset", "通知下沉底部偏移"),
                         value = iosOffsetDp.toFloat(),

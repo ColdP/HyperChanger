@@ -258,6 +258,21 @@ public final class ShadeLayer {
                 if (btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_CENTER.equals(key)
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_WALLPAPER.equals(key)
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_HIDE_CLEAR.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_STYLE.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_MATERIAL.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_RADIUS.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_PURE_COLOR.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_ADVANCED_COLOR.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_ADVANCED_OPACITY.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_ADVANCED_BLUR.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_ADVANCED_HIGHLIGHT.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_SOFT_COLOR.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_SOFT_OPACITY.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_SOFT_BACKDROP_BLUR.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_SOFT_BLUR.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_SOFT_LUMINANCE.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_SOFT_REFRACTION.equals(key)
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationBottomOffsetSettingsKt.KEY_IOS_NOTIFICATION_BOTTOM_OFFSET.equals(key)) {
                     UI.post(() -> readPreferences(prefs));
                 }
@@ -278,6 +293,22 @@ public final class ShadeLayer {
         boolean hideClear = prefs.getBoolean(
                 btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_HIDE_CLEAR, false);
         IosNotificationCenterPresentation.setHideClearButton(hideClear);
+        IosNotificationCenterPresentation.setNotificationHeaderSettings(
+                prefs.getBoolean(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER, false),
+                prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_STYLE, 0),
+                prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_MATERIAL, 0),
+                prefs.getFloat(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_RADIUS, 22f),
+                prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_PURE_COLOR, 0x66FFFFFF),
+                prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_ADVANCED_COLOR, 0xFFFFFFFF),
+                prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_ADVANCED_OPACITY, 14),
+                prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_ADVANCED_BLUR, 36),
+                prefs.getBoolean(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_ADVANCED_HIGHLIGHT, false),
+                prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_SOFT_COLOR, 0xFFFFFFFF),
+                prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_SOFT_OPACITY, 10),
+                prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_SOFT_BACKDROP_BLUR, 80),
+                prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_SOFT_BLUR, 36),
+                prefs.getFloat(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_SOFT_LUMINANCE, .14f),
+                prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_SOFT_REFRACTION, 0));
         IosNotificationCenterPresentation.setNotificationBottomOffset(
                 btm.m.os4.systemuihook.newnotificationcenter.IosNotificationBottomOffsetSettingsKt
                         .readIosNotificationBottomOffset(prefs));

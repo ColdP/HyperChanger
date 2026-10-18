@@ -2,16 +2,19 @@ package btm.m.os4.systemuihook.newnotificationcenter;
 
 import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.RenderEffect;
 import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.animation.ValueAnimator;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.MotionEvent;
 import android.view.ViewTreeObserver;
 import android.view.WindowInsets;
+import android.view.Gravity;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -77,12 +80,29 @@ public final class IosNotificationCenterPresentation {
     private static View clearButton;
     private static int clearButtonVisibility = View.VISIBLE;
     private static float clearButtonAlpha = 1f;
+    private static boolean clearButtonCaptured;
     private static int lastBlur = -1;
     private static int lastStatusBlur = -1;
     private static boolean switching;
     private static boolean gestureActive;
     private static boolean wallpaperEnabled = true;
     private static ValueAnimator headerExitAnimator;
+    private static NotificationHeaderView notificationHeaderBar;
+    private static boolean notificationHeaderEnabled;
+    private static int notificationClearStyle;
+    private static int notificationClearMaterial;
+    private static float notificationClearRadius = 22f;
+    private static int notificationClearPureColor = 0x66FFFFFF;
+    private static int notificationClearAdvancedColor = Color.WHITE;
+    private static int notificationClearAdvancedOpacity = 14;
+    private static int notificationClearAdvancedBlur = 36;
+    private static boolean notificationClearAdvancedHighlight;
+    private static int notificationClearSoftColor = Color.WHITE;
+    private static int notificationClearSoftOpacity = 10;
+    private static int notificationClearSoftBackdropBlur = 80;
+    private static int notificationClearSoftBlur = 36;
+    private static float notificationClearSoftLuminance = .14f;
+    private static int notificationClearSoftRefraction;
 
     private IosNotificationCenterPresentation() {}
 
@@ -238,8 +258,10 @@ public final class IosNotificationCenterPresentation {
         final float[] targets = oldHeaderAlpha;
         final View container = notificationHeader;
         final float containerTarget = notificationHeaderAlpha;
+        final NotificationHeaderView customBar = notificationHeaderBar;
+        final float customBarTarget = customBar == null ? 0f : customBar.getAlpha();
         restoreHeaderChromeVisibility();
-        if (views == null && container == null) {
+        if (views == null && container == null && customBar == null) {
             releasePresentation();
             return;
         }
@@ -251,6 +273,7 @@ public final class IosNotificationCenterPresentation {
         headerExitAnimator.addUpdateListener(animation -> {
             float amount = (Float) animation.getAnimatedValue();
             if (container != null) container.setAlpha(containerTarget * amount);
+            if (customBar != null) customBar.setAlpha(customBarTarget * (1f - amount));
             for (int i = 0; views != null && i < views.length; i++) {
                 View view = views[i];
                 if (view == null) continue;
@@ -271,6 +294,35 @@ public final class IosNotificationCenterPresentation {
 
     public static void setHideClearButton(boolean hide) {
         hideClearButton = hide;
+        syncClearButton();
+    }
+
+    public static void setNotificationHeaderSettings(boolean enabled, int style, int material,
+            float radius, int pureColor, int advancedColor, int advancedOpacity, int advancedBlur,
+            boolean advancedHighlight, int softColor, int softOpacity, int softBackdropBlur,
+            int softBlur, float softLuminance, int softRefraction) {
+        notificationHeaderEnabled = enabled;
+        notificationClearStyle = Math.max(0, Math.min(2, style));
+        notificationClearMaterial = Math.max(0, Math.min(2, material));
+        notificationClearRadius = Math.max(0f, Math.min(60f, radius));
+        notificationClearPureColor = pureColor;
+        notificationClearAdvancedColor = advancedColor;
+        notificationClearAdvancedOpacity = Math.max(0, Math.min(100, advancedOpacity));
+        notificationClearAdvancedBlur = Math.max(0, Math.min(120, advancedBlur));
+        notificationClearAdvancedHighlight = advancedHighlight;
+        notificationClearSoftColor = softColor;
+        notificationClearSoftOpacity = Math.max(0, Math.min(100, softOpacity));
+        notificationClearSoftBackdropBlur = Math.max(0, Math.min(120, softBackdropBlur));
+        notificationClearSoftBlur = Math.max(0, Math.min(120, softBlur));
+        notificationClearSoftLuminance = Math.max(0f, Math.min(.4f, softLuminance));
+        notificationClearSoftRefraction = Math.max(-100, Math.min(100, softRefraction));
+        if (notificationHeaderBar != null) {
+            if (!enabled) removeNotificationHeader();
+            else {
+                notificationHeaderBar.applySettings();
+                syncNotificationHeader();
+            }
+        }
         syncClearButton();
     }
 
@@ -429,6 +481,7 @@ public final class IosNotificationCenterPresentation {
             if (stack == null && capturedStack != null
                     && capturedStack.getRootView() == target.getRootView()) stack = capturedStack;
             Xp.log(TAG + "notification stack " + (stack == null ? "not found" : "attached"));
+            ensureNotificationHeader();
             findHeader();
             observer = target.getViewTreeObserver();
             observer.addOnPreDrawListener(FRAME);
@@ -503,6 +556,7 @@ public final class IosNotificationCenterPresentation {
             lastStatusBlur = statusBlur;
         }
         syncNotifications();
+        syncNotificationHeader();
         syncClockInfo();
     }
 
@@ -610,6 +664,24 @@ public final class IosNotificationCenterPresentation {
 
     private static void syncClearButton() {
         if (window == null) return;
+        if (notificationHeaderEnabled) {
+            findClearButton();
+            if (clearButton != null) {
+                if (!clearButtonCaptured) {
+                    clearButtonVisibility = clearButton.getVisibility();
+                    clearButtonAlpha = clearButton.getAlpha();
+                    clearButtonCaptured = true;
+                }
+                // Keep the OEM click target alive for performClick(), while the custom
+                // button owns the visible surface.
+                clearButton.setVisibility(View.VISIBLE);
+                clearButton.setAlpha(0f);
+                if (notificationHeaderBar != null) {
+                    notificationHeaderBar.setClearEnabled(clearButton.isEnabled());
+                }
+            }
+            return;
+        }
         if (!hideClearButton) {
             if (clearButton != null) {
                 clearButton.setVisibility(clearButtonVisibility);
@@ -631,6 +703,93 @@ public final class IosNotificationCenterPresentation {
             if (clearButton.getVisibility() != View.GONE) clearButtonVisibility = clearButton.getVisibility();
             clearButtonAlpha = clearButton.getAlpha();
             clearButton.setVisibility(View.GONE);
+        }
+    }
+
+    private static void findClearButton() {
+        if (clearButton != null && clearButton.getRootView() == window.getRootView()) return;
+        String[] ids = {"notification_dismiss_view", "clear_all", "clear_all_button",
+                "notification_clear_all", "dismiss_button"};
+        for (String id : ids) {
+            clearButton = byId(window, id);
+            if (clearButton != null) break;
+        }
+        if (clearButton == null) clearButton = findViewByClass(window, "NotificationDismissView");
+        if (clearButton == null) clearButton = findViewByClass(window, "DismissView");
+        if (clearButton == null) clearButton = findViewByClass(window, "CircleAndTickAnimView");
+    }
+
+    private static void ensureNotificationHeader() {
+        if (!notificationHeaderEnabled || panel == null) {
+            removeNotificationHeader();
+            return;
+        }
+        if (notificationHeaderBar != null && notificationHeaderBar.getParent() == panel) return;
+        removeNotificationHeader();
+        notificationHeaderBar = new NotificationHeaderView(panel.getContext());
+        notificationHeaderBar.applySettings();
+        notificationHeaderBar.setAlpha(0f);
+        notificationHeaderBar.setClickable(false);
+        panel.addView(notificationHeaderBar, new FrameLayout.LayoutParams(-1, dp(52)));
+    }
+
+    private static void removeNotificationHeader() {
+        if (notificationHeaderBar != null && notificationHeaderBar.getParent() instanceof ViewGroup) {
+            ((ViewGroup) notificationHeaderBar.getParent()).removeView(notificationHeaderBar);
+        }
+        notificationHeaderBar = null;
+    }
+
+    private static void syncNotificationHeader() {
+        if (panel == null || stack == null || !notificationHeaderEnabled) {
+            removeNotificationHeader();
+            return;
+        }
+        ensureNotificationHeader();
+        if (notificationHeaderBar == null || stack.getHeight() == 0) return;
+        int[] panelPoint = new int[2];
+        int[] stackPoint = new int[2];
+        panel.getLocationInWindow(panelPoint);
+        stack.getLocationInWindow(stackPoint);
+        float topPadding = 0f;
+        try { topPadding = ((Number) Xp.callMethod(stack, "getTopPadding")).floatValue(); }
+        catch (Throwable ignored) {}
+        int scrollY = 0;
+        try { scrollY = ((Number) stack.getClass().getMethod("getOwnScrollY").invoke(stack)).intValue(); }
+        catch (Throwable ignored) {}
+        // Use the first real row as the anchor. The stack itself starts at the panel's
+        // viewport origin on some HyperOS builds, which placed the bar at screen top when
+        // its top padding was used directly. The row location already includes NSSL scroll.
+        float firstTop = firstNotificationTop(stack, panelPoint);
+        if (Float.isNaN(firstTop)) {
+            firstTop = stackPoint[1] - panelPoint[1] + topPadding;
+        }
+        float y = firstTop - dp(60);
+        notificationHeaderBar.setTranslationY(y);
+        // iOS compresses the large time after the list is touched. Tie the same subtle
+        // scale to the real NSSL scroll position so the bar and clock feel like one sheet.
+        float shrink = Math.min(1f, Math.max(0f, scrollY / (float) Math.max(1, dp(180))));
+        float clockScale = 1f - .12f * shrink;
+        if (clock != null) {
+            clock.setScaleX(clockScale);
+            clock.setScaleY(clockScale);
+        }
+        float visual = progress * progress * (3f - 2f * progress);
+        notificationHeaderBar.setAlpha(visual);
+    }
+
+    private static int dp(int value) {
+        if (panel == null) return value;
+        return Math.round(value * panel.getResources().getDisplayMetrics().density);
+    }
+
+    private static void performNativeClear() {
+        findClearButton();
+        if (clearButton == null) return;
+        try {
+            clearButton.performClick();
+        } catch (Throwable error) {
+            Xp.log(TAG + "clear-all click unavailable: " + error);
         }
     }
 
@@ -1115,6 +1274,10 @@ public final class IosNotificationCenterPresentation {
         clockAnimation = null;
         clockInfoOffset = 0f;
         clockInfoBaseTranslation = 0f;
+        if (clock != null) {
+            clock.setScaleX(1f);
+            clock.setScaleY(1f);
+        }
         clockInfoRefreshMinute = -1L;
         stack = null;
         stackOriginalLayoutParams = null;
@@ -1134,6 +1297,8 @@ public final class IosNotificationCenterPresentation {
             clearButton.setAlpha(clearButtonAlpha);
         }
         clearButton = null;
+        clearButtonCaptured = false;
+        removeNotificationHeader();
         host = null;
         panel = null;
         clock = null;
@@ -1190,6 +1355,267 @@ public final class IosNotificationCenterPresentation {
             if (source == null || source.getWidth() <= 0 || source.getHeight() <= 0) return;
             source.draw(canvas);
             if (isAttachedToWindow()) postInvalidateDelayed(1000L);
+        }
+    }
+
+    private static final class NotificationHeaderView extends FrameLayout {
+        private final TextView title;
+        private final ClearButtonView clear;
+        private final View glassSurface;
+        private final GradientDrawable background = new GradientDrawable();
+
+        NotificationHeaderView(Context context) {
+            super(context);
+            setClipChildren(false);
+            setClipToPadding(false);
+            title = new TextView(context);
+            title.setText(localized(context, "通知中心", "Notification Center", "通知センター"));
+            title.setTextColor(Color.WHITE);
+            title.setTextSize(20f);
+            title.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+            title.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+            title.setPadding(Math.round(24.5f * getResources().getDisplayMetrics().density), 0, dp(12), 0);
+            title.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+            addView(title, new FrameLayout.LayoutParams(-2, -1, Gravity.START));
+
+            glassSurface = new View(context);
+            glassSurface.setClickable(false);
+            glassSurface.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            glassSurface.addOnLayoutChangeListener((view, left, top, right, bottom,
+                    oldLeft, oldTop, oldRight, oldBottom) -> {
+                if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) {
+                    applyNativeMaterial(view);
+                }
+            });
+            FrameLayout.LayoutParams surfaceParams = new FrameLayout.LayoutParams(dpScaled(84), dpScaled(40),
+                    Gravity.END | Gravity.CENTER_VERTICAL);
+            surfaceParams.rightMargin = dp(23);
+            addView(glassSurface, surfaceParams);
+
+            clear = new ClearButtonView(context);
+            clear.setOnClickListener(v -> performNativeClear());
+            clear.setContentDescription(localized(context, "清除", "Clear", "消去"));
+            FrameLayout.LayoutParams clearParams = new FrameLayout.LayoutParams(dp(84), dpScaled(40),
+                    Gravity.END | Gravity.CENTER_VERTICAL);
+            clearParams.rightMargin = dp(23);
+            addView(clear, clearParams);
+            setClearEnabled(false);
+        }
+
+        void setClearEnabled(boolean enabled) {
+            clear.setEnabled(enabled);
+            clear.setAlpha(enabled ? 1f : .45f);
+        }
+
+        void applySettings() {
+            clear.applyStyle(notificationClearStyle,
+                    localized(getContext(), "清除", "Clear", "消去"), 13.5f * .92f);
+            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) clear.getLayoutParams();
+            // Keep the transparent click target centered on the visible glass surface. The
+            // surface can be resized independently, while its right edge stays fixed.
+            int glassHeight = notificationTextHeight();
+            int glassWidth;
+            if (notificationClearStyle == 1) {
+                // Keep the icon-only control circular while enlarging its radius to 118%.
+                glassHeight = Math.round(glassHeight * 1.18f);
+                glassWidth = glassHeight;
+            } else {
+                glassWidth = Math.round(glassHeight * clearButtonAspectRatio() * 1.22f);
+            }
+            params.width = glassWidth;
+            params.height = dpScaled(40);
+            params.rightMargin = dp(23);
+            clear.setLayoutParams(params);
+            FrameLayout.LayoutParams surfaceParams = (FrameLayout.LayoutParams) glassSurface.getLayoutParams();
+            surfaceParams.height = glassHeight;
+            surfaceParams.width = glassWidth;
+            surfaceParams.rightMargin = params.rightMargin;
+            glassSurface.setLayoutParams(surfaceParams);
+            float radiusScale = notificationClearStyle == 1 ? 1.18f : 1f;
+            background.setCornerRadius(dpFloat(notificationClearRadius * .92f * radiusScale));
+            // HyperOS's backdrop renderer needs a drawable source, but the source must be
+            // almost transparent so it can sample the wallpaper behind this control.
+            int color = notificationClearMaterial == 2
+                    ? notificationClearPureColor : Color.argb(1, 255, 255, 255);
+            background.setColor(color);
+            if (notificationClearAdvancedHighlight && notificationClearMaterial == 1) {
+                background.setStroke(dp(1), Color.argb(90, 255, 255, 255));
+            } else {
+                background.setStroke(0, Color.TRANSPARENT);
+            }
+            glassSurface.setBackground(background);
+            clear.setBackgroundColor(Color.TRANSPARENT);
+            applyNativeMaterial(glassSurface);
+        }
+
+        private void applyNativeMaterial(View view) {
+            boolean glass = notificationClearMaterial != 2;
+            optional(view, "clearMiBackgroundBlendColor");
+            optional(view, "setPassWindowBlurEnabled", glass);
+            optional(view, "setMiViewBlurMode", glass ? 1 : 0);
+            optional(view, "setMiBackgroundBlurMode", glass ? 1 : 0);
+            optional(view, "setMiBackgroundBlurRadius", notificationClearMaterial == 0
+                    ? notificationClearSoftBackdropBlur : notificationClearAdvancedBlur);
+            if (glass) {
+                int blur = notificationClearSoftBlur;
+                if (notificationClearMaterial == 0) {
+                    optional(view, "setMiGlassBlurRadius", blur, Math.min(500, blur * 2));
+                } else if (notificationClearAdvancedHighlight) {
+                    optional(view, "setMiBloomStroke", new float[]{
+                            3f, 180f, 1f, 1f, 1f, .05f, 8f, .5f, .5f, -.5f, 1f,
+                            1f, 1f, .6f, .5f, .95f, -.5f, 1f, 1f, 1f, .35f,
+                    });
+                }
+                int tint = notificationClearMaterial == 0 ? notificationClearSoftColor : notificationClearAdvancedColor;
+                int opacity = notificationClearMaterial == 0
+                        ? notificationClearSoftOpacity : notificationClearAdvancedOpacity;
+                optional(view, "clearMiBackgroundBlendColor");
+                optional(view, "addMiBackgroundBlendColor", withOpacity(tint, opacity), 101);
+                if (notificationClearMaterial == 0) {
+                applySystemGlassMaterial(view, blur, notificationClearSoftLuminance,
+                        notificationClearSoftRefraction);
+                }
+            }
+        }
+
+        /** Same MiGlassCompat path used by lockscreen shortcut soft-glass backgrounds. */
+        private void applySystemGlassMaterial(View view, int blurRadius, float luminance, int refraction) {
+            try {
+                Class<?> compat = null;
+                ClassLoader[] loaders = {
+                        view.getContext().getClassLoader(),
+                        view.getClass().getClassLoader(),
+                        Thread.currentThread().getContextClassLoader(),
+                };
+                for (ClassLoader loader : loaders) {
+                    if (loader == null) continue;
+                    try {
+                        compat = Class.forName("com.miui.systemui.util.MiGlassCompat", false, loader);
+                        break;
+                    } catch (Throwable ignored) {}
+                }
+                if (compat == null) throw new ClassNotFoundException("MiGlassCompat");
+                int smallBlur = Math.max(0, Math.min(100, blurRadius));
+                float[] parameters = {
+                        .67f, .16f, .09f, 0f, Math.max(0f, Math.min(.4f, luminance)), 1.4f,
+                        -.02f, .3f, .6f, 1f, .03f, 1f, 1f, 1f, .1f, .2f, .3f, 1f, 1f,
+                        72f, 3.8f, 80f, 800f, 1.2f, 1f, -.4f, .6f, -.8f, 1.4f, .7f,
+                        .8f, 1.15f, 4f, 2f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f,
+                };
+                parameters[32] += Math.max(-100, Math.min(100, refraction)) / 100f;
+                compat.getMethod("setMiGlassBlurRadius", View.class, int.class, int.class)
+                        .invoke(null, view, smallBlur, Math.min(500, smallBlur * 2));
+                compat.getMethod("setMiViewMaterialTypeCompat", int.class, View.class)
+                        .invoke(null, 1, view);
+                try {
+                    compat.getMethod("setMiGlassSdfMaxSizeCompat", View.class, float.class, float.class)
+                            .invoke(null, view, (float) view.getWidth(), (float) view.getHeight());
+                } catch (Throwable ignored) {}
+                compat.getMethod("setMiGlassCompat", View.class, float[].class)
+                        .invoke(null, view, parameters);
+            } catch (Throwable error) {
+                Xp.log(TAG + "clear button MiGlass unavailable: " + error);
+            }
+        }
+
+        private void optional(View view, String method, Object... args) {
+            try {
+                Xp.callMethod(view, method, args);
+            } catch (Throwable ignored) {
+                // HyperOS blur APIs vary by build; keep the drawable fallback for missing calls.
+            }
+        }
+
+        private int withOpacity(int color, int opacity) {
+            return Color.argb(Math.round(255f * opacity / 100f), Color.red(color), Color.green(color), Color.blue(color));
+        }
+
+        private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
+        private int dpScaled(int value) { return Math.round(value * getResources().getDisplayMetrics().density * .92f); }
+        private float dpFloat(float value) { return value * getResources().getDisplayMetrics().density; }
+
+        /** Height of the visible title glyphs, used to size the independent glass pill. */
+        private int notificationTextHeight() {
+            android.graphics.Paint.FontMetrics metrics = title.getPaint().getFontMetrics();
+            float measured = metrics.descent - metrics.ascent;
+            return Math.max(dp(1), Math.round(measured > 0f ? measured : dp(20)));
+        }
+
+        private float clearButtonAspectRatio() {
+            return notificationClearStyle == 1 ? 40f / 40f
+                    : (notificationClearStyle == 2 ? 68f / 40f : 84f / 40f);
+        }
+
+        private String localized(Context context, String zh, String en, String ja) {
+            String language = context.getResources().getConfiguration().getLocales().isEmpty()
+                    ? "zh" : context.getResources().getConfiguration().getLocales().get(0).getLanguage();
+            return "en".equals(language) ? en : ("ja".equals(language) ? ja : zh);
+        }
+    }
+
+    /** Centers the icon and label as one group, including icon-only and text-only styles. */
+    private static final class ClearButtonView extends android.widget.LinearLayout {
+        private final CloseIconView icon;
+        private final TextView label;
+
+        ClearButtonView(Context context) {
+            super(context);
+            setOrientation(HORIZONTAL);
+            setGravity(Gravity.CENTER);
+            setClipChildren(false);
+            icon = new CloseIconView(context);
+            label = new TextView(context);
+            label.setTextColor(Color.WHITE);
+            label.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+            label.setGravity(Gravity.CENTER);
+            addView(icon, new LayoutParams(1, 1));
+            addView(label, new LayoutParams(-2, -1));
+        }
+
+        void applyStyle(int style, String text, float textSizeSp) {
+            label.setText(text);
+            label.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, textSizeSp);
+            boolean iconOnly = style == 1;
+            boolean textOnly = style == 2;
+            icon.setVisibility(textOnly ? GONE : VISIBLE);
+            label.setVisibility(iconOnly ? GONE : VISIBLE);
+            int iconSize = Math.max(1, Math.round(label.getTextSize() * .95f));
+            icon.setIconSize(iconSize);
+            LayoutParams iconParams = (LayoutParams) icon.getLayoutParams();
+            iconParams.width = iconSize;
+            iconParams.height = iconSize;
+            iconParams.rightMargin = textOnly || iconOnly ? 0 : Math.round(iconSize * .28f);
+            icon.setLayoutParams(iconParams);
+        }
+    }
+
+    /** Close glyph based on the supplied Close.svg path, sized from the clear text's font. */
+    private static final class CloseIconView extends View {
+        private final android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private int iconSize = 1;
+
+        CloseIconView(Context context) {
+            super(context);
+            paint.setColor(Color.WHITE);
+            paint.setStyle(android.graphics.Paint.Style.STROKE);
+            paint.setStrokeCap(android.graphics.Paint.Cap.ROUND);
+        }
+
+        void setIconSize(int size) {
+            iconSize = Math.max(1, size);
+            paint.setStrokeWidth(iconSize * .14f);
+            requestLayout();
+            invalidate();
+        }
+
+        @Override protected void onMeasure(int widthSpec, int heightSpec) {
+            setMeasuredDimension(iconSize, iconSize);
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            float pad = iconSize * .14f;
+            canvas.drawLine(pad, pad, iconSize - pad, iconSize - pad, paint);
+            canvas.drawLine(iconSize - pad, pad, pad, iconSize - pad, paint);
         }
     }
 
