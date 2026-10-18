@@ -111,7 +111,7 @@ object AppBottomNavHooks {
         displayName = "Weibo",
         packageName = "com.sina.weibo",
         activityName = "com.sina.weibo.MainTabActivity",
-        barResourceName = "main_radio",
+        barResourceName = null,
         anchorResourceName = null,
         requiredTabs = setOf(TabKey.HOME, TabKey.DISCOVER, TabKey.MESSAGES, TabKey.PROFILE),
         targetVersion = "16.10.0 (8202)",
@@ -652,6 +652,7 @@ object AppBottomNavHooks {
         private var resumed = false
         private var attempts = 0
         private var originalBar: ViewGroup? = null
+        private var lastWeiboHierarchySearchAt = 0L
         private var detectedTabs = emptyList<DetectedTab>()
         private var navigationTabs by mutableStateOf(emptyList<DetectedTab>())
         private var nav: ComposeView? = null
@@ -821,6 +822,7 @@ object AppBottomNavHooks {
                     setBackgroundColor(android.graphics.Color.TRANSPARENT)
                     setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
                     setContent {
+                        val currentNavigationTabs = navigationTabs
                         val watchFaceBackdrop = if (config === xiaomiHealthWatchFaceMarket) {
                             rememberBitmapNativeViewBackdrop(
                                 sourceView = navigationBackdropSource,
@@ -833,7 +835,7 @@ object AppBottomNavHooks {
                         Box(Modifier.fillMaxSize()) {
                             CustomNavigation(
                                 sourceView = navigationBackdropSource,
-                                tabs = navigationTabs.mapIndexed { index, tab ->
+                                tabs = currentNavigationTabs.mapIndexed { index, tab ->
                                     HostTab(
                                         label = tab.displayLabel,
                                         className = tab.key.name,
@@ -862,10 +864,13 @@ object AppBottomNavHooks {
                                 } else {
                                     null
                                 },
-                                tabImageVector = if (config === appleMusic) {
-                                    ::appleMusicTabIcon
-                                } else {
-                                    null
+                                tabImageVector = when (config) {
+                                    appleMusic -> ::appleMusicTabIcon
+                                    weibo -> { index ->
+                                        extractedTabIcon(currentNavigationTabs[index].key)
+                                            ?: MiuixIcons.Regular.Search
+                                    }
+                                    else -> null
                                 },
                                 redrawNativeText = config === cloudMusic ||
                                     config === qqMusic || config === appleMusic,
@@ -1017,10 +1022,10 @@ object AppBottomNavHooks {
             if (guard != null) return
             guardRoot = content
             guard = ViewTreeObserver.OnPreDrawListener {
-                val bar = if (config === qqMusic || config === weibo) {
-                    refreshDetectedBar(content)?.container ?: originalBar
-                } else {
-                    originalBar
+                val bar = when (config) {
+                    weibo -> refreshDetectedBar(content)?.container
+                    qqMusic -> refreshDetectedBar(content)?.container ?: originalBar
+                    else -> originalBar
                 }
                 val applePlayerExpanded = config === appleMusic &&
                     isAppleMusicPlayerExpandedOrMoving(content)
@@ -1053,7 +1058,8 @@ object AppBottomNavHooks {
                 syncQQMusicMiniPlayer(content)
             }
             if (config === qqMusic || config === weibo) {
-                if (content != null) refreshDetectedBar(content)
+                val detected = content?.let(::refreshDetectedBar)
+                if (config === weibo && detected == null) return
             }
             // Xiaomi Store reapplies its system-bar appearance while the home page refreshes.
             // Reapply the verified edge-to-edge state after that write on every pre-draw.
@@ -1111,7 +1117,10 @@ object AppBottomNavHooks {
                 return
             }
             val content = activity.findViewById<ViewGroup>(android.R.id.content)
-            val currentTab = if (content != null && (config === qqMusic || config === weibo)) {
+            val currentTab = if (config === weibo) {
+                content?.let(::refreshDetectedBar)?.tabs
+                    ?.firstOrNull { it.identity == tab.identity } ?: return
+            } else if (content != null && config === qqMusic) {
                 refreshDetectedBar(content)?.tabs?.firstOrNull { it.key == tab.key } ?: tab
             } else {
                 tab
@@ -2844,6 +2853,35 @@ object AppBottomNavHooks {
         }
 
         private fun detectBottomBar(content: ViewGroup): DetectedBar? {
+            if (config === weibo) {
+                val cached = WeiboBottomBarDetector.detect(content, originalBar, searchHierarchy = false)
+                val bar = cached ?: run {
+                    // Revalidate the small native row every frame; only walk the whole
+                    // activity on cache misses, at most twice per second during rebuilds.
+                    val now = android.os.SystemClock.uptimeMillis()
+                    if (lastWeiboHierarchySearchAt != 0L && now - lastWeiboHierarchySearchAt < 500L) return null
+                    lastWeiboHierarchySearchAt = now
+                    WeiboBottomBarDetector.detect(content, null) ?: return null
+                }
+                return DetectedBar(bar.container, bar.tabs.map { tab ->
+                    val key = when (tab.feature.kind) {
+                        WeiboTabFeatures.Kind.OTHER -> TabKey.NATIVE
+                        else -> TabKey.valueOf(tab.feature.kind.name)
+                    }
+                    DetectedTab(
+                        key,
+                        if (key == TabKey.NATIVE) {
+                            val label = tab.feature.hostLabel ?: return null
+                            tr(label, label)
+                        } else {
+                            weiboDisplayLabel(key)
+                        },
+                        tab.view,
+                        tab.clickTarget,
+                        tab.feature.identity
+                    )
+                })
+            }
             if (config === xiaomiWallet) return detectWalletBottomBar(content)
             resolveStableBar(content)?.let { candidate ->
                 if (config.coordinateTabSurface) {
@@ -2894,19 +2932,28 @@ object AppBottomNavHooks {
         }
 
         private fun refreshDetectedBar(content: ViewGroup): DetectedBar? {
-            val detected = detectBottomBar(content) ?: return null
+            val detected = detectBottomBar(content) ?: run {
+                // A partial rebuild or an ambiguous match must leave native navigation
+                // usable. Retry discovery on the next frame without keeping stale tabs.
+                if (config === weibo) {
+                    nav?.visibility = View.GONE
+                    restoreOriginalBar()
+                    detectedTabs = emptyList()
+                }
+                return null
+            }
             if (detected.container !== originalBar) {
                 originalBar = detected.container
                 rememberOriginalNavigationLayers(content, detected.container)
                 config.navigationLayerResourceNames.forEach { rememberResourceView(content, it) }
             }
             detectedTabs = detected.tabs
-            if (config === weibo && navigationTabs != detected.tabs) {
-                val selectedKey = navigationTabs.getOrNull(selectedIndex.intValue)?.key
-                navigationTabs = detected.tabs
-                selectedIndex.intValue = detected.tabs.indexOfFirst { it.key == selectedKey }
+            if (config === weibo) {
+                val selectedIdentity = navigationTabs.getOrNull(selectedIndex.intValue)?.identity
+                if (navigationTabs != detected.tabs) navigationTabs = detected.tabs
+                selectedIndex.intValue = detected.tabs.indexOfFirst { isSelectedRecursively(it.view) }
                     .takeIf { it >= 0 }
-                    ?: detected.tabs.indexOfFirst { isSelectedRecursively(it.view) }
+                    ?: detected.tabs.indexOfFirst { it.identity == selectedIdentity }
                         .takeIf { it >= 0 }
                     ?: 0
             }
@@ -2936,7 +2983,6 @@ object AppBottomNavHooks {
         }
 
         private fun parseDirectTabs(candidate: ViewGroup): List<DetectedTab>? {
-            if (config === weibo) return parseWeiboTabs(candidate)
             val tabs = (0 until candidate.childCount).mapNotNull { index ->
                 val child = candidate.getChildAt(index)
                 val key = canonicalTab(semanticText(child)) ?: return@mapNotNull null
@@ -2954,43 +3000,6 @@ object AppBottomNavHooks {
                 val clickTarget = findClickable(child) ?: return null
                 DetectedTab(key, displayLabel(key, semanticText(child)), child, clickTarget)
             }
-        }
-
-        private fun parseWeiboTabs(candidate: ViewGroup): List<DetectedTab>? {
-            if (resourceEntryName(candidate) != "main_radio" || candidate.childCount !in 4..5) return null
-            val tabs = (0 until candidate.childCount).map { index ->
-                val child = candidate.getChildAt(index)
-                val clickTarget = findClickable(child) ?: return null
-                val tag = clickTarget.tag as? Enum<*> ?: return null
-                if (tag.javaClass.name != "com.sina.weibo.tab.l") return null
-                val key = when (tag.name) {
-                    "Home" -> TabKey.HOME
-                    "Video" -> TabKey.VIDEO
-                    "SuperGroup" -> TabKey.SUPERGROUP
-                    "Find" -> TabKey.FIND
-                    "Featured" -> TabKey.FEATURED
-                    "Playlet" -> TabKey.SHORT_DRAMA
-                    "Discover" -> TabKey.DISCOVER
-                    "Message" -> TabKey.MESSAGES
-                    "Me" -> TabKey.PROFILE
-                    else -> return null
-                }
-                DetectedTab(key, weiboDisplayLabel(key), child, clickTarget)
-            }
-            val keys = tabs.map { it.key }
-            val optionalCount = keys.count {
-                it in setOf(
-                    TabKey.VIDEO,
-                    TabKey.SUPERGROUP,
-                    TabKey.FIND,
-                    TabKey.FEATURED,
-                    TabKey.SHORT_DRAMA
-                )
-            }
-            if (keys.toSet().size != keys.size || !keys.containsAll(config.requiredTabs) ||
-                optionalCount != candidate.childCount - config.requiredTabs.size
-            ) return null
-            return tabs.sortedBy { IntArray(2).also(it.view::getLocationInWindow)[0] }
         }
 
         private fun weiboDisplayLabel(key: TabKey): String = when (key) {
@@ -3117,6 +3126,7 @@ object AppBottomNavHooks {
             TabKey.FEATURED -> tr("精选", "精选")
             TabKey.LOAN -> "\u501f\u94b1"
             TabKey.PROFILE -> "\u6211\u7684"
+            TabKey.NATIVE -> tr("更多", "更多")
         }
 
         private fun extractedTabIcon(key: TabKey) = when (config) {
@@ -3217,7 +3227,7 @@ object AppBottomNavHooks {
     private enum class TabKey {
         FACE_HOME, FACE_CATEGORY, FACE_MINE, HEALTH, WORKOUT, DEVICE, HOME, COFFEE_MENU, ENJOY, MEMBERSHIP, CATEGORY, MARKET, PUBLISH, MESSAGES, CONTACTS, FOLLOWING, VIDEO, MUSIC_DISCOVER, STARLIGHT,
         DISCOVER, DYNAMIC, SERVICE, CART, SAVINGS, SHORT_DRAMA, SUPERGROUP, FIND, FEATURED, LOAN, PROFILE, LISTEN_NOW, BROWSE, RADIO,
-        LIBRARY, MUSIC_SEARCH, COMMUNITIES, CHAT, INBOX
+        LIBRARY, MUSIC_SEARCH, COMMUNITIES, CHAT, INBOX, NATIVE
     }
 
     private data class AppConfig(
@@ -3244,7 +3254,8 @@ object AppBottomNavHooks {
         val key: TabKey,
         val displayLabel: String,
         val view: View,
-        val clickTarget: View
+        val clickTarget: View,
+        val identity: String = key.name
     )
 
     private data class OriginalViewState(
