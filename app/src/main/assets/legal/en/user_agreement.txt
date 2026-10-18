@@ -15,7 +15,7 @@ The module is not licensed or intended for MIUI, HyperOS 1-3, other manufacturer
 
 3. License and intellectual property
 
-The project is distributed under Apache License 2.0. Your rights to copy, modify, and redistribute the code are subject to that license and its notices. Components from other open-source projects retain their original licenses and copyrights. Xiaomi, HyperOS, MIUI, and other marks belong to their respective owners and are referenced only to describe compatibility; no endorsement or affiliation is implied.
+The project is distributed under the GNU Affero General Public License, version 3 or, at your option, any later version (AGPL-3.0-or-later). Your rights to copy, modify, and redistribute the code are subject to the chosen license version and its notices, including corresponding-source obligations when distributing the software or allowing users to interact with a modified version over a network. The full license is included in the app and in the repository LICENSE file. Components from other open-source projects retain their original licenses and copyrights. Xiaomi, HyperOS, MIUI, and other marks belong to their respective owners and are referenced only to describe compatibility; no endorsement or affiliation is implied.
 
 4. Prohibited conduct
 

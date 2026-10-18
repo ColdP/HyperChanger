@@ -1,11 +1,17 @@
 HyperChanger
 Copyright 2026 btm_m
 
-This project was previously distributed under the MIT License. The MIT
-copyright notice is retained here as a historical attribution and tribute
-to the original licensing of HyperChanger. Current distributions are made
-available under the Apache License, Version 2.0; see LICENSE for the full
-license text.
+HyperChanger is distributed under the GNU Affero General Public License,
+version 3 or (at your option) any later version
+(SPDX-License-Identifier: AGPL-3.0-or-later). See LICENSE for the full text.
+The project was previously distributed under MIT and Apache-2.0; those
+historical releases retain the rights granted under their original licenses.
+
+Third-party components retain their original licenses and copyright notices.
+This project's license does not replace those component licenses. The bundled
+Apache-2.0 text is in app/src/main/assets/licenses/Apache-2.0.txt.
+Native source attribution is recorded in the file headers and in
+app/src/main/cpp/nativehook/THIRD_PARTY_NOTICES.md.
 
 This product includes the HyperMusicCover lock-screen runtime implementation
 (Main.java, WallpaperProbe.java, Xp.java, MiBlur.java, ShadeBlur.java,

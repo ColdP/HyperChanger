@@ -23,7 +23,7 @@
   <img src="https://img.shields.io/badge/Platform-Android-green?style=flat-square&logo=android" alt="プラットフォーム">
   <img src="https://img.shields.io/badge/minSdk-35-blue?style=flat-square" alt="最小 SDK">
   <img src="https://img.shields.io/badge/targetSdk-37-blue?style=flat-square" alt="ターゲット SDK">
-  <img src="https://img.shields.io/badge/License-Apache--2.0-yellow?style=flat-square" alt="ライセンス">
+  <img src="https://img.shields.io/badge/License-AGPL--3.0--or--later-yellow?style=flat-square" alt="ライセンス">
 </p>
 
 ## 概要
@@ -224,7 +224,7 @@ HyperChanger はコミュニティが開発する実験的なモジュールで�
 
 ## ライセンスと謝辞
 
-本プロジェクトは [Apache License 2.0](LICENSE) で公開されています。過去の MIT ライセンスに関する帰属表記とソースの権利表記は [NOTICE](NOTICE) を参照してください。
+本プロジェクトは [AGPL-3.0-or-later](LICENSE) で公開され、GNU Affero General Public License 第3版または任意の後続版を選択できます。過去の MIT・Apache-2.0 ライセンスおよび第三者の権利表記は [NOTICE](NOTICE) を参照してください。
 
 - ロック画面の音楽カバー実装は [HyperMusicCover](https://github.com/zyl6932/HyperMusicCover)（Copyright 2026 zyl6932、Apache License 2.0）から導入・改変しています。
 - 折りたたみ時のアイランドの輪郭、大小アイランド間の距離、顔認証アイランドの実装は [HyperIsland 3.1.8](https://github.com/1812z/HyperIsland)（Copyright 2026 1812z、MIT）を基にしています。全文は [HyperIsland-MIT.txt](app/src/main/assets/licenses/HyperIsland-MIT.txt) を参照してください。

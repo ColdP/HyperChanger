@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package btm.m.os4.systemuihook
 
 /** Percent of each launcher's stock glass parameter; 100 preserves its theme. */

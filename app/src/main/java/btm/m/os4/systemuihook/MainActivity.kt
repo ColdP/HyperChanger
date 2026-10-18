@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright 2026 btm_m
 package btm.m.os4.systemuihook
 
@@ -11022,7 +11022,7 @@ private fun About(back: () -> Unit, openPage: (PageId) -> Unit, onDebugMode: () 
         }
         item {
             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, colors = aboutCardColors()) {
-                ArrowPreference(title = tr("license", "LICENSE"), summary = "Apache License 2.0", onClick = { openPage(PageId.LICENSE) })
+                ArrowPreference(title = tr("license", "LICENSE"), summary = tr("project_license_name", "AGPL-3.0-or-later"), onClick = { openPage(PageId.LICENSE) })
                 ArrowPreference(title = tr("githubRepository", "GitHub Repository"), summary = "github.com/ColdP/HyperChanger", onClick = { openUrl(context, "https://github.com/ColdP/HyperChanger") })
                 ArrowPreference(title = tr("telegramGroup", "Telegram 群组"), summary = "t.me/HyperChanger", onClick = { openUrl(context, "https://t.me/HyperChanger") })
                 ArrowPreference(title = tr("qqGroup", "QQ 群"), summary = tr("qqGroupNumber", "群号: 429188055"), onClick = { openUrl(context, "https://qm.qq.com/q/rQhbQbiYLe") })
@@ -11478,43 +11478,31 @@ private fun AboutAdvancedMaterialHeader(onLogoClick: () -> Unit, onVersionClick:
 }
 
 @Composable
-private fun License(back: () -> Unit) = AppPage("LICENSE", back) { padding, scroll ->
-    val licenseText = """Apache License
-Version 2.0, January 2004
-http://www.apache.org/licenses/
-
-Copyright 2026 btm_m
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
-NOTICE: Historical licensing attribution is documented in the repository's
-NOTICE file; current distributions are under Apache License 2.0.
-
-(以下中文翻译仅供参考，一切法律效力以英文原文为准)
-
-Apache 许可证 2.0 版
-版权所有 2026 btm_m
-
-本文件遵循 Apache License 2.0（以下简称“本许可证”）授权；除非遵守本许可证，否则不得使用本文件。你可以在以下地址获取本许可证副本：
-http://www.apache.org/licenses/LICENSE-2.0
-
-除非适用法律要求或书面同意，依据本许可证分发的软件均按“原样”提供，不附带任何明示或暗示的担保或条件。有关本许可证具体权限和限制，请参阅许可证正文。
-
-致敬说明：历史授权归属与版权信息见仓库 NOTICE 文件；当前版本依据 Apache License 2.0 发布。"""
-    AppList(padding, scroll, 28) {
-        item {
-            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(16.dp)) {
-                Text(licenseText, style = MiuixTheme.textStyles.body2)
+private fun License(back: () -> Unit) {
+    val context = LocalContext.current
+    val licenseText = remember(context) {
+        context.assets.open("licenses/AGPL-3.0-or-later.txt").bufferedReader().use { it.readText() }
+    }
+    AppPage(tr("license", "LICENSE"), back) { padding, scroll ->
+        AppList(padding, scroll, 28) {
+            item {
+                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(16.dp)) {
+                    Text(tr("project_license_name", "AGPL-3.0-or-later"), style = MiuixTheme.textStyles.title3)
+                    Text(
+                        tr("project_license_scope", "本项目采用 GNU Affero 通用公共许可证第 3 版或任何后续版本（AGPL-3.0-or-later）。分发本软件或让用户通过网络与修改版本交互时，请遵守对应源代码提供等许可义务。第三方组件保留其原始许可与版权声明。以下为许可证英文原文。"),
+                        style = MiuixTheme.textStyles.body2,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                    ArrowPreference(
+                        title = tr("project_license_source", "查看项目源代码"),
+                        onClick = { openUrl(context, "https://github.com/ColdP/HyperChanger") },
+                    )
+                }
+            }
+            item {
+                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(16.dp)) {
+                    Text(licenseText, style = MiuixTheme.textStyles.body2)
+                }
             }
         }
     }

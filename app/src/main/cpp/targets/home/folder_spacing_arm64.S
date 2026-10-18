@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Entry replaces the first instruction of calItemSpacing's two Dart epilogues.
 // The stock calculation has finished; no C calls or runtime safepoints occur.
 .text

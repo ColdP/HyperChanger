@@ -23,7 +23,7 @@
   <img src="https://img.shields.io/badge/Platform-Android-green?style=flat-square&logo=android" alt="平台">
   <img src="https://img.shields.io/badge/minSdk-35-blue?style=flat-square" alt="最低 SDK">
   <img src="https://img.shields.io/badge/targetSdk-37-blue?style=flat-square" alt="目标 SDK">
-  <img src="https://img.shields.io/badge/License-Apache--2.0-yellow?style=flat-square" alt="许可证">
+  <img src="https://img.shields.io/badge/License-AGPL--3.0--or--later-yellow?style=flat-square" alt="许可证">
 </p>
 
 ## 项目简介
@@ -224,7 +224,7 @@ HyperChanger 是社区开发的实验性模块，与小米无隶属或官方授�
 
 ## 许可证与致谢
 
-项目基于 [Apache License 2.0](LICENSE) 开源，历史 MIT 授权致敬说明及来源声明见 [NOTICE](NOTICE)。
+项目依据 [AGPL-3.0-or-later](LICENSE) 开源，可选择 GNU Affero 通用公共许可证第 3 版或任何后续版本。历史 MIT、Apache-2.0 授权说明及第三方来源声明见 [NOTICE](NOTICE)。
 
 - 锁屏音乐封面运行时引入并适配自 [HyperMusicCover](https://github.com/zyl6932/HyperMusicCover)（Copyright 2026 zyl6932，Apache License 2.0）。
 - 收起岛平滑轮廓、大小岛间距及人脸解锁岛相关实现适配自 [HyperIsland 3.1.8](https://github.com/1812z/HyperIsland)（Copyright 2026 1812z，MIT）；完整声明见 [HyperIsland-MIT.txt](app/src/main/assets/licenses/HyperIsland-MIT.txt)。

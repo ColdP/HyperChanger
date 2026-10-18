@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #include "folder_spacing.h"
 #include "home_effects.h"
 #include "home_native_dock.h"

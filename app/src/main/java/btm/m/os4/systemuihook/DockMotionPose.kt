@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package btm.m.os4.systemuihook
 
 /** A transform of the existing Dock surface, in launcher-window coordinates. */

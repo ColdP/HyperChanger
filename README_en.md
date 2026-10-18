@@ -23,7 +23,7 @@
   <img src="https://img.shields.io/badge/Platform-Android-green?style=flat-square&logo=android" alt="Platform">
   <img src="https://img.shields.io/badge/minSdk-35-blue?style=flat-square" alt="Minimum SDK">
   <img src="https://img.shields.io/badge/targetSdk-37-blue?style=flat-square" alt="Target SDK">
-  <img src="https://img.shields.io/badge/License-Apache--2.0-yellow?style=flat-square" alt="License">
+  <img src="https://img.shields.io/badge/License-AGPL--3.0--or--later-yellow?style=flat-square" alt="License">
 </p>
 
 ## Overview
@@ -224,7 +224,7 @@ HyperChanger is an experimental community module with no affiliation with or off
 
 ## License and acknowledgments
 
-The project is released under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for historical MIT attribution and source notices.
+The project is released under [AGPL-3.0-or-later](LICENSE): GNU Affero General Public License version 3 or, at your option, any later version. See [NOTICE](NOTICE) for historical MIT and Apache-2.0 licensing and third-party notices.
 
 - The lock-screen music-cover runtime is imported and adapted from [HyperMusicCover](https://github.com/zyl6932/HyperMusicCover) (Copyright 2026 zyl6932, Apache License 2.0).
 - Collapsed-island smoothing, large/small island spacing, and face-unlock island implementations are adapted from [HyperIsland 3.1.8](https://github.com/1812z/HyperIsland) (Copyright 2026 1812z, MIT). The full notice is in [HyperIsland-MIT.txt](app/src/main/assets/licenses/HyperIsland-MIT.txt).
