@@ -6268,128 +6268,214 @@ class HyperSystemUiModule : XposedModule() {
         generateSequence<View>(view) { it.parent as? View }.any { it.javaClass.name.contains("dynamicisland", true) }
 
     private var softGlassRuntime: SoftGlassRuntimeSettings? = null
+    private val softGlassBaselines = WeakHashMap<View, MutableMap<Method, Array<Any?>>>()
+    private val softGlassLegacyBlends = WeakHashMap<View, ArrayList<Point>>()
+    private val softGlassDimLayers = WeakHashMap<View, Boolean>()
+    private val softGlassArrayPairs = WeakHashMap<View, Pair<FloatArray, FloatArray>>()
+    private val softGlassRefreshHandler = Handler(Looper.getMainLooper())
+    private val softGlassRefreshing = ThreadLocal<Boolean>()
+    private val softGlassBlendDispatching = ThreadLocal<Boolean>()
+    private val softGlassRefresh = Runnable {
+        val surfaces = synchronized(softGlassBaselines) {
+            softGlassBaselines.map { (view, setters) -> view to setters.toMap() }
+        }
+        val legacyBlends = synchronized(softGlassBaselines) { softGlassLegacyBlends.map { it.key to it.value.toList() } }
+        softGlassRefreshing.set(true)
+        try {
+            surfaces.forEach { (view, setters) ->
+                if (view.isAttachedToWindow) setters.forEach { (method, arguments) ->
+                    runCatching { method.invoke(view, *arguments) }
+                }
+            }
+            legacyBlends.forEach { (view, colors) ->
+                if (view.isAttachedToWindow) runCatching {
+                    View::class.java.getMethod("clearMiBackgroundBlendColor").invoke(view)
+                    val add = View::class.java.getMethod("addMiBackgroundBlendColor", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+                    colors.forEach { add.invoke(view, it.x, it.y) }
+                }
+            }
+        } finally {
+            softGlassRefreshing.remove()
+            if (softGlassRuntime?.settings?.enabled != true) {
+                synchronized(softGlassBaselines) { softGlassBaselines.clear(); softGlassArrayPairs.clear(); softGlassLegacyBlends.clear(); softGlassDimLayers.clear() }
+            }
+        }
+    }
+
+    private fun rememberSoftGlassBaseline(view: View, method: Method, arguments: Array<Any?>) {
+        if (softGlassRefreshing.get() == true) return
+        synchronized(softGlassBaselines) { softGlassBaselines.getOrPut(view) { mutableMapOf() }[method] = arguments }
+    }
+
+    private fun isSoftGlassSurface(view: View): Boolean =
+        softGlassRefreshing.get() == true || isNotificationRowBackground(view) || isShadeBackgroundView(view) ||
+            isControlCenterCall() || isNotificationCenterCall() || isMediaNotificationView(view)
+
+    private fun isSoftGlassPanelLayer(view: View): Boolean =
+        isShadeBackgroundView(view) || stackContainsClass("ShadeBlendBlurController") ||
+            stackContainsClass("ShadeWindowBlurController") || stackContainsClass("ShadeSolidBackgroundController")
+
+    private fun softGlassBlendPoints(original: ArrayList<*>, percent: Int): ArrayList<Point> =
+        ArrayList<Point>(original.size).apply {
+            original.filterIsInstance<Point>().forEach { add(Point(softGlassColorAlpha(it.x, percent), it.y)) }
+        }
 
     private fun installShadeMaterialHooks(preferences: SharedPreferences, classLoader: ClassLoader) {
-        softGlassRuntime = SoftGlassRuntimeSettings(preferences)
-        runCatching {
-            installFocusNotificationMaterialEnforcementHooks(preferences, classLoader)
-            installFocusNotificationBackgroundHook(preferences, classLoader)
-
-            val setGlass = View::class.java.getMethod("setMiGlass", FloatArray::class.java)
-            hook(setGlass)
-                .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("shade-notification-glass-material")
-                .intercept { chain ->
-                    val original = chain.getArg(0) as? FloatArray
-                    val view = chain.thisObject as? View
-                    val controlCenter = isControlCenterCall()
-                    val notification = isNotificationCenterCall()
-                    val normalNotificationMaterial = if (
-                        original != null &&
-                        original.size >= MIN_GLASS_PARAMS_SIZE &&
-                        original.any { it != 0f } &&
-                        shouldUseNormalNotificationMaterial(view, preferences)
-                    ) {
-                        view?.let(::normalNotificationGlassParams)
-                    } else {
-                        null
-                    }
-                    val tuning = elementMaterialOverride(preferences, view, controlCenter, notification)
-                    if (original != null && original.size >= MIN_GLASS_PARAMS_SIZE &&
-                        (normalNotificationMaterial != null || (tuning?.enabled == true && original.any { it != 0f }))
-                    ) {
-                        logControlCenterMaterialHit(view, "glass-material")
-                        val material = normalNotificationMaterial ?: original
-                        chain.proceedWith(
-                            chain.thisObject,
-                            arrayOf(if (tuning?.enabled == true) tuneSoftGlass(material, tuning) else material),
-                        )
-                    } else {
-                        chain.proceed()
-                    }
-                }
-
-            val setGlassRadius = View::class.java.getMethod(
-                "setMiGlassBlurRadius",
-                Int::class.javaPrimitiveType,
-                Int::class.javaPrimitiveType,
-            )
-            hook(setGlassRadius)
-                .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("shade-notification-glass-radius")
-                .intercept { chain ->
-                    val view = chain.thisObject as? View
-                    val tuning = elementMaterialOverride(
-                        preferences,
-                        view,
-                        isControlCenterCall(),
-                        isNotificationCenterCall(),
-                    )
-                    if (tuning?.enabled == true) {
-                        val percent = if (isShadeBackgroundView(view) || isShadeBlurProviderCall()) tuning.backgroundBlur else tuning.elementBlur
-                        chain.proceedWith(chain.thisObject, arrayOf(
-                            softGlassBlur(chain.getArg(0) as Int, percent),
-                            softGlassBlur(chain.getArg(1) as Int, percent),
-                        ))
-                    } else chain.proceed()
-                }
-
-            val setBackgroundBlur = View::class.java.getMethod(
-                "setMiBackgroundBlurRadius",
-                Int::class.javaPrimitiveType,
-            )
-            hook(setBackgroundBlur)
-                .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("shade-panel-background-radius")
-                .intercept { chain ->
-                    val view = chain.thisObject as? View
-                    val tuning = softGlassTargetSettings(preferences, view)
-                    if (tuning?.enabled == true) {
-                        chain.proceedWith(
-                            chain.thisObject,
-                            arrayOf(softGlassBlur(chain.getArg(0) as Int, if (isShadeBackgroundView(view) || isShadeBlurProviderCall()) tuning.backgroundBlur else tuning.elementBlur)),
-                        )
-                    } else {
-                        chain.proceed()
-                    }
-                }
-            val setScaleRatio = View::class.java.getMethod(
-                "setMiBackgroundBlurScaleRatio",
-                Float::class.javaPrimitiveType,
-            )
-            hook(setScaleRatio)
-                .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("shade-panel-background-scale")
-                .intercept { chain ->
-                    val view = chain.thisObject as? View
-                    val tuning = softGlassTargetSettings(preferences, view)
-                    if (tuning?.enabled == true) {
-                        chain.proceedWith(
-                            chain.thisObject,
-                            arrayOf(softGlassScale(chain.getArg(0) as Float, if (isShadeBackgroundView(view) || isShadeBlurProviderCall()) tuning.backgroundScale else tuning.elementScale)),
-                        )
-                    } else chain.proceed()
-                }
-            val setBlendColors = View::class.java.getMethod("setMiBackgroundBlendColors", ArrayList::class.java)
-            hook(setBlendColors)
-                .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("shade-panel-background-tint")
-                .intercept { chain ->
-                    val view = chain.thisObject as? View
-                    val original = chain.getArg(0) as? ArrayList<*>
-                    val normalBlend = if (original != null) {
-                        normalNotificationBlendPoints(view, preferences)
-                    } else {
-                        null
-                    }
-                    if (normalBlend != null) {
-                        chain.proceedWith(chain.thisObject, arrayOf(normalBlend))
-                    } else chain.proceed()
-                }
-            log(Log.INFO, TAG, "Installed configurable notification and control-center material hooks")
-        }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install notification and shade material hooks", error)
+        softGlassRuntime = SoftGlassRuntimeSettings(preferences) {
+            softGlassRefreshHandler.removeCallbacks(softGlassRefresh)
+            softGlassRefreshHandler.postDelayed(softGlassRefresh, 16L)
         }
+        installFocusNotificationMaterialEnforcementHooks(preferences, classLoader)
+        installFocusNotificationBackgroundHook(preferences, classLoader)
+        runCatching {
+            val method = View::class.java.getMethod("setMiGlass", FloatArray::class.java)
+            hookDeoptimized(method)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("soft-glass-v4-recipe")
+                .intercept { chain ->
+                    val view = chain.thisObject as? View ?: return@intercept chain.proceed()
+                    val original = chain.getArg(0) as? FloatArray ?: return@intercept chain.proceed()
+                    val settings = softGlassRuntime?.settings
+                    val normal = if (original.size >= 42 && original.any { it != 0f } &&
+                        shouldUseNormalNotificationMaterial(view, preferences)) normalNotificationGlassParams(view) else null
+                    if (settings?.enabled != true || !isSoftGlassSurface(view)) {
+                        return@intercept if (normal != null) chain.proceedWith(view, arrayOf(normal)) else chain.proceed()
+                    }
+                    val baseline = synchronized(softGlassBaselines) {
+                        val previous = softGlassArrayPairs[view]
+                        if (original === previous?.second) previous.first else original.copyOf()
+                    }
+                    rememberSoftGlassBaseline(view, method, arrayOf(baseline))
+                    val tuned = tuneSoftGlass(normal ?: baseline, settings)
+                    synchronized(softGlassBaselines) { softGlassArrayPairs[view] = baseline to tuned }
+                    chain.proceedWith(view, arrayOf(tuned))
+                }
+        }.onFailure { error -> log(Log.INFO, TAG, "Soft glass API unavailable: setMiGlass", error) }
+        runCatching {
+            val method = View::class.java.getMethod("setMiGlassBlurRadius", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+            hookDeoptimized(method)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("soft-glass-v4-dual-radius")
+                .intercept { chain ->
+                    val view = chain.thisObject as? View ?: return@intercept chain.proceed()
+                    val settings = softGlassRuntime?.settings ?: return@intercept chain.proceed()
+                    if (!settings.enabled || !isSoftGlassSurface(view)) return@intercept chain.proceed()
+                    rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0), chain.getArg(1)))
+                    // GlassToken.blurRadius is separate from the ordinary background blur.
+                    // Keep both native samples and their animation-zero values independent.
+                    chain.proceedWith(view, arrayOf(softGlassBlur(chain.getArg(0) as Int, settings.refractionBlur), softGlassBlur(chain.getArg(1) as Int, settings.refractionBlur)))
+                }
+        }.onFailure { error -> log(Log.INFO, TAG, "Soft glass API unavailable: setMiGlassBlurRadius", error) }
+        runCatching {
+            val method = View::class.java.getMethod("setMiBackgroundBlurRadius", Int::class.javaPrimitiveType)
+            hookDeoptimized(method)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("soft-glass-v4-background-radius")
+                .intercept { chain ->
+                    val view = chain.thisObject as? View ?: return@intercept chain.proceed()
+                    val settings = softGlassRuntime?.settings ?: return@intercept chain.proceed()
+                    if (!settings.enabled || !isSoftGlassSurface(view)) return@intercept chain.proceed()
+                    rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0)))
+                    chain.proceedWith(view, arrayOf(softGlassBlur(chain.getArg(0) as Int, settings.backgroundBlur)))
+                }
+        }.onFailure { error -> log(Log.INFO, TAG, "Soft glass API unavailable: setMiBackgroundBlurRadius", error) }
+        runCatching {
+            val method = View::class.java.getMethod("setMiBackgroundBlurScaleRatio", Float::class.javaPrimitiveType)
+            hookDeoptimized(method)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("soft-glass-v4-sampling-scale")
+                .intercept { chain ->
+                    val view = chain.thisObject as? View ?: return@intercept chain.proceed()
+                    val settings = softGlassRuntime?.settings ?: return@intercept chain.proceed()
+                    if (!settings.enabled || !isSoftGlassSurface(view)) return@intercept chain.proceed()
+                    rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0)))
+                    chain.proceedWith(view, arrayOf(softGlassScale(chain.getArg(0) as Float, settings.backgroundScale)))
+                }
+        }.onFailure { error -> log(Log.INFO, TAG, "Soft glass API unavailable: setMiBackgroundBlurScaleRatio", error) }
+        runCatching {
+            val method = View::class.java.getMethod("setMiBackgroundBlendColors", ArrayList::class.java)
+            hookDeoptimized(method)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("soft-glass-v4-blend-batch")
+                .intercept { chain ->
+                    if (softGlassBlendDispatching.get() == true) return@intercept chain.proceed()
+                    val view = chain.thisObject as? View ?: return@intercept chain.proceed()
+                    val original = chain.getArg(0) as? ArrayList<*> ?: return@intercept chain.proceed()
+                    val normal = normalNotificationBlendPoints(view, preferences)
+                    val settings = softGlassRuntime?.settings
+                    if (settings?.enabled != true || (!isSoftGlassPanelLayer(view) && softGlassRefreshing.get() != true)) {
+                        return@intercept if (normal != null) chain.proceedWith(view, arrayOf(normal)) else chain.proceed()
+                    }
+                    // New batch setter and old addMiBackgroundBlendColor are alternatives.
+                    // Never tune this list again through the Compat wrapper.
+                    val copy = ArrayList(original.filterIsInstance<Point>().map { Point(it.x, it.y) })
+                    rememberSoftGlassBaseline(view, method, arrayOf(copy))
+                    if (softGlassRefreshing.get() != true) synchronized(softGlassBaselines) { softGlassLegacyBlends.remove(view) }
+                    val percent = settings.backgroundOpacity
+                    softGlassBlendDispatching.set(true)
+                    try { chain.proceedWith(view, arrayOf(softGlassBlendPoints(normal ?: copy, percent))) }
+                    finally { softGlassBlendDispatching.remove() }
+                }
+        }.onFailure { error -> log(Log.INFO, TAG, "Soft glass API unavailable: setMiBackgroundBlendColors", error) }
+        runCatching {
+            val clear = View::class.java.getMethod("clearMiBackgroundBlendColor")
+            val add = View::class.java.getMethod("addMiBackgroundBlendColor", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+            hookDeoptimized(clear).setExceptionMode(ExceptionMode.PROTECTIVE).setId("soft-glass-v4-blend-clear").intercept { chain ->
+                val view = chain.thisObject as? View
+                if (view != null && softGlassRefreshing.get() != true && softGlassBlendDispatching.get() != true) synchronized(softGlassBaselines) {
+                    softGlassLegacyBlends.remove(view)
+                    softGlassBaselines[view]?.keys?.removeAll { it.name == "setMiBackgroundBlendColors" }
+                }
+                chain.proceed()
+            }
+            hookDeoptimized(add).setExceptionMode(ExceptionMode.PROTECTIVE).setId("soft-glass-v4-blend-add").intercept { chain ->
+                val view = chain.thisObject as? View ?: return@intercept chain.proceed()
+                val settings = softGlassRuntime?.settings ?: return@intercept chain.proceed()
+                if (softGlassBlendDispatching.get() == true) return@intercept chain.proceed()
+                if (!settings.enabled || (!isSoftGlassPanelLayer(view) && softGlassRefreshing.get() != true)) return@intercept chain.proceed()
+                if (softGlassRefreshing.get() != true) synchronized(softGlassBaselines) {
+                    softGlassLegacyBlends.getOrPut(view) { arrayListOf() }.add(Point(chain.getArg(0) as Int, chain.getArg(1) as Int))
+                }
+                chain.proceedWith(view, arrayOf(softGlassColorAlpha(chain.getArg(0) as Int, settings.backgroundOpacity), chain.getArg(1)))
+            }
+        }.onFailure { error -> log(Log.INFO, TAG, "Legacy blend API unavailable", error) }
+        runCatching {
+            val method = View::class.java.getMethod("setMiSelfBlur", Int::class.javaPrimitiveType, ArrayList::class.java)
+            hookDeoptimized(method)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("soft-glass-v4-window-self-blur")
+                .intercept { chain ->
+                    val view = chain.thisObject as? View ?: return@intercept chain.proceed()
+                    val settings = softGlassRuntime?.settings ?: return@intercept chain.proceed()
+                    if (!settings.enabled || (!stackContainsClass("ShadeWindowBlurController") && softGlassRefreshing.get() != true)) return@intercept chain.proceed()
+                    val original = chain.getArg(1) as? ArrayList<*> ?: return@intercept chain.proceed()
+                    val copy = ArrayList(original.filterIsInstance<Point>().map { Point(it.x, it.y) })
+                    rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0), copy))
+                    val percent = settings.backgroundOpacity * settings.backgroundDarkening / 100
+                    softGlassBlendDispatching.set(true)
+                    try { chain.proceedWith(view, arrayOf(softGlassBlur(chain.getArg(0) as Int, settings.backgroundBlur), softGlassBlendPoints(copy, percent))) }
+                    finally { softGlassBlendDispatching.remove() }
+                }
+        }.onFailure { error -> log(Log.INFO, TAG, "Soft glass API unavailable: setMiSelfBlur", error) }
+        runCatching {
+            val method = View::class.java.getMethod("setBackgroundColor", Int::class.javaPrimitiveType)
+            hookDeoptimized(method)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("soft-glass-v4-panel-color")
+                .intercept { chain ->
+                    val view = chain.thisObject as? View ?: return@intercept chain.proceed()
+                    val settings = softGlassRuntime?.settings ?: return@intercept chain.proceed()
+                    if (!settings.enabled) return@intercept chain.proceed()
+                    val dim = stackContainsClass("ShadeWindowBlurController")
+                    val solid = stackContainsClass("ShadeSolidBackgroundController")
+                    if (!settings.enabled || (!dim && !solid && softGlassRefreshing.get() != true)) return@intercept chain.proceed()
+                    rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0)))
+                    if (softGlassRefreshing.get() != true) synchronized(softGlassBaselines) { softGlassDimLayers[view] = dim }
+                    val isDim = dim || synchronized(softGlassBaselines) { softGlassDimLayers[view] == true }
+                    val percent = if (isDim) settings.backgroundOpacity * settings.backgroundDarkening / 100 else settings.backgroundOpacity
+                    chain.proceedWith(view, arrayOf(softGlassColorAlpha(chain.getArg(0) as Int, percent)))
+                }
+        }.onFailure { error -> log(Log.INFO, TAG, "Soft glass API unavailable: setBackgroundColor", error) }
     }
 
     private fun installLockscreenClockColonHook(
@@ -9628,18 +9714,6 @@ class HyperSystemUiModule : XposedModule() {
         }
         return tuned
     }
-
-    private fun elementMaterialOverride(
-        preferences: SharedPreferences,
-        view: View?,
-        controlCenter: Boolean,
-        notification: Boolean,
-    ): SoftGlassSettings? = if (view != null && (
-        isNotificationRowBackground(view) || isShadeBackgroundView(view) || controlCenter || notification
-    )) softGlassRuntime?.settings else null
-
-    private fun softGlassTargetSettings(preferences: SharedPreferences, view: View?): SoftGlassSettings? =
-        elementMaterialOverride(preferences, view, isControlCenterCall(), isNotificationCenterCall())
 
     private fun applyBlendColorTuning(original: ArrayList<*>, tuning: GlassTuning): ArrayList<Point> =
         ArrayList<Point>(original.size).also { tuned ->

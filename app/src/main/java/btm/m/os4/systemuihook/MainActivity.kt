@@ -276,6 +276,7 @@ private enum class PageId {
     SHADE,
     SHADE_PRESETS,
     SOFT_GLASS_PARAMETERS,
+    SOFT_GLASS_PRESETS,
     GESTURE_HANDLE_STYLE, DESKTOP, DESKTOP_MATERIAL,
     ISLAND, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
@@ -4689,7 +4690,8 @@ private fun Detail(
         PageId.DESKTOP -> Desktop(dockSettings, updateDock, homeRecentsSettings, updateHomeRecents, homeFolderSettings, updateHomeFolder, homeMaterialSettings, updateHomeMaterial, openPage, back)
         PageId.DESKTOP_MATERIAL -> HomeMaterialPage(homeMaterialSettings, updateHomeMaterial, back)
         PageId.SHADE_PRESETS -> ShadePresets(settings, update, presetActions, back)
-        PageId.SOFT_GLASS_PARAMETERS -> SoftGlassParametersPage(back)
+        PageId.SOFT_GLASS_PARAMETERS -> SoftGlassParametersPage(openPage, back)
+        PageId.SOFT_GLASS_PRESETS -> SoftGlassPresetsPage(back)
         PageId.GESTURE_HANDLE_STYLE -> GestureHandleStylePage(back)
         PageId.ISLAND -> Island(openPage, onRequestNotificationPermission, back)
         PageId.UNLOCK_ISLAND -> UnlockIslandPage(back)
@@ -5520,7 +5522,40 @@ private fun Shade(
             ?.putBoolean(KEY_HIDE_GLOBAL_GESTURE_HANDLE, gesturePrefs.getBoolean(KEY_HIDE_GLOBAL_GESTURE_HANDLE, false))
             ?.apply()
     }
+    val softGlassStore = remember(context) { SoftGlassSettingsStore(context) }
+    var softGlass by remember { mutableStateOf(softGlassStore.settings) }
+    val glassChanged = LocalNotificationSettingsChanged.current
+    LaunchedEffect(service) {
+        softGlassStore.reload()
+        service?.let(softGlassStore::syncRemote)
+        softGlass = softGlassStore.settings
+    }
     AppList(p, scroll, 28) {
+        item {
+            Group(tr("柔光玻璃参数调整", "柔光玻璃参数调整")) {
+                SwitchPreference(
+                    title = tr("柔光玻璃参数调整", "柔光玻璃参数调整"),
+                    summary = tr("softGlassScope", "统一调整通知、控制中心与悬浮通知的柔光玻璃，保留系统浅色与深色材质差异。"),
+                    checked = softGlass.enabled,
+                    onCheckedChange = { enabled ->
+                        softGlassStore.update(service) { it.copy(enabled = enabled) }
+                        softGlass = softGlassStore.settings
+                        glassChanged()
+                    },
+                )
+                AnimatedVisibility(
+                    visible = softGlass.enabled,
+                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                ) {
+                    Column {
+                        ArrowPreference(title = tr("柔光玻璃参数调整", "柔光玻璃参数调整"), onClick = { openPage(PageId.SOFT_GLASS_PARAMETERS) })
+                        ArrowPreference(title = tr("softGlassPresets", "柔光玻璃预设"), onClick = { openPage(PageId.SOFT_GLASS_PRESETS) })
+                    }
+                }
+            }
+        }
+
         item {
             Group(tr("\u754c\u9762", "\u754c\u9762")) {
                 SwitchPreference(
@@ -5712,11 +5747,7 @@ private fun Shade(
             }
         }
         item {
-            Group(tr("柔光玻璃参数调整", "柔光玻璃参数调整")) {
-                ArrowPreference(
-                    title = tr("柔光玻璃参数调整", "柔光玻璃参数调整"),
-                    onClick = { openPage(PageId.SOFT_GLASS_PARAMETERS) },
-                )
+            Group(tr("圆角", "圆角")) {
                 ArrowPreference(title = tr("\u63a7\u5236\u4e2d\u5fc3\u5706\u89d2\u8be6\u7ec6\u8bbe\u7f6e", "\u63a7\u5236\u4e2d\u5fc3\u5706\u89d2\u8be6\u7ec6\u8bbe\u7f6e"), onClick = { openPage(PageId.CONTROL) })
             }
         }
@@ -5730,17 +5761,46 @@ private fun Shade(
 }
 
 @Composable
-private fun SoftGlassParametersPage(back: () -> Unit) = AppPage(
-    tr("柔光玻璃参数调整", "柔光玻璃参数调整"), back,
-    restartScopes = setOf(ScopeApplication.SYSTEM_UI),
-) { padding, scroll ->
+private fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, onSelected: (Int) -> Unit) {
+    val backdrop = LocalToolbarBackdrop.current
+    val surface = MiuixTheme.colorScheme.surfaceContainer
+    val shape = RoundedCornerShape(50.dp)
+    val glass = if (backdrop != null && isRuntimeShaderSupported()) Modifier.drawBackdrop(
+        backdrop = backdrop,
+        shape = { shape },
+        effects = {
+            vibrancy()
+            blur(6.dp.toPx())
+            lens(18.dp.toPx(), 44.dp.toPx(), depthEffect = true, chromaticAberration = true)
+        },
+        highlight = { Highlight.Default.copy(alpha = .62f) },
+        onDrawSurface = { drawRect(surface.copy(alpha = .6f)) },
+    ) else Modifier.background(surface, shape)
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 8.dp).clip(shape).then(glass)) {
+        val tabWidth = (maxWidth - 8.dp) / 2
+        TabRowWithContour(
+            tabs = tabs, selectedTabIndex = selected, onTabSelected = onSelected,
+            colors = TabRowDefaults.tabRowColors(
+                backgroundColor = ComposeColor.Transparent,
+                selectedBackgroundColor = MiuixTheme.colorScheme.onSurface.copy(alpha = .10f),
+            ),
+            minWidth = tabWidth, maxWidth = tabWidth, itemSpacing = 0.dp,
+            cornerRadius = 50.dp,
+            modifier = Modifier.fillMaxWidth().padding(4.dp),
+        )
+    }
+}
+
+@Composable
+private fun SoftGlassParametersPage(openPage: (PageId) -> Unit, back: () -> Unit) {
+    var tab by rememberSaveable { mutableIntStateOf(0) }
     val context = LocalContext.current
     val service by HookApplication.service.collectAsStateWithLifecycle()
     val changed = LocalNotificationSettingsChanged.current
     val store = remember(context) { SoftGlassSettingsStore(context) }
     var value by remember { mutableStateOf(store.settings) }
-    var advanced by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(service) {
+        store.reload()
         service?.let(store::syncRemote)
         value = store.settings
     }
@@ -5749,62 +5809,221 @@ private fun SoftGlassParametersPage(back: () -> Unit) = AppPage(
         value = store.settings
         changed()
     }
-    AppList(padding, scroll, 28) {
-        item {
-            Group(tr("柔光玻璃参数调整", "柔光玻璃参数调整")) {
-                SwitchPreference(
-                    title = tr("柔光玻璃参数调整", "柔光玻璃参数调整"),
-                    summary = tr("softGlassScope", "统一调整通知、控制中心与悬浮通知的柔光玻璃，保留系统浅色与深色材质差异。"),
-                    checked = value.enabled,
-                    onCheckedChange = { enabled -> updateGlass { it.copy(enabled = enabled) } },
-                )
-                ArrowPreference(
-                    title = tr("softGlassReset", "恢复柔光玻璃默认参数"),
-                    onClick = { updateGlass { SoftGlassSettings(enabled = it.enabled) } },
-                )
-            }
-        }
-        if (value.enabled) {
+    AppPage(
+        tr("柔光玻璃参数调整", "柔光玻璃参数调整"), back,
+        restartScopes = setOf(ScopeApplication.SYSTEM_UI),
+        header = {
+            SoftGlassHeaderTabs(
+                listOf(tr("玻璃参数调整", "玻璃参数调整"), tr("背景调整", "背景调整")),
+                tab, { tab = it },
+            )
+        },
+    ) { padding, scroll ->
+        AppList(padding, scroll, 28) {
             item {
-                Group(tr("softGlassBlurScale", "模糊与缩放")) {
-                    Text(
-                        tr("softGlassBlurHint", "100% 保持系统效果，0% 关闭对应模糊或缩放；缩放仅影响系统已有的背景采样缩放。"),
-                        modifier = Modifier.padding(16.dp), style = MiuixTheme.textStyles.body2,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                Group(tr("softGlassPresets", "柔光玻璃预设")) {
+                    ArrowPreference(title = tr("softGlassPresets", "柔光玻璃预设"), onClick = { openPage(PageId.SOFT_GLASS_PRESETS) })
+                    ArrowPreference(
+                        title = tr("softGlassReset", "恢复柔光玻璃默认参数"),
+                        onClick = { updateGlass { SoftGlassSettings(enabled = it.enabled) } },
                     )
-                    ParameterIntSlide(tr("softGlassElementBlur", "元素模糊度"), value.elementBlur, 0..200, "%", 100) { n -> updateGlass { it.copy(elementBlur = n) } }
-                    ParameterIntSlide(tr("softGlassBackgroundBlur", "背景模糊度"), value.backgroundBlur, 0..200, "%", 100) { n -> updateGlass { it.copy(backgroundBlur = n) } }
-                    ParameterIntSlide(tr("softGlassElementScale", "元素缩放程度"), value.elementScale, 0..200, "%", 100) { n -> updateGlass { it.copy(elementScale = n) } }
-                    ParameterIntSlide(tr("softGlassBackgroundScale", "背景缩放程度"), value.backgroundScale, 0..200, "%", 100) { n -> updateGlass { it.copy(backgroundScale = n) } }
                 }
             }
-            item {
-                Group(tr("softGlassOptics", "玻璃光学参数")) {
-                    Text(
-                        tr("softGlassOpticsHint", "0% 保持系统原值，负值减弱、正值增强；原值为零时按小幅偏移调整。点击数值可精确输入或恢复默认。"),
-                        modifier = Modifier.padding(16.dp), style = MiuixTheme.textStyles.body2,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
-                    softGlassParameters.filter { !it.advanced }.forEach { definition ->
-                        ParameterIntSlide(tr(definition.title, definition.title), value.adjustments[definition.key] ?: 0, -100..200, "%", 0) { n ->
-                            updateGlass { it.copy(adjustments = it.adjustments + (definition.key to n)) }
+            if (tab == 0) {
+                item {
+                    Group(tr("softGlassOptics", "玻璃光学参数")) {
+                        ParameterIntSlide(tr("玻璃模糊", "玻璃模糊"), value.refractionBlur, 0..200, "%", 100) { n ->
+                            updateGlass { it.copy(refractionBlur = n) }
                         }
-                    }
-                    SwitchPreference(title = tr("softGlassAdvanced", "显示高级光学参数"), checked = advanced, onCheckedChange = { advanced = it })
-                }
-            }
-            if (advanced) {
-                softGlassParameters.filter { it.advanced }.forEach { definition ->
-                    item(key = definition.key) {
-                        Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                        Text(
+                            tr("softGlassOpticsHint", "0% 保持系统原值，负值减弱、正值增强；原值为零时按小幅偏移调整。点击数值可精确输入或恢复默认。"),
+                            modifier = Modifier.padding(16.dp), style = MiuixTheme.textStyles.body2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                        softGlassParameters.forEach { definition ->
                             ParameterIntSlide(tr(definition.title, definition.title), value.adjustments[definition.key] ?: 0, -100..200, "%", 0) { n ->
                                 updateGlass { it.copy(adjustments = it.adjustments + (definition.key to n)) }
                             }
                         }
                     }
                 }
+            } else {
+                item {
+                    Group(tr("背景调整", "背景调整")) {
+                        Text(
+                            tr("softGlassBackgroundHint", "统一调整通知中心、控制中心及柔光玻璃采样背景。100% 保持系统值，0% 关闭对应效果；不透明度与压暗保留系统展开动画，系统原值为零时不会额外着色。"),
+                            modifier = Modifier.padding(16.dp), style = MiuixTheme.textStyles.body2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                        ParameterIntSlide(tr("softGlassBackgroundBlur", "背景模糊度"), value.backgroundBlur, 0..200, "%", 100) { n -> updateGlass { it.copy(backgroundBlur = n) } }
+                        ParameterIntSlide(tr("softGlassBackgroundScale", "背景缩放程度"), value.backgroundScale, 0..200, "%", 100) { n -> updateGlass { it.copy(backgroundScale = n) } }
+                        ParameterIntSlide(tr("背景不透明度", "背景不透明度"), value.backgroundOpacity, 0..200, "%", 100) { n -> updateGlass { it.copy(backgroundOpacity = n) } }
+                        ParameterIntSlide(tr("背景压暗", "背景压暗"), value.backgroundDarkening, 0..200, "%", 100) { n -> updateGlass { it.copy(backgroundDarkening = n) } }
+                    }
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun SoftGlassPresetsPage(back: () -> Unit) {
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    val changed = LocalNotificationSettingsChanged.current
+    val store = remember(context) { SoftGlassSettingsStore(context) }
+    var presets by remember { mutableStateOf(store.presets) }
+    var scopeIndex by rememberSaveable { mutableIntStateOf(0) }
+    val scope = SoftGlassPresetScope.entries[scopeIndex]
+    var showSave by remember { mutableStateOf(false) }
+    var showImport by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf<SoftGlassPreset?>(null) }
+    var export by remember { mutableStateOf<SoftGlassPreset?>(null) }
+    var pendingJson by remember { mutableStateOf<String?>(null) }
+    var qr by remember { mutableStateOf<QrShareRequest?>(null) }
+    var pendingQr by remember { mutableStateOf<QrShareRequest?>(null) }
+    val coroutine = rememberCoroutineScope()
+    fun toast(key: String) { Toast.makeText(context, tr(key, key), Toast.LENGTH_SHORT).show() }
+    LaunchedEffect(service) {
+        store.reload()
+        service?.let(store::syncRemote)
+        presets = store.presets
+    }
+    fun applyPreset(preset: SoftGlassPreset) {
+        store.reload()
+        store.update(service, preset::applyTo)
+        changed()
+        toast("预设已应用")
+    }
+    fun importPayload(payload: String) {
+        runCatching { SoftGlassPresetCodec.decode(payload) }.onSuccess { preset ->
+            store.reload()
+            store.savePreset(service, preset)
+            presets = store.presets
+            applyPreset(preset)
+            toast("预设已导入")
+        }.onFailure { toast("导入失败") }
+    }
+    val jsonImport = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) coroutine.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use {
+                        val buffer = CharArray(SoftGlassPresetCodec.MAX_PAYLOAD_LENGTH + 1)
+                        var length = 0
+                        while (length < buffer.size) {
+                            val count = it.read(buffer, length, buffer.size - length)
+                            if (count < 0) break
+                            length += count
+                        }
+                        require(length <= SoftGlassPresetCodec.MAX_PAYLOAD_LENGTH)
+                        String(buffer, 0, length)
+                    } ?: error("Missing input")
+                }
+            }.onSuccess(::importPayload).onFailure { toast("导入失败") }
+        }
+    }
+    val qrImport = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) coroutine.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+                    require(bounds.outWidth > 0 && bounds.outHeight > 0)
+                    val options = BitmapFactory.Options().apply {
+                        inSampleSize = 1
+                        while (bounds.outWidth / inSampleSize > 2048 || bounds.outHeight / inSampleSize > 2048) inSampleSize *= 2
+                    }
+                    val bitmap = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) } ?: error("Missing image")
+                    try { readPresetQrCode(bitmap) } finally { bitmap.recycle() }
+                }
+            }.onSuccess(::importPayload).onFailure { toast("导入失败") }
+        }
+    }
+    val jsonExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        val payload = pendingJson
+        pendingJson = null
+        if (uri != null && payload != null) coroutine.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { it.write(payload) } ?: error("Missing output")
+                }
+            }.onSuccess { toast("预设已导出") }.onFailure { toast("导出失败") }
+        }
+    }
+    val qrExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
+        val request = pendingQr
+        pendingQr = null
+        if (uri != null && request != null) coroutine.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val bitmap = createPresetQrCode(request.payload)
+                    try {
+                        context.contentResolver.openOutputStream(uri)?.use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) } ?: error("Missing output")
+                    } finally { bitmap.recycle() }
+                }
+            }.onSuccess { toast("预设已导出") }.onFailure { toast("导出失败") }
+        }
+    }
+    fun display(preset: SoftGlassPreset): ShadePreset = ShadePreset(
+        if (preset.builtIn) tr(preset.name, preset.name) else preset.name,
+        SoftGlassPresetCodec.encode(preset), preset.builtIn,
+    )
+    AppPage(tr("softGlassPresets", "柔光玻璃预设"), back) { padding, scroll ->
+        AppList(padding, scroll, 28) {
+            item {
+                Group(tr("softGlassPresetScope", "预设范围")) {
+                    Text(tr("softGlassPresetHint", "选择保存、导出及应用内置预设的范围。导入和自定义预设保留各自范围，不会更改总开关。长按预设可导出或删除。"), modifier = Modifier.padding(16.dp), style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                    GlassSegmentedTabs(SoftGlassPresetScope.entries.map { tr(it.title, it.title) }, scopeIndex, { scopeIndex = it }, Modifier.padding(horizontal = 12.dp))
+                    ArrowPreference(title = tr("保存当前预设", "保存当前预设"), onClick = { showSave = true })
+                    ArrowPreference(title = tr("导入预设", "导入预设"), onClick = { showImport = true })
+                }
+            }
+            item {
+                Group(tr("内置预设", "内置预设")) {
+                    builtInSoftGlassPresets().forEach { preset ->
+                        val scoped = preset.copy(scope = scope)
+                        PresetRow(display(scoped), onUse = { applyPreset(scoped) }, onLongPress = { selected = scoped })
+                    }
+                }
+            }
+            item {
+                Group(tr("用户预设", "用户预设")) {
+                    if (presets.isEmpty()) Text(tr("暂无保存的用户预设", "暂无保存的用户预设"), modifier = Modifier.padding(16.dp), style = MiuixTheme.textStyles.body2)
+                    presets.forEach { preset ->
+                        PresetRow(display(preset).copy(name = preset.name + " · " + tr(preset.scope.title, preset.scope.title)), onUse = { applyPreset(preset) }, onLongPress = { selected = preset })
+                    }
+                }
+            }
+        }
+    }
+    SavePresetDialog(showSave, { showSave = false }) { name ->
+        store.reload()
+        val preset = SoftGlassPreset(name.trim(), store.settings, scope)
+        store.savePreset(service, preset)
+        presets = store.presets
+        showSave = false
+        export = preset
+    }
+    ImportPresetDialog(showImport, { showImport = false },
+        { showImport = false; jsonImport.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
+        { showImport = false; qrImport.launch("image/*") },
+    )
+    selected?.let { preset ->
+        PresetActionDialog(display(preset), { selected = null },
+            { applyPreset(preset); selected = null },
+            { selected = null; export = preset },
+            { store.deletePreset(service, preset.id); presets = store.presets; selected = null },
+        )
+    }
+    export?.let { preset ->
+        ExportPresetDialog(true, display(preset), { export = null },
+            { pendingJson = SoftGlassPresetCodec.encode(preset); export = null; jsonExport.launch("HyperChanger-glass-preset.json") },
+            { qr = QrShareRequest(display(preset).name, SoftGlassPresetCodec.encode(preset)); export = null },
+        )
+    }
+    qr?.let { request ->
+        QrShareDialog(request, { qr = null }, { pendingQr = request; qrExport.launch("HyperChanger-glass-preset.png") })
     }
 }
 
@@ -6250,7 +6469,7 @@ private fun ImportPresetDialog(show: Boolean, onDismiss: () -> Unit, onJson: () 
     WindowDialog(show = show, onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(tr("导入预设", "导入预设"), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
-            GlassDialogButton(onJson, Modifier.fillMaxWidth()) { Text("JSON") }
+            GlassDialogButton(onJson, Modifier.fillMaxWidth()) { Text(tr("JSON", "JSON")) }
             GlassDialogButton(onQr, Modifier.fillMaxWidth()) { Text(tr("二维码", "二维码")) }
             GlassDialogButton(onDismiss, Modifier.fillMaxWidth()) { Text(tr("取消", "取消")) }
         }
@@ -6287,7 +6506,7 @@ private fun ExportPresetDialog(
     WindowDialog(show = show, onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(String.format(Locale.getDefault(), tr("export_preset_named", "导出 %s"), preset.name), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
-            GlassDialogButton(onJson, Modifier.fillMaxWidth()) { Text("JSON") }
+            GlassDialogButton(onJson, Modifier.fillMaxWidth()) { Text(tr("JSON", "JSON")) }
             GlassDialogButton(onQr, Modifier.fillMaxWidth()) { Text(tr("二维码", "二维码")) }
             GlassDialogButton(onDismiss, Modifier.fillMaxWidth()) { Text(tr("取消", "取消")) }
         }

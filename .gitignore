@@ -42,9 +42,10 @@ hyperos4-glass-blur-main/
 /.jadx.zip
 
 # Temporary reverse-engineering and device-test files
+/.tmp/
+/.java-tmp/
 /.tmp-*
 /device-*.txt
-/apk-output-final/
 /custom-my-device/
 /RELEASE_NOTES*.md
 
@@ -57,13 +58,11 @@ hyperos4-glass-blur-main/
 /*.aar
 /*.resources.txt
 /*.svg
-/*.png
 
 # Local reverse-engineering projects, dumps, and generated output
 /apk-output/
 /apk-output-final/
 /lockscreen-weather-extracted/
-/PowerShell 7.6.4/
 /PowerShell */
 /null/
 /work/
@@ -87,3 +86,7 @@ hyperos4-glass-blur-main/
 
 # Handoff documents are kept locally and out of version control
 /HANDOFF/
+
+# Python inspection caches
+__pycache__/
+*.py[cod]
