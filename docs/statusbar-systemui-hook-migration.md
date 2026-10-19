@@ -1786,3 +1786,149 @@ Targets / selectors (read with the complete method, not standalone classificatio
 Direct local calls: `hookDeoptimized`, `readInstanceField`, `controlRadiusSettings`, `hookUnifiedRadiusSetter`, `hookMaterialStyle`, `hookDeviceCenterOutline`
 
 Companion references: `TOP_BUTTONS_CLASS`, `MEDIA_PANEL_CLASS`, `SLIDER_VIEW_HOLDER_CLASS`, `BRIGHTNESS_PANEL_SLIDER_DELEGATE_CLASS`, `SECONDARY_PANEL_CONTROLLER_BASE_CLASS`, `SECONDARY_VOLUME_PANEL_CLASS`, `MI_BACKGROUND_STYLE_CLASS`, `DEVICE_CENTER_ENTRY`, `cornerTargetClasses`
+
+## 阶段一结果（阶段二源文件创建前）
+
+最终验证：`.\gradlew.bat :app:assembleDebug` 成功（19s，40 tasks：6 executed、34 up-to-date）；随后 `git diff --check` 通过。
+
+完整逆向对照通过：67 个方法、3 个顶层类型、35 个 companion 声明；其他 268 个基线文件 SHA256 未变。原锁屏时钟缩放对象保持原位，生成 View ID 的时机保持原位。无实机验证。
+
+迁移方法（保留原方法名；新类另外提供两个包装入口，承接原安装 guard）：
+
+- `isBatteryPercentageView`
+- `installBatteryThemeAndTextHooks`
+- `hideBatteryText`
+- `shouldSkipBatteryThemeRefresh`
+- `installBatteryInternalTextHooks`
+- `captureBatteryDrawables`
+- `restoreBatteryDrawables`
+- `installBatteryDrawableHistoryHook`
+- `installStatusBarIconThemeGuards`
+- `captureImageViewDrawables`
+- `restoreImageViewDrawables`
+- `findViewsByResourceNames`
+- `installStatusBarIconsLeftHook`
+- `applyStatusBarIconsLeft`
+- `positionStatusBarLeftIconGroup`
+- `installStackedMobileSignalHook`
+- `updateStackedMobileSubscription`
+- `updateStackedMobileSubscriptions`
+- `captureMobileNetworkTypeSource`
+- `captureMobileSignalLayout`
+- `resolveDataSim`
+- `ensureIndependentMobileType`
+- `captureHorizontalMargins`
+- `applyHorizontalMargins`
+- `restoreIndependentMobileType`
+- `applyIndependentMobileTypeTypeface`
+- `applyIndependentMobileType`
+- `formatIndependentMobileType`
+- `isUsingMobileData`
+- `anchorSystemMobileTypeToDualSignal`
+- `restoreSystemMobileType`
+- `readCurrentFlowValue`
+- `registerStackedMobilePresentation`
+- `registerMobileNetworkStateCallback`
+- `isStackedMobilePresentationSignal`
+- `isIndependentMobileTypeView`
+- `enforceSystemMobileSignalVisibility`
+- `shouldHideSystemMobileSignal`
+- `isDescendantOf`
+- `isStackedSecondaryMobileRoot`
+- `shouldSuppressStackedMobileIcon`
+- `refreshStackedMobilePresentations`
+- `refreshStackedMobilePresentationForView`
+- `scheduleStackedMobilePresentationRefresh`
+- `applyStackedMobilePresentation`
+- `isStackedMobileDualSim`
+- `stackedMobileRenderOrder`
+- `ensureDualMobileSignal`
+- `resolveDualMobileSignalWidth`
+- `updateDualMobileSignalLayout`
+- `configureDualMobileSignalConstraints`
+- `copyLayoutParams`
+- `getLayoutParamInt`
+- `setLayoutParamInt`
+- `setDualMobileSignalVisibility`
+- `restoreDualMobileSignal`
+- `hideSecondaryMobileRoot`
+- `restoreSecondaryMobileRoot`
+- `requestStackedMobileParentLayout`
+- `loadFirstClass`
+- `setStackedMobileViewVisibility`
+- `invokeInt`
+- `findViewByEntryName`
+- `resolveMobileSignalColor`
+- `resolveMobileSignalColorFilter`
+- `resolveDrawableTintList`
+- `resolveColorFilterColor`
+
+迁移类型：`StackedMobileSubscription`, `StackedMobilePresentation`, `StackedMobileDrawable`。
+
+迁移 companion 声明：`BATTERY_HOLLOW_ICON_CLASS`, `BATTERY_ICON_CLASS`, `BATTERY_INDICATOR_CLASS`, `BATTERY_METER_VIEW_CLASS`, `INDEPENDENT_MOBILE_TYPE_TAG`, `KEY_MOBILE_NETWORK_TYPE_BOLD`, `KEY_MOBILE_NETWORK_TYPE_CUSTOM_TEXT`, `KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC`, `KEY_MOBILE_NETWORK_TYPE_POSITION`, `KEY_MOBILE_NETWORK_TYPE_SHRINK_5GA_A`, `LEFT_STATUS_BAR_MANAGER_TAG`, `MOBILE_ICON_BINDER_CLASS`, `MOBILE_ICON_BINDER_CLASSES`, `MODERN_MOBILE_VIEW_CLASSES`, `MODERN_STATUS_BAR_VIEW_CLASS`, `WIFI_VIEW_BINDER_CLASS`, `batteryDrawableHistory`, `batteryResourceRefreshSeen`, `restoringBatteryDrawable`, `stackedMobileActiveSubscriptionIds`, `stackedMobileApplying`, `stackedMobileNetworkCallbackRegistered`, `stackedMobileNetworkController`, `stackedMobileNetworkTypes`, `stackedMobilePreferenceChangeListener`, `stackedMobilePreferenceListenerRegistered`, `stackedMobilePreferences`, `stackedMobilePresentations`, `stackedMobileSignalHookInstalled`, `stackedMobileSignalLock`, `stackedMobileSubscriptions`, `statusBarDarkIconManagerArgs`, `statusBarDarkIconManagerConstructor`, `statusBarDarkIconManagerFactory`, `statusBarIconsLeftHookInstalled`。
+
+暂留：全局 View 可见性混合 Hook/安装标志、共享 Resources 尺寸拦截、锁屏运营商文字；通用反射与反优化、共享配置键仍由原模块唯一持有。三个信号判断和电池安装在原调用点委托。两个专属安装 guard 的写入点与异常语义不变。
+
+## 阶段二结果
+
+迁移 8 个方法和 1 个内部类；保持每个完整实现，仅替换 Xposed API 接收者、共享不可变输入名称及 4 个委托入口的可见性。
+
+| 实际迁移成员 | 目标 / 职责 |
+| --- | --- |
+| `installDynamicIslandAppearanceHooks` | `DynamicIslandBaseContentView.updateBackgroundBg` 的原参数筛选、`IslandIconViewHolder.setSmallIcon`；原有专属轮廓实现原样移动，不改写共享材质或圆角分发 |
+| `ExpandedIslandCornerProvider` | 原 outline provider 包装及 `baseRadiusPx` 缓存，缓存仍属于每个 provider 实例 |
+| `isExpandedIslandCornerTarget` | expanded/fake expanded 资源名和展开视图类判断 |
+| `applySmallMediaIconCorner` | 原小媒体图标轮廓偏移、clip 和 invalidate |
+| `installDynamicIslandMiniBarHook` | `DynamicIslandBaseContentView.updateMiniBar`，保持参数/返回类型筛选、配置条件、两项布尔字段、miniBar 可见性及原生 translation 调用次数 |
+| `findDynamicIslandMethod` | mini-bar 唯一使用的继承链方法查询，未新增缓存 |
+| `setDynamicIslandBooleanField` | mini-bar 专属字段写入，继续通过原模块的字段查询实现 |
+| `installDynamicIslandLayoutHooks` | 原 reset 高度对齐及三个 content 类的 `updateBigIslandLayout*` 回调；原有无可见副作用的回调也保留 |
+| `installDynamicIslandBottomGlowHook` | `DynamicGlowEffectView` 的两个原光效方法及原返回值后处理 |
+
+迁移 8 个专属 companion 声明：`DYNAMIC_ISLAND_GLOW_EFFECT_CLASS`、
+`DYNAMIC_ISLAND_EXPANDED_VIEW_CLASS`、`DYNAMIC_ISLAND_CONTENT_CLASS`、
+`DYNAMIC_ISLAND_UPDATE_MINI_BAR_METHOD`、`DYNAMIC_ISLAND_UPDATE_MINI_BAR_TRANSLATION_METHOD`、
+`DYNAMIC_ISLAND_LAYOUT_CLASSES`、`KEY_REMOVE_DYNAMIC_ISLAND_MEDIA_MINI_BAR_WHITELIST_LIMIT`、
+`KEY_DISABLE_MEDIA_ISLAND_BOTTOM_GLOW`。配置值/默认值未变；外观设置仍由原设置文件持有。
+
+原模块仍唯一持有 `installDynamicIslandHooks`、`dynamicIslandHooksInstalled`、
+`installDynamicIslandClassDiscovery`、`findDynamicIslandField` 及共享包名、基础内容类名。
+不为四个委托子组新设安装标志。原协调器保留
+background → layout → expanded material → bottom glow → self blur → media source → mini bar → appearance → whitelist
+的顺序；原发现器置位/失败复位和 plugin 分支安装后置位语义不变。媒体来源图标的两条原安装调用路径完整保留。
+
+两个新增类仅依赖 `XposedModule` 基类及类型明确的原实现回调；不相互引用，也不依赖具体
+`HyperSystemUiModule` 类型。原私有反射方法未扩大可见性，不通过反射访问模块私有字段。
+阶段一的 `StatusBarHooks.kt` 在整个阶段二 SHA256 不变。工作期间检测到外部已生成阶段一提交
+`61b93c29`（Migrate Status Bar Hooks），核实其源码与已验证的阶段一内容一致，未重置或覆盖该提交。
+
+第二次独立执行 `.\gradlew.bat :app:assembleDebug`：**BUILD SUCCESSFUL in 19s**，
+40 tasks：6 executed、34 up-to-date。仍有原有 Kotlin/Gradle 警告，没有编译或打包错误。
+构建后 `git diff --check` 通过。
+
+## 最终静态与产物核验
+
+- 75 个迁移方法、3 个顶层类型、1 个内部类和 43 个 companion 声明与修改前完整源码逆向对照通过。
+- 所有剩余原模块成员，撤销明确的委托替换后，与基线逐项一致；未迁移的常量/状态声明也一致。
+- 三份源码的全部 `.setId(...)` 表达式多重集合与原文件一致；两个状态栏专属 guard 仅保留一个写入路径；动态岛共享 guard 和原生命周期/进程分发不变。
+- 其余 268 个基线文件 SHA256 未变，包括 `IosShadeMaterial.java`、`ShadeLayer.java`、既有控制中心/通知/锁屏实现和设置文件。三个语言 JSON 均可解析，没有文案或配置变更。
+- APK ZIP 完整性通过；12 个 DEX 中类定义无重复，确认原模块、两新增类、三个既有拆分类及新的 provider 均有实际类定义；旧模块名下的 provider 类定义已不存在。
+
+生成 APK：`D:\ReverseProject\HyperChanger\app\build\outputs\apk\debug\app-debug.apk`。
+大小：122561613 字节。
+SHA256：`97884ed30ceb72da6d9190aa46983cb656e272e96196dee80b8ba7fadcc34753`。
+
+本轮修改文件：`HyperSystemUiModule.kt`、新增 `StatusBarHooks.kt`、新增 `SystemUiHooks.kt`、
+本审计文档（其中阶段一已由外部提交保存）。未修改其他分类或此前行为修复。
+
+## 延期与未实测范围
+
+继续保留共享 visibility/resources/radius/theme/material、动态岛背景与材质、焦点白名单、
+通知/岛共享媒体图标、全局电源菜单、音量和全局手势条完整链路。具体耦合原因见前面的归属表；
+本轮不以搬迁数量为目标扩展接口，不继续拆分 Others 或既有控制中心/通知/锁屏组。
+
+**没有实机测试。** 构建和静态核验不能证明设备运行行为：仍需验证双 SIM 切换、网络类型变更、
+偏好实时更新、图标重建/居左、深浅色与主题切换后的电池/信号恢复；动态岛 plugin 首次加载及重建、
+mini-bar 原生位移、图标/展开轮廓和底部光效；以及通知、控制中心、锁屏、电源菜单、音量及共享材质的交互。
+此前灰色遮罩修复源码保持不变，其设备回归也未在本轮执行。未安装 APK、重启或终止 SystemUI。
+本轮仅完成结构迁移，不宣称性能提升。

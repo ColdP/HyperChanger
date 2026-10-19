@@ -197,6 +197,14 @@ class HyperSystemUiModule : XposedModule() {
         stackedMobileDualContainerId = stackedMobileDualContainerId,
         logTag = TAG,
     )
+    private val systemUiHooks = SystemUiHooks(
+        module = this,
+        hookDeoptimized = ::hookDeoptimized,
+        findDynamicIslandField = ::findDynamicIslandField,
+        systemUiPluginPackageName = SYSTEM_UI_PLUGIN,
+        dynamicIslandBaseContentClass = DYNAMIC_ISLAND_BASE_CONTENT_CLASS,
+        logTag = TAG,
+    )
     private val islandSmoothingHook by lazy { IslandSmoothingHook(this) }
     private val lockscreenFaceUnlockHook by lazy { LockscreenFaceUnlockHook(this) }
     private val unlockFocusAuthHook by lazy { UnlockFocusAuthHook(this) }
@@ -4787,13 +4795,13 @@ class HyperSystemUiModule : XposedModule() {
         preferences: SharedPreferences,
     ) {
         installDynamicIslandBackgroundHooks(classLoader, preferences)
-        installDynamicIslandLayoutHooks(classLoader, preferences)
+        systemUiHooks.installDynamicIslandLayoutHooks(classLoader, preferences)
         installDynamicIslandExpandedMaterialHook(classLoader, preferences)
-        installDynamicIslandBottomGlowHook(classLoader, preferences)
+        systemUiHooks.installDynamicIslandBottomGlowHook(classLoader, preferences)
         installDynamicIslandSelfBlurHook(classLoader, preferences)
         installMediaSourceIconHooks(classLoader, preferences)
-        installDynamicIslandMiniBarHook(classLoader, preferences)
-        installDynamicIslandAppearanceHooks(classLoader, preferences)
+        systemUiHooks.installDynamicIslandMiniBarHook(classLoader, preferences)
+        systemUiHooks.installDynamicIslandAppearanceHooks(classLoader, preferences)
         if (!focusIslandWhitelistPluginHooksInstalled) {
             focusIslandWhitelistPluginHooksInstalled =
                 installFocusIslandWhitelistPluginHooks(classLoader, preferences)
@@ -4801,118 +4809,9 @@ class HyperSystemUiModule : XposedModule() {
         log(Log.INFO, TAG, "Installed dynamic-island hooks")
     }
 
-    /** Applies the optional island corner controls after the vendor has created its views. */
-    private fun installDynamicIslandAppearanceHooks(
-        classLoader: ClassLoader,
-        preferences: SharedPreferences,
-    ) {
-        runCatching {
-            val baseContent = classLoader.loadClass(DYNAMIC_ISLAND_BASE_CONTENT_CLASS)
-            baseContent.declaredMethods.filter {
-                it.name == "updateBackgroundBg" && it.parameterTypes.size == 2 && it.parameterTypes[0] == View::class.java
-            }.forEachIndexed { index, method ->
-                method.isAccessible = true
-                hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
-                    .setId("dynamic-island-expanded-corner-material:$index")
-                    .intercept { chain ->
-                        val result = chain.proceed()
-                        val view = chain.getArg(0) as? View
-                        val radiusDp = preferences.readExpandedIslandCornerRadius()
-                        if (preferences.getBoolean(KEY_EXPANDED_ISLAND_CORNER_RADIUS_ENABLED, false) &&
-                            radiusDp != 0f && view != null && isExpandedIslandCornerTarget(view)
-                        ) {
-                            view.outlineProvider?.let { provider ->
-                                if (provider !is ExpandedIslandCornerProvider) {
-                                    view.outlineProvider = ExpandedIslandCornerProvider(provider, preferences)
-                                }
-                            }
-                            view.invalidateOutline()
-                        } else if (view != null) {
-                            (view.outlineProvider as? ExpandedIslandCornerProvider)?.let { wrapped ->
-                                view.outlineProvider = wrapped.original
-                                view.invalidateOutline()
-                            }
-                        }
-                        result
-                    }
-            }
-        }.onFailure { error -> log(Log.DEBUG, TAG, "Expanded island material corner hook unavailable", error) }
 
-        runCatching {
-            val holder = classLoader.loadClass("miui.systemui.dynamicisland.module.IslandIconViewHolder")
-            holder.declaredMethods.filter { it.name == "setSmallIcon" && it.parameterCount == 1 }.forEachIndexed { index, method ->
-                method.isAccessible = true
-                hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
-                    .setId("dynamic-island-small-media-icon-corner:$index")
-                    .intercept { chain ->
-                        val result = chain.proceed()
-                        if (preferences.getBoolean(KEY_SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS_ENABLED, false)) {
-                            val picInfo = runCatching {
-                                holder.getMethod("getPicInfo").invoke(chain.thisObject)
-                            }.getOrNull()
-                            val picture = runCatching {
-                                picInfo?.javaClass?.getMethod("getPic")?.invoke(picInfo) as? String
-                            }.getOrNull()
-                            if (picture != "miui_media_album_icon") return@intercept result
-                            val icon = findDynamicIslandField(chain.thisObject, "smallIcon")?.get(chain.thisObject) as? View
-                            icon?.let { applySmallMediaIconCorner(it, preferences) }
-                        }
-                        result
-                    }
-            }
-        }.onFailure { error -> log(Log.DEBUG, TAG, "Small island media icon corner hook unavailable", error) }
-    }
 
-    private inner class ExpandedIslandCornerProvider(
-        internal val original: ViewOutlineProvider,
-        private val preferences: SharedPreferences,
-    ) : ViewOutlineProvider() {
-        private var baseRadiusPx: Float? = null
 
-        override fun getOutline(view: View, outline: Outline) {
-            original.getOutline(view, outline)
-            if (!preferences.getBoolean(KEY_EXPANDED_ISLAND_CORNER_RADIUS_ENABLED, false)) return
-            val offsetDp = preferences.readExpandedIslandCornerRadius()
-            if (offsetDp == 0f) return
-            val rect = Rect()
-            if (outline.getRect(rect)) {
-                val density = view.resources.displayMetrics.density
-                val baseRadius = baseRadiusPx ?: view.resources.getIdentifier("island_radius", "dimen", SYSTEM_UI_PLUGIN)
-                    .takeIf { it != 0 }
-                    ?.let { runCatching { view.resources.getDimension(it) }.getOrNull() }
-                    ?.also { baseRadiusPx = it }
-                    ?: 0f
-                val radius = (baseRadius + offsetDp * density)
-                    .coerceAtLeast(0f)
-                    .coerceAtMost(minOf(rect.width(), rect.height()) / 2f)
-                outline.setRoundRect(rect, radius)
-            }
-        }
-    }
-
-    private fun isExpandedIslandCornerTarget(view: View): Boolean {
-        val idName = runCatching { view.resources.getResourceEntryName(view.id) }.getOrDefault("")
-        return idName == "expanded_view" ||
-            idName == "fake_expanded_view" ||
-            view.javaClass.name == DYNAMIC_ISLAND_EXPANDED_VIEW_CLASS
-    }
-
-    private fun applySmallMediaIconCorner(view: View, preferences: SharedPreferences) {
-        val offsetDp = preferences.getInt(KEY_SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS, SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS_DEFAULT)
-            .coerceIn(-64, 96)
-        val baseId = view.resources.getIdentifier("island_icon_radius", "dimen", SYSTEM_UI_PLUGIN)
-        val base = if (baseId != 0) view.resources.getDimension(baseId) else 4.56f * view.resources.displayMetrics.density
-        if (offsetDp == 0) return
-        val radius = (base + offsetDp * view.resources.displayMetrics.density).coerceAtLeast(0f)
-        view.outlineProvider = object : ViewOutlineProvider() {
-            override fun getOutline(target: View, outline: Outline) {
-                val max = minOf(target.width, target.height) / 2f
-                outline.setRoundRect(0, 0, target.width, target.height, radius.coerceAtMost(max))
-            }
-        }
-        view.clipToOutline = true
-        view.invalidateOutline()
-    }
 
     private fun installMediaSourceIconHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
         listOf(
@@ -4987,72 +4886,6 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
-    /**
-     * DynamicIslandBaseContentView normally hides the mini bar when the source
-     * package is absent from SystemUI's media-island allowlist.  The module
-     * option deliberately replaces that decision with the tutorial's verified
-     * always-visible implementation while retaining Xiaomi's translation code.
-     */
-    private fun installDynamicIslandMiniBarHook(
-        classLoader: ClassLoader,
-        preferences: SharedPreferences,
-    ) {
-        runCatching {
-            val baseClass = classLoader.loadClass(DYNAMIC_ISLAND_BASE_CONTENT_CLASS)
-            val updateMethods = baseClass.declaredMethods.filter { method ->
-                method.name == DYNAMIC_ISLAND_UPDATE_MINI_BAR_METHOD &&
-                    method.returnType == Void.TYPE &&
-                    method.parameterTypes.size == 1 &&
-                    method.parameterTypes[0].name == DYNAMIC_ISLAND_CONTENT_CLASS
-            }
-            check(updateMethods.isNotEmpty()) {
-                "$DYNAMIC_ISLAND_BASE_CONTENT_CLASS#$DYNAMIC_ISLAND_UPDATE_MINI_BAR_METHOD not found"
-            }
-            updateMethods.forEachIndexed { index, method ->
-                method.isAccessible = true
-                hookDeoptimized(method)
-                    .setExceptionMode(ExceptionMode.PROTECTIVE)
-                    .setId("dynamic-island-mini-bar:$index")
-                    .intercept { chain ->
-                        if (!preferences.getBoolean(
-                                KEY_REMOVE_DYNAMIC_ISLAND_MEDIA_MINI_BAR_WHITELIST_LIMIT,
-                                false,
-                            )
-                        ) {
-                            return@intercept chain.proceed()
-                        }
-
-                        val target = chain.thisObject
-                        val content = chain.getArg(0)
-                        setDynamicIslandBooleanField(target, "hideByFullScreenPkg", false)
-                        setDynamicIslandBooleanField(target, "miniBarVisible", true)
-                        findDynamicIslandField(target, "miniBar")?.let { field ->
-                            (field.get(target) as? View)?.setVisibility(View.VISIBLE)
-                        }
-
-                        // Keep the stock translation/positioning implementation;
-                        // only the visibility decision is overridden.
-                        runCatching {
-                            val translate = findDynamicIslandMethod(
-                                target,
-                                DYNAMIC_ISLAND_UPDATE_MINI_BAR_TRANSLATION_METHOD,
-                                content,
-                            )
-                            if (translate != null) {
-                                translate.isAccessible = true
-                                translate.invoke(target, content)
-                            }
-                        }.onFailure { error ->
-                            log(Log.WARN, TAG, "Could not update Dynamic Island mini-bar translation", error)
-                        }
-                        null
-                    }
-            }
-            log(Log.INFO, TAG, "Installed Dynamic Island mini-bar allowlist bypass")
-        }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install Dynamic Island mini-bar allowlist bypass", error)
-        }
-    }
 
     private fun findDynamicIslandField(target: Any, name: String): java.lang.reflect.Field? {
         var current: Class<*>? = target.javaClass
@@ -5068,22 +4901,7 @@ class HyperSystemUiModule : XposedModule() {
         return null
     }
 
-    private fun findDynamicIslandMethod(target: Any, name: String, argument: Any?): Method? {
-        var current: Class<*>? = target.javaClass
-        while (current != null && current != Any::class.java) {
-            current.declaredMethods.firstOrNull {
-                it.name == name &&
-                    it.parameterTypes.size == 1 &&
-                    (argument == null || it.parameterTypes[0].isInstance(argument))
-            }?.let { return it }
-            current = current.superclass
-        }
-        return null
-    }
 
-    private fun setDynamicIslandBooleanField(target: Any, name: String, value: Boolean) {
-        runCatching { findDynamicIslandField(target, name)?.setBoolean(target, value) }
-    }
 
     private fun installFocusIslandWhitelistPluginHooks(
         classLoader: ClassLoader,
@@ -5466,58 +5284,6 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
-    private fun installDynamicIslandLayoutHooks(
-        classLoader: ClassLoader,
-        preferences: SharedPreferences,
-    ) {
-        runCatching {
-            val baseClass = classLoader.loadClass(DYNAMIC_ISLAND_BASE_CONTENT_CLASS)
-            val reset = baseClass.getDeclaredMethod("reset").apply { isAccessible = true }
-            hook(reset)
-                .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("dynamic-island-small-width-height")
-                .intercept { chain ->
-                    val result = chain.proceed()
-                    runCatching {
-                        val target = chain.thisObject
-                        val smallView = baseClass.getDeclaredField("smallIslandView").apply { isAccessible = true }
-                            .get(target) as? View
-                        val islandHeight = baseClass.getDeclaredField("islandViewHeight").apply { isAccessible = true }
-                            .getInt(target)
-                        if (smallView != null && islandHeight > 0) {
-                            smallView.layoutParams = smallView.layoutParams?.apply { height = islandHeight }
-                            smallView.requestLayout()
-                        }
-                    }
-                    result
-                }
-            log(Log.INFO, TAG, "Installed small-island width/height alignment hook")
-        }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install small-island width/height alignment hook", error)
-        }
-        DYNAMIC_ISLAND_LAYOUT_CLASSES.forEach { className ->
-            runCatching {
-                val layoutClass = classLoader.loadClass(className)
-                val methods = layoutClass.declaredMethods.filter {
-                    it.name.startsWith("updateBigIslandLayout")
-                }
-                check(methods.isNotEmpty()) { "$className has no updateBigIslandLayout method" }
-                methods.forEachIndexed { index, method ->
-                    hookDeoptimized(method)
-                        .setExceptionMode(ExceptionMode.PROTECTIVE)
-                        .setId("dynamic-island-layout:${layoutClass.name}#$index")
-                        .intercept { chain ->
-                            val result = chain.proceed()
-                            val source = chain.thisObject as? View
-                            result
-                        }
-                }
-                log(Log.INFO, TAG, "Installed ${methods.size} big-island layout hooks for $className")
-            }.onFailure { error ->
-                log(Log.INFO, TAG, "Skipped dynamic-island layout class $className", error)
-            }
-        }
-    }
 
     private fun installDynamicIslandSelfBlurHook(
         classLoader: ClassLoader,
@@ -5590,20 +5356,6 @@ class HyperSystemUiModule : XposedModule() {
         maxOf(preferences.getInt(KEY_EXPANDED_ISLAND_GLASS_BLUR_RADIUS, 40), preferences.getInt(KEY_EXPANDED_ISLAND_GLASS_LARGE_BLUR_RADIUS, 40), preferences.getInt(KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS, 0)),
     ).coerceIn(0, 120)
 
-    private fun installDynamicIslandBottomGlowHook(classLoader: ClassLoader, preferences: SharedPreferences) {
-        runCatching {
-            val glowClass = classLoader.loadClass(DYNAMIC_ISLAND_GLOW_EFFECT_CLASS)
-            glowClass.declaredMethods.filter { it.name == "startGlowEffect\$miui_dynamicisland_release" || it.name == "setAlphaOfGlowEffect\$miui_dynamicisland_release" }.forEachIndexed { index, method ->
-                hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE).setId("dynamic-island-bottom-glow:$index").intercept { chain ->
-                    val result = chain.proceed()
-                    if (preferences.getBoolean(KEY_DISABLE_MEDIA_ISLAND_BOTTOM_GLOW, false) && chain.thisObject?.javaClass?.name == DYNAMIC_ISLAND_EXPANDED_VIEW_CLASS) {
-                        runCatching { chain.thisObject?.javaClass?.getMethod("getMGlowEffectBottomView")?.invoke(chain.thisObject) }.getOrNull()?.let { (it as? View)?.alpha = 0f }
-                    }
-                    result
-                }
-            }
-        }.onFailure { log(Log.WARN, TAG, "Could not install media-island bottom glow hooks", it) }
-    }
 
     private fun applyExpandedIslandBackground(view: View?, preferences: SharedPreferences, classLoader: ClassLoader) {
         if (view == null || !preferences.getBoolean(KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED, false)) return
@@ -13234,17 +12986,8 @@ class HyperSystemUiModule : XposedModule() {
         private const val CLOCK_EFFECT_OVERLAY = 2
         private const val CLOCK_EFFECT_GLASS = 5
         private const val DYNAMIC_ISLAND_BACKGROUND_CLASS = "miui.systemui.dynamicisland.DynamicIslandBackgroundView"
-        private const val DYNAMIC_ISLAND_GLOW_EFFECT_CLASS =
-            "miui.systemui.dynamicisland.view.DynamicGlowEffectView"
-        private const val DYNAMIC_ISLAND_EXPANDED_VIEW_CLASS =
-            "miui.systemui.dynamicisland.view.DynamicIslandExpandedView"
         private const val DYNAMIC_ISLAND_BASE_CONTENT_CLASS =
             "miui.systemui.dynamicisland.window.content.DynamicIslandBaseContentView"
-        private const val DYNAMIC_ISLAND_CONTENT_CLASS =
-            "miui.systemui.dynamicisland.window.content.DynamicIslandContentView"
-        private const val DYNAMIC_ISLAND_UPDATE_MINI_BAR_METHOD = "updateMiniBar"
-        private const val DYNAMIC_ISLAND_UPDATE_MINI_BAR_TRANSLATION_METHOD =
-            "updateMiniBarTranslation\$miui_dynamicisland_release"
         private const val PLUGIN_NOTIFICATION_SETTINGS_MANAGER_CLASS =
             "miui.systemui.notification.NotificationSettingsManager"
         private const val SYSTEM_UI_NOTIFICATION_SETTINGS_MANAGER_CLASS =
@@ -13260,11 +13003,6 @@ class HyperSystemUiModule : XposedModule() {
         private const val ISLAND_STATE_CALLBACK_CONTROLLER_CLASS =
             "miui.systemui.dynamicisland.event.IslandStateCallbackController"
         private const val DYNAMIC_ISLAND_SOURCE_PACKAGE_KEY = "miui.source.pkg"
-        private val DYNAMIC_ISLAND_LAYOUT_CLASSES = listOf(
-            "miui.systemui.dynamicisland.window.content.DynamicIslandContentView",
-            "miui.systemui.dynamicisland.window.content.DynamicIslandBaseContentView",
-            "miui.systemui.dynamicisland.window.content.DynamicIslandContentFakeView",
-        )
         private val SLIDER_PART_IDS = setOf("progress_bg")
         private val SHADE_BACKGROUND_IDS = setOf(
             "shade_background",
@@ -13330,8 +13068,6 @@ class HyperSystemUiModule : XposedModule() {
 
         private const val KEY_REMOVE_FOCUS_AND_ISLAND_WHITELIST_LIMIT =
             "remove_focus_and_island_whitelist_limit"
-        private const val KEY_REMOVE_DYNAMIC_ISLAND_MEDIA_MINI_BAR_WHITELIST_LIMIT =
-            "remove_dynamic_island_media_mini_bar_whitelist_limit"
         private const val KEY_HIDE_NOTIFICATION_MINI_WINDOW_BAR = "hide_notification_mini_window_bar"
         private const val KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED = "expanded_island_background_enabled"
         private const val KEY_EXPANDED_ISLAND_BACKGROUND_OPACITY = "expanded_island_background_opacity"
@@ -13341,7 +13077,6 @@ class HyperSystemUiModule : XposedModule() {
         private const val KEY_EXPANDED_ISLAND_GLASS_LARGE_BLUR_RADIUS = "expanded_island_glass_large_blur_radius"
         private const val KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS = "expanded_island_self_blur_radius"
         private const val KEY_EXPANDED_ISLAND_SHOW_HIGHLIGHT = "expanded_island_show_highlight"
-        private const val KEY_DISABLE_MEDIA_ISLAND_BOTTOM_GLOW = "disable_media_island_bottom_glow"
         private const val KEY_HIDE_SYSTEM_MEDIA_SOURCE_ICON = "hide_system_media_source_icon"
         private const val KEY_HIDE_MEDIA_ISLAND_SOURCE_ICON = "hide_media_island_source_icon"
         private const val KEY_SYSTEM_MEDIA_INFO_VERTICAL_OFFSET = "system_media_info_vertical_offset"
