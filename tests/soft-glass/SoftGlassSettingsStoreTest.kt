@@ -8,6 +8,7 @@ const val REMOTE_PREFERENCE_GROUP = "hyper_system_ui_hook"
 
 /** Exercise separate page stores and a stale remote snapshot using the real store. */
 internal fun testPresetPersistence() {
+    testControlCenterRadius()
     val disk = mutableMapOf<String, Any>()
     val local = memoryPreferences(disk)
     val remoteDisk = mutableMapOf<String, Any>()
@@ -76,3 +77,33 @@ private fun memoryPreferences(values: MutableMap<String, Any>): SharedPreference
     } as SharedPreferences
 }
 
+
+private fun testControlCenterRadius() {
+    val local = memoryPreferences(mutableMapOf("top_buttons_radius_enabled" to true, "top_buttons_radius" to 60f))
+    val remote = memoryPreferences(mutableMapOf())
+    val defaults = ControlCenterRadiusPreferences.read(local)
+    check(defaults == ControlCenterRadiusSettings()) { "Legacy absolute radii must not become new offsets" }
+    check(adjustedControlCenterRadius(72f, 80, 3f, false) == 72f)
+    check(adjustedControlCenterRadius(72f, 0, 3f, true) == 72f)
+    check(adjustedControlCenterRadius(72f, -40, 3f, true) == 0f)
+    check(adjustedControlCenterRadius(72f, 80, 3f, true) == 312f)
+    val settings = ControlCenterRadiusSettings(true, -40, -20, 10, 20, 40, 80)
+    ControlCenterRadiusPreferences.write(local, settings)
+    check(ControlCenterRadiusPreferences.sync(local, remote) == settings)
+    check(ControlCenterRadiusPreferences.read(remote) == settings)
+    val fresh = memoryPreferences(mutableMapOf())
+    check(ControlCenterRadiusPreferences.sync(fresh, remote) == settings)
+    ControlCenterRadiusPreferences.write(local, settings.copy(topButtons = -99, expandedPanel = 999))
+    check(ControlCenterRadiusPreferences.read(local).topButtons == -40)
+    check(ControlCenterRadiusPreferences.read(local).expandedPanel == 80)
+    val baseline = ControlCenterRadiusBaseline()
+    check(baseline.resolve(72f, 10, 3f, true) == 102f)
+    repeat(100) { check(baseline.resolve(102f, 10, 3f, true) == 102f) }
+    check(baseline.resolve(102f, 20, 3f, true) == 132f)
+    check(baseline.resolve(132f, 20, 3f, false) == 72f)
+    check(baseline.resolve(90f, -10, 3f, true) == 60f) { "A new system baseline must replace the old baseline" }
+    check(baseline.resolve(60f, 0, 3f, true) == 90f)
+    val clipped = ControlCenterRadiusBaseline()
+    check(clipped.resolve(72f, -40, 3f, true) == 0f)
+    check(clipped.resolve(0f, 0, 3f, true) == 72f) { "Reset from square corners must restore the unclamped native radius" }
+}

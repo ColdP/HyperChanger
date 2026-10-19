@@ -6271,6 +6271,7 @@ class HyperSystemUiModule : XposedModule() {
 
     private var softGlassRuntime: SoftGlassRuntimeSettings? = null
     private var volumeGlassRuntime: VolumePanelGlassRuntimeSettings? = null
+    private var controlCenterRadiusRuntime: ControlCenterRadiusRuntimeSettings? = null
     private val volumeGlobalRecipes = WeakHashMap<View, SoftGlassRecipeCache>()
     private val volumeGlobalCorners = WeakHashMap<View, VolumeCornerSnapshot>()
     private val volumeResourceNames = WeakHashMap<View, Pair<Int, String>>()
@@ -14144,6 +14145,7 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun installCornerRadiusHooks(preferences: SharedPreferences) {
+        controlCenterRadiusRuntime = ControlCenterRadiusRuntimeSettings(preferences)
         // MIUI loads its Control Center implementation through a plugin class loader.
         // Discover target classes at the point that loader resolves them.
         hook(ClassLoader::class.java.getMethod("loadClass", String::class.java))
@@ -14162,14 +14164,7 @@ class HyperSystemUiModule : XposedModule() {
             .intercept { chain ->
                 val result = chain.proceed()
                 val view = chain.thisObject as View
-                if (preferences.getBoolean(KEY_SLIDER_RADIUS_ENABLED, false) && isControlCenterSliderBackgroundPart(view)) {
-                    val radius = dpToPixels(view, preferences.getFloat(KEY_SLIDER_RADIUS, DEFAULT_CORNER_RADIUS))
-                    (view.background as? GradientDrawable)?.mutate()?.let { drawable ->
-                        GradientDrawable::class.java
-                            .getMethod("setCornerRadius", Float::class.javaPrimitiveType)
-                            .invoke(drawable, radius)
-                    }
-                }
+                applyControlCenterDrawableRadius(view, preferences)
                 result
             }
     }
@@ -14184,9 +14179,16 @@ class HyperSystemUiModule : XposedModule() {
         preferences: SharedPreferences,
     ) {
         listOf(
+            TOP_BUTTONS_CLASS,
+            MEDIA_PANEL_CLASS,
+            DEVICE_CENTER_ENTRY,
             SLIDER_VIEW_HOLDER_CLASS,
             BRIGHTNESS_PANEL_SLIDER_DELEGATE_CLASS,
             QS_ITEM_VIEW_HOLDER_CLASS,
+            "miui.systemui.controlcenter.qs.tileview.QSTileItemIconView",
+            "miui.systemui.controlcenter.panel.main.media.MediaPlayerController\$MediaPlayerViewHolder",
+            SECONDARY_PANEL_CONTROLLER_BASE_CLASS,
+            SECONDARY_VOLUME_PANEL_CLASS,
         ).forEach { className ->
             runCatching {
                 classLoader.loadClass(className).also { targetClass ->
@@ -15181,136 +15183,179 @@ class HyperSystemUiModule : XposedModule() {
     ) {
         if (!cornerTargetClasses.add(targetClass)) return
         when (targetClass.name) {
-            TOP_BUTTONS_CLASS -> hookRadiusSetter(
-                targetClass,
-                "setCornerRadius",
-                KEY_TOP_BUTTONS_RADIUS_ENABLED,
-                KEY_TOP_BUTTONS_RADIUS,
-                preferences,
-            )
-            MEDIA_PANEL_CLASS -> hookRadiusSetter(
-                targetClass,
-                "setCornerRadius",
-                KEY_MEDIA_CARD_RADIUS_ENABLED,
-                KEY_MEDIA_CARD_RADIUS,
-                preferences,
-            )
+            TOP_BUTTONS_CLASS -> hookUnifiedRadiusSetter(targetClass, "setCornerRadius", 0, preferences)
+            MEDIA_PANEL_CLASS -> hookUnifiedRadiusSetter(targetClass, "setCornerRadius", 1, preferences)
             DEVICE_CENTER_ENTRY -> hookDeviceCenterOutline(targetClass, preferences)
             SLIDER_VIEW_HOLDER_CLASS,
-            BRIGHTNESS_PANEL_SLIDER_DELEGATE_CLASS -> hookSliderRadiusSetters(targetClass, preferences)
-            QS_ITEM_VIEW_HOLDER_CLASS -> hookMainBottomButtonsRadius(targetClass, preferences)
-            MI_BACKGROUND_STYLE_CLASS -> hookMaterialStyle(targetClass, preferences)
-            else -> cornerTargetClasses.remove(targetClass)
-        }
-    }
-
-    private fun hookMainBottomButtonsRadius(
-        targetClass: Class<*>,
-        preferences: SharedPreferences,
-    ) {
-        runCatching {
-            val method = targetClass.getMethod("setCornerRadius", Float::class.javaPrimitiveType)
-            hookDeoptimized(method)
-                .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("radius:$QS_ITEM_VIEW_HOLDER_CLASS#setCornerRadius")
-                .intercept { chain ->
-                    if (!preferences.getBoolean(KEY_CONTROL_BOTTOM_BUTTONS_RADIUS_ENABLED, false)) {
-                        return@intercept chain.proceed()
-                    }
-                    val itemView = readInstanceField(chain.thisObject, "itemView") as? View
-                        ?: return@intercept chain.proceed()
-                    val radius = dpToPixels(
-                        itemView,
-                        preferences.getFloat(KEY_CONTROL_BOTTOM_BUTTONS_RADIUS, DEFAULT_CORNER_RADIUS),
-                    )
-                    chain.proceedWith(chain.thisObject, arrayOf(radius))
-                }
-            log(Log.INFO, TAG, "Installed main control-center bottom-button radius hook")
-        }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install main control-center bottom-button radius hook", error)
-        }
-    }
-
-    private fun hookRadiusSetter(
-        targetClass: Class<*>,
-        methodName: String,
-        enabledKey: String,
-        radiusKey: String,
-        preferences: SharedPreferences,
-        applyOutline: Boolean = targetClass.name == TOP_BUTTONS_CLASS,
-    ) {
-        runCatching {
-            val method = targetClass.getMethod(methodName, Float::class.javaPrimitiveType)
-            hookDeoptimized(method)
-                .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("radius:${targetClass.name}#$methodName")
-                .intercept { chain ->
-                    val view = chain.thisObject as? View
-                    if (view == null || !preferences.getBoolean(enabledKey, false)) {
-                        chain.proceed()
-                    } else {
-                        val radius = dpToPixels(view, preferences.getFloat(radiusKey, DEFAULT_CORNER_RADIUS))
-                        val result = chain.proceedWith(
-                            view,
-                            arrayOf(radius),
-                        )
-                        if (applyOutline) applyRoundedOutline(view, radius)
-                        result
-                    }
-                }
-            log(Log.INFO, TAG, "Installed corner-radius hook: ${targetClass.name}#$methodName")
-        }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install corner-radius hook: ${targetClass.name}#$methodName", error)
-        }
-    }
-
-    private fun hookMaterialStyle(targetClass: Class<*>, preferences: SharedPreferences) {
-        targetClass.declaredMethods
-            .filter { method ->
-                method.name == "setMiBackgroundStyle" &&
-                    method.parameterTypes.firstOrNull() == View::class.java
-            }
-            .forEach { method ->
+            BRIGHTNESS_PANEL_SLIDER_DELEGATE_CLASS -> hookUnifiedRadiusSetter(targetClass, "setOutlineRadius", 2, preferences)
+            SECONDARY_VOLUME_PANEL_CLASS -> hookUnifiedRadiusSetter(targetClass, "getCornerRadius", 2, preferences)
+            "miui.systemui.controlcenter.qs.tileview.QSTileItemIconView" -> hookUnifiedRadiusSetter(targetClass, "setCornerRadius", 3, preferences)
+            "miui.systemui.controlcenter.panel.main.media.MediaPlayerController\$MediaPlayerViewHolder" -> hookUnifiedRadiusSetter(targetClass, "setCornerRadius", 1, preferences)
+            SECONDARY_PANEL_CONTROLLER_BASE_CLASS -> {
+                hookUnifiedRadiusSetter(targetClass, "setContentBgRadius", 5, preferences)
                 runCatching {
-                    hookDeoptimized(method)
-                        .setExceptionMode(ExceptionMode.PROTECTIVE)
-                        .setId("material-style:${method.parameterCount}")
+                    hookDeoptimized(targetClass.getDeclaredMethod("updateContentBg", Boolean::class.javaPrimitiveType))
+                        .setExceptionMode(ExceptionMode.PROTECTIVE).setId("control-center-expanded-background-radius")
                         .intercept { chain ->
                             val result = chain.proceed()
-                            val view = chain.getArg(0) as? View ?: return@intercept result
-                            when {
-                                view.javaClass.name == TOP_BUTTONS_CLASS &&
-                                    preferences.getBoolean(KEY_TOP_BUTTONS_RADIUS_ENABLED, false) ->
-                                    applyRoundedOutline(
-                                        view,
-                                        dpToPixels(view, preferences.getFloat(KEY_TOP_BUTTONS_RADIUS, DEFAULT_CORNER_RADIUS)),
-                                    )
+                            val target = chain.thisObject ?: return@intercept result
+                            val settings = controlRadiusSettings(preferences)
+                            if (settings.enabled && settings.expandedPanel != 0) {
+                                val view = runCatching { target.javaClass.getMethod("getContentBg").invoke(target) as? View }.getOrNull()
+                                val radius = readInstanceField(target, "contentBgRadius") as? Float
+                                if (view != null && radius != null) (view.background as? GradientDrawable)?.mutate()?.let { (it as GradientDrawable).cornerRadius = radius }
                             }
                             result
                         }
                 }
             }
+            MI_BACKGROUND_STYLE_CLASS -> hookMaterialStyle(targetClass, preferences)
+            else -> cornerTargetClasses.remove(targetClass)
+        }
+    }
+
+    private val controlRadiusDispatch = ThreadLocal<Int?>()
+    private val controlRadiusBaselines = WeakHashMap<Any, MutableMap<String, ControlCenterRadiusBaseline>>()
+    private val controlDrawableBaselines = WeakHashMap<Drawable, ControlCenterRadiusBaseline>()
+    private val controlOriginalOutlines = WeakHashMap<View, Pair<ViewOutlineProvider?, Boolean>>()
+
+    private fun controlRadiusSettings(preferences: SharedPreferences) =
+        controlCenterRadiusRuntime?.settings ?: ControlCenterRadiusPreferences.read(preferences)
+
+    private fun controlRadiusView(target: Any?): View? {
+        if (target == null) return null
+        if (target is View) return target
+        (readInstanceField(target, "itemView") as? View)?.let { return it }
+        resolveSliderView(target)?.let { return it }
+        listOf("getContentBg", "getView").forEach { name ->
+            runCatching { target?.javaClass?.getMethod(name)?.invoke(target) as? View }.getOrNull()?.let { return it }
+        }
+        return null
+    }
+
+    private fun controlRadiusOffset(settings: ControlCenterRadiusSettings, category: Int) = when (category) {
+        0 -> settings.topButtons
+        1 -> settings.mediaCard
+        2 -> settings.sliders
+        3 -> settings.smallButtons
+        4 -> settings.deviceCenter
+        else -> settings.expandedPanel
+    }
+
+    private fun resolveControlRadius(target: Any, name: String, input: Float, density: Float, settings: ControlCenterRadiusSettings, category: Int): Float =
+        synchronized(controlRadiusBaselines) {
+            controlRadiusBaselines.getOrPut(target) { mutableMapOf() }
+                .getOrPut(name) { ControlCenterRadiusBaseline() }
+                .resolve(input, controlRadiusOffset(settings, category), density, settings.enabled)
+        }
+
+    private fun updateControlOutline(view: View, radius: Float, active: Boolean) {
+        if (active) {
+            controlOriginalOutlines.putIfAbsent(view, view.outlineProvider to view.clipToOutline)
+            applyRoundedOutline(view, radius)
+        } else {
+            controlOriginalOutlines.remove(view)?.let { (provider, clip) ->
+                view.outlineProvider = provider
+                view.clipToOutline = clip
+                view.invalidateOutline()
+            }
+        }
+    }
+
+    private fun hookUnifiedRadiusSetter(targetClass: Class<*>, methodName: String, category: Int, preferences: SharedPreferences) {
+        runCatching {
+            val method = if (methodName.startsWith("get")) targetClass.getMethod(methodName)
+                else targetClass.getMethod(methodName, Float::class.javaPrimitiveType)
+            hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("unified-control-center-radius:${targetClass.name}#$methodName")
+                .intercept { chain ->
+                    val target = chain.thisObject ?: return@intercept chain.proceed()
+                    if (controlRadiusDispatch.get() == category) return@intercept chain.proceed()
+                    val settings = controlRadiusSettings(preferences)
+                    val view = controlRadiusView(target) ?: return@intercept chain.proceed()
+                    val density = view.resources.displayMetrics.density
+                    if (method.parameterCount == 0) {
+                        // VolumePanelController's setter is empty; its getter supplies transition geometry.
+                        val original = chain.proceed() as? Float ?: return@intercept null
+                        adjustedControlCenterRadius(original, controlRadiusOffset(settings, category), density, settings.enabled)
+                    } else {
+                        val active = settings.enabled && controlRadiusOffset(settings, category) != 0
+                        val hadBaseline = synchronized(controlRadiusBaselines) { controlRadiusBaselines[target]?.containsKey(methodName) == true }
+                        if (!active && !hadBaseline) return@intercept chain.proceed()
+                        val radius = resolveControlRadius(target, methodName, chain.getArg(0) as Float, density, settings, category)
+                        val previous = controlRadiusDispatch.get()
+                        controlRadiusDispatch.set(category)
+                        try {
+                            val result = chain.proceedWith(target, arrayOf(radius))
+                            if (category == 0) updateControlOutline(view, radius, active)
+                            if (category == 1) (view.background as? GradientDrawable)?.mutate()?.let { (it as GradientDrawable).cornerRadius = radius }
+                            if (category == 2) {
+                                val originalRadius = synchronized(controlRadiusBaselines) { controlRadiusBaselines[target]?.get(methodName)?.originalRadius }
+                                applySliderDrawableRadius(target, radius, originalRadius)
+                            }
+                            result
+                        } finally {
+                            if (previous == null) controlRadiusDispatch.remove() else controlRadiusDispatch.set(previous)
+                        }
+                    }
+                }
+        }.onFailure { error -> log(Log.DEBUG, TAG, "Control-center radius hook unavailable: ${targetClass.name}#$methodName", error) }
+    }
+
+    private fun applyControlCenterDrawableRadius(view: View, preferences: SharedPreferences) {
+        val settings = controlRadiusSettings(preferences)
+        if ((!settings.enabled || settings.sliders == 0 && settings.deviceCenter == 0) && controlDrawableBaselines.isEmpty()) return
+        val device = view.javaClass.name == DEVICE_CENTER_ENTRY
+        if (!device && !isControlCenterSliderBackgroundPart(view)) return
+        val offset = if (device) settings.deviceCenter else settings.sliders
+        val drawable = view.background as? GradientDrawable ?: return
+        if ((!settings.enabled || offset == 0) && !controlDrawableBaselines.containsKey(drawable)) {
+            if (device) updateControlOutline(view, drawable.cornerRadius, false)
+            return
+        }
+        val radius = synchronized(controlDrawableBaselines) {
+            controlDrawableBaselines.getOrPut(drawable) { ControlCenterRadiusBaseline() }
+                .resolve(drawable.cornerRadius, offset, view.resources.displayMetrics.density, settings.enabled)
+        }
+        // Mutate before editing so another surface using the same resource keeps its own radius.
+        (drawable.mutate() as GradientDrawable).cornerRadius = radius
+        if (device) updateControlOutline(view, radius, settings.enabled && offset != 0)
+        view.invalidateOutline()
+    }
+
+    private fun hookMaterialStyle(targetClass: Class<*>, preferences: SharedPreferences) {
+        targetClass.declaredMethods.filter {
+            it.name == "setMiBackgroundStyle" && it.parameterTypes.firstOrNull() == View::class.java
+        }.forEach { method ->
+            hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("material-style:${method.parameterCount}").intercept { chain ->
+                    val result = chain.proceed()
+                    val view = chain.getArg(0) as? View ?: return@intercept result
+                    if (view.javaClass.name == TOP_BUTTONS_CLASS) {
+                        val settings = controlRadiusSettings(preferences)
+                        val input = readField(view, "_cornerRadius") as? Float
+                        if (input != null) {
+                            val radius = resolveControlRadius(view, "setCornerRadius", input, view.resources.displayMetrics.density, settings, 0)
+                            updateControlOutline(view, radius, settings.enabled && settings.topButtons != 0)
+                        }
+                    }
+                    applyControlCenterDrawableRadius(view, preferences)
+                    result
+                }
+        }
     }
 
     private fun hookDeviceCenterOutline(targetClass: Class<*>, preferences: SharedPreferences) {
         runCatching {
-            val method = targetClass.getMethod("onFinishInflate")
-            hookDeoptimized(method)
-                .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("radius:$DEVICE_CENTER_ENTRY#onFinishInflate")
+            hookDeoptimized(targetClass.getMethod("onFinishInflate"))
+                .setExceptionMode(ExceptionMode.PROTECTIVE).setId("control-center-device-radius")
                 .intercept { chain ->
                     val result = chain.proceed()
                     val view = chain.thisObject as? View ?: return@intercept result
-                    if (preferences.getBoolean(KEY_DEVICE_CENTER_RADIUS_ENABLED, false)) {
-                        val radius = dpToPixels(view, preferences.getFloat(KEY_DEVICE_CENTER_RADIUS, DEFAULT_CORNER_RADIUS))
-                        applyRoundedOutline(view, radius)
-                    }
+                    applyControlCenterDrawableRadius(view, preferences)
                     result
                 }
-            log(Log.INFO, TAG, "Installed corner-radius hook: $DEVICE_CENTER_ENTRY#onFinishInflate")
-        }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install corner-radius hook: $DEVICE_CENTER_ENTRY", error)
-        }
+        }.onFailure { error -> log(Log.DEBUG, TAG, "Device center radius hook unavailable", error) }
     }
 
     private fun replaceDimensionIfNeeded(
@@ -15389,40 +15434,6 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
-    private fun hookSliderRadiusSetters(
-        targetClass: Class<*>,
-        preferences: SharedPreferences,
-    ) {
-        // setProgressRadius() is the foreground progress drawable radius.  Hooking it makes
-        // the volume/brightness foreground pill-shaped, so only the outer slider outline is
-        // customized here.
-        listOf("setOutlineRadius").forEach { methodName ->
-            runCatching {
-                val method = targetClass.getMethod(methodName, Float::class.javaPrimitiveType)
-                hookDeoptimized(method)
-                    .setExceptionMode(ExceptionMode.PROTECTIVE)
-                    .setId("radius:${targetClass.name}#$methodName")
-                    .intercept { chain ->
-                        val sliderView = resolveSliderView(chain.thisObject)
-                        if (sliderView == null || !preferences.getBoolean(KEY_SLIDER_RADIUS_ENABLED, false)) {
-                            chain.proceed()
-                        } else {
-                            val radius = dpToPixels(
-                                sliderView,
-                                preferences.getFloat(KEY_SLIDER_RADIUS, DEFAULT_CORNER_RADIUS),
-                            )
-                            val result = chain.proceedWith(chain.thisObject, arrayOf(radius))
-                            applySliderDrawableRadius(chain.thisObject, radius)
-                            result
-                        }
-                    }
-            }.onFailure { error ->
-                log(Log.DEBUG, TAG, "Slider radius method unavailable: ${targetClass.name}#$methodName", error)
-            }
-        }
-        log(Log.INFO, TAG, "Installed expanded control-center slider radius hooks: ${targetClass.name}")
-    }
-
     private fun resolveSliderView(target: Any?): View? {
         if (target is View) return target
         readField(target, "binding")?.let { binding ->
@@ -15441,7 +15452,7 @@ class HyperSystemUiModule : XposedModule() {
         return null
     }
 
-    private fun applySliderDrawableRadius(target: Any?, radius: Float) {
+    private fun applySliderDrawableRadius(target: Any?, radius: Float, originalRadius: Float? = null) {
         if (target == null) return
         val views = mutableListOf<View>()
         readField(target, "binding")?.let { binding ->
@@ -15458,6 +15469,9 @@ class HyperSystemUiModule : XposedModule() {
         views.distinct().forEach { view ->
             (view.background as? GradientDrawable)?.mutate()?.let { drawable ->
                 (drawable as GradientDrawable).setCornerRadius(radius)
+                if (originalRadius != null) synchronized(controlDrawableBaselines) {
+                    controlDrawableBaselines.getOrPut(drawable) { ControlCenterRadiusBaseline() }.remember(originalRadius, radius)
+                }
             }
             view.invalidateOutline()
         }
@@ -15774,6 +15788,7 @@ class HyperSystemUiModule : XposedModule() {
             "miui.systemui.controlcenter.panel.main.recyclerview.ToggleSliderViewHolder"
         private const val BRIGHTNESS_PANEL_SLIDER_DELEGATE_CLASS =
             "miui.systemui.controlcenter.panel.secondary.brightness.BrightnessPanelSliderDelegate"
+        private const val SECONDARY_PANEL_CONTROLLER_BASE_CLASS = "miui.systemui.controlcenter.panel.secondary.SecondaryPanelControllerBase"
         private const val SECONDARY_VOLUME_PANEL_CLASS =
             "miui.systemui.controlcenter.panel.secondary.volume.VolumePanelController"
         private const val QS_ITEM_VIEW_HOLDER_CLASS =

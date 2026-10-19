@@ -863,6 +863,7 @@ private fun Root(
                 hooks.syncRemote(it)
                 SoftGlassSettingsStore(context).syncRemote(it)
                 VolumePanelGlassSettingsStore(context).syncRemote(it)
+                ControlCenterRadiusSettingsStore(context).syncRemote(it)
                 SuperXiaoAiInputGlassSettingsStore(context).syncRemote(it)
                 navigation.syncRemote(it)
                 lockscreenCapsules.syncRemote(it)
@@ -4724,7 +4725,7 @@ private fun Detail(
         PageId.STATUS -> Status(settings, update, openPage, back)
         PageId.STATUS_SIGNAL_CUSTOMIZATION -> StatusSignalCustomization(settings, update, openPage, back)
         PageId.STATUS_SIGNAL_TUNING -> StatusSignalTuning(settings, update, back)
-        PageId.CONTROL -> Control(settings, update, back)
+        PageId.CONTROL -> Control(back)
         PageId.LOCK -> Lock(settings, lockscreenCapsuleSettings, update, openPage, back)
         PageId.LOCKSCREEN_CAPSULE -> LockscreenCapsule(lockscreenCapsuleSettings, updateLockscreenCapsule, back)
         PageId.LIFT_TO_WAKE_SCHEDULE -> LiftToWakeSchedulePage(back)
@@ -7579,15 +7580,49 @@ private fun StatusSignalTuning(
 }
 
 @Composable
-private fun Control(s: HookSettings, update: ((HookSettings) -> HookSettings) -> Unit, back: () -> Unit) = AppPage(tr("\u63a7\u5236\u4e2d\u5fc3", "\u63a7\u5236\u4e2d\u5fc3"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI)) { p, scroll ->
-    AppList(p, scroll, 28) {
-        item { Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-        Corner(tr("\u9876\u90e8\u64cd\u4f5c\u6309\u94ae", "\u9876\u90e8\u64cd\u4f5c\u6309\u94ae"), s.topButtonsRadiusEnabled, { v -> update { it.copy(topButtonsRadiusEnabled = v) } }, s.topButtonsRadius) { v -> update { it.copy(topButtonsRadius = v) } }
-        Corner(tr("\u5a92\u4f53\u5361\u7247", "\u5a92\u4f53\u5361\u7247"), s.mediaCardRadiusEnabled, { v -> update { it.copy(mediaCardRadiusEnabled = v) } }, s.mediaCardRadius) { v -> update { it.copy(mediaCardRadius = v) } }
-        Corner(tr("\u97f3\u91cf / \u4eae\u5ea6\u6761", "\u97f3\u91cf / \u4eae\u5ea6\u6761"), s.sliderRadiusEnabled, { v -> update { it.copy(sliderRadiusEnabled = v) } }, s.sliderRadius) { v -> update { it.copy(sliderRadius = v) } }
-        Corner(tr("\u4e0b\u534a\u90e8\u5206\u5706\u5f62\u6309\u94ae", "\u4e0b\u534a\u90e8\u5206\u5706\u5f62\u6309\u94ae"), s.controlBottomButtonsRadiusEnabled, { v -> update { it.copy(controlBottomButtonsRadiusEnabled = v) } }, s.controlBottomButtonsRadius) { v -> update { it.copy(controlBottomButtonsRadius = v) } }
-        Corner(tr("\u878d\u5408\u8bbe\u5907\u4e2d\u5fc3", "\u878d\u5408\u8bbe\u5907\u4e2d\u5fc3"), s.deviceCenterRadiusEnabled, { v -> update { it.copy(deviceCenterRadiusEnabled = v) } }, s.deviceCenterRadius) { v -> update { it.copy(deviceCenterRadius = v) } }
-        } }
+private fun Control(back: () -> Unit) {
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    val changed = LocalNotificationSettingsChanged.current
+    val store = remember(context) { ControlCenterRadiusSettingsStore(context) }
+    var settings by remember { mutableStateOf(store.settings) }
+    LaunchedEffect(service) {
+        service?.let(store::syncRemote)
+        settings = store.settings
+    }
+    fun save(value: ControlCenterRadiusSettings) {
+        store.update(service, value)
+        settings = store.settings
+        changed()
+    }
+    AppPage(tr("控制中心", "控制中心"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI)) { p, scroll ->
+        AppList(p, scroll, 28) {
+            item {
+                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                    SwitchPreference(
+                        title = tr("自定义控制中心圆角", "自定义控制中心圆角"),
+                        checked = settings.enabled,
+                        onCheckedChange = { save(settings.copy(enabled = it)) },
+                    )
+                }
+            }
+            item {
+                AnimatedVisibility(
+                    visible = settings.enabled,
+                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                ) {
+                    Group(tr("圆角参数调整", "圆角参数调整")) {
+                        ParameterIntSlide(tr("顶部控制按钮圆角", "顶部控制按钮圆角"), settings.topButtons, -40..80, " dp", defaultValue = 0) { save(settings.copy(topButtons = it)) }
+                        ParameterIntSlide(tr("媒体卡片圆角", "媒体卡片圆角"), settings.mediaCard, -40..80, " dp", defaultValue = 0) { save(settings.copy(mediaCard = it)) }
+                        ParameterIntSlide(tr("音量 / 亮度条圆角", "音量 / 亮度条圆角"), settings.sliders, -40..80, " dp", defaultValue = 0) { save(settings.copy(sliders = it)) }
+                        ParameterIntSlide(tr("圆形按钮圆角", "圆形按钮圆角"), settings.smallButtons, -40..80, " dp", defaultValue = 0) { save(settings.copy(smallButtons = it)) }
+                        ParameterIntSlide(tr("融合台设备中心卡片圆角", "融合台设备中心卡片圆角"), settings.deviceCenter, -40..80, " dp", defaultValue = 0) { save(settings.copy(deviceCenter = it)) }
+                        ParameterIntSlide(tr("展开面板圆角", "展开面板圆角"), settings.expandedPanel, -40..80, " dp", defaultValue = 0) { save(settings.copy(expandedPanel = it)) }
+                    }
+                }
+            }
+        }
     }
 }
 

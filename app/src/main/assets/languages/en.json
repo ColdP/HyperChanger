@@ -1203,7 +1203,15 @@
     "JSON": "JSON",
     "玻璃模糊": "Glass blur",
     "边缘羽化": "Edge feathering",
-    "使用全局柔光玻璃参数": "Use global soft glass parameters"
+    "使用全局柔光玻璃参数": "Use global soft glass parameters",
+    "自定义控制中心圆角": "Customize Control Center Corners",
+    "圆角参数调整": "Corner Radius Parameters",
+    "顶部控制按钮圆角": "Top Control Button Corners",
+    "媒体卡片圆角": "Media Card Corners",
+    "音量 / 亮度条圆角": "Volume / Brightness Slider Corners",
+    "圆形按钮圆角": "Circular Button Corners",
+    "融合台设备中心卡片圆角": "Device Center Card Corners",
+    "展开面板圆角": "Expanded Panel Corners"
   },
   "Xiaomi 18 Pro 系列 AI 背屏": "Xiaomi 18 Pro Series AI Rear Screen",
   "解锁 AI 功能": "Unlock AI features",
