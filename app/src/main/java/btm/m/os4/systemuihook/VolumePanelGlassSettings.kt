@@ -13,7 +13,6 @@ internal fun volumePanelUsesGlobalGlass(preferences: SharedPreferences): Boolean
 internal data class VolumePanelGlassRuntimeState(
     val materialEnabled: Boolean,
     val useGlobal: Boolean,
-    val cornerRadius: Float,
 ) {
     val globalSelected: Boolean get() = materialEnabled && useGlobal
 }
@@ -23,12 +22,13 @@ internal class VolumePanelGlassRuntimeSettings(private val preferences: SharedPr
     private fun read() = VolumePanelGlassRuntimeState(
         preferences.getBoolean("volume_panel_material_enabled", true),
         volumePanelUsesGlobalGlass(preferences),
-        preferences.getFloat("volume_panel_corner_radius", 24f),
     )
     @Volatile var state = read(); private set
+    @Volatile var layout = VolumePanelLayoutPreferences.read(preferences); private set
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == null || key.startsWith("volume_panel_layout_")) layout = VolumePanelLayoutPreferences.read(preferences)
         if (key == null || key == KEY_VOLUME_PANEL_GLOBAL_GLASS ||
-            key == "volume_panel_material_enabled" || key == "volume_panel_corner_radius") state = read()
+            key == "volume_panel_material_enabled") state = read()
     }
 
     init { preferences.registerOnSharedPreferenceChangeListener(listener) }

@@ -67,16 +67,14 @@ internal class VolumePanelLayoutSettingsStore(context: Context) {
 /** Offsets always start from the system resource, never from a previously adjusted View. */
 internal fun volumePanelLayoutDimensionDp(name: String?, originalDp: Float, settings: VolumePanelLayoutSettings): Float? {
     val offset = when (name) {
+        // Only the collapsed physical-key panel uses these resources. Expanded/CC
+        // widths (including single-notification columns) must retain stock dimensions.
         "miui_volume_column_width", "flip_tiny_miui_volume_column_width",
-        "o3_miui_volume_notify_width", "o3_miui_volume_expend_width",
-        "o3_miui_volume_cc_notify_width", "o3_miui_volume_cc_width",
-        "o3_miui_ringer_btn_width", "o3_miui_ringer_btn_width_expended",
-        "o3_miui_ringer_btn_width_cc" ->
+        "o3_miui_ringer_btn_width" ->
             if (settings.sizeEnabled) settings.width else 0
-        "miui_volume_column_height", "flip_tiny_miui_volume_column_height",
-        "o3_miui_volume_expend_height", "o3_miui_volume_cc_height" ->
+        "miui_volume_column_height", "flip_tiny_miui_volume_column_height" ->
             if (settings.sizeEnabled) settings.height else 0
-        "o3_miui_cc_volume_radius", "o3_miui_volume_bg_radius", "o3_miui_volume_radius",
+        "o3_miui_volume_bg_radius", "o3_miui_volume_radius",
         "o3_miui_tiny_volume_radius", "miui_volume_bg_radius", "miui_volume_bg_radius_expanded",
         "miui_volume_blur_bg_radius", "volume_dialog_background_corner_radius",
         "volume_dialog_background_square_corner_radius" ->

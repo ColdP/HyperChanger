@@ -93,11 +93,8 @@ private data class VolumeTuningSnapshot(
     val blurRadius: Int,
     val glassStrength: Int,
     val backgroundOpacity: Int,
-    val cornerRadius: Float,
     val viewCount: Int,
 )
-
-private data class VolumeCornerSnapshot(val radius: Float, val width: Int, val height: Int)
 
 private data class StackedMobileSubscription(
     val slot: Int,
@@ -6273,7 +6270,6 @@ class HyperSystemUiModule : XposedModule() {
     private var volumeGlassRuntime: VolumePanelGlassRuntimeSettings? = null
     private var controlCenterRadiusRuntime: ControlCenterRadiusRuntimeSettings? = null
     private val volumeGlobalRecipes = WeakHashMap<View, SoftGlassRecipeCache>()
-    private val volumeGlobalCorners = WeakHashMap<View, VolumeCornerSnapshot>()
     private val volumeResourceNames = WeakHashMap<View, Pair<Int, String>>()
     private val softGlassBaselines = WeakHashMap<View, MutableMap<Method, Array<Any?>>>()
     private val softGlassLegacyBlends = WeakHashMap<View, ArrayList<Point>>()
@@ -14667,6 +14663,9 @@ class HyperSystemUiModule : XposedModule() {
         }.onFailure { error ->
             log(Log.DEBUG, TAG, "Volume panel classes are deferred until ClassLoader discovery", error)
         }
+        listOf("com.android.systemui.miui.volume.MiuiVolumeDialogView", "com.android.systemui.miui.volume.MiuiVolumeSeekBar").forEach { name ->
+            runCatching { installLoadedVolumePanelHook(classLoader.loadClass(name), preferences) }
+        }
         runCatching { installLoadedVolumePanelHook(classLoader.loadClass("com.android.systemui.miui.volume.Util"), preferences) }
         runCatching { installLoadedVolumePanelHook(classLoader.loadClass(MI_BACKGROUND_STYLE_CLASS), preferences) }
     }
@@ -14827,6 +14826,30 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
+    private fun findVolumeLongPressPanel(slider: View): View? {
+        var current = slider.parent
+        while (current is View) {
+            if (current.javaClass.name == "com.android.systemui.miui.volume.MiuiVolumeDialogView") return current
+            current = current.parent
+        }
+        return null
+    }
+
+    private val volumeLongPress = VolumePanelLongPress(
+        canExpand = { slider ->
+            val panel = findVolumeLongPressPanel(slider)
+            volumeGlassRuntime?.layout?.longPressExpansionEnabled == true && panel != null &&
+                readField(panel, "isControlCenterPanel") != true &&
+                readField(panel, "expandListener") is View.OnClickListener &&
+                runCatching { panel.javaClass.getMethod("isExpanded").invoke(panel) == false }.getOrDefault(false)
+        },
+        expand = { slider ->
+            findVolumeLongPressPanel(slider)?.let { panel ->
+                (readField(panel, "expandListener") as? View.OnClickListener)?.onClick(slider)
+            }
+        },
+    )
+
     private fun installLoadedVolumePanelHook(targetClass: Class<*>, preferences: SharedPreferences) {
         if (!volumePanelHookedClasses.add(targetClass)) return
         when (targetClass.name) {
@@ -14894,20 +14917,29 @@ class HyperSystemUiModule : XposedModule() {
                     }
                 log(Log.INFO, TAG, "Installed physical volume-panel controller hooks")
             }
-            VOLUME_COLUMN_CLASS -> {
-                targetClass.declaredMethods
-                    .filter { it.name == "setRadius" && it.parameterTypes.size == 1 }
-                    .forEach { method ->
-                        hookDeoptimized(method)
-                            .setExceptionMode(ExceptionMode.PROTECTIVE)
-                            .setId("volume-panel-native-radius")
-                            .intercept { chain ->
-                                val result = chain.proceed()
-                                applyVolumeColumnRadius(chain.thisObject)
-                                result
-                            }
-                    }
-                log(Log.INFO, TAG, "Installed physical volume-column hook")
+            "com.android.systemui.miui.volume.MiuiVolumeDialogView" -> {
+                targetClass.declaredMethods.filter { it.name in setOf("onFinishInflate", "updateFooterVisibility") }.forEach { method ->
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("volume-panel-buttons:${method.name}").intercept { chain ->
+                            val result = chain.proceed()
+                            val settings = volumeGlassRuntime?.layout ?: VolumePanelLayoutPreferences.read(preferences)
+                            if (settings.hideRinger) (readField(chain.thisObject, "mRingerModeLayout") as? View)?.visibility = View.GONE
+                            if (settings.hideExpand) (readField(chain.thisObject, "mExpandButton") as? View)?.visibility = View.GONE
+                            result
+                        }
+                }
+            }
+            "com.android.systemui.miui.volume.MiuiVolumeSeekBar" -> {
+                targetClass.declaredMethods.filter {
+                    it.name == "onTouchEvent" && it.parameterTypes.contentEquals(arrayOf(MotionEvent::class.java))
+                }.forEach { method ->
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("volume-panel-long-press").intercept { chain ->
+                            val view = chain.thisObject as? View
+                            val event = chain.getArg(0) as? MotionEvent
+                            if (view != null && event != null && volumeLongPress.onTouch(view, event)) true else chain.proceed()
+                        }
+                }
             }
         }
     }
@@ -14975,35 +15007,21 @@ class HyperSystemUiModule : XposedModule() {
             // common global setter hooks. Reapplying custom defaults here would both
             // overwrite the system baseline and multiply the global adjustments twice.
             synchronized(volumePanelAppliedTuning) { volumePanelAppliedTuning.remove(root) }
-            val radius = dpToPixels(root, runtime.cornerRadius)
-            fun visitCorners(view: View) {
+            fun restoreAlpha(view: View) {
                 view.background?.let { background ->
                     synchronized(volumeOriginalDrawableAlphas) { volumeOriginalDrawableAlphas.remove(background) }
                         ?.let { background.alpha = it }
                 }
-                val id = volumeResourceName(view)
-                val snapshot = VolumeCornerSnapshot(radius, view.width, view.height)
-                if (volumeGlobalCorners[view] != snapshot) {
-                    if (view.javaClass.name == VOLUME_ROUND_RECT_CLASS) invokeIfPresent(view, "setRadius", arrayOf(radius.toInt()))
-                    if (view.javaClass.name.endsWith("VolumeBlurFrameLayout") || view.javaClass.name.endsWith("ExpandBlurFrameLayout") ||
-                        id == "volume_column_slider_bg_glass" || id == "volume_column_slider_bg_blend") invokeMiBlurOutline(view, radius)
-                    volumeGlobalCorners[view] = snapshot
-                }
-                if (view is ViewGroup) repeat(view.childCount) { visitCorners(view.getChildAt(it)) }
+                if (view is ViewGroup) repeat(view.childCount) { restoreAlpha(view.getChildAt(it)) }
             }
-            visitCorners(root)
+            restoreAlpha(root)
             return
         }
-        volumeGlobalCorners.clear()
         val blurRadius = preferences.getInt(KEY_VOLUME_PANEL_BLUR_RADIUS, 24).coerceIn(0, 120)
         val glassStrength = preferences.getInt(KEY_VOLUME_PANEL_GLASS_STRENGTH, 50).coerceIn(0, 100)
         val backgroundOpacity = preferences.getInt(KEY_VOLUME_PANEL_BACKGROUND_OPACITY, 100).coerceIn(0, 100)
-        val cornerRadius = dpToPixels(
-            root,
-            preferences.getFloat(KEY_VOLUME_PANEL_CORNER_RADIUS, DEFAULT_CORNER_RADIUS),
-        )
         val viewCount = countViewTree(root)
-        val tuning = VolumeTuningSnapshot(blurRadius, glassStrength, backgroundOpacity, cornerRadius, viewCount)
+        val tuning = VolumeTuningSnapshot(blurRadius, glassStrength, backgroundOpacity, viewCount)
         synchronized(volumePanelAppliedTuning) {
             if (volumePanelAppliedTuning[root] == tuning) return
             volumePanelAppliedTuning[root] = tuning
@@ -15039,11 +15057,7 @@ class HyperSystemUiModule : XposedModule() {
             }
             if (background != null && background.javaClass.name.contains("BackgroundBlurDrawable")) {
                 invokeIfPresent(background, "setBlurRadius", arrayOf(blurRadius))
-                invokeIfPresent(
-                    background,
-                    "setCornerRadius",
-                    arrayOf(cornerRadius, cornerRadius, cornerRadius, cornerRadius),
-                )
+
             }
             if (background != null && (view === root ||
                     idName.contains("volume_dialog_content") ||
@@ -15060,9 +15074,6 @@ class HyperSystemUiModule : XposedModule() {
                 synchronized(volumeOriginalDrawableAlphas) { volumeOriginalDrawableAlphas.putIfAbsent(background, background.alpha) }
                 background.alpha = (glassStrength * 255 / 100).coerceIn(0, 255)
             }
-            if (view.javaClass.name == VOLUME_ROUND_RECT_CLASS) {
-                invokeIfPresent(view, "setRadius", arrayOf(cornerRadius.toInt()))
-            }
             if (view is ViewGroup) {
                 for (index in 0 until view.childCount) visit(view.getChildAt(index))
             }
@@ -15075,27 +15086,6 @@ class HyperSystemUiModule : XposedModule() {
         var count = 1
         for (index in 0 until root.childCount) count += countViewTree(root.getChildAt(index))
         return count
-    }
-
-    private fun applyVolumeColumnRadius(column: Any?) {
-        val runtime = volumeGlassRuntime?.state ?: return
-        if (!runtime.materialEnabled) return
-        if (column == null) return
-        val view = readField(column, "view") as? View ?: return
-        val radius = dpToPixels(
-            view,
-            runtime.cornerRadius,
-        )
-        val radiusInt = radius.toInt()
-        writeField(column, "radius", radiusInt)
-        readField(column, "progressViewBg")?.let {
-            invokeIfPresent(it, "setRadius", arrayOf(radiusInt))
-        }
-        // The slider is the foreground progress surface.  Its outline is intentionally left
-        // untouched; only the volume panel/background surfaces follow the panel radius.
-        listOf("view", "glassBg", "expandBg").forEach { fieldName ->
-            (readField(column, fieldName) as? View)?.let { invokeMiBlurOutline(it, radius) }
-        }
     }
 
     private fun invokeMiBlurOutline(view: View, radius: Float) {
@@ -15377,6 +15367,8 @@ class HyperSystemUiModule : XposedModule() {
         ?: original
 
     private fun replacementDp(name: String?, originalDp: Float, preferences: SharedPreferences): Float? {
+        val layout = volumeGlassRuntime?.layout ?: VolumePanelLayoutPreferences.read(preferences)
+        volumePanelLayoutDimensionDp(name, originalDp, layout)?.let { return it }
         if (!preferences.getBoolean(KEY_VOLUME_PANEL_MATERIAL_ENABLED, true) &&
             name in VOLUME_PANEL_MATERIAL_DIMENSION_NAMES
         ) return null
@@ -15384,17 +15376,6 @@ class HyperSystemUiModule : XposedModule() {
         // These are the dimensions consumed by VolumeColumnRes and the AOSP Compose dialog.
         // They are real inputs to the vendor volume panel, so the stock blur/glass pipeline
         // remains intact while its parameters become adjustable.
-        "o3_miui_cc_volume_radius",
-        "o3_miui_volume_bg_radius",
-        "o3_miui_volume_radius",
-        "o3_miui_tiny_volume_radius",
-        "miui_volume_bg_radius",
-        "miui_volume_bg_radius_expanded",
-        "miui_volume_blur_bg_radius",
-        "volume_dialog_background_corner_radius",
-        "volume_dialog_background_square_corner_radius" ->
-            preferences.getFloat(KEY_VOLUME_PANEL_CORNER_RADIUS, DEFAULT_CORNER_RADIUS)
-                .coerceIn(0f, 60f)
         "volume_dialog_background_blur_radius" ->
             preferences.getInt(KEY_VOLUME_PANEL_BLUR_RADIUS, 24).coerceIn(0, 120).toFloat()
         "volume_dialog_background_surface_blur_radius" ->
@@ -15973,7 +15954,6 @@ class HyperSystemUiModule : XposedModule() {
         private const val KEY_CONTROL_BOTTOM_BUTTONS_RADIUS = "control_bottom_buttons_radius"
         private const val KEY_VOLUME_PANEL_BLUR_RADIUS = "volume_panel_blur_radius"
         private const val KEY_VOLUME_PANEL_GLASS_STRENGTH = "volume_panel_glass_strength"
-        private const val KEY_VOLUME_PANEL_CORNER_RADIUS = "volume_panel_corner_radius"
         private const val KEY_VOLUME_PANEL_BACKGROUND_OPACITY = "volume_panel_background_opacity"
         private val VOLUME_PANEL_MATERIAL_DIMENSION_NAMES = setOf(
             "o3_miui_cc_volume_radius",

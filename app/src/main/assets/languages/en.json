@@ -1211,7 +1211,14 @@
     "音量 / 亮度条圆角": "Volume / Brightness Slider Corners",
     "圆形按钮圆角": "Circular Button Corners",
     "融合台设备中心卡片圆角": "Device Center Card Corners",
-    "展开面板圆角": "Expanded Panel Corners"
+    "展开面板圆角": "Expanded Panel Corners",
+    "自定义音量条大小": "Customize Volume Bar Size",
+    "自定义音量条宽度": "Custom Volume Bar Width",
+    "自定义音量条高度": "Custom Volume Bar Height",
+    "隐藏静音与勿扰按钮": "Hide Mute and Do Not Disturb Buttons",
+    "隐藏音量条上半部分的展开按钮": "Hide the Upper Volume Bar Expand Button",
+    "长按展开音量面板": "Long Press to Expand the Volume Panel",
+    "自定义音量条圆角": "Customize Volume Bar Corners"
   },
   "Xiaomi 18 Pro 系列 AI 背屏": "Xiaomi 18 Pro Series AI Rear Screen",
   "解锁 AI 功能": "Unlock AI features",

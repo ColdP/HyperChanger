@@ -863,6 +863,7 @@ private fun Root(
                 hooks.syncRemote(it)
                 SoftGlassSettingsStore(context).syncRemote(it)
                 VolumePanelGlassSettingsStore(context).syncRemote(it)
+                VolumePanelLayoutSettingsStore(context).syncRemote(it)
                 ControlCenterRadiusSettingsStore(context).syncRemote(it)
                 SuperXiaoAiInputGlassSettingsStore(context).syncRemote(it)
                 navigation.syncRemote(it)
@@ -6083,11 +6084,78 @@ private fun VolumePanelPreferences(
                     }
                 }
             }
-            FloatSlide(tr("\u5706\u89d2", "\u5706\u89d2"), s.volumePanelCornerRadius, 0f..60f, defaultValue = 24f) { value ->
-                update { it.copy(volumePanelCornerRadius = value) }
-            }
+
         }
     }
+
+    VolumePanelLayoutControls()
+}
+
+@Composable
+private fun VolumePanelLayoutControls() {
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    val changed = LocalNotificationSettingsChanged.current
+    val store = remember(context) { VolumePanelLayoutSettingsStore(context) }
+    var layout by remember { mutableStateOf(store.settings) }
+    LaunchedEffect(service) {
+        service?.let(store::syncRemote)
+        layout = store.settings
+    }
+    fun save(value: VolumePanelLayoutSettings) {
+        store.update(service, value)
+        layout = store.settings
+        changed()
+    }
+    SwitchPreference(
+        title = tr("自定义音量条大小", "自定义音量条大小"),
+        checked = layout.sizeEnabled,
+        onCheckedChange = { save(layout.copy(sizeEnabled = it)) },
+    )
+    AnimatedVisibility(
+        visible = layout.sizeEnabled,
+        enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+        exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+    ) {
+        Column {
+            ParameterIntSlide(tr("自定义音量条宽度", "自定义音量条宽度"), layout.width, -30..60, " dp", defaultValue = 0) { save(layout.copy(width = it)) }
+            ParameterIntSlide(tr("自定义音量条高度", "自定义音量条高度"), layout.height, -64..96, " dp", defaultValue = 0) { save(layout.copy(height = it)) }
+        }
+    }
+    SwitchPreference(
+        title = tr("隐藏静音与勿扰按钮", "隐藏“静音”与“勿扰”按钮"),
+        checked = layout.hideRinger,
+        onCheckedChange = { save(layout.copy(hideRinger = it)) },
+    )
+    SwitchPreference(
+        title = tr("隐藏音量条上半部分的展开按钮", "隐藏音量条上半部分的展开按钮"),
+        checked = layout.hideExpand,
+        onCheckedChange = { save(layout.copy(hideExpand = it)) },
+    )
+    AnimatedVisibility(
+        visible = layout.hideExpand,
+        enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+        exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+    ) {
+        SwitchPreference(
+            title = tr("长按展开音量面板", "长按展开音量面板"),
+            checked = layout.longPressExpand,
+            onCheckedChange = { save(layout.copy(longPressExpand = it)) },
+        )
+    }
+    SwitchPreference(
+        title = tr("自定义音量条圆角", "自定义音量条圆角"),
+        checked = layout.cornerEnabled,
+        onCheckedChange = { save(layout.copy(cornerEnabled = it)) },
+    )
+    AnimatedVisibility(
+        visible = layout.cornerEnabled,
+        enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+        exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+    ) {
+        ParameterIntSlide(tr("圆角", "圆角"), layout.corner, -40..80, " dp", defaultValue = 0) { save(layout.copy(corner = it)) }
+    }
+
 }
 
 @Composable
