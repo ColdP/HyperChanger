@@ -11502,7 +11502,20 @@ class HyperSystemUiModule : XposedModule() {
                         }.onFailure { error ->
                             log(Log.ERROR, TAG, "Could not override lockscreen FOD position", error)
                         }
-                        chain.proceed()
+                        val originalCollector = chain.getArg(0) ?: return@intercept chain.proceed()
+                        val collectorType = collect.parameterTypes.firstOrNull()
+                            ?: return@intercept chain.proceed()
+                        val forwardingCollector = createLockscreenNotificationPositionCollector(
+                            originalCollector,
+                            chain.thisObject,
+                            collectorType,
+                            collectorType.classLoader ?: positionFlowClass.classLoader ?: classLoader,
+                            preferences,
+                        )
+                        chain.proceedWith(
+                            chain.thisObject,
+                            arrayOf(forwardingCollector, chain.getArg(1)),
+                        )
                     }
                 positionHookCount += 1
             }.onFailure { error ->
@@ -11602,6 +11615,65 @@ class HyperSystemUiModule : XposedModule() {
             collectorMethod.invoke(originalCollector, *forwardedArgs)
         }
         method.invoke(sourceFlow, forwardingCollector, *invocationArgs.drop(1).toTypedArray())
+    }
+
+    private fun createLockscreenNotificationPositionCollector(
+        originalCollector: Any,
+        flow: Any,
+        collectorClass: Class<*>,
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ): Any {
+        return Proxy.newProxyInstance(
+            collectorClass.classLoader ?: classLoader,
+            arrayOf(collectorClass),
+        ) { _, method, args ->
+            val invocationArgs = args?.copyOf() ?: emptyArray()
+            if (method.name == "emit" && invocationArgs.isNotEmpty()) {
+                invocationArgs[0] = adjustLockscreenNotificationPosition(
+                    invocationArgs[0],
+                    flow,
+                    preferences,
+                )
+            }
+            method.invoke(originalCollector, *invocationArgs)
+        }
+    }
+
+    private fun adjustLockscreenNotificationPosition(
+        value: Any?,
+        flow: Any,
+        preferences: SharedPreferences,
+    ): Any? {
+        if (!preferences.getBoolean(KEY_LOCKSCREEN_NOTIFICATION_BOTTOM_OFFSET_ENABLED, false)) {
+            return value
+        }
+        val valueType = value?.javaClass ?: return value
+        if (valueType.name != "kotlin.Triple") return value
+        val parts = runCatching {
+            arrayOf(
+                valueType.getMethod("getFirst").invoke(value),
+                valueType.getMethod("getSecond").invoke(value),
+                valueType.getMethod("getThird").invoke(value),
+            )
+        }.getOrNull() ?: return value
+        val second = (parts[1] as? Number)?.toInt() ?: return value
+        val offsetDp = preferences.getInt(KEY_LOCKSCREEN_NOTIFICATION_BOTTOM_OFFSET, 0)
+            .coerceIn(-40, 64)
+        if (offsetDp == 0) return value
+        val controller = readInheritedField(flow, "this$0")
+        val context = controller?.let(::readContext) ?: systemUiApplicationContext
+        val density = context?.resources?.displayMetrics?.density
+            ?: Resources.getSystem().displayMetrics.density
+        val offsetPx = (offsetDp * density).roundToInt()
+        if (offsetPx == 0) return value
+        // This is a screen-space bottom boundary: positive values move it upward, while
+        // negative values move it downward as requested by the setting.
+        return runCatching {
+            valueType.declaredConstructors.first { it.parameterCount == 3 }
+                .apply { isAccessible = true }
+                .newInstance(parts[0], second - offsetPx, parts[2])
+        }.getOrDefault(value)
     }
 
     private fun installLockscreenMediaNotificationHook(

@@ -71,6 +71,7 @@ public final class IosNotificationCenterPresentation {
     private static float lastNotificationY = Float.NaN;
     private static float restingNotificationY = Float.NaN;
     private static int restingNotificationScrollY = Integer.MIN_VALUE;
+    private static boolean notificationClockContact;
     private static final ThreadLocal<Boolean> DRIVING_HOSTED_CLOCK = new ThreadLocal<>();
     private static Drawable lastDepthDrawable;
     private static ViewTreeObserver observer;
@@ -254,6 +255,16 @@ public final class IosNotificationCenterPresentation {
         return Boolean.TRUE.equals(DRIVING_HOSTED_CLOCK.get());
     }
 
+    /**
+     * The hosted clock is driven from the notification list only after a real contact. SystemUI
+     * also emits its own notification-Y flow for every scroll, so suppress those unsolicited
+     * updates while this presentation owns the clock; otherwise the OEM path moves it before a
+     * card reaches the clock even when our own driver correctly stays idle.
+     */
+    public static boolean shouldSuppressHostedClockNotification(View view) {
+        return isHostedClock(view) && isActive() && !isDrivingHostedClock();
+    }
+
     /** Called once the native panel reports that the notification center is actually hidden. */
     public static void finishPresentation() {
         if (!btm.m.os4.systemuihook.hypermusiccover.ShadeLayer.iosEnabled()) {
@@ -352,7 +363,7 @@ public final class IosNotificationCenterPresentation {
     }
 
     public static void setNotificationBottomOffset(int offsetDp) {
-        int bounded = Math.max(-30, Math.min(60, offsetDp));
+        int bounded = Math.max(-40, Math.min(120, offsetDp));
         if (notificationBottomOffsetDp == bounded) return;
         notificationBottomOffsetDp = bounded;
         restingNotificationY = Float.NaN;
@@ -1253,6 +1264,25 @@ public final class IosNotificationCenterPresentation {
         catch (Throwable ignored) {}
         float notificationY = stackPoint[1] - panelPoint[1]
                 + nativeTop + stackOffset(currentStack, nativeTop) - host.getTranslationY();
+        // The stack origin is not the notification top on every HyperOS layout. During a
+        // scroll it can remain above the first card, which made the OEM believe a notification
+        // had already touched the clock and caused a premature clock move. Prefer the actual
+        // first row whenever it is available; it also avoids feeding transient stack geometry
+        // to the clock while NSSL is relaying out its children.
+        float firstTop = firstNotificationTop(currentStack, panelPoint);
+        if (Float.isNaN(firstTop)) {
+            // An empty stack has no notification boundary. Leave the clock at its natural
+            // position and, if a previous card was touching it, settle that state once.
+            float clockBottom = hostedClockBottom(panelPoint);
+            if ((notificationClockContact || Float.isNaN(lastNotificationY))
+                    && !Float.isNaN(clockBottom)) {
+                driveHostedClock(clockBottom);
+                lastNotificationY = clockBottom;
+            }
+            notificationClockContact = false;
+            return;
+        }
+        notificationY = firstTop - host.getTranslationY();
         if (layoutProgress >= .95f && progress >= .95f) {
             if (Float.isNaN(restingNotificationY)) restingNotificationY = notificationY;
             int scrollY = 0;
@@ -1261,35 +1291,74 @@ public final class IosNotificationCenterPresentation {
                         .invoke(currentStack)).intValue();
             } catch (Throwable ignored) {}
             if (scrollY > 0) {
-                float firstTop = firstNotificationTop(currentStack, panelPoint);
-                if (!Float.isNaN(firstTop)) firstTop -= host.getTranslationY();
-                if (!Float.isNaN(firstTop)) {
+                float scrolledFirstTop = firstNotificationTop(currentStack, panelPoint);
+                if (!Float.isNaN(scrolledFirstTop)) scrolledFirstTop -= host.getTranslationY();
+                if (!Float.isNaN(scrolledFirstTop)) {
                     float lower = restingNotificationY - scrollY
                             - 16f * panel.getResources().getDisplayMetrics().density;
-                    notificationY = Math.min(restingNotificationY, Math.max(lower, firstTop));
+                    notificationY = Math.min(restingNotificationY, Math.max(lower, scrolledFirstTop));
                 }
             } else {
                 notificationY = restingNotificationY;
             }
         }
-        if (Float.isNaN(lastNotificationY) || Math.abs(notificationY - lastNotificationY) > 1f) {
-            try {
-                Class<?> kind = Class.forName(
-                        "com.miui.systemui.notification.data.repository.NotificationTopChangeType",
-                        false, clock.getClass().getClassLoader());
-                Object changed = kind.getField("NOTIFS_CHANGED").get(null);
-                Method method = clock.getClass().getMethod("notifStateChange", float.class, boolean.class, kind);
-                DRIVING_HOSTED_CLOCK.set(true);
-                try {
-                    method.invoke(clock, notificationY, true, changed);
-                    lastNotificationY = notificationY;
-                } finally {
-                    DRIVING_HOSTED_CLOCK.remove();
+        float clockBottom = hostedClockBottom(panelPoint);
+        if (!Float.isNaN(clockBottom)) {
+            // Do not call notifStateChange while the first notification is below the clock.
+            // The OEM call recomputes the clock layout even when its resulting translation is
+            // zero, which is visible as an unwanted upward/leftward nudge during scrolling.
+            if (notificationY > clockBottom + dpFloat(1f)) {
+                if (notificationClockContact || Float.isNaN(lastNotificationY)) {
+                    driveHostedClock(clockBottom);
+                    notificationClockContact = false;
+                    lastNotificationY = clockBottom;
                 }
-            } catch (Throwable ignored) {
-                // Other OEM builds may use a different notification change type.
+                return;
             }
+            notificationClockContact = true;
         }
+        if (Float.isNaN(lastNotificationY) || Math.abs(notificationY - lastNotificationY) > 1f) {
+            driveHostedClock(notificationY);
+        }
+    }
+
+    /** Drive the hosted OEM clock only after a real notification/clock contact. */
+    private static void driveHostedClock(float notificationY) {
+        try {
+            Class<?> kind = Class.forName(
+                    "com.miui.systemui.notification.data.repository.NotificationTopChangeType",
+                    false, clock.getClass().getClassLoader());
+            Object changed = kind.getField("NOTIFS_CHANGED").get(null);
+            Method method = clock.getClass().getMethod("notifStateChange", float.class, boolean.class, kind);
+            DRIVING_HOSTED_CLOCK.set(true);
+            try {
+                method.invoke(clock, notificationY, true, changed);
+                lastNotificationY = notificationY;
+            } finally {
+                DRIVING_HOSTED_CLOCK.remove();
+            }
+        } catch (Throwable ignored) {
+            // Other OEM builds may use a different notification change type.
+        }
+    }
+
+    /** Clock bottom in the same panel-local coordinate space as notificationY. */
+    private static float hostedClockBottom(int[] panelPoint) {
+        try {
+            Object value = clock.getClass().getMethod("getClockBottom").invoke(clock);
+            if (!(value instanceof Number)) return Float.NaN;
+            float bottom = ((Number) value).floatValue();
+            if (!(bottom > 0f)) return Float.NaN;
+            int[] clockPoint = new int[2];
+            clock.getLocationInWindow(clockPoint);
+            return clockPoint[1] - panelPoint[1] - host.getTranslationY() + bottom;
+        } catch (Throwable ignored) {
+            return Float.NaN;
+        }
+    }
+
+    private static float dpFloat(float value) {
+        return panel == null ? value : value * panel.getResources().getDisplayMetrics().density;
     }
 
     private static View findClockAnimation(View info) {
@@ -1374,6 +1443,7 @@ public final class IosNotificationCenterPresentation {
         layoutProgress = 0f;
         lastNotificationY = Float.NaN;
         restingNotificationY = Float.NaN;
+        notificationClockContact = false;
         restingNotificationScrollY = Integer.MIN_VALUE;
         lastDepthDrawable = null;
         if (host != null && host.getParent() instanceof ViewGroup) {

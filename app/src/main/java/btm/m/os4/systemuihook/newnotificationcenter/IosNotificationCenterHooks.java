@@ -133,7 +133,7 @@ public final class IosNotificationCenterHooks {
                 return chain.proceed();
             });
             Xp.hookAll(injector, "onNotificationAppearChanged", chain -> {
-                if (Boolean.TRUE.equals(chain.getArgs().get(0))) ShadeLayer.onNotificationAppearance();
+                ShadeLayer.onNotificationAppearance(Boolean.TRUE.equals(chain.getArgs().get(0)));
                 return chain.proceed();
             });
             Xp.log("[IOSShade] notification/control-centre ownership hooked");

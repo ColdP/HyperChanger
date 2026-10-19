@@ -10,7 +10,7 @@ import io.github.libxposed.service.XposedService
 const val KEY_IOS_NOTIFICATION_BOTTOM_OFFSET = "ios_notification_bottom_offset_dp"
 
 fun readIosNotificationBottomOffset(preferences: SharedPreferences): Int =
-    preferences.getInt(KEY_IOS_NOTIFICATION_BOTTOM_OFFSET, 0).coerceIn(-30, 60)
+    preferences.getInt(KEY_IOS_NOTIFICATION_BOTTOM_OFFSET, 0).coerceIn(-40, 120)
 
 /** Positive offsets move the notification resting edge upward; negative offsets move it down. */
 class IosNotificationBottomOffsetSettingsStore(context: Context) {
@@ -24,7 +24,7 @@ class IosNotificationBottomOffsetSettingsStore(context: Context) {
     }
 
     fun update(service: XposedService?, value: Int) {
-        offsetDp = value.coerceIn(-30, 60)
+        offsetDp = value.coerceIn(-40, 120)
         write(local, offsetDp)
         service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.let { write(it, offsetDp) }
     }

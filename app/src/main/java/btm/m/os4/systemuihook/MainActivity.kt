@@ -5572,11 +5572,11 @@ private fun IosNotificationCenterPage(
                             title = tr("iosNotificationBottomOffset", "通知下沉底部偏移"),
                             value = offsetDp.toFloat(),
                             valueText = if (offsetDp > 0) "+$offsetDp dp" else "$offsetDp dp",
-                            valueRange = -30f..60f,
-                            steps = 89,
+                            valueRange = -40f..120f,
+                            steps = 159,
                             defaultValue = 0f,
                             centerValue = 0f,
-                            onValueChange = { offsetDp = it.roundToInt().coerceIn(-30, 60) },
+                            onValueChange = { offsetDp = it.roundToInt().coerceIn(-40, 120) },
                             onValueChangeFinished = { offsetStore.update(service, offsetDp) },
                         )
                     }
@@ -7611,10 +7611,18 @@ private fun Lock(
     val clockHorizontalStore = remember(context) { LockscreenClockHorizontalSettingsStore(context) }
     val clockHorizontalService by HookApplication.service.collectAsStateWithLifecycle()
     var clockHorizontalEnabled by remember { mutableStateOf(clockHorizontalStore.enabled) }
+    val lockscreenNotificationOffsetStore = remember(context) {
+        LockscreenNotificationBottomOffsetSettingsStore(context)
+    }
+    var lockscreenNotificationOffsetSettings by remember {
+        mutableStateOf(lockscreenNotificationOffsetStore.settings)
+    }
     LaunchedEffect(clockHorizontalService) {
         clockHorizontalService?.let {
             clockHorizontalStore.syncRemote(it)
             clockHorizontalEnabled = clockHorizontalStore.enabled
+            lockscreenNotificationOffsetStore.syncRemote(it)
+            lockscreenNotificationOffsetSettings = lockscreenNotificationOffsetStore.settings
         }
     }
 
@@ -7797,6 +7805,43 @@ private fun Lock(
         }
         item {
             Group(tr("\u901a\u77e5\u4e0e\u8d85\u7ea7\u5c9b", "\u901a\u77e5\u4e0e\u8d85\u7ea7\u5c9b")) {
+                SwitchPreference(
+                    title = tr(
+                        "lockscreenNotificationBottomOffset",
+                        "调整锁屏通知下沉底部位置",
+                    ),
+                    summary = tr(
+                        "lockscreenNotificationBottomOffsetSummary",
+                        "开启后可调整位置；0 为系统默认值，负值向下移动，正值向上移动",
+                    ),
+                    checked = lockscreenNotificationOffsetSettings.enabled,
+                    onCheckedChange = { enabled ->
+                        lockscreenNotificationOffsetStore.update(clockHorizontalService) {
+                            it.copy(enabled = enabled)
+                        }
+                        lockscreenNotificationOffsetSettings = lockscreenNotificationOffsetStore.settings
+                    },
+                )
+                AnimatedVisibility(
+                    visible = lockscreenNotificationOffsetSettings.enabled,
+                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                ) {
+                    IntSlide(
+                        title = tr(
+                            "lockscreenNotificationBottomOffsetValue",
+                            "锁屏通知中心下沉底部偏移",
+                        ),
+                        value = lockscreenNotificationOffsetSettings.offsetDp,
+                        range = -40..64,
+                        defaultValue = 0,
+                    ) { value ->
+                        lockscreenNotificationOffsetStore.update(clockHorizontalService) {
+                            it.copy(offsetDp = value)
+                        }
+                        lockscreenNotificationOffsetSettings = lockscreenNotificationOffsetStore.settings
+                    }
+                }
                 SwitchPreference(
                     title = tr("\u53bb\u9664\u901a\u77e5\u4e0b\u6c89\u4f4d\u7f6e\u9650\u5236", "\u53bb\u9664\u901a\u77e5\u4e0b\u6c89\u4f4d\u7f6e\u9650\u5236"),
                     checked = s.notificationFodPositionLimitRemoved,

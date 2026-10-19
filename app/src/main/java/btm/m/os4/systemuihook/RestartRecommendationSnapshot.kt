@@ -49,6 +49,8 @@ internal fun restartRecommendationSnapshot(group: String, preferences: SharedPre
     volumePanelUsesGlobalGlass(p)
     p.readRearScreenWallpaperLimitSettings()
     p.isRearScreenThemeApplyFixEnabled()
+    p.getBoolean(KEY_LOCKSCREEN_NOTIFICATION_BOTTOM_OFFSET_ENABLED, false)
+    p.getInt(KEY_LOCKSCREEN_NOTIFICATION_BOTTOM_OFFSET, 0)
     readIosNotificationBottomOffset(p)
     p.getBoolean(KEY_LOCKSCREEN_CLOCK_HORIZONTAL_MOVE, false)
     p.getBoolean(KEY_IOS_NOTIFICATION_CENTER, false)

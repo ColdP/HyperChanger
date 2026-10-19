@@ -95,7 +95,7 @@ public final class ShadeLayer {
 
     /** Includes the first native panel frame, before the hosted clock has been attached. */
     public static boolean iosNotificationPanelEnabled() {
-        return sIosEnabled && !IOS.controlCenter && effectActive();
+        return sIosEnabled && !IOS.controlCenter && IOS.progress > 0f && effectActive();
     }
 
     public static boolean shouldDeferNotificationHide() {
@@ -152,17 +152,34 @@ public final class ShadeLayer {
     }
 
     public static void onControlCenterAppearance(boolean visible) {
-        if (sIosSwitchDriver) return;
+        if (sIosSwitchDriver && visible) return;
+        boolean wasControlCenter = IOS.controlCenter;
         IOS.controlCenter(visible);
         if (visible) {
             cancelIosSettle();
             hideIosLayer();
             IosNotificationCenterPresentation.finishPresentation();
+        } else if (wasControlCenter) {
+            // The control-center trigger can disappear without another expansion frame. Make
+            // sure its wallpaper/material layer is returned immediately, otherwise the last
+            // translucent sheet can cover the desktop and heads-up notifications.
+            cancelIosSettle();
+            IOS.move(0f);
+            hideIosLayer();
+            IosNotificationCenterPresentation.finishPresentation();
         }
     }
 
-    public static void onNotificationAppearance() {
-        if (sIosSwitchDriver) return;
+    public static void onNotificationAppearance(boolean visible) {
+        if (sIosSwitchDriver && visible) return;
+        if (!visible) {
+            if (IOS.switching) return;
+            cancelIosSettle();
+            IOS.move(0f);
+            hideIosLayer();
+            IosNotificationCenterPresentation.finishPresentation();
+            return;
+        }
         boolean returning = IOS.controlCenter;
         IOS.notification();
         if (sIosEnabled && returning) {
@@ -204,6 +221,14 @@ public final class ShadeLayer {
             // Keep the measured sheet in the tree so the next drag requires no layout pass.
             sFrame.setVisibility(View.INVISIBLE);
             sFrame.setTranslationY(0f);
+            sFrame.setClipBounds(null);
+            sFrame.invalidateOutline();
+        }
+        if (sWp != null) {
+            sWp.setTranslationY(0f);
+            sWp.setScaleX(1f);
+            sWp.setScaleY(1f);
+            sWp.setRenderEffect(null);
         }
         sLastAlpha = Float.NaN;
         btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterHooks.finishDeferredHide();
