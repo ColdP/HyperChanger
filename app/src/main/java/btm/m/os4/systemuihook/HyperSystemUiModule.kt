@@ -61,7 +61,6 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
 import androidx.core.graphics.PathParser
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 import io.github.libxposed.api.XposedModule
@@ -299,9 +298,23 @@ private const val CONTROL_CENTER_POWER_PATH =
 private val gestureMaterialOverlays = Collections.synchronizedMap(WeakHashMap<View, View>())
 
 class HyperSystemUiModule : XposedModule() {
-    private val controlCenterHeaderHeightHook by lazy { ControlCenterHeaderHeightHook(this) }
-    private val controlCenterCarrierHook by lazy { ControlCenterCarrierHook(this) }
-    private val controlCenterClockHook by lazy { ControlCenterClockHook(this) }
+    private val controlCenterHooks by lazy {
+        ControlCenterHooks(
+            module = this,
+            readContext = ::readContext,
+            applicationContext = { systemUiApplicationContext },
+        )
+    }
+    private val notificationHooks = NotificationHooks(
+        module = this,
+        readInstanceField = ::readInstanceField,
+        findDynamicIslandField = ::findDynamicIslandField,
+        systemUiPackageName = SYSTEM_UI,
+        notificationSettingsManagerClassName = SYSTEM_UI_NOTIFICATION_SETTINGS_MANAGER_CLASS,
+        notificationRowInjectorClassName = EXPANDABLE_NOTIFICATION_ROW_INJECTOR_CLASS,
+        hideMiniWindowBarKey = KEY_HIDE_NOTIFICATION_MINI_WINDOW_BAR,
+        logTag = TAG,
+    )
     private val islandSmoothingHook by lazy { IslandSmoothingHook(this) }
     private val lockscreenFaceUnlockHook by lazy { LockscreenFaceUnlockHook(this) }
     private val unlockFocusAuthHook by lazy { UnlockFocusAuthHook(this) }
@@ -316,9 +329,6 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
-    private var customTileHookInstalled = false
-    private var customPluginTileHookInstalled = false
-    private var customTileRetryScheduled = false
     private var customRearScreenWidgetRegistrationInstalled = false
 
     private fun installAppNavigation(param: PackageLoadedParam) {
@@ -471,10 +481,6 @@ class HyperSystemUiModule : XposedModule() {
         log(Log.INFO, TAG, "Installed Xiaomi Health unlimited watch-face trial hook")
     }
 
-    private fun invokeNoArgResult(target: Any, name: String): Any? = runCatching {
-        target.javaClass.methods.firstOrNull { it.name == name && it.parameterCount == 0 }?.invoke(target)
-    }.getOrNull()
-
     private fun readContext(target: Any): Context? = runCatching {
         target.javaClass.methods.firstOrNull { it.name in setOf("getContext", "getMContext") && it.parameterCount == 0 }?.invoke(target) as? Context
     }.getOrNull() ?: runCatching {
@@ -485,145 +491,6 @@ class HyperSystemUiModule : XposedModule() {
                 field.get(target) as? Context
             }
     }.getOrNull()
-
-    private fun findTileInterface(type: Class<*>): Class<*>? {
-        type.interfaces.forEach { iface ->
-            if (iface.name == "com.android.systemui.plugins.miui.qs.MiuiQSTile") return iface
-            findTileInterface(iface)?.let { return it }
-        }
-        return type.superclass?.let(::findTileInterface)
-    }
-
-    private fun installCustomTileHooks(loader: ClassLoader, prefs: SharedPreferences) {
-        if (customTileHookInstalled) {
-            installPluginTileHook(loader, prefs)
-            return
-        }
-        val factory = runCatching { loader.loadClass("com.android.systemui.qs.tileimpl.MiuiQSFactory") }.getOrNull()
-        if (factory == null) {
-            if (!customTileRetryScheduled) {
-                customTileRetryScheduled = true
-                Handler(Looper.getMainLooper()).postDelayed({
-                    customTileRetryScheduled = false
-                    installCustomTileHooks(loader, prefs)
-                }, 1500L)
-            }
-            return
-        }
-        val create = factory.methods.firstOrNull { it.name == "createTile" && it.parameterTypes.contentEquals(arrayOf(String::class.java)) }
-            ?: return
-        hook(create).setExceptionMode(ExceptionMode.PROTECTIVE).setId("hyperchanger:custom-tiles").intercept { chain ->
-            val spec = chain.getArg(0) as? String
-            if (spec == "custom_5G" || (spec == "custom_GMS" && prefs.getBoolean(KEY_CONTROL_CENTER_GMS_TILE_ENABLED, false))) {
-                injectPluginTile(chain.thisObject, loader, prefs, spec)
-            }
-            chain.proceed()
-        }
-        val pluginInstalled = installPluginTileHook(loader, prefs)
-        hook(Resources::class.java.getMethod("getString", Int::class.javaPrimitiveType))
-            .setExceptionMode(ExceptionMode.PROTECTIVE).setId("hyperchanger:custom-tile-stock").intercept { chain ->
-                val value = chain.proceed()
-                val resources = chain.thisObject as? Resources
-                val id = chain.getArg(0) as? Int
-                val name = runCatching { id?.let { resources?.getResourceEntryName(it) } }.getOrNull()
-                if (value is String && name?.contains("quick_settings_tiles_stock") == true) {
-                    value.split(',').map(String::trim).filter(String::isNotEmpty).toMutableList().apply {
-                        if (prefs.getInt(KEY_CONTROL_CENTER_5G_TILE_MODE, 0) != 0 && "custom_5G" !in this) add("custom_5G")
-                        if (prefs.getBoolean(KEY_CONTROL_CENTER_GMS_TILE_ENABLED, false) && "custom_GMS" !in this) add("custom_GMS")
-                    }.joinToString(",")
-                } else value
-            }
-        customTileHookInstalled = true
-        if (!pluginInstalled && !customTileRetryScheduled) {
-            customTileRetryScheduled = true
-            Handler(Looper.getMainLooper()).postDelayed({
-                customTileRetryScheduled = false
-                installCustomTileHooks(loader, prefs)
-            }, 1500L)
-        }
-    }
-
-    private fun installPluginTileHook(loader: ClassLoader, prefs: SharedPreferences): Boolean {
-        if (customPluginTileHookInstalled) return true
-        return runCatching {
-            val plugin = loader.loadClass("miui.systemui.quicksettings.LocalMiuiQSTilePlugin")
-            val method = plugin.methods.first { it.name == "getAllPluginTiles" && it.parameterCount == 0 }
-            hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE).setId("hyperchanger:custom-plugin-tiles").intercept { chain ->
-                val rawMap = chain.proceed()
-                val map = rawMap as? MutableMap<Any?, Any?> ?: return@intercept rawMap
-                val host = map.values.firstOrNull { it != null } ?: return@intercept map
-                val hostLoader = host.javaClass.classLoader ?: loader
-                if (prefs.getInt(KEY_CONTROL_CENTER_5G_TILE_MODE, 0) != 0 && !map.containsKey("custom_5G")) map["custom_5G"] = proxyTile(host, hostLoader, prefs, "custom_5G")
-                if (prefs.getBoolean(KEY_CONTROL_CENTER_GMS_TILE_ENABLED, false) && !map.containsKey("custom_GMS")) map["custom_GMS"] = proxyTile(host, hostLoader, prefs, "custom_GMS")
-                map
-            }
-            customPluginTileHookInstalled = true
-            true
-        }.getOrDefault(false)
-    }
-
-    private fun injectPluginTile(factory: Any?, loader: ClassLoader, prefs: SharedPreferences, spec: String?) = runCatching {
-        val field = generateSequence(factory?.javaClass) { it.superclass }.flatMap { it.declaredFields.asSequence() }.firstOrNull { it.name == "qSTilePluginInteractor" } ?: return@runCatching
-        field.isAccessible = true
-        val interactor = field.get(factory)?.let { invokeNoArgResult(it, "get") } ?: return@runCatching
-        val pluginField = interactor.javaClass.declaredFields.firstOrNull { it.name == "miuiQSTilePlugin" } ?: return@runCatching
-        pluginField.isAccessible = true
-        val map = invokeNoArgResult(pluginField.get(interactor), "getAllPluginTiles") as? MutableMap<Any?, Any?> ?: return@runCatching
-        if (spec == "custom_5G" && !map.containsKey(spec)) map.values.firstOrNull()?.let { map[spec] = proxyTile(it, it.javaClass.classLoader ?: loader, prefs, spec) }
-        if (spec == "custom_GMS" && !map.containsKey(spec)) map.values.firstOrNull()?.let { map[spec] = proxyTile(it, it.javaClass.classLoader ?: loader, prefs, spec) }
-    }
-
-    private fun proxyTile(host: Any, loader: ClassLoader, prefs: SharedPreferences, spec: String): Any {
-        val iface = findTileInterface(host.javaClass) ?: error("MiuiQSTile interface unavailable")
-        val context = readContext(host) ?: systemUiApplicationContext ?: error("tile context unavailable")
-        val state = invokeNoArgResult(host, "getState")?.javaClass?.getDeclaredConstructor()?.apply { isAccessible = true }?.newInstance() ?: error("tile state unavailable")
-        val callbacks = mutableListOf<Any>()
-        fun refresh() {
-            val gms = spec == "custom_GMS"
-            val enabled = if (gms) isGmsEnabled(context) else isUserFiveGEnabled(context)
-            state.javaClass.getField("state").setInt(state, if (enabled) 2 else 1)
-            state.javaClass.getField("label").set(state, if (gms) "Google 服务" else "5G")
-            state.javaClass.getField("contentDescription").set(state, if (gms) "Google 服务" else "5G")
-            // DrawableIcon moved from quicksettings to controlcenter.qs in 18.3.x.
-            // Resolve both names because the plugin and SystemUI can use different
-            // class loaders during a SystemUI/plugin upgrade.
-            val iconClass = sequenceOf(
-                "miui.systemui.controlcenter.qs.DrawableIcon",
-                "miui.systemui.quicksettings.DrawableIcon"
-            ).mapNotNull { name ->
-                runCatching { host.javaClass.classLoader.loadClass(name) }.getOrNull()
-                    ?: runCatching { loader.loadClass(name) }.getOrNull()
-            }.firstOrNull() ?: error("DrawableIcon unavailable")
-            val drawable = if (gms) loadTileDrawable(context, R.drawable.ic_control_center_google) else loadTileDrawable(context, when (prefs.getInt(KEY_CONTROL_CENTER_5G_TILE_MODE, 1)) { 2 -> R.drawable.ic_control_center_5g_semibold; 3 -> R.drawable.ic_control_center_5g_black; 4 -> R.drawable.ic_control_center_5g_signal; else -> R.drawable.ic_control_center_5g_regular })
-            state.javaClass.getField("icon").set(state, iconClass.getConstructor(Drawable::class.java).newInstance(drawable))
-            callbacks.toList().forEach { cb -> runCatching { cb.javaClass.methods.firstOrNull { it.name == "onStateChanged" && it.parameterCount == 1 }?.invoke(cb, state) } }
-        }
-        refresh()
-        return Proxy.newProxyInstance(iface.classLoader, arrayOf(iface)) { proxy, method, args -> when (method.name) {
-            "getTileSpec" -> spec
-            "isAvailable" -> if (spec == "custom_GMS") hasGms(context) else prefs.getInt(KEY_CONTROL_CENTER_5G_TILE_MODE, 0) != 0
-            "getState" -> state
-            // PluginTile calls this on every update and expects a fresh State.
-            "newTileState" -> state.javaClass.getDeclaredConstructor().apply { isAccessible = true }.newInstance()
-            "refreshState" -> { refresh(); null }
-            "addCallback" -> { args?.firstOrNull()?.let { if (it !in callbacks) callbacks += it }; refresh(); null }
-            "removeCallback" -> { args?.firstOrNull()?.let(callbacks::remove); null }
-            "setListening" -> null
-            "composeChangeAnnouncement" -> spec
-            // This value is unboxed by PluginTile; returning null here crashes SystemUI.
-            "getMetricsCategory" -> 0
-            "handleClick" -> { if (spec == "custom_GMS") toggleGms(context) else setUserFiveGEnabled(context, !isUserFiveGEnabled(context)); refresh(); null }
-            "getLongClickIntent" -> if (spec == "custom_GMS") Intent().setClassName("com.miui.securitycenter", "com.miui.googlebase.ui.GmsCoreSettings") else Intent().setClassName("com.android.phone", "com.android.phone.settings.MiuiFiveGNetworkSetting")
-            "hashCode" -> System.identityHashCode(proxy); "equals" -> proxy === args?.firstOrNull(); "toString" -> "HyperChanger-$spec"; else -> null
-        } }
-    }
-
-    private fun loadTileDrawable(context: Context, id: Int): Drawable = context.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY).resources.getDrawable(id, null).mutate()
-    private fun hasGms(c: Context) = runCatching { c.packageManager.getPackageInfo("com.google.android.gms", 0); true }.getOrDefault(false)
-    private fun isGmsEnabled(c: Context) = runCatching { c.packageManager.getApplicationEnabledSetting("com.google.android.gms") != android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER }.getOrDefault(false)
-    private fun toggleGms(c: Context) { val next = if (isGmsEnabled(c)) android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER else android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED; listOf("com.google.android.gms", "com.google.android.gsf", "com.android.vending").forEach { runCatching { c.packageManager.setApplicationEnabledSetting(it, next, 0) } } }
-    private fun isUserFiveGEnabled(c: Context) = runCatching { val k = Class.forName("miui.telephony.TelephonyManager"); k.getDeclaredMethod("isUserFiveGEnabled").invoke(k.getDeclaredMethod("getDefault").invoke(null)) as Boolean }.getOrElse { Settings.Global.getInt(c.contentResolver, "fiveg_user_enable", 1) != 0 }
-    private fun setUserFiveGEnabled(c: Context, value: Boolean) { runCatching { val k = Class.forName("miui.telephony.TelephonyManager"); k.getDeclaredMethod("setUserFiveGEnabled", Boolean::class.javaPrimitiveType).invoke(k.getDeclaredMethod("getDefault").invoke(null), value) }.onFailure { Settings.Global.putInt(c.contentResolver, "fiveg_user_enable", if (value) 1 else 0) } }
 
     private fun settingsField(target: Any, name: String): java.lang.reflect.Field? = generateSequence(target.javaClass) { it.superclass }
         .mapNotNull { type -> runCatching { type.getDeclaredField(name).apply { isAccessible = true } }.getOrNull() }
@@ -1057,7 +924,7 @@ class HyperSystemUiModule : XposedModule() {
      * Private methods that the compiler inlined never reach the hook, which is what happened to
      * getMaxMiuiFreeFormStackCount. HyperCeiler does the same through Deoptimizers.deoptimize.
      */
-    private fun hookDeoptimized(member: java.lang.reflect.Executable) = runCatching {
+    internal fun hookDeoptimized(member: java.lang.reflect.Executable) = runCatching {
         deoptimize(member)
     }.let { hook(member) }
 
@@ -1718,32 +1585,6 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
-    /** Clears the "force new control center" flag so the legacy shade comes back. */
-    private fun installOldControlCenterHook(loader: ClassLoader, prefs: SharedPreferences) {
-        if (!readSettingsAppScopePreferences(prefs).oldControlCenter) return
-        listOf(
-            "com.miui.systemui.controlcenter.data.repository.ControlCenterSettingsRepositoryImpl" to "forceUseControlCenter",
-            "com.android.systemui.controlcenter.policy.ControlCenterControllerImpl" to "forceUseControlCenterPanel",
-        ).forEach { (className, fieldName) ->
-            runCatching {
-                val cls = loader.loadClass(className)
-                cls.declaredConstructors.forEach { constructor ->
-                    hook(constructor)
-                        .setExceptionMode(ExceptionMode.PROTECTIVE)
-                        .setId("hyperchanger:old-cc-${cls.simpleName}")
-                        .intercept { chain ->
-                            val result = chain.proceed()
-                            runCatching {
-                                cls.getDeclaredField(fieldName).apply { isAccessible = true }
-                                    .setBoolean(chain.thisObject, false)
-                            }
-                            result
-                        }
-                }
-            }
-        }
-    }
-
     override fun onPackageLoaded(param: PackageLoadedParam) {
         if (!OsCompatibility.areHooksAllowed()) return
         if (param.packageName == "com.android.systemui") {
@@ -1759,7 +1600,7 @@ class HyperSystemUiModule : XposedModule() {
         }
         if (param.packageName == "com.android.systemui") {
             runCatching {
-                installOldControlCenterHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+                controlCenterHooks.installOldControlCenterHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
             }.onFailure { error -> log(Log.ERROR, TAG, "Could not install old control center hook", error) }
         }
         if (param.packageName == "com.xiaomi.misettings") {
@@ -1837,14 +1678,12 @@ class HyperSystemUiModule : XposedModule() {
             val preferences = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
             when (param.packageName) {
                 SYSTEM_UI, SYSTEM_UI_PLUGIN -> {
-                    controlCenterHeaderHeightHook.install(param.defaultClassLoader, preferences)
-                    controlCenterCarrierHook.install(param.defaultClassLoader, preferences)
-                    controlCenterClockHook.install(param.defaultClassLoader, preferences)
+                    controlCenterHooks.installHeaderHooks(param.defaultClassLoader, preferences)
                     islandSmoothingHook.install(param.defaultClassLoader, preferences)
                     if (param.packageName == SYSTEM_UI) {
                         lockscreenFaceUnlockHook.install(param.defaultClassLoader, preferences)
                     }
-                    installCustomTileHooks(param.defaultClassLoader, preferences)
+                    controlCenterHooks.installCustomTileHooks(param.defaultClassLoader, preferences)
                     if (param.packageName == SYSTEM_UI) {
                         synchronized(controlCenterButtonsLock) {
                             systemUiClassLoader = param.defaultClassLoader
@@ -1854,7 +1693,7 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     if (!resourceHooksInstalled) {
                         installDimensionHooks(preferences)
-                        installNotificationColorHooks(preferences)
+                        notificationHooks.installNotificationColorHooks(preferences)
                         resourceHooksInstalled = true
                     }
                     if (!cornerHooksInstalled) {
@@ -1901,10 +1740,8 @@ class HyperSystemUiModule : XposedModule() {
                         focusIslandWhitelistSystemUiHooksInstalled =
                             installFocusIslandWhitelistSystemUiHooks(param.defaultClassLoader, preferences)
                     }
-                    if (param.packageName == SYSTEM_UI && !notificationRestrictionHooksInstalled) {
-                        installNotificationRestrictionHooks(param.defaultClassLoader, preferences)
-                        installNotificationMiniWindowBarHook(param.defaultClassLoader, preferences)
-                        notificationRestrictionHooksInstalled = true
+                    if (param.packageName == SYSTEM_UI) {
+                        notificationHooks.installNotificationRestrictions(param.defaultClassLoader, preferences)
                     }
                     if (!focusIslandWhitelistPluginHooksInstalled) {
                         // The plugin is commonly loaded into SystemUI's class loader and may not
@@ -2345,9 +2182,7 @@ class HyperSystemUiModule : XposedModule() {
         val handler = Handler(Looper.getMainLooper())
         listOf(500L, 1500L, 3000L, 6000L, 10000L, 16000L).forEach { delay ->
             handler.postDelayed({
-                controlCenterHeaderHeightHook.install(classLoader, preferences)
-                controlCenterCarrierHook.install(classLoader, preferences)
-                controlCenterClockHook.install(classLoader, preferences)
+                controlCenterHooks.installHeaderHooks(classLoader, preferences)
                 islandSmoothingHook.install(classLoader, preferences)
                 val complete = controlCenterEditButtonHookInstalled &&
                     controlCenterTopButtonsHookInstalled &&
@@ -5957,9 +5792,7 @@ class HyperSystemUiModule : XposedModule() {
                 if (controlCenterClassDiscoveryInProgress.get() == true) return
                 controlCenterClassDiscoveryInProgress.set(true)
                 try {
-                controlCenterHeaderHeightHook.onClassLoaded(loadedClass, preferences)
-                controlCenterCarrierHook.onClassLoaded(loadedClass, preferences)
-                controlCenterClockHook.onClassLoaded(loadedClass, preferences)
+                controlCenterHooks.onHeaderClassLoaded(loadedClass, preferences)
                 islandSmoothingHook.onClassLoaded(loadedClass, preferences)
                 lockscreenFaceUnlockHook.onClassLoaded(loadedClass)
                 if ((loadedClass.name == CONTROL_CENTER_EDIT_BUTTON_CONTROLLER_CLASS ||
@@ -6768,38 +6601,6 @@ class HyperSystemUiModule : XposedModule() {
             }
             log(Log.INFO, TAG, "Installed status bar icon left-position hook")
         }.onFailure { error -> log(Log.WARN, TAG, "Status bar icon left-position hook unavailable", error) }
-    }
-
-    private fun installNotificationMiniWindowBarHook(
-        classLoader: ClassLoader,
-        preferences: SharedPreferences,
-    ) {
-        runCatching {
-            val injectorClass = classLoader.loadClass(EXPANDABLE_NOTIFICATION_ROW_INJECTOR_CLASS)
-            val methods = injectorClass.declaredMethods.filter {
-                it.name == "updateMiniWindowBar" && it.parameterCount == 0
-            }
-            check(methods.isNotEmpty()) { "$EXPANDABLE_NOTIFICATION_ROW_INJECTOR_CLASS#updateMiniWindowBar not found" }
-            methods.forEachIndexed { index, method ->
-                method.isAccessible = true
-                hookDeoptimized(method)
-                    .setExceptionMode(ExceptionMode.PROTECTIVE)
-                    .setId("notification-mini-window-bar-hide:$index")
-                    .intercept { chain ->
-                        val result = chain.proceed()
-                        if (preferences.getBoolean(KEY_HIDE_NOTIFICATION_MINI_WINDOW_BAR, false)) {
-                            runCatching {
-                                val getMiniBar = injectorClass.getDeclaredMethod("getMiniBar").apply { isAccessible = true }
-                                (getMiniBar.invoke(chain.thisObject) as? View)?.visibility = View.GONE
-                            }
-                        }
-                        result
-                    }
-            }
-            log(Log.INFO, TAG, "Installed notification mini-window bar hide hook")
-        }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install notification mini-window bar hide hook", error)
-        }
     }
 
     /**
@@ -9501,188 +9302,6 @@ class HyperSystemUiModule : XposedModule() {
         return runCatching {
             header.context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true
         }.getOrDefault(false)
-    }
-
-    private fun installNotificationRestrictionHooks(
-        classLoader: ClassLoader,
-        preferences: SharedPreferences,
-    ) {
-        runCatching {
-            val suppressedToasts = Collections.synchronizedMap(WeakHashMap<Any, Boolean>())
-            val makeText = Toast::class.java.getMethod(
-                "makeText",
-                Context::class.java,
-                Int::class.javaPrimitiveType,
-                Int::class.javaPrimitiveType,
-            )
-            hook(makeText)
-                .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("notification-limits:remove-ble-unlock-toast-create")
-                .intercept { chain ->
-                    val result = chain.proceed()
-                    if (preferences.getBoolean(KEY_REMOVE_BLE_UNLOCK_TOAST, false)) {
-                        val context = chain.getArg(0) as? Context
-                        val resourceId = chain.getArg(1) as? Int
-                        val resourceName = resourceId?.let { id ->
-                            runCatching { context?.resources?.getResourceEntryName(id) }.getOrNull()
-                        }
-                        if (resourceName == "miui_keyguard_ble_unlock_succeed_msg") {
-                            suppressedToasts[result] = true
-                        }
-                    }
-                    result
-                }
-            hook(Toast::class.java.getMethod("show"))
-                .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("notification-limits:remove-ble-unlock-toast-show")
-                .intercept { chain ->
-                    if (preferences.getBoolean(KEY_REMOVE_BLE_UNLOCK_TOAST, false) &&
-                        suppressedToasts.remove(chain.thisObject) == true
-                    ) null else chain.proceed()
-                }
-        }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install BLE unlock toast hook", error)
-        }
-
-        runCatching {
-            val visibilityProvider = classLoader.loadClass(
-                "com.android.systemui.statusbar.notification.interruption.KeyguardNotificationVisibilityProviderImpl",
-            )
-            visibilityProvider.declaredMethods
-                .filter { it.name == "shouldHideNotification" && it.parameterCount in 1..2 }
-                .forEachIndexed { index, method ->
-                    hookDeoptimized(method)
-                        .setExceptionMode(ExceptionMode.PROTECTIVE)
-                        .setId("notification-limits:keep:$index")
-                        .intercept { chain ->
-                            if (preferences.getBoolean(KEY_KEEP_NOTIFICATIONS, false)) {
-                                val entry = chain.getArg(0)
-                                val notification = entry?.let { readInstanceField(it, "mSbn") }
-                                notification?.let { target ->
-                                    findDynamicIslandField(target, "mHasShownAfterUnlock")
-                                        ?.setBoolean(target, false)
-                                }
-                            }
-                            chain.proceed()
-                        }
-                }
-        }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install keep-notifications hook", error)
-        }
-
-        runCatching {
-            val expanded = classLoader.loadClass(
-                "com.android.systemui.statusbar.notification.ExpandedNotification",
-            )
-            expanded.declaredMethods
-                .filter { it.name == "canShowOnKeyguard" && it.parameterCount == 0 }
-                .forEachIndexed { index, method ->
-                    hookDeoptimized(method)
-                        .setExceptionMode(ExceptionMode.PROTECTIVE)
-                        .setId("notification-limits:lockscreen-entry:$index")
-                        .intercept { chain ->
-                            if (preferences.getBoolean(KEY_ALLOW_ALL_NOTIFICATIONS_ON_LOCKSCREEN, false)) {
-                                true
-                            } else chain.proceed()
-                        }
-                }
-            listOf("canFloat", "isEnableFloat").forEach { name ->
-                expanded.declaredMethods
-                    .filter { it.name == name && it.parameterCount == 0 }
-                    .forEachIndexed { index, method ->
-                        hookDeoptimized(method)
-                            .setExceptionMode(ExceptionMode.PROTECTIVE)
-                            .setId("notification-limits:heads-up-entry:$name:$index")
-                            .intercept { chain ->
-                                if (preferences.getBoolean(KEY_FORCE_ALL_NOTIFICATIONS_HEADS_UP, false)) {
-                                    true
-                                } else chain.proceed()
-                            }
-                    }
-            }
-
-            val settings = classLoader.loadClass(SYSTEM_UI_NOTIFICATION_SETTINGS_MANAGER_CLASS)
-            settings.declaredMethods
-                .filter { it.name == "canShowOnKeyguard" && it.parameterCount == 3 }
-                .forEachIndexed { index, method ->
-                    hookDeoptimized(method)
-                        .setExceptionMode(ExceptionMode.PROTECTIVE)
-                        .setId("notification-limits:lockscreen-settings:$index")
-                        .intercept { chain ->
-                            if (preferences.getBoolean(KEY_ALLOW_ALL_NOTIFICATIONS_ON_LOCKSCREEN, false)) {
-                                true
-                            } else chain.proceed()
-                        }
-                }
-            settings.declaredMethods
-                .filter { it.name == "canFloat" && it.parameterCount == 3 }
-                .forEachIndexed { index, method ->
-                    hookDeoptimized(method)
-                        .setExceptionMode(ExceptionMode.PROTECTIVE)
-                        .setId("notification-limits:heads-up-settings:$index")
-                        .intercept { chain ->
-                            if (preferences.getBoolean(KEY_FORCE_ALL_NOTIFICATIONS_HEADS_UP, false)) {
-                                true
-                            } else chain.proceed()
-                        }
-                }
-        }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install notification visibility hooks", error)
-        }
-
-        runCatching {
-            val listener = classLoader.loadClass(
-                "com.android.systemui.statusbar.notification.MiuiNotificationListener",
-            )
-            listener.declaredMethods
-                .filter { it.name == "onSilentStatusBarIconsVisibilityChanged" && it.parameterCount == 1 }
-                .forEachIndexed { index, method ->
-                    hookDeoptimized(method)
-                        .setExceptionMode(ExceptionMode.PROTECTIVE)
-                        .setId("notification-limits:importance-icons:$index")
-                        .intercept { chain ->
-                            if (preferences.getBoolean(KEY_REMOVE_NOTIFICATION_IMPORTANCE_LIMIT, false)) {
-                                chain.proceedWith(chain.thisObject, arrayOf(false))
-                            } else chain.proceed()
-                        }
-                }
-        }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install notification-importance icon hook", error)
-        }
-
-        runCatching {
-            val foldCoordinator = classLoader.loadClass(
-                "com.android.systemui.statusbar.notification.collection.coordinator.FoldCoordinator",
-            )
-            foldCoordinator.declaredMethods
-                .filter { it.name == "attach" && it.parameterCount == 1 }
-                .forEachIndexed { index, method ->
-                    hookDeoptimized(method)
-                        .setExceptionMode(ExceptionMode.PROTECTIVE)
-                        .setId("notification-limits:disable-fold-coordinator:$index")
-                        .intercept { chain ->
-                            if (preferences.getBoolean(KEY_DISABLE_NOTIFICATION_HISTORY_FOLDING, false)) {
-                                null
-                            } else chain.proceed()
-                        }
-                }
-            val utility = classLoader.loadClass("com.miui.systemui.notification.MiuiBaseNotifUtil")
-            utility.declaredMethods
-                .filter { it.name == "shouldSuppressFold" && it.parameterCount == 0 }
-                .forEachIndexed { index, method ->
-                    hookDeoptimized(method)
-                        .setExceptionMode(ExceptionMode.PROTECTIVE)
-                        .setId("notification-limits:suppress-fold:$index")
-                        .intercept { chain ->
-                            if (preferences.getBoolean(KEY_DISABLE_NOTIFICATION_HISTORY_FOLDING, false)) {
-                                true
-                            } else chain.proceed()
-                        }
-                }
-        }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install notification-history folding hooks", error)
-        }
-        log(Log.INFO, TAG, "Installed notification restriction-removal hooks")
     }
 
     private fun hasCustomizedNotificationTuning(view: View, preferences: SharedPreferences): Boolean =
@@ -13984,55 +13603,6 @@ class HyperSystemUiModule : XposedModule() {
             }
     }
 
-    private fun installNotificationColorHooks(preferences: SharedPreferences) {
-        val methods = listOfNotNull(
-            runCatching { Resources::class.java.getMethod("getColor", Int::class.javaPrimitiveType) }.getOrNull(),
-            runCatching {
-                Resources::class.java.getMethod(
-                    "getColor",
-                    Int::class.javaPrimitiveType,
-                    Resources.Theme::class.java,
-                )
-            }.getOrNull(),
-            runCatching { Resources::class.java.getMethod("getColorStateList", Int::class.javaPrimitiveType) }.getOrNull(),
-            runCatching {
-                Resources::class.java.getMethod(
-                    "getColorStateList",
-                    Int::class.javaPrimitiveType,
-                    Resources.Theme::class.java,
-                )
-            }.getOrNull(),
-        )
-        methods.forEachIndexed { index, method ->
-            hookDeoptimized(method)
-                .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("heads-up-notification-color-$index")
-                .intercept { chain ->
-                    val resources = chain.thisObject as? Resources
-                    val resourceId = chain.getArg(0) as? Int
-                    if (resources != null && resourceId != null &&
-                        preferences.getBoolean(KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS, false) &&
-                        isHeadsUpNotificationColorResource(resources, resourceId)
-                    ) {
-                        if (method.name == "getColorStateList") {
-                            ColorStateList.valueOf(HEADS_UP_NOTIFICATION_TEXT_COLOR)
-                        } else {
-                            HEADS_UP_NOTIFICATION_TEXT_COLOR
-                        }
-                    } else {
-                        chain.proceed()
-                    }
-                }
-        }
-    }
-
-    private fun isHeadsUpNotificationColorResource(resources: Resources, resourceId: Int): Boolean =
-        runCatching {
-            resources.getResourcePackageName(resourceId) == SYSTEM_UI &&
-                resourceId != 0 &&
-                resourceId.let { resources.getResourceEntryName(it) } in HEADS_UP_NOTIFICATION_COLOR_NAMES
-        }.getOrDefault(false)
-
     private val headsUpGlassDispatching = ThreadLocal<Boolean>()
     private val convertedHeadsUpRows = Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap<View, Boolean>()))
 
@@ -15634,15 +15204,6 @@ class HyperSystemUiModule : XposedModule() {
         private const val LOCKSCREEN_MEDIA_PRESENTATION_REAPPLY_SHORT_DELAY_MS = 96L
         private const val LOCKSCREEN_MEDIA_PRESENTATION_REAPPLY_SETTLE_DELAY_MS = 320L
         private const val MI_GLASS_COMPAT_CLASS = "com.miui.systemui.util.MiGlassCompat"
-        private const val HEADS_UP_NOTIFICATION_TEXT_COLOR = 0xE8FFFFFF.toInt()
-        private val HEADS_UP_NOTIFICATION_COLOR_NAMES = setOf(
-            "notification_action_text_color",
-            "notification_time_color",
-            "optimized_heads_up_notification_text",
-            "notification_primary_text_color_light",
-            "notification_secondary_text_color_light",
-            "optimized_heads_up_notification_action_text",
-        )
         private const val CHARGING_INDICATION_TYPE = 3
         private const val IMAGE_THRESHOLD_FIELD = "IMAGE_THRESHOLD"
         private const val THRESHOLD_RATE_FIELD = "rate"
@@ -16149,7 +15710,6 @@ private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_d
         private var dynamicIslandClassDiscoveryInstalled = false
         private var focusIslandWhitelistSystemUiHooksInstalled = false
         private var focusIslandWhitelistPluginHooksInstalled = false
-        private var notificationRestrictionHooksInstalled = false
         private val focusIslandWhitelistPluginInstalling = ThreadLocal.withInitial<Boolean> { false }
         @Volatile private var lockscreenMediaKeyguardShowing = false
         @Volatile private var lockscreenLyricDrawableLoadFailureLogged = false
