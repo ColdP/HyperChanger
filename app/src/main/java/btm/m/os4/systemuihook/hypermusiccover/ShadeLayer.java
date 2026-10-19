@@ -230,6 +230,8 @@ public final class ShadeLayer {
             sWp.setScaleY(1f);
             sWp.setRenderEffect(null);
         }
+        // The render effect was cleared above, so a same-radius reopen must write it again.
+        sLastWpBlur = -1;
         sLastAlpha = Float.NaN;
         btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterHooks.finishDeferredHide();
     }

@@ -48,7 +48,8 @@ public final class IosShadeMaterial {
                     READERS[slot] = View.class.getDeclaredMethod(GETTERS[slot]);
                     READERS[slot].setAccessible(true);
                 } catch (Throwable ignored) {
-                    // A missing getter is restored by the next native recipe, never guessed.
+                    // Only override a property after its native value is known. A missing
+                    // getter must not leave an unrestorable material on the shared window.
                 }
                 Xp.api().hook(setter)
                         .setExceptionMode(io.github.libxposed.api.XposedInterface.ExceptionMode.PROTECTIVE)
@@ -64,6 +65,12 @@ public final class IosShadeMaterial {
                                     || view.getRootView() != root) return chain.proceed();
                             Object[] saved = remember(view);
                             saved[slot] = requested;
+                            // The full-screen panel also exists for heads-up notifications.
+                            // Honour the OEM shutdown even while our exit animation is alive;
+                            // forcing mode 1 here can keep its whole-screen material enabled.
+                            if (slot == 0 && isPanel(view) && Integer.valueOf(0).equals(requested)) {
+                                return chain.proceed();
+                            }
                             return chain.proceed(new Object[]{wanted(view, slot, saved)});
                         });
             } catch (Throwable error) {
@@ -216,6 +223,9 @@ public final class IosShadeMaterial {
         WRITING.set(true);
         try {
             for (int slot = 0; slot < METHODS.length; slot++) {
+                // Unknown native values cannot be restored. The setter hook can still take
+                // ownership later, once the OEM supplies an explicit value for this slot.
+                if (saved[slot] == null) continue;
                 // The panel and clear-all control sample the wallpaper sibling below the
                 // notification surface. Notification rows keep their native containment.
                 if (slot == 4 && (!(isPanel(view) || isDismissView(view)) || saved[4] == null)) continue;
