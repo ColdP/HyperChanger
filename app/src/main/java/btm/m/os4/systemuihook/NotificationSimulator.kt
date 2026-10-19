@@ -15,18 +15,14 @@ import android.graphics.BitmapFactory
 import android.os.SystemClock
 import java.io.File
 import java.io.FileOutputStream
-import org.json.JSONObject
 
 internal object NotificationSimulator {
     private const val PREFS = "notification_simulator"
     private const val NORMAL_TITLE_KEY = "normal_title"
     private const val NORMAL_CONTENT_KEY = "normal_content"
-    private const val FOCUS_TITLE_KEY = "focus_title"
-    private const val FOCUS_CONTENT_KEY = "focus_content"
     private const val NEXT_ID_KEY = "next_id"
     private const val NEXT_SCHEDULE_ID_KEY = "next_schedule_id"
     private const val NORMAL_CHANNEL_ID = "hyperchanger_normal_test"
-    private const val FOCUS_CHANNEL_ID = "hyperchanger_focus_test"
     private const val NORMAL_IMAGE_FILE = "normal_notification_image.webp"
     private const val ACTION_SEND_SCHEDULED_NORMAL = "btm.m.os4.systemuihook.SEND_SCHEDULED_NORMAL"
     private const val EXTRA_TITLE = "title"
@@ -34,13 +30,9 @@ internal object NotificationSimulator {
 
     fun normalTitle(context: Context): String = value(context, NORMAL_TITLE_KEY, "普通通知测试")
     fun normalContent(context: Context): String = value(context, NORMAL_CONTENT_KEY, "这是一条用于测试通知中心的普通通知")
-    fun focusTitle(context: Context): String = value(context, FOCUS_TITLE_KEY, "焦点通知测试")
-    fun focusContent(context: Context): String = value(context, FOCUS_CONTENT_KEY, "这是一条用于测试小米超级岛的焦点通知")
 
     fun saveNormalTitle(context: Context, value: String) = save(context, NORMAL_TITLE_KEY, value)
     fun saveNormalContent(context: Context, value: String) = save(context, NORMAL_CONTENT_KEY, value)
-    fun saveFocusTitle(context: Context, value: String) = save(context, FOCUS_TITLE_KEY, value)
-    fun saveFocusContent(context: Context, value: String) = save(context, FOCUS_CONTENT_KEY, value)
 
     fun hasNormalImage(context: Context): Boolean = normalImageFile(context).isFile
 
@@ -116,39 +108,6 @@ internal object NotificationSimulator {
 
     fun sendScheduledNormal(context: Context, title: String, content: String) {
         sendNormal(context.applicationContext, title, content)
-    }
-
-    fun sendFocus(context: Context, title: String, content: String): Boolean {
-        val appContext = context.applicationContext
-        val manager = appContext.getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(
-            NotificationChannel(FOCUS_CHANNEL_ID, "HyperChanger focus test", NotificationManager.IMPORTANCE_DEFAULT),
-        )
-        val notification = Notification.Builder(appContext, FOCUS_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle(title)
-            .setContentText(content)
-            .setCategory(Notification.CATEGORY_EVENT)
-            .setAutoCancel(true)
-            .build()
-        val paramV2 = JSONObject()
-            .put("protocol", 1)
-            .put("business", "noroot_island_test")
-            .put("islandFirstFloat", true)
-            .put("enableFloat", true)
-            .put("updatable", false)
-            .put("aodTitle", title)
-            .put("ticker", title)
-            .put("baseInfo", JSONObject()
-                .put("title", title)
-                .put("content", content)
-                .put("colorTitle", "#006EFF")
-                .put("type", 2))
-        notification.extras.putString(
-            "miui.focus.param",
-            JSONObject().put("param_v2", paramV2).toString(),
-        )
-        return notify(appContext, manager, notification)
     }
 
     private fun notify(context: Context, manager: NotificationManager, notification: Notification): Boolean = runCatching {

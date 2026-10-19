@@ -23,6 +23,11 @@ public final class IosShadeMaterial {
     };
     private static final Method[] METHODS = new Method[SETTERS.length];
     private static final Method[] READERS = new Method[SETTERS.length];
+    // Enabling pass-window blur adds a visible texture entry in ViewRootImpl even if
+    // the View's background mode is zero. Restore it BEFORE the local mode changes
+    // back to zero, so that mode's setter also retires the texture entry. Reversing
+    // these writes leaves a window-wide sampler alive after the sheet has closed.
+    private static final int[] RESTORE_ORDER = {3, 0, 1, 2, 4};
     private static final WeakHashMap<View, Object[]> SAVED = new WeakHashMap<>();
     private static final WeakHashMap<View, Boolean> CONTAIN_REQUESTS = new WeakHashMap<>();
     private static final WeakHashMap<View, Boolean> MEDIA = new WeakHashMap<>();
@@ -56,6 +61,11 @@ public final class IosShadeMaterial {
                         .intercept(chain -> {
                             View view = (View) chain.getThisObject();
                             if (Boolean.TRUE.equals(WRITING.get())) return chain.proceed();
+                            // This full-screen provider is also used by heads-up and theme
+                            // transitions. Keep its mode/type/radius/pass recipe native; a
+                            // row-local fallback (notably radius 0 -> 80) can cover the whole
+                            // window. Only its wallpaper containment belongs to this layer.
+                            if (isPanel(view) && slot != 4) return chain.proceed();
                             Object requested = chain.getArgs().get(0);
                             if (slot == 4 && !isContainmentSurface(view)) return chain.proceed();
                             if (slot == 4 && isContainmentSurface(view)) {
@@ -65,12 +75,6 @@ public final class IosShadeMaterial {
                                     || view.getRootView() != root) return chain.proceed();
                             Object[] saved = remember(view);
                             saved[slot] = requested;
-                            // The full-screen panel also exists for heads-up notifications.
-                            // Honour the OEM shutdown even while our exit animation is alive;
-                            // forcing mode 1 here can keep its whole-screen material enabled.
-                            if (slot == 0 && isPanel(view) && Integer.valueOf(0).equals(requested)) {
-                                return chain.proceed();
-                            }
                             return chain.proceed(new Object[]{wanted(view, slot, saved)});
                         });
             } catch (Throwable error) {
@@ -189,6 +193,9 @@ public final class IosShadeMaterial {
         if (saved != null) return saved;
         saved = new Object[SETTERS.length];
         for (int slot = 0; slot < READERS.length; slot++) {
+            // Do not snapshot/replay full-screen properties we do not own. The OEM can
+            // change them while the sheet is active without repeating every setter.
+            if (isPanel(view) && slot != 4) continue;
             try {
                 if (READERS[slot] != null) saved[slot] = READERS[slot].invoke(view);
             } catch (Throwable ignored) {
@@ -252,7 +259,7 @@ public final class IosShadeMaterial {
                 View view = entry.getKey();
                 Object[] values = entry.getValue();
                 if (view == null) continue;
-                for (int slot = 0; slot < METHODS.length; slot++) {
+                for (int slot : RESTORE_ORDER) {
                     if (METHODS[slot] == null || values[slot] == null) continue;
                     try {
                         METHODS[slot].invoke(view, values[slot]);

@@ -51,6 +51,9 @@
         <receiver
             android:name=".NotificationSimulatorReceiver"
             android:exported="false" />
+        <receiver
+            android:name=".IslandSimulationReceiver"
+            android:exported="false" />
         <service
             android:name=".RasterWallpaperService"
             android:exported="true"

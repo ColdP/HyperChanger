@@ -6,16 +6,20 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.content.res.ColorStateList
 import android.content.res.Resources
+import android.content.res.Configuration
 import android.util.Log
 import android.view.View
+import android.view.ViewGroup
+import android.widget.TextView
 import android.widget.Toast
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 import java.lang.reflect.Field
+import java.lang.ref.WeakReference
 import java.util.Collections
 import java.util.WeakHashMap
 
 /**
- * Owns the independent notification restriction, mini-window bar and resource-color hooks.
+ * Owns independent notification restrictions, mini-window bar, text and flashlight hooks.
  * Package dispatch and the shared resource installation guard stay in HyperSystemUiModule.
  * Shared reflection helpers and constants are supplied without exposing the module's state.
  * The iOS shade and shared notification/material pipelines keep their existing entry points.
@@ -253,65 +257,168 @@ internal class NotificationHooks(
         }
     }
 
-    fun installNotificationColorHooks(preferences: SharedPreferences) {
-        val methods = listOfNotNull(
-            runCatching { Resources::class.java.getMethod("getColor", Int::class.javaPrimitiveType) }.getOrNull(),
-            runCatching {
-                Resources::class.java.getMethod(
-                    "getColor",
-                    Int::class.javaPrimitiveType,
-                    Resources.Theme::class.java,
-                )
-            }.getOrNull(),
-            runCatching { Resources::class.java.getMethod("getColorStateList", Int::class.javaPrimitiveType) }.getOrNull(),
-            runCatching {
-                Resources::class.java.getMethod(
-                    "getColorStateList",
-                    Int::class.javaPrimitiveType,
-                    Resources.Theme::class.java,
-                )
-            }.getOrNull(),
-        )
-        methods.forEachIndexed { index, method ->
-            module.hookDeoptimized(method)
-                .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("heads-up-notification-color-$index")
-                .intercept { chain ->
-                    val resources = chain.thisObject as? Resources
-                    val resourceId = chain.getArg(0) as? Int
-                    if (resources != null && resourceId != null &&
-                        preferences.getBoolean(KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS, false) &&
-                        isHeadsUpNotificationColorResource(resources, resourceId)
-                    ) {
-                        if (method.name == "getColorStateList") {
-                            ColorStateList.valueOf(HEADS_UP_NOTIFICATION_TEXT_COLOR)
-                        } else {
-                            HEADS_UP_NOTIFICATION_TEXT_COLOR
-                        }
-                    } else {
-                        chain.proceed()
-                    }
-                }
+    private data class TextRoot(val wrapper: WeakReference<Any>, val row: WeakReference<View>)
+    private data class TextColors(val original: ColorStateList, val applied: ColorStateList)
+    private val textRoots = Collections.synchronizedMap(WeakHashMap<View, TextRoot>())
+    private val textColors = Collections.synchronizedMap(WeakHashMap<TextView, TextColors>())
+    private var textHooksInstalled = false
+    private var textPreferenceListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
+    @Volatile private var darkIntensity = 0f
+    private val flashlightClasses = Collections.newSetFromMap(WeakHashMap<Class<*>, Boolean>())
+
+    private fun forEachText(view: View, action: (TextView) -> Unit) {
+        if (view is TextView) action(view)
+        if (view is ViewGroup) for (index in 0 until view.childCount) forEachText(view.getChildAt(index), action)
+    }
+
+    private fun restoreText(root: View) = forEachText(root) { text ->
+        textColors.remove(text)?.let { colors ->
+            // A RemoteViews rebind may already have installed a newer system color.
+            if (text.textColors === colors.applied) text.setTextColor(colors.original)
         }
     }
 
-    private fun isHeadsUpNotificationColorResource(resources: Resources, resourceId: Int): Boolean =
+    private fun applyText(root: View, preferences: SharedPreferences) {
+        val owner = textRoots[root] ?: return
+        val row = owner.row.get()
+        val wrapper = owner.wrapper.get()
+        val content = generateSequence(root.parent as? View) { it.parent as? View }
+            .firstOrNull { it.javaClass.name.endsWith(".NotificationContentView") }
+        val headsUpChild = content?.let { readInstanceField(it, "mHeadsUpChild") }
+        val rowHeadsUp = row?.let {
+            runCatching { it.javaClass.getMethod("isHeadsUpState").invoke(it) as? Boolean }.getOrNull()
+                ?: (readInstanceField(it, "mIsHeadsUp") as? Boolean)
+        } == true
+        val headsUp = rowHeadsUp && (headsUpChild === root ||
+            wrapper?.let { readInstanceField(it, "mIsHeadsUpWrapper") } == true)
+        val settings = readNotificationTextColorSettings(preferences)
+        val enabled = preferences.getBoolean(
+            if (headsUp) KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS else KEY_UNIFY_NOTIFICATION_MATERIAL, false,
+        )
+        val night = Resources.getSystem().configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+        val color = if (enabled) notificationTextColor(
+            if (headsUp) settings.headsUp else settings.notification, headsUp, night, darkIntensity,
+        ) else null
+        if (color == null) { restoreText(root); return }
+        val applied = ColorStateList.valueOf(color)
+        forEachText(root) { text ->
+            val previous = textColors[text]
+            if (previous != null && text.textColors === previous.applied && previous.applied.defaultColor == color) return@forEachText
+            val original = if (previous != null && text.textColors === previous.applied) previous.original else text.textColors
+            textColors[text] = TextColors(original, applied)
+            text.setTextColor(applied)
+        }
+    }
+
+    private fun trackWrapper(wrapper: Any, rowHint: View?, preferences: SharedPreferences) {
+        val root = (readInstanceField(wrapper, "mView") as? View) ?: (wrapper as? View) ?: return
+        val row = (readInstanceField(wrapper, "mRow") as? View) ?: rowHint ?:
+            generateSequence(root.parent as? View) { it.parent as? View }
+                .firstOrNull { it.javaClass.name.endsWith(".ExpandableNotificationRow") }
+        textRoots[root] = TextRoot(WeakReference(wrapper), WeakReference(row))
+        applyText(root, preferences)
+    }
+
+    private fun refreshText(preferences: SharedPreferences) {
+        val roots = synchronized(textRoots) { textRoots.keys.toList() }
+        roots.forEach { root -> root.post { applyText(root, preferences) } }
+    }
+
+    fun installNotificationTextHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (textHooksInstalled) return
+        textHooksInstalled = true
+        textPreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == null || key in setOf(KEY_HEADS_UP_TEXT_COLOR, KEY_NOTIFICATION_TEXT_COLOR,
+                    KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS, KEY_UNIFY_NOTIFICATION_MATERIAL)) refreshText(preferences)
+        }.also(preferences::registerOnSharedPreferenceChangeListener)
+        val wrapperNames = listOf(
+            "MiuiNotificationBigTextViewWrapper", "MiuiNotificationTemplateViewWrapper", "MiuiNotificationCustomViewWrapper",
+            "NotificationViewWrapper", "NotificationHeaderViewWrapper", "NotificationTemplateViewWrapper",
+            "NotificationBigTextTemplateViewWrapper", "NotificationBigPictureTemplateViewWrapper",
+            "NotificationMessagingTemplateViewWrapper", "NotificationConversationTemplateViewWrapper",
+            "NotificationCallTemplateViewWrapper", "NotificationCompactHeadsUpTemplateViewWrapper",
+            "NotificationCompactMessagingTemplateViewWrapper", "NotificationProgressTemplateViewWrapper",
+            "NotificationMetricTemplateViewWrapper", "NotificationDecoratedCustomViewWrapper",
+        ).map { "com.android.systemui.statusbar.notification.row.wrapper.$it" } +
+            "com.android.systemui.statusbar.notification.row.HybridNotificationView"
+        wrapperNames.forEach { name ->
+            runCatching { classLoader.loadClass(name) }.getOrNull()?.declaredMethods
+                ?.filter { it.name in setOf("onContentUpdated", "updateTransparentBgAndTextColor", "bind", "onFinishInflate", "onReinflated") }
+                ?.forEachIndexed { index, method ->
+                    module.hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("notification-text:$name:${method.name}:$index").intercept { chain ->
+                            val owner = chain.thisObject
+                            val root = owner?.let { readInstanceField(it, "mView") as? View ?: it as? View }
+                            root?.let(::restoreText)
+                            val result = chain.proceed()
+                            if (owner != null) {
+                                val row = (0 until method.parameterCount).map { chain.getArg(it) }
+                                    .firstOrNull { it is View && it.javaClass.name.endsWith(".ExpandableNotificationRow") } as? View
+                                trackWrapper(owner, row, preferences)
+                                // MIUI also posts template work after onContentUpdated.
+                                root?.post { trackWrapper(owner, row, preferences) }
+                            }
+                            result
+                        }
+                }
+        }
         runCatching {
-            resources.getResourcePackageName(resourceId) == systemUiPackageName &&
-                resourceId != 0 &&
-                resourceId.let { resources.getResourceEntryName(it) } in HEADS_UP_NOTIFICATION_COLOR_NAMES
-        }.getOrDefault(false)
+            val content = classLoader.loadClass("com.android.systemui.statusbar.notification.row.NotificationContentView")
+            content.declaredMethods.filter { it.name in setOf("setHeadsUpChild", "selectLayout", "onConfigurationChanged") }
+                .forEachIndexed { index, method ->
+                    module.hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("notification-text-content:${method.name}:$index").intercept { chain ->
+                            val result = chain.proceed()
+                            val owner = chain.thisObject
+                            if (owner != null) {
+                                val row = readInstanceField(owner, "mContainingNotification") as? View
+                                listOf("mContractedWrapper", "mExpandedWrapper", "mHeadsUpWrapper", "mSingleLineView").forEach { field ->
+                                    readInstanceField(owner, field)?.let { trackWrapper(it, row, preferences) }
+                                }
+                            }
+                            result
+                        }
+                }
+        }.onFailure { module.log(Log.WARN, logTag, "Could not install notification text lifecycle hooks", it) }
+        runCatching {
+            val dispatcher = classLoader.loadClass("com.android.systemui.statusbar.phone.DarkIconDispatcherImpl")
+            val method = dispatcher.getDeclaredMethod("applyDarkIntensity", Float::class.javaPrimitiveType)
+            module.hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("notification-text-status-bar").intercept { chain ->
+                    val result = chain.proceed()
+                    val intensity = chain.getArg(0) as? Float ?: darkIntensity
+                    val changed = (intensity >= .5f) != (darkIntensity >= .5f)
+                    darkIntensity = intensity
+                    if (changed) refreshText(preferences)
+                    result
+                }
+        }.onFailure { module.log(Log.WARN, logTag, "Could not observe status-bar text color", it) }
+    }
+
+    fun installFlashlightMaterialHook(classLoader: ClassLoader, preferences: SharedPreferences) {
+        runCatching { classLoader.loadClass(FLASHLIGHT_NOTIFICATION_CLASS) }.getOrNull()?.let { onClassLoaded(it, preferences) }
+    }
+
+    fun onClassLoaded(target: Class<*>, preferences: SharedPreferences) {
+        if (target.name != FLASHLIGHT_NOTIFICATION_CLASS) return
+        synchronized(flashlightClasses) {
+            if (target in flashlightClasses) return
+            runCatching {
+                val method = target.getDeclaredMethod("getExtraMiuiFocusParam", Context::class.java)
+                module.hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("notification-flashlight-material").intercept { chain ->
+                        val result = chain.proceed()
+                        if (result is String && preferences.getBoolean(KEY_UNIFY_NOTIFICATION_MATERIAL, false)) {
+                            runCatching { unifyFlashlightNotificationPayload(result) }.getOrDefault(result)
+                        } else result
+                    }
+                flashlightClasses.add(target)
+            }.onFailure { module.log(Log.WARN, logTag, "Could not unify flashlight notification material", it) }
+        }
+    }
 
     companion object {
         private var notificationRestrictionHooksInstalled = false
-        private const val HEADS_UP_NOTIFICATION_TEXT_COLOR = 0xE8FFFFFF.toInt()
-        private val HEADS_UP_NOTIFICATION_COLOR_NAMES = setOf(
-            "notification_action_text_color",
-            "notification_time_color",
-            "optimized_heads_up_notification_text",
-            "notification_primary_text_color_light",
-            "notification_secondary_text_color_light",
-            "optimized_heads_up_notification_action_text",
-        )
+        private const val FLASHLIGHT_NOTIFICATION_CLASS = "miui.systemui.flashlight.NotificationManager"
     }
 }

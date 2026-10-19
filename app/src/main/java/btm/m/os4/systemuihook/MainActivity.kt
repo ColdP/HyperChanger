@@ -284,7 +284,7 @@ private enum class PageId {
     ISLAND, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_CLEAR, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
-    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, OTHER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION,
+    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, OTHER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND,
 }
 
 private data class CategorySearchItem(
@@ -865,7 +865,7 @@ private fun Root(
                 SoftGlassSettingsStore(context).syncRemote(it)
                 VolumePanelGlassSettingsStore(context).syncRemote(it)
                 VolumePanelLayoutSettingsStore(context).syncRemote(it)
-                VolumePanelExpandedCornerSettingsStore(context).syncRemote(it)
+                NotificationTextColorSettingsStore(context).syncRemote(it)
                 ControlCenterRadiusSettingsStore(context).syncRemote(it)
                 SuperXiaoAiInputGlassSettingsStore(context).syncRemote(it)
                 RearScreenGestureSettingsStore(context).syncRemote(it)
@@ -4904,6 +4904,7 @@ private fun Detail(
             onRestartedTargets = onRestartedTargets,
             back = back,
         )
+        PageId.SIMULATE_ISLAND -> IslandSimulationPage(onRequestNotificationPermission, back)
         PageId.SIMULATE_MEDIA_NOTIFICATION -> SimulateMediaNotificationPage(
             musicWhitelist,
             updateMusicWhitelist,
@@ -4915,22 +4916,21 @@ private fun Detail(
 
 @Composable
 private fun NotificationSimulationDialog(
-    focus: Boolean,
     onRequestNotificationPermission: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
-    var title by remember(focus) {
-        mutableStateOf(if (focus) NotificationSimulator.focusTitle(context) else NotificationSimulator.normalTitle(context))
+    var title by remember {
+        mutableStateOf(NotificationSimulator.normalTitle(context))
     }
-    var content by remember(focus) {
-        mutableStateOf(if (focus) NotificationSimulator.focusContent(context) else NotificationSimulator.normalContent(context))
+    var content by remember {
+        mutableStateOf(NotificationSimulator.normalContent(context))
     }
-    var normalNotificationCount by remember(focus) { mutableIntStateOf(1) }
-    var normalIntervalIndex by remember(focus) { mutableIntStateOf(0) }
-    var delayFirstNormalNotification by remember(focus) { mutableStateOf(false) }
-    var hasNormalNotificationImage by remember(focus) {
-        mutableStateOf(!focus && NotificationSimulator.hasNormalImage(context))
+    var normalNotificationCount by remember { mutableIntStateOf(1) }
+    var normalIntervalIndex by remember { mutableIntStateOf(0) }
+    var delayFirstNormalNotification by remember { mutableStateOf(false) }
+    var hasNormalNotificationImage by remember {
+        mutableStateOf(NotificationSimulator.hasNormalImage(context))
     }
     val normalIntervalsMs = remember { longArrayOf(1_000L, 3_000L, 5_000L, 10_000L, 15_000L, 20_000L, 30_000L, 60_000L) }
     val pickNormalNotificationImage = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -4961,11 +4961,7 @@ private fun NotificationSimulationDialog(
         }
         val trimmedTitle = title.trim()
         val trimmedContent = content.trim()
-        val sent = if (focus) {
-            NotificationSimulator.saveFocusTitle(context, trimmedTitle)
-            NotificationSimulator.saveFocusContent(context, trimmedContent)
-            NotificationSimulator.sendFocus(context, trimmedTitle, trimmedContent)
-        } else {
+        val sent = run {
             NotificationSimulator.saveNormalTitle(context, trimmedTitle)
             NotificationSimulator.saveNormalContent(context, trimmedContent)
             NotificationSimulator.sendNormalBatch(
@@ -4992,10 +4988,7 @@ private fun NotificationSimulationDialog(
     ) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(
-                tr(
-                    if (focus) "focus_notification_simulation" else "normal_notification_simulation",
-                    if (focus) "超级岛&焦点通知模拟" else "普通通知模拟",
-                ),
+                tr("normal_notification_simulation", "普通通知模拟"),
                 style = MiuixTheme.textStyles.title3,
                 fontWeight = FontWeight.Bold,
             )
@@ -5017,90 +5010,88 @@ private fun NotificationSimulationDialog(
                 cornerRadius = 24.dp,
                 modifier = Modifier.fillMaxWidth(),
             )
-            if (!focus) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        tr("notification_count", "模拟通知数量"),
-                        style = MiuixTheme.textStyles.body1,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    Text(
-                        normalNotificationCount.toString(),
-                        style = MiuixTheme.textStyles.body1,
-                        fontWeight = FontWeight.Medium,
-                    )
-                }
-                Slider(
-                    value = normalNotificationCount.toFloat(),
-                    onValueChange = { normalNotificationCount = it.roundToInt().coerceIn(1, 10) },
-                    valueRange = 1f..10f,
-                    steps = 8,
-                    showKeyPoints = true,
-                    hapticEffect = SliderDefaults.SliderHapticEffect.Step,
-                    modifier = Modifier.fillMaxWidth(),
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    tr("notification_count", "模拟通知数量"),
+                    style = MiuixTheme.textStyles.body1,
+                    fontWeight = FontWeight.Medium,
                 )
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        tr("notification_interval", "发送间隔"),
-                        style = MiuixTheme.textStyles.body1,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    Text(
-                        "${normalIntervalsMs[normalIntervalIndex] / 1_000}s",
-                        style = MiuixTheme.textStyles.body1,
-                        fontWeight = FontWeight.Medium,
-                    )
-                }
-                Slider(
-                    value = normalIntervalIndex.toFloat(),
-                    onValueChange = { normalIntervalIndex = it.roundToInt().coerceIn(normalIntervalsMs.indices) },
-                    valueRange = 0f..normalIntervalsMs.lastIndex.toFloat(),
-                    steps = normalIntervalsMs.size - 2,
-                    showKeyPoints = true,
-                    hapticEffect = SliderDefaults.SliderHapticEffect.Step,
-                    modifier = Modifier.fillMaxWidth(),
+                Text(
+                    normalNotificationCount.toString(),
+                    style = MiuixTheme.textStyles.body1,
+                    fontWeight = FontWeight.Medium,
                 )
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(
-                        tr("notification_delay_first", "首条通知在设定的发送间隔结束后发送"),
-                        modifier = Modifier.weight(1f),
-                        style = MiuixTheme.textStyles.body1,
-                    )
-                    Switch(
-                        checked = delayFirstNormalNotification,
-                        onCheckedChange = { delayFirstNormalNotification = it },
-                    )
-                }
-                GlassDialogButton(
-                    onClick = {
-                        if (hasNormalNotificationImage) {
-                            NotificationSimulator.clearNormalImage(context)
-                            hasNormalNotificationImage = false
-                        } else {
-                            pickNormalNotificationImage.launch(arrayOf("image/*"))
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        tr(
-                            if (hasNormalNotificationImage) "notification_image_uploaded" else "notification_image_upload",
-                            if (hasNormalNotificationImage) "上传通知图片（已上传）" else "上传通知图片",
-                        ),
-                    )
-                }
+            }
+            Slider(
+                value = normalNotificationCount.toFloat(),
+                onValueChange = { normalNotificationCount = it.roundToInt().coerceIn(1, 10) },
+                valueRange = 1f..10f,
+                steps = 8,
+                showKeyPoints = true,
+                hapticEffect = SliderDefaults.SliderHapticEffect.Step,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    tr("notification_interval", "发送间隔"),
+                    style = MiuixTheme.textStyles.body1,
+                    fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    "${normalIntervalsMs[normalIntervalIndex] / 1_000}s",
+                    style = MiuixTheme.textStyles.body1,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+            Slider(
+                value = normalIntervalIndex.toFloat(),
+                onValueChange = { normalIntervalIndex = it.roundToInt().coerceIn(normalIntervalsMs.indices) },
+                valueRange = 0f..normalIntervalsMs.lastIndex.toFloat(),
+                steps = normalIntervalsMs.size - 2,
+                showKeyPoints = true,
+                hapticEffect = SliderDefaults.SliderHapticEffect.Step,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    tr("notification_delay_first", "首条通知在设定的发送间隔结束后发送"),
+                    modifier = Modifier.weight(1f),
+                    style = MiuixTheme.textStyles.body1,
+                )
+                Switch(
+                    checked = delayFirstNormalNotification,
+                    onCheckedChange = { delayFirstNormalNotification = it },
+                )
+            }
+            GlassDialogButton(
+                onClick = {
+                    if (hasNormalNotificationImage) {
+                        NotificationSimulator.clearNormalImage(context)
+                        hasNormalNotificationImage = false
+                    } else {
+                        pickNormalNotificationImage.launch(arrayOf("image/*"))
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    tr(
+                        if (hasNormalNotificationImage) "notification_image_uploaded" else "notification_image_upload",
+                        if (hasNormalNotificationImage) "上传通知图片（已上传）" else "上传通知图片",
+                    ),
+                )
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 GlassDialogButton(onDismiss, Modifier.weight(1f)) { Text(tr("cancel", "取消")) }
@@ -6235,13 +6226,9 @@ private fun VolumePanelLayoutControls() {
     val changed = LocalNotificationSettingsChanged.current
     val store = remember(context) { VolumePanelLayoutSettingsStore(context) }
     var layout by remember { mutableStateOf(store.settings) }
-    val expandedCornerStore = remember(context) { VolumePanelExpandedCornerSettingsStore(context) }
-    var expandedCorner by remember { mutableIntStateOf(expandedCornerStore.offset) }
     LaunchedEffect(service) {
         service?.let(store::syncRemote)
         layout = store.settings
-        service?.let(expandedCornerStore::syncRemote)
-        expandedCorner = expandedCornerStore.offset
     }
     fun save(value: VolumePanelLayoutSettings) {
         store.update(service, value)
@@ -6294,14 +6281,7 @@ private fun VolumePanelLayoutControls() {
         enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
         exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
     ) {
-        Column {
-            ParameterIntSlide(tr("音量条圆角", "音量条圆角"), layout.corner, -40..80, " dp", defaultValue = 0) { save(layout.copy(corner = it)) }
-            ParameterIntSlide(tr("音量展开面板圆角", "音量展开面板圆角"), expandedCorner, -20..30, " dp", defaultValue = 0) {
-                expandedCornerStore.update(service, it)
-                expandedCorner = expandedCornerStore.offset
-                changed()
-            }
-        }
+        ParameterIntSlide(tr("圆角", "圆角"), layout.corner, -40..80, " dp", defaultValue = 0) { save(layout.copy(corner = it)) }
     }
 
 }
@@ -6838,10 +6818,15 @@ private fun Island(
     restartScopes = setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.SETTINGS),
 ) { p, scroll ->
     var showNormalNotificationDialog by remember { mutableStateOf(false) }
-    var showFocusNotificationDialog by remember { mutableStateOf(false) }
     val (s, update) = rememberNotificationIslandSettings()
     val context = LocalContext.current
     val service by HookApplication.service.collectAsStateWithLifecycle()
+    val textColorStore = remember(context) { NotificationTextColorSettingsStore(context) }
+    var textColors by remember { mutableStateOf(textColorStore.settings) }
+    LaunchedEffect(service) {
+        service?.let(textColorStore::syncRemote)
+        textColors = textColorStore.settings
+    }
     val widthStore = remember(context) { IslandWidthSettingsStore(context) }
     var widthSettings by remember { mutableStateOf(widthStore.settings) }
     val smoothingStore = remember(context) { IslandSmoothingSettingsStore(context) }
@@ -6997,11 +6982,29 @@ private fun Island(
                         update { it.copy(unifyNotificationMaterial = enabled) }
                     },
                 )
+                OverlayDropdownPreference(
+                    title = tr("自定义通知文本颜色", "自定义通知文本颜色"),
+                    items = listOf(tr("系统默认", "系统默认"), tr("浅色", "浅色"), tr("深色", "深色"), tr("与系统默认相反", "与系统默认相反")),
+                    selectedIndex = textColors.notification,
+                    onSelectedIndexChange = { mode ->
+                        textColorStore.update(service, textColors.copy(notification = mode))
+                        textColors = textColorStore.settings
+                    },
+                )
                 SwitchPreference(
                     title = tr("\u60ac\u6d6e\u901a\u77e5\u542f\u7528\u67d4\u5149\u73bb\u7483\u6750\u8d28", "\u60ac\u6d6e\u901a\u77e5\u542f\u7528\u67d4\u5149\u73bb\u7483\u6750\u8d28"),
                     checked = s.headsUpNotificationSoftGlass,
                     onCheckedChange = { enabled ->
                         update { it.copy(headsUpNotificationSoftGlass = enabled) }
+                    },
+                )
+                OverlayDropdownPreference(
+                    title = tr("自定义悬浮通知文本颜色", "自定义悬浮通知文本颜色"),
+                    items = listOf(tr("系统默认", "系统默认"), tr("浅色", "浅色"), tr("深色", "深色"), tr("跟随状态栏颜色", "跟随状态栏颜色")),
+                    selectedIndex = textColors.headsUp,
+                    onSelectedIndexChange = { mode ->
+                        textColorStore.update(service, textColors.copy(headsUp = mode))
+                        textColors = textColorStore.settings
                     },
                 )
                 SwitchPreference(
@@ -7026,8 +7029,8 @@ private fun Island(
                     onClick = { showNormalNotificationDialog = true },
                 )
                 ArrowPreference(
-                    title = tr("focus_notification_simulation", "超级岛&焦点通知模拟"),
-                    onClick = { showFocusNotificationDialog = true },
+                    title = tr("island_simulation", "超级岛模拟"),
+                    onClick = { openPage(PageId.SIMULATE_ISLAND) },
                 )
                 ArrowPreference(
                     title = tr("simulate_media_notification", "媒体通知模拟"),
@@ -7039,16 +7042,8 @@ private fun Island(
 
     if (showNormalNotificationDialog) {
         NotificationSimulationDialog(
-            focus = false,
             onRequestNotificationPermission = onRequestNotificationPermission,
             onDismiss = { showNormalNotificationDialog = false },
-        )
-    }
-    if (showFocusNotificationDialog) {
-        NotificationSimulationDialog(
-            focus = true,
-            onRequestNotificationPermission = onRequestNotificationPermission,
-            onDismiss = { showFocusNotificationDialog = false },
         )
     }
 }

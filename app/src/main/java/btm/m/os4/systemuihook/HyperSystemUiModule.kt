@@ -1076,7 +1076,6 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     if (!resourceHooksInstalled) {
                         installDimensionHooks(preferences)
-                        notificationHooks.installNotificationColorHooks(preferences)
                         resourceHooksInstalled = true
                     }
                     if (!cornerHooksInstalled) {
@@ -1125,7 +1124,9 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     if (param.packageName == SYSTEM_UI) {
                         notificationHooks.installNotificationRestrictions(param.defaultClassLoader, preferences)
+                        notificationHooks.installNotificationTextHooks(param.defaultClassLoader, preferences)
                     }
+                    notificationHooks.installFlashlightMaterialHook(param.defaultClassLoader, preferences)
                     if (!focusIslandWhitelistPluginHooksInstalled) {
                         // The plugin is commonly loaded into SystemUI's class loader and may not
                         // receive a separate package callback.  Try the current loader first;
@@ -1283,6 +1284,7 @@ class HyperSystemUiModule : XposedModule() {
                     installAodEditorBackgroundHook(param.defaultClassLoader, preferences)
                 }
                 SUBSCREEN_CENTER -> {
+                    othersHooks.installIslandSimulationRearScreenHook(param.defaultClassLoader)
                     othersHooks.installRearScreenAppWidgetUnlockHooks(param.defaultClassLoader)
                     if (preferences.getBoolean("unlock_xiaomi_18_rear_screen_ai", false) || preferences.getBoolean("remove_custom_rear_screen_restrictions", false)) {
                         othersHooks.installSubScreenCenterAppWidgetState(param.defaultClassLoader)
@@ -3508,6 +3510,7 @@ class HyperSystemUiModule : XposedModule() {
                 controlCenterClassDiscoveryInProgress.set(true)
                 try {
                 controlCenterHooks.onHeaderClassLoaded(loadedClass, preferences)
+                notificationHooks.onClassLoaded(loadedClass, preferences)
                 islandSmoothingHook.onClassLoaded(loadedClass, preferences)
                 lockscreenFaceUnlockHook.onClassLoaded(loadedClass)
                 if ((loadedClass.name == CONTROL_CENTER_EDIT_BUTTON_CONTROLLER_CLASS ||
@@ -10937,8 +10940,6 @@ class HyperSystemUiModule : XposedModule() {
 
     private fun replacementDp(name: String?, originalDp: Float, preferences: SharedPreferences): Float? {
         val layout = volumeGlassRuntime?.layout ?: VolumePanelLayoutPreferences.read(preferences)
-        val expandedCorner = volumeGlassRuntime?.expandedCorner ?: readVolumePanelExpandedCorner(preferences)
-        volumePanelExpandedCornerDimensionDp(name, originalDp, expandedCorner, layout.cornerEnabled)?.let { return it }
         volumePanelLayoutDimensionDp(name, originalDp, layout)?.let { return it }
         if (!preferences.getBoolean(KEY_VOLUME_PANEL_MATERIAL_ENABLED, true) &&
             name in VOLUME_PANEL_MATERIAL_DIMENSION_NAMES

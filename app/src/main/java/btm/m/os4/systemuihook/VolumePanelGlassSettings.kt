@@ -25,9 +25,7 @@ internal class VolumePanelGlassRuntimeSettings(private val preferences: SharedPr
     )
     @Volatile var state = read(); private set
     @Volatile var layout = VolumePanelLayoutPreferences.read(preferences); private set
-    @Volatile var expandedCorner = readVolumePanelExpandedCorner(preferences); private set
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == null || key == KEY_VOLUME_PANEL_EXPANDED_CORNER) expandedCorner = readVolumePanelExpandedCorner(preferences)
         if (key == null || key.startsWith("volume_panel_layout_")) layout = VolumePanelLayoutPreferences.read(preferences)
         if (key == null || key == KEY_VOLUME_PANEL_GLOBAL_GLASS ||
             key == "volume_panel_material_enabled") state = read()

@@ -74,7 +74,9 @@ internal fun volumePanelLayoutDimensionDp(name: String?, originalDp: Float, sett
             if (settings.sizeEnabled) settings.width else 0
         "miui_volume_column_height", "flip_tiny_miui_volume_column_height" ->
             if (settings.sizeEnabled) settings.height else 0
-        "o3_miui_volume_radius", "o3_miui_tiny_volume_radius", "miui_volume_bg_radius" ->
+        "o3_miui_volume_radius", "o3_miui_tiny_volume_radius", "miui_volume_bg_radius",
+        "o3_miui_volume_bg_radius", "miui_volume_bg_radius_expanded", "miui_volume_blur_bg_radius",
+        "volume_dialog_background_corner_radius", "volume_dialog_background_square_corner_radius" ->
             return if (settings.cornerEnabled && settings.corner != 0) (originalDp + settings.corner).coerceAtLeast(0f) else null
         else -> 0
     }

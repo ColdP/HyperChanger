@@ -48,6 +48,81 @@ internal class OthersHooks(
 ) {
     private var customRearScreenWidgetRegistrationInstalled = false
     private var rearScreenLeftSwipeInstalled = false
+    private var islandSimulationRearScreenInstalled = false
+
+    /** Only our simulator notifications enter the verified SubScreen native card pipeline. */
+    fun installIslandSimulationRearScreenHook(classLoader: ClassLoader) {
+        if (islandSimulationRearScreenInstalled) return
+        runCatching {
+            val listenerClass = classLoader.loadClass("com.xiaomi.subscreencenter.smartassistant.SmartAssistantNotificationListenerService")
+            // Use DEX names from JADX's "renamed from" comments, not its Java aliases.
+            val managerClass = classLoader.loadClass("U1.r0")
+            val paramsClass = classLoader.loadClass("f2.a")
+            val descriptorClass = classLoader.loadClass("I.g")
+            val singleton = classLoader.loadClass("U1.p0").getField("a")
+            val handlerField = managerClass.getField("F")
+            val enabled = listenerClass.getDeclaredMethod("d")
+            val parse = classLoader.loadClass("o2.c").getDeclaredMethod("k", android.os.Bundle::class.java)
+            val descriptor = descriptorClass.getConstructor(java.io.Serializable::class.java, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+            val add = managerClass.getDeclaredMethod("r", String::class.java, String::class.java,
+                Int::class.javaPrimitiveType, String::class.java, String::class.java, descriptorClass,
+                android.os.Bundle::class.java, paramsClass, Boolean::class.javaPrimitiveType)
+            val remove = managerClass.getDeclaredMethod("l", String::class.java, Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType, String::class.java)
+            fun forward(sbn: android.service.notification.StatusBarNotification, removed: Boolean) {
+                if (sbn.packageName != BuildConfig.APPLICATION_ID || sbn.tag != ISLAND_SIMULATION_TAG ||
+                    sbn.user != android.os.Process.myUserHandle()) return
+                val extras = android.os.Bundle(sbn.notification.extras)
+                val type = IslandSimulationType.entries.firstOrNull {
+                    it.key == extras.getString(ISLAND_SIMULATION_TYPE_EXTRA)
+                } ?: return
+                if (sbn.id != type.ordinal) return
+                val handler = handlerField.get(null) as Handler
+                handler.post {
+                    runCatching {
+                        val manager = singleton.get(null)
+                        val rear = extras.getString("miui.rear.param")?.let(::JSONObject)
+                        val business = rear?.optString("business")
+                        val allowed = (type == IslandSimulationType.DELIVERY && business == "foodDelivery") ||
+                            (type == IslandSimulationType.MOVIE_LOGISTICS && business == "Logistics")
+                        if (removed || !allowed) {
+                            remove.invoke(manager, sbn.packageName, sbn.id, 0, sbn.key)
+                        } else if (enabled.invoke(null) == true) {
+                            add.invoke(manager, "${sbn.packageName}:${sbn.id}", sbn.packageName, sbn.id,
+                                sbn.key, business, descriptor.newInstance(business, 0, 500), extras, parse.invoke(null, extras), true)
+                        }
+                    }.onFailure { error -> module.log(Log.WARN, logTag, "Could not forward simulator notification to rear screen", error) }
+                }
+            }
+            // Resolve all signatures before registering. Each original callback runs exactly once.
+            val posted = listenerClass.getDeclaredMethod("onNotificationPosted", android.service.notification.StatusBarNotification::class.java)
+            val removed = listenerClass.getDeclaredMethod("onNotificationRemoved", android.service.notification.StatusBarNotification::class.java)
+            val connected = listenerClass.getDeclaredMethod("onListenerConnected")
+            islandSimulationRearScreenInstalled = true
+            hookDeoptimized(posted).setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("island-simulation:rear-post").intercept { chain ->
+                    val result = chain.proceed()
+                    (chain.getArg(0) as? android.service.notification.StatusBarNotification)?.let { forward(it, false) }
+                    result
+                }
+            hookDeoptimized(removed).setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("island-simulation:rear-remove").intercept { chain ->
+                    val result = chain.proceed()
+                    (chain.getArg(0) as? android.service.notification.StatusBarNotification)?.let { forward(it, true) }
+                    result
+                }
+            hookDeoptimized(connected).setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("island-simulation:rear-reconnect").intercept { chain ->
+                    val result = chain.proceed()
+                    runCatching {
+                        (chain.thisObject as? android.service.notification.NotificationListenerService)
+                            ?.activeNotifications?.forEach { forward(it, false) }
+                    }.onFailure { error -> module.log(Log.WARN, logTag, "Could not restore simulator rear-screen notifications", error) }
+                    result
+                }
+            module.log(Log.INFO, logTag, "Installed simulator-only rear-screen notification bridge")
+        }.onFailure { error -> module.log(Log.WARN, logTag, "Could not install simulator rear-screen bridge for this SubScreen version", error) }
+    }
 
     private class RearSwipeState {
         val gesture = RearScreenLeftSwipeGesture()

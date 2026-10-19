@@ -1,5 +1,7 @@
 # NotificationHooks 迁移审计（第二批）
 
+后续功能变更：按用户要求以通知视图级的可选文字颜色替代旧资源级固定白字，并加入手电筒模板颜色统一。生命周期、包分发及共享材质链仍由原所有者管理。实现范围、原方法调用次数、ClassLoader、安装去重与验证结果见 [notification-text-and-flashlight.md](notification-text-and-flashlight.md)。下文保留原迁移时的基线记录。
+
 ## 基线及范围
 
 本轮基线是第一阶段拆分后的工作区，而非 Git HEAD；`HyperSystemUiModule.kt` 共 16,120 行，SHA-256 为 `26a6ac875f9dccfd4b347793a111e3f71bb8fdf9a7f546087e9704cfed93f42f`。第一阶段尚未提交，不能用 HEAD 代替本轮输入。本文原行号均指这一工作区基线。本表在修改 Kotlin 之前形成。
