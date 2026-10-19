@@ -86,6 +86,8 @@ internal fun restartScopesForPreference(group: String, key: String): Set<ScopeAp
         key.startsWith("screenrecorder_") -> setOf(ScopeApplication.SCREEN_RECORDER, ScopeApplication.XIAOMI_HEALTH)
         key.contains("music_controls_") -> setOf(ScopeApplication.SUBSCREEN_CENTER)
         key.startsWith("super_xiaoai_") -> setOf(ScopeApplication.SUPER_XIAOAI_IME)
+        key == KEY_REAR_SCREEN_LEFT_SWIPE_ENABLED || key == KEY_REAR_SCREEN_LEFT_SWIPE_PACKAGE ->
+            setOf(ScopeApplication.SUBSCREEN_CENTER)
         key == "rear_screen_theme_apply_fix" || key.startsWith("rear_wallpaper_limit_") ->
             setOf(ScopeApplication.THEME_MANAGER)
         key.startsWith("rear_") || key.contains("rear_screen") || key.contains("subscreen") ->

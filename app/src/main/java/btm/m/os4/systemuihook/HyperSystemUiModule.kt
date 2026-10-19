@@ -1288,6 +1288,7 @@ class HyperSystemUiModule : XposedModule() {
                         othersHooks.installSubScreenCenterAppWidgetState(param.defaultClassLoader)
                     }
                     othersHooks.installMusicControlWhitelistHook(param.defaultClassLoader, preferences)
+                    othersHooks.installRearScreenLeftSwipeHook(param.defaultClassLoader, preferences)
                 }
                 PERSONAL_ASSISTANT -> {
                     // The app-card store and its catalog filters are process-local data
@@ -10479,12 +10480,19 @@ class HyperSystemUiModule : XposedModule() {
                 log(Log.INFO, TAG, "Installed physical volume-panel controller hooks")
             }
             "com.android.systemui.miui.volume.MiuiVolumeDialogView" -> {
-                targetClass.declaredMethods.filter { it.name in setOf("onFinishInflate", "updateFooterVisibility") }.forEach { method ->
+                val ringerStates = java.util.WeakHashMap<View, VolumePanelRingerVisibility>()
+                targetClass.declaredMethods.filter { it.name in setOf("onFinishInflate", "updateFooterVisibility", "onExpandStateUpdated") }.forEach { method ->
                     hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("volume-panel-buttons:${method.name}").intercept { chain ->
                             val result = chain.proceed()
                             val settings = volumeGlassRuntime?.layout ?: VolumePanelLayoutPreferences.read(preferences)
-                            if (settings.hideRinger) (readField(chain.thisObject, "mRingerModeLayout") as? View)?.visibility = View.GONE
+                            val expanded = runCatching { targetClass.getMethod("isExpanded").invoke(chain.thisObject) as Boolean }.getOrDefault(true)
+                            val controlCenter = readField(chain.thisObject, "isControlCenterPanel") == true
+                            (readField(chain.thisObject, "mRingerModeLayout") as? View)?.let { ringer ->
+                                val state = ringerStates.getOrPut(ringer) { VolumePanelRingerVisibility() }
+                                val visibility = state.resolve(ringer.visibility, method.name != "onExpandStateUpdated", settings.hideRinger, expanded, controlCenter)
+                                if (ringer.visibility != visibility) ringer.visibility = visibility
+                            }
                             if (settings.hideExpand) (readField(chain.thisObject, "mExpandButton") as? View)?.visibility = View.GONE
                             result
                         }
@@ -10929,6 +10937,8 @@ class HyperSystemUiModule : XposedModule() {
 
     private fun replacementDp(name: String?, originalDp: Float, preferences: SharedPreferences): Float? {
         val layout = volumeGlassRuntime?.layout ?: VolumePanelLayoutPreferences.read(preferences)
+        val expandedCorner = volumeGlassRuntime?.expandedCorner ?: readVolumePanelExpandedCorner(preferences)
+        volumePanelExpandedCornerDimensionDp(name, originalDp, expandedCorner, layout.cornerEnabled)?.let { return it }
         volumePanelLayoutDimensionDp(name, originalDp, layout)?.let { return it }
         if (!preferences.getBoolean(KEY_VOLUME_PANEL_MATERIAL_ENABLED, true) &&
             name in VOLUME_PANEL_MATERIAL_DIMENSION_NAMES

@@ -3,6 +3,8 @@
 package btm.m.os4.systemuihook
 
 import android.content.Context
+import android.app.Activity
+import android.animation.ValueAnimator
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.res.Resources
@@ -13,6 +15,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import android.view.MotionEvent
 import android.widget.ImageView
 import android.widget.TextView
 import btm.m.liquidglass.AppColorMode
@@ -44,6 +47,123 @@ internal class OthersHooks(
     private val logTag: String,
 ) {
     private var customRearScreenWidgetRegistrationInstalled = false
+    private var rearScreenLeftSwipeInstalled = false
+
+    private class RearSwipeState {
+        val gesture = RearScreenLeftSwipeGesture()
+        var animator: ValueAnimator? = null
+        var blur = 0f
+        var ownsBlur = false
+        var packageName = ""
+        var suppressUntilUp = false
+    }
+
+    /** SubScreenLauncher only; unrelated rear-screen installers keep their own boundaries. */
+    fun installRearScreenLeftSwipeHook(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (rearScreenLeftSwipeInstalled) return
+        runCatching {
+            val launcher = classLoader.loadClass("com.xiaomi.subscreencenter.SubScreenLauncher")
+            val dispatch = launcher.getDeclaredMethod("dispatchTouchEvent", MotionEvent::class.java)
+            // Verified in SubScreen RELEASE-1.0.2609181659: public background-blur API.
+            val blurMethod = launcher.getDeclaredMethod("a", String::class.java, Float::class.javaPrimitiveType)
+            val blurProgress = launcher.getDeclaredMethod("c")
+            // JADX calls this f5788Z; its original DEX field name is Z.
+            val acceptsGestures = launcher.getDeclaredField("Z").apply { isAccessible = true }
+            val lifecycle = listOf("onPause", "onResume", "onDestroy").associateWith { launcher.getDeclaredMethod(it) }
+            val states = java.util.WeakHashMap<Activity, RearSwipeState>()
+            fun setBlur(activity: Activity, state: RearSwipeState, value: Float) {
+                if (runCatching { blurMethod.invoke(activity, "gesture", value) }.isSuccess) {
+                    state.blur = value
+                    state.ownsBlur = value > 0f
+                }
+            }
+            fun reset(activity: Activity, state: RearSwipeState, animate: Boolean) {
+                state.gesture.reset()
+                state.animator?.cancel()
+                state.animator = null
+                if (!state.ownsBlur) return
+                if (!animate || state.blur <= 0f) {
+                    setBlur(activity, state, 0f)
+                } else {
+                    state.animator = ValueAnimator.ofFloat(state.blur, 0f).apply {
+                        duration = 180
+                        addUpdateListener { setBlur(activity, state, it.animatedValue as Float) }
+                        start()
+                    }
+                }
+            }
+            // Resolve all required members before installing any callback.
+            module.hook(dispatch).setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("rear-screen:left-swipe:touch")
+                .intercept { chain ->
+                    val activity = chain.thisObject as? Activity ?: return@intercept chain.proceed()
+                    val event = chain.getArg(0) as? MotionEvent ?: return@intercept chain.proceed()
+                    val state = states.getOrPut(activity) { RearSwipeState() }
+                    val action = event.actionMasked
+                    val config = preferences.readRearScreenGestureSettings()
+                    if (action == MotionEvent.ACTION_DOWN) {
+                        state.suppressUntilUp = false
+                        reset(activity, state, false)
+                        state.packageName = ""
+                        val result = chain.proceed()
+                        if (config.enabled && config.packageName.isNotBlank() &&
+                            acceptsGestures.getBoolean(activity) && (blurProgress.invoke(activity) as Float) <= 0f) {
+                            state.packageName = config.packageName
+                            state.gesture.begin(event.x, event.y, activity.window.decorView.width)
+                        }
+                        return@intercept result
+                    }
+                    if (state.suppressUntilUp) {
+                        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) state.suppressUntilUp = false
+                        return@intercept true
+                    }
+                    val wasCaptured = state.gesture.captured
+                    if (!config.enabled || config.packageName != state.packageName || event.pointerCount != 1 ||
+                        action == MotionEvent.ACTION_CANCEL) {
+                        reset(activity, state, true)
+                        if (wasCaptured) {
+                            state.suppressUntilUp = action != MotionEvent.ACTION_UP && action != MotionEvent.ACTION_CANCEL
+                            return@intercept true
+                        }
+                        return@intercept chain.proceed()
+                    }
+                    if (action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_UP) {
+                        state.gesture.move(event.x, event.y, activity.resources.displayMetrics.density)
+                    }
+                    if (!state.gesture.captured) return@intercept chain.proceed()
+                    if (!wasCaptured) {
+                        // The system/child already received DOWN. Cancel it exactly once.
+                        val cancel = MotionEvent.obtain(event).apply { setAction(MotionEvent.ACTION_CANCEL) }
+                        try { chain.proceed(arrayOf(cancel)) } finally { cancel.recycle() }
+                    }
+                    setBlur(activity, state, state.gesture.progress * .5f)
+                    if (action == MotionEvent.ACTION_UP) {
+                        if (state.gesture.finish()) {
+                            val launched = runCatching {
+                                val intent = activity.packageManager.getLaunchIntentForPackage(state.packageName)
+                                    ?: return@runCatching false
+                                setBlur(activity, state, .5f)
+                                activity.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                                true
+                            }.onFailure { module.log(Log.WARN, logTag, "Rear-screen left-swipe launch failed", it) }.getOrDefault(false)
+                            if (!launched) reset(activity, state, true)
+                        } else reset(activity, state, true)
+                    }
+                    true
+                }
+            lifecycle.forEach { (name, method) ->
+                module.hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("rear-screen:left-swipe:$name")
+                    .intercept { chain ->
+                        val activity = chain.thisObject as? Activity
+                        if (activity != null) states.remove(activity)?.let { reset(activity, it, false) }
+                        chain.proceed()
+                    }
+            }
+            rearScreenLeftSwipeInstalled = true
+            module.log(Log.INFO, logTag, "Installed SubScreenLauncher left-swipe hooks")
+        }.onFailure { module.log(Log.WARN, logTag, "Rear-screen left-swipe hook unavailable on this build", it) }
+    }
 
     fun installAppNavigation(param: PackageLoadedParam) {
         val packageName = param.packageName

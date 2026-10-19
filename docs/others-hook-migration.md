@@ -1,5 +1,9 @@
 # OthersHooks 最终分类迁移审计
 
+## 后续功能增量：背屏左滑手势
+
+本次为用户请求的功能新增，不进行分类迁移。`OthersHooks` 增加独立的 `installRearScreenLeftSwipeHook`，由模块背屏包分发委托；原迁移的安装入口、共享依赖和 framework 边界保持原有实现。目标、ClassLoader、设置存储、回调行为、测试与 APK 结果见 [背屏左滑手势审计](rear-screen-left-swipe.md)。
+
 ## 最终交付与验证结果
 
 本轮仅修改/新增三个正式文件：

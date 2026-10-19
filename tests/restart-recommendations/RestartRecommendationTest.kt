@@ -45,6 +45,12 @@ fun main() {
     local.write("ios_notification_center" to false, "ios_notification_header" to false, "ios_notification_clear_style" to 0)
     local.write("control_center_header_height_offset_dp" to 0)
     check(events.isEmpty()) { "Default materialization generated restart suggestions: $events" }
+    local.write(KEY_REAR_SCREEN_LEFT_SWIPE_ENABLED to false, KEY_REAR_SCREEN_LEFT_SWIPE_PACKAGE to "")
+    check(events.isEmpty()) { "Rear-screen defaults must not suggest a restart" }
+    local.write(KEY_REAR_SCREEN_LEFT_SWIPE_ENABLED to true)
+    check(events.removeLast() == setOf(ScopeApplication.SUBSCREEN_CENTER))
+    local.write(KEY_REAR_SCREEN_LEFT_SWIPE_PACKAGE to "example.app")
+    check(events.removeLast() == setOf(ScopeApplication.SUBSCREEN_CENTER))
 
     local.write("island_spacing_enabled" to true, "island_spacing_offset_dp" to 12)
     check(events.removeLast() == setOf(ScopeApplication.SYSTEM_UI))

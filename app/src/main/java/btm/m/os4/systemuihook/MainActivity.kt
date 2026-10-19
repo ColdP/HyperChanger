@@ -107,6 +107,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
@@ -283,7 +284,7 @@ private enum class PageId {
     ISLAND, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_CLEAR, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
-    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, OTHER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION,
+    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, OTHER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION,
 }
 
 private data class CategorySearchItem(
@@ -864,8 +865,10 @@ private fun Root(
                 SoftGlassSettingsStore(context).syncRemote(it)
                 VolumePanelGlassSettingsStore(context).syncRemote(it)
                 VolumePanelLayoutSettingsStore(context).syncRemote(it)
+                VolumePanelExpandedCornerSettingsStore(context).syncRemote(it)
                 ControlCenterRadiusSettingsStore(context).syncRemote(it)
                 SuperXiaoAiInputGlassSettingsStore(context).syncRemote(it)
+                RearScreenGestureSettingsStore(context).syncRemote(it)
                 navigation.syncRemote(it)
                 lockscreenCapsules.syncRemote(it)
                 cameras.syncRemote(it)
@@ -1962,7 +1965,9 @@ private data class RearApp(
 private fun rememberRearApps(): List<RearApp> {
     val context = LocalContext.current
     val packageManager = context.packageManager
-    val apps by produceState<List<RearApp>>(initialValue = emptyList(), packageManager) {
+    val configuration = LocalConfiguration.current
+    val locales = remember(context, configuration) { applicationLabelLocales(context) }
+    val apps by produceState<List<RearApp>>(initialValue = emptyList(), context, locales.toLanguageTags()) {
         value = withContext(Dispatchers.IO) {
             val rootPackages = runRootPackageList()
             val installed = if (rootPackages.isNotEmpty()) {
@@ -1976,7 +1981,7 @@ private fun rememberRearApps(): List<RearApp> {
                 .map { info ->
                     RearApp(
                         info = info,
-                        label = info.loadLabel(packageManager).toString(),
+                        label = localizedApplicationLabel(context, info, locales),
                         packageName = info.packageName,
                         isSystem = (info.flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0,
                     )
@@ -2050,6 +2055,30 @@ private fun RearScreen(
     val context = LocalContext.current
     val service by HookApplication.service.collectAsState()
     val rearScreenThemeApplyStore = remember(context) { RearScreenThemeApplySettingsStore(context) }
+    val (gestureSettings, updateGestureSettings) = rememberRearScreenGestureSettings()
+    var showGestureAppActions by remember { mutableStateOf(false) }
+    val configuration = LocalConfiguration.current
+    val labelLocales = remember(context, configuration) { applicationLabelLocales(context) }
+    val gestureAppLabel = remember(context, gestureSettings.packageName, labelLocales.toLanguageTags()) {
+        runCatching {
+            localizedApplicationLabel(context,
+                context.packageManager.getApplicationInfo(gestureSettings.packageName, 0), labelLocales)
+        }.getOrDefault(gestureSettings.packageName)
+    }
+    WindowDialog(show = showGestureAppActions && gestureSettings.enabled, onDismissRequest = { showGestureAppActions = false }) {
+        Text(gestureAppLabel, style = MiuixTheme.textStyles.title3)
+        Column(Modifier.fillMaxWidth().padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            GlassDialogButton(onClick = {
+                showGestureAppActions = false
+                open(PageId.REAR_SWIPE_APP)
+            }, modifier = Modifier.fillMaxWidth()) { Text(tr("编辑", "编辑")) }
+            GlassDialogButton(onClick = {
+                updateGestureSettings { it.copy(packageName = "") }
+                showGestureAppActions = false
+            }, modifier = Modifier.fillMaxWidth()) { Text(tr("清除", "清除")) }
+            GlassDialogButton(onClick = { showGestureAppActions = false }, modifier = Modifier.fillMaxWidth()) { Text(tr("取消", "取消")) }
+        }
+    }
     var rearScreenThemeApplyFix by remember { mutableStateOf(rearScreenThemeApplyStore.enabled) }
     val wallpaperLimitStore = remember(context) { RearScreenWallpaperLimitSettingsStore(context) }
     var wallpaperLimit by remember { mutableStateOf(wallpaperLimitStore.settings) }
@@ -2077,6 +2106,33 @@ private fun RearScreen(
     )
     val apps = rememberRearApps()
     AppList(padding, scroll, 28) {
+        item {
+            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                SwitchPreference(
+                    title = tr("开启左滑手势", "开启左滑手势"),
+                    summary = tr("从背屏右侧向左滑动，打开所选应用。", "从背屏右侧向左滑动，打开所选应用。"),
+                    checked = gestureSettings.enabled,
+                    onCheckedChange = { enabled ->
+                        updateGestureSettings { it.copy(enabled = enabled) }
+                        if (!enabled) showGestureAppActions = false
+                    },
+                )
+                AnimatedVisibility(
+                    visible = gestureSettings.enabled,
+                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                ) {
+                    ArrowPreference(
+                        title = tr("左滑启动应用", "左滑启动应用"),
+                        summary = gestureAppLabel.ifBlank { tr("未选择应用", "未选择应用") },
+                        onClick = {
+                            if (gestureSettings.packageName.isBlank()) open(PageId.REAR_SWIPE_APP)
+                            else showGestureAppActions = true
+                        },
+                    )
+                }
+            }
+        }
         item {
             Group(tr("解锁 AI 功能", "解锁 AI 功能")) {
                 SwitchPreference(
@@ -2450,6 +2506,86 @@ private fun deleteCustomRearScreenApp(app: CustomRearScreenApp) {
             waitFor(15, TimeUnit.SECONDS)
         }
     }.onFailure { Log.w("HyperChanger", "Custom rear-screen deletion failed", it) }
+}
+
+@Composable
+private fun rememberRearScreenGestureSettings(): Pair<RearScreenGestureSettings, (((RearScreenGestureSettings) -> RearScreenGestureSettings) -> Unit)> {
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsState()
+    val store = remember(context) { RearScreenGestureSettingsStore(context) }
+    var settings by remember { mutableStateOf(store.settings) }
+    DisposableEffect(context, store) {
+        val preferences = context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE)
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == null || key == KEY_REAR_SCREEN_LEFT_SWIPE_ENABLED || key == KEY_REAR_SCREEN_LEFT_SWIPE_PACKAGE) {
+                store.reload()
+                settings = store.settings
+            }
+        }
+        preferences.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+    return settings to { transform ->
+        store.update(service, transform)
+        settings = store.settings
+    }
+}
+
+@Composable
+private fun RearSwipeAppPicker(back: () -> Unit) {
+    val context = LocalContext.current
+    val installed = rememberRearApps()
+    val apps by produceState<List<RearApp>>(emptyList(), installed) {
+        value = withContext(Dispatchers.IO) {
+            installed.filter { it.packageName != "com.xiaomi.subscreencenter" &&
+                context.packageManager.getLaunchIntentForPackage(it.packageName) != null }
+        }
+    }
+    val (settings, update) = rememberRearScreenGestureSettings()
+    var query by rememberSaveable { mutableStateOf("") }
+    var showSystemApps by rememberSaveable { mutableStateOf(false) }
+    val visibleApps = remember(apps, query, showSystemApps) {
+        apps.filter { (showSystemApps || !it.isSystem) &&
+            (it.label.contains(query.trim(), ignoreCase = true) || it.packageName.contains(query.trim(), ignoreCase = true)) }
+    }
+    AppPage(
+        title = tr("选择应用", "选择应用"),
+        onBack = back,
+        restartScopes = setOf(ScopeApplication.SUBSCREEN_CENTER),
+        actions = {
+            GlassIconDropdownMenu(
+                entry = DropdownEntry(items = listOf(DropdownItem(
+                    text = if (showSystemApps) tr("隐藏系统应用", "隐藏系统应用") else tr("显示系统应用", "显示系统应用"),
+                    selected = showSystemApps,
+                    onClick = { showSystemApps = !showSystemApps },
+                ))),
+                backdrop = LocalToolbarBackdrop.current,
+                trigger = { onClick, enabled ->
+                    GlassToolbarIconButton(
+                        icon = MiuixIcons.Regular.More,
+                        description = tr("更多", "更多"),
+                        containerPadding = PaddingValues(end = 8.dp),
+                        onClick = { if (enabled) onClick() },
+                    )
+                },
+            )
+        },
+    ) { padding, scroll ->
+        AppList(padding, scroll, 28) {
+            item { RearAppSearchBar(query, onQueryChange = { query = it }) }
+            if (visibleApps.isEmpty()) item {
+                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(18.dp)) {
+                    Text(tr("没有匹配的应用", "没有匹配的应用"), style = MiuixTheme.textStyles.body2)
+                }
+            }
+            items(visibleApps, key = { it.packageName }) { app ->
+                RearAppCard(app = app, checked = settings.packageName == app.packageName, onCheckedChange = {
+                    update { it.copy(packageName = app.packageName) }
+                    back()
+                })
+            }
+        }
+    }
 }
 
 @Composable
@@ -4760,6 +4896,7 @@ private fun Detail(
         PageId.REAR_SCREEN -> RearScreen(settings, update, musicWhitelist, updateMusicWhitelist, openPage, back)
         PageId.REAR_CUSTOM_CENTER -> CustomRearScreenCenter(back)
         PageId.REAR_MUSIC_APPS -> RearMusicApps(musicWhitelist, updateMusicWhitelist, back)
+        PageId.REAR_SWIPE_APP -> RearSwipeAppPicker(back)
         PageId.OTHER -> OtherPage(airDropSettings, updateAirDrop, screenRecorder, updateScreenRecorder, openPage, back)
         PageId.APP_NAVIGATION -> AppNavigationPage(back)
         PageId.RESTART_SCOPES -> RestartScopesPage(
@@ -6098,9 +6235,13 @@ private fun VolumePanelLayoutControls() {
     val changed = LocalNotificationSettingsChanged.current
     val store = remember(context) { VolumePanelLayoutSettingsStore(context) }
     var layout by remember { mutableStateOf(store.settings) }
+    val expandedCornerStore = remember(context) { VolumePanelExpandedCornerSettingsStore(context) }
+    var expandedCorner by remember { mutableIntStateOf(expandedCornerStore.offset) }
     LaunchedEffect(service) {
         service?.let(store::syncRemote)
         layout = store.settings
+        service?.let(expandedCornerStore::syncRemote)
+        expandedCorner = expandedCornerStore.offset
     }
     fun save(value: VolumePanelLayoutSettings) {
         store.update(service, value)
@@ -6144,7 +6285,7 @@ private fun VolumePanelLayoutControls() {
         )
     }
     SwitchPreference(
-        title = tr("自定义音量条圆角", "自定义音量条圆角"),
+        title = tr("自定义音量圆角", "自定义音量圆角"),
         checked = layout.cornerEnabled,
         onCheckedChange = { save(layout.copy(cornerEnabled = it)) },
     )
@@ -6153,7 +6294,14 @@ private fun VolumePanelLayoutControls() {
         enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
         exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
     ) {
-        ParameterIntSlide(tr("圆角", "圆角"), layout.corner, -40..80, " dp", defaultValue = 0) { save(layout.copy(corner = it)) }
+        Column {
+            ParameterIntSlide(tr("音量条圆角", "音量条圆角"), layout.corner, -40..80, " dp", defaultValue = 0) { save(layout.copy(corner = it)) }
+            ParameterIntSlide(tr("音量展开面板圆角", "音量展开面板圆角"), expandedCorner, -20..30, " dp", defaultValue = 0) {
+                expandedCornerStore.update(service, it)
+                expandedCorner = expandedCornerStore.offset
+                changed()
+            }
+        }
     }
 
 }
