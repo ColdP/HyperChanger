@@ -1320,7 +1320,8 @@
     "island_sim_highlight_text": "強調テキスト",
     "island_sim_payment_amount": "お支払い金額",
     "island_sim_secondary_action_text": "副ボタンのテキスト",
-    "island_sim_rear_screen": "背面画面にも送信"
+    "island_sim_rear_screen": "背面画面にも送信",
+    "island_sim_outer_glow": "シミュレーションのスーパーアイランドに外周の光効果を追加"
   },
   "Xiaomi 18 Pro 系列 AI 背屏": "Xiaomi 18 Pro シリーズ AI 背面画面",
   "解锁 AI 功能": "AI 機能を解放",

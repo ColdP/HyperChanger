@@ -28,6 +28,39 @@ internal class SystemUiHooks(
     private val dynamicIslandBaseContentClass: String,
     private val logTag: String,
 ) {
+    private val islandSimulationGlowBridgeClasses = mutableSetOf<Class<*>>()
+
+    /** The vendor's new island Bundle drops the big-island effect requested by our simulator. */
+    fun installIslandSimulationGlowBridge(classLoader: ClassLoader) {
+        runCatching {
+            val controller = classLoader.loadClass("miui.systemui.notification.focus.FocusNotificationController")
+            synchronized(islandSimulationGlowBridgeClasses) {
+                if (controller in islandSimulationGlowBridgeClasses) return
+                val method = controller.getDeclaredMethod("setUpDynamicIslandDataBundle",
+                    android.service.notification.StatusBarNotification::class.java).apply { isAccessible = true }
+                check(method.returnType == android.os.Bundle::class.java)
+                hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("island-simulation:big-glow-bridge").intercept { chain ->
+                        val result = chain.proceed()
+                        val sbn = chain.getArg(0) as? android.service.notification.StatusBarNotification
+                            ?: return@intercept result
+                        if (sbn.packageName != BuildConfig.APPLICATION_ID || sbn.tag != ISLAND_SIMULATION_TAG) {
+                            return@intercept result
+                        }
+                        val target = result as? android.os.Bundle ?: return@intercept result
+                        val source = sbn.notification.extras
+                        if (shouldBridgeIslandSimulationGlow(sbn.packageName, sbn.tag, sbn.id,
+                                source.getString(ISLAND_SIMULATION_TYPE_EXTRA), source.getString(ISLAND_SIMULATION_BIG_GLOW_EXTRA))) {
+                            target.putString(ISLAND_SIMULATION_BIG_GLOW_EXTRA, ISLAND_SIMULATION_OUTER_GLOW_EFFECT)
+                        }
+                        result
+                    }
+                islandSimulationGlowBridgeClasses.add(controller)
+            }
+            module.log(Log.INFO, logTag, "Installed simulator big-island glow extras bridge")
+        }.onFailure { error -> module.log(Log.WARN, logTag, "Could not install simulator big-island glow extras bridge", error) }
+    }
+
     /** Applies the optional island corner controls after the vendor has created its views. */
     fun installDynamicIslandAppearanceHooks(
         classLoader: ClassLoader,

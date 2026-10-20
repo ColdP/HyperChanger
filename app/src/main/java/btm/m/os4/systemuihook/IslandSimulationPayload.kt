@@ -33,6 +33,7 @@ internal fun buildIslandSimulationPayload(
     kilometerText: String = tr("island_sim_km", "公里"),
     codeText: String = tr("island_sim_code", "凭证码"),
     images: Set<IslandSimulationImageSlot> = emptySet(),
+    outerGlow: Boolean = false,
 ): String {
     val percent = progress.coerceIn(0, 100)
     val summary = if (terminal) completedText else settings.summary
@@ -86,6 +87,7 @@ internal fun buildIslandSimulationPayload(
         .put("aodPic", summaryIcon)
         .put("ticker", summary)
         .put("tickerPic", summaryIcon)
+    if (outerGlow) param.put("outEffectSrc", ISLAND_SIMULATION_OUTER_GLOW_EFFECT)
     when (type) {
         IslandSimulationType.TEXT -> {
             param.put("baseInfo", base(1)).put("picInfo", pic(primary, 3))
@@ -165,7 +167,8 @@ internal fun buildIslandSimulationPayload(
         }
     }
     param.put("param_island", JSONObject().put("islandProperty", 1)
-        .put("islandTimeout", 3600).put("bigIslandArea", big).put("smallIslandArea", small))
+        .put("islandTimeout", 3600).put("bigIslandArea", big).put("smallIslandArea", small)
+        .apply { if (outerGlow) put("outEffectSrc", ISLAND_SIMULATION_OUTER_GLOW_EFFECT) })
     return JSONObject().put("param_v2", param).toString().also {
         require(it.toByteArray(Charsets.UTF_8).size <= 3072) { "Island payload exceeds 3 KB" }
     }

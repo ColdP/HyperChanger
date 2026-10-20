@@ -3159,6 +3159,7 @@ class HyperSystemUiModule : XposedModule() {
         systemUiHooks.installDynamicIslandLayoutHooks(classLoader, preferences)
         installDynamicIslandExpandedMaterialHook(classLoader, preferences)
         systemUiHooks.installDynamicIslandBottomGlowHook(classLoader, preferences)
+        systemUiHooks.installIslandSimulationGlowBridge(classLoader)
         installDynamicIslandSelfBlurHook(classLoader, preferences)
         installMediaSourceIconHooks(classLoader, preferences)
         systemUiHooks.installDynamicIslandMiniBarHook(classLoader, preferences)

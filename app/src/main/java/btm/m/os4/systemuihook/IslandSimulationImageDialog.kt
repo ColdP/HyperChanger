@@ -80,7 +80,7 @@ private fun IslandSimulationImageDialog(
                 Image(
                     bitmap = picture.bitmap.asImageBitmap(),
                     contentDescription = tr("island_sim_image", "超级岛图片"),
-                    modifier = Modifier.size(112.dp, if (cover) 144.dp else 112.dp).clip(RoundedCornerShape(16.dp)),
+                    modifier = Modifier.size(112.dp, if (cover) 144.dp else 112.dp).clip(RoundedCornerShape(28.dp)),
                     contentScale = ContentScale.Crop,
                 )
                 Text(picture.name, style = MiuixTheme.textStyles.body2)

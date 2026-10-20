@@ -5,7 +5,11 @@ package btm.m.os4.systemuihook
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.BitmapShader
+import android.graphics.Canvas
 import android.graphics.ImageDecoder
+import android.graphics.Paint
+import android.graphics.Shader
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.AtomicFile
@@ -13,6 +17,17 @@ import java.io.File
 import btm.m.os4.systemuihook.IslandSimulationImageSlot.*
 
 internal data class IslandSimulationImage(val bitmap: Bitmap, val name: String)
+
+/** Bake transparent corners into the notification image; SystemUI need not clip it. */
+internal fun roundIslandSimulationImage(source: Bitmap): Bitmap {
+    val rounded = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+    val radius = minOf(source.width, source.height) / 4f
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+        shader = BitmapShader(source, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+    }
+    Canvas(rounded).drawRoundRect(0f, 0f, source.width.toFloat(), source.height.toFloat(), radius, radius, paint)
+    return rounded
+}
 
 internal enum class IslandSimulationImageSlot(val key: String, val pictureKey: String) {
     PRIMARY("primary", ISLAND_SIM_IMAGE),

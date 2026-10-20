@@ -1260,7 +1260,8 @@
     "island_sim_highlight_text": "Highlighted text",
     "island_sim_payment_amount": "Amount due",
     "island_sim_secondary_action_text": "Secondary button text",
-    "island_sim_rear_screen": "Also send to rear screen"
+    "island_sim_rear_screen": "Also send to rear screen",
+    "island_sim_outer_glow": "Add an outer glow to simulated islands"
   },
   "Xiaomi 18 Pro 系列 AI 背屏": "Xiaomi 18 Pro Series AI Rear Screen",
   "解锁 AI 功能": "Unlock AI features",

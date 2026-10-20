@@ -25,6 +25,8 @@ internal fun IslandSimulationPage(onRequestNotificationPermission: () -> Unit, b
     AppPage(tr("island_simulation", "超级岛模拟"), back) { padding, scroll ->
         val context = LocalContext.current
         val store = remember(context) { IslandSimulationSettingsStore(context) }
+        val effectsStore = remember(context) { IslandSimulationEffectsSettingsStore(context) }
+        var outerGlow by remember(effectsStore) { mutableStateOf(effectsStore.outerGlow()) }
         var type by remember { mutableStateOf(store.selectedType()) }
         var settings by remember(type) { mutableStateOf(store.load(type)) }
         val defaults = store.defaults(type)
@@ -71,6 +73,14 @@ internal fun IslandSimulationPage(onRequestNotificationPermission: () -> Unit, b
                         onSelectedIndexChange = { index ->
                             type = IslandSimulationType.entries[index]
                             store.select(type)
+                        },
+                    )
+                    SwitchPreference(
+                        title = tr("island_sim_outer_glow", "为模拟超级岛添加外圈光效"),
+                        checked = outerGlow,
+                        onCheckedChange = {
+                            outerGlow = it
+                            effectsStore.setOuterGlow(it)
                         },
                     )
                     if (supportsIslandSimulationRearScreen(type, settings.logistics)) {

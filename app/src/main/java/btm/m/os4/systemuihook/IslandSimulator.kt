@@ -54,12 +54,13 @@ internal object IslandSimulator {
             durationSeconds = settings.durationSeconds.takeIf { it in ISLAND_SIMULATION_DURATIONS } ?: 15,
         )
         val finished = tr("island_sim_completed", "已完成")
+        val outerGlow = IslandSimulationEffectsSettingsStore(app).outerGlow()
         val icon = Icon.createWithBitmap(requireNotNull(app.getDrawable(R.drawable.ic_hyperchanger)).toBitmap(224, 224).asShared())
         val functionIcon = Icon.createWithResource(app, if (type == IslandSimulationType.CALL) R.drawable.ic_island_call_recording else R.drawable.ic_widget_steps)
         // Shared bitmap storage avoids putting several decoded images into one Binder parcel.
         val images = islandSimulationImageSlots(type).mapNotNull { slot ->
             IslandSimulationImageStore(app, type, slot).load()?.let {
-                slot to Icon.createWithBitmap(it.bitmap.asShared())
+                slot to Icon.createWithBitmap(roundIslandSimulationImage(it.bitmap).asShared())
             }
         }.toMap()
         val id = type.ordinal
@@ -68,8 +69,13 @@ internal object IslandSimulator {
         fun post(progress: Int, terminal: Boolean) {
             val extras = Bundle().apply {
                 putString(ISLAND_SIMULATION_TYPE_EXTRA, type.key)
+                if (outerGlow) {
+                    putString(ISLAND_SIMULATION_BIG_GLOW_EXTRA, ISLAND_SIMULATION_OUTER_GLOW_EFFECT)
+                    putString("miui.effect.src", ISLAND_SIMULATION_OUTER_GLOW_EFFECT)
+                }
                 buildIslandSimulationRearPayload(type, draft)?.let { putString("miui.rear.param", it) }
-                putString("miui.focus.param", buildIslandSimulationPayload(type, draft, progress, terminal, finished, timerStart, images = images.keys))
+                putString("miui.focus.param", buildIslandSimulationPayload(type, draft, progress, terminal, finished, timerStart,
+                    images = images.keys, outerGlow = outerGlow))
                 putBundle("miui.focus.pics", Bundle().apply {
                     putParcelable(ISLAND_SIM_ICON, icon)
                     putParcelable(ISLAND_SIM_FUNCTION, functionIcon)

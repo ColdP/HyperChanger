@@ -3,13 +3,25 @@ package btm.m.os4.systemuihook
 
 import org.json.JSONObject
 
-private fun payload(type: IslandSimulationType, settings: IslandSimulationSettings, terminal: Boolean = false): JSONObject =
+private fun payload(type: IslandSimulationType, settings: IslandSimulationSettings, terminal: Boolean = false,
+    outerGlow: Boolean = false): JSONObject =
     JSONObject(buildIslandSimulationPayload(type, settings, if (terminal) 100 else 37, terminal,
-        "已完成", 1_000_000L, 1_065_000L, "公里", "凭证码")).getJSONObject("param_v2")
+        "已完成", 1_000_000L, 1_065_000L, "公里", "凭证码", outerGlow = outerGlow)).getJSONObject("param_v2")
 
 fun main() {
     val draft = IslandSimulationSettings("测试任务", "测试内容", "测试", "123456", "查看", secondaryAction = "拒绝")
     for (type in IslandSimulationType.entries) {
+        check(shouldBridgeIslandSimulationGlow("btm.m.os4.systemuihook", ISLAND_SIMULATION_TAG, type.ordinal,
+            type.key, "outer_glow"))
+        check(!shouldBridgeIslandSimulationGlow("other.app", ISLAND_SIMULATION_TAG, type.ordinal, type.key, "outer_glow"))
+        check(!shouldBridgeIslandSimulationGlow("btm.m.os4.systemuihook", null, type.ordinal, type.key, "outer_glow"))
+        check(!shouldBridgeIslandSimulationGlow("btm.m.os4.systemuihook", ISLAND_SIMULATION_TAG, type.ordinal, null, "outer_glow"))
+        check(!shouldBridgeIslandSimulationGlow("btm.m.os4.systemuihook", ISLAND_SIMULATION_TAG, type.ordinal, "unknown", "outer_glow"))
+        check(!shouldBridgeIslandSimulationGlow("btm.m.os4.systemuihook", ISLAND_SIMULATION_TAG,
+            (type.ordinal + 1) % IslandSimulationType.entries.size, type.key, "outer_glow"))
+        for (effect in listOf(null, "", "other_effect")) {
+            check(!shouldBridgeIslandSimulationGlow("btm.m.os4.systemuihook", ISLAND_SIMULATION_TAG, type.ordinal, type.key, effect))
+        }
         val json = payload(type, draft)
         // Regression for the device crash in ModuleTextButton5ViewHolder.bind:
         // Html.fromHtml reads actionTitle from JSON, without using Notification.Action.title.
@@ -30,6 +42,16 @@ fun main() {
         check(json.getInt("protocol") == 1)
         check(!json.getBoolean("enableFloat"))
         val island = json.getJSONObject("param_island")
+        check(!json.has("outEffectSrc") && !island.has("outEffectSrc"))
+        for (terminal in listOf(false, true)) {
+            val glowing = payload(type, draft, terminal = terminal, outerGlow = true)
+            // Native expanded and big-island consumers read separate protocol levels.
+            check(glowing.getString("outEffectSrc") == "outer_glow")
+            check(glowing.getJSONObject("param_island").getString("outEffectSrc") == "outer_glow")
+            glowing.remove("outEffectSrc")
+            glowing.getJSONObject("param_island").remove("outEffectSrc")
+            check(glowing.similar(payload(type, draft, terminal = terminal)))
+        }
         val big = island.getJSONObject("bigIslandArea")
         check(big.getJSONObject("imageTextInfoLeft").getJSONObject("picInfo").getString("pic") == ISLAND_SIM_ICON)
         val small = island.getJSONObject("smallIslandArea")
@@ -123,8 +145,11 @@ fun main() {
             }
         }
         // The longest permitted Chinese input must fit SystemUI's UTF-8 payload limit.
-        payload(type, draft.copy(title = "测".repeat(40), content = "测".repeat(80), summary = "测".repeat(8),
-            detail = "测".repeat(24), action = "测".repeat(12), subContent = "测".repeat(40), secondaryAction = "测".repeat(12)))
+        for (outerGlow in listOf(false, true)) {
+            payload(type, draft.copy(title = "测".repeat(40), content = "测".repeat(80), summary = "测".repeat(8),
+                detail = "测".repeat(24), action = "测".repeat(12), subContent = "测".repeat(40), secondaryAction = "测".repeat(12)),
+                outerGlow = outerGlow)
+        }
         val slots = islandSimulationImageSlots(type).toSet()
         check(slots.size == islandSimulationImageSlots(type).size)
         val custom = JSONObject(buildIslandSimulationPayload(type, draft, 37, false,
@@ -158,6 +183,9 @@ fun main() {
             }
         }
     }
+    for (id in listOf(-1, IslandSimulationType.entries.size)) {
+        check(!shouldBridgeIslandSimulationGlow("btm.m.os4.systemuihook", ISLAND_SIMULATION_TAG, id, "text", "outer_glow"))
+    }
     check(ISLAND_SIMULATION_DURATIONS == listOf(5, 10, 15, 30, 60, 90, 120, 180))
     for (seconds in ISLAND_SIMULATION_DURATIONS) for (start in listOf(0, 37, 99)) {
         val duration = seconds * 1000L
@@ -169,5 +197,5 @@ fun main() {
         val samples = (0..seconds * 2).map { islandSimulationProgress(start, it * 500L, duration) }
         check(samples.zipWithNext().all { (a, b) -> b >= a })
     }
-    println("PASS: 11 expanded/summary templates, JSON button-title crash regression, per-role image/fallback contracts, Call Kit theme images, native rear-screen eligibility, UTF-8 limit, timers, completion, all countdowns")
+    println("PASS: 11 expanded/summary templates, outer glow on/off and completion, simulator-only big-glow bridge policy, JSON button-title crash regression, per-role image/fallback contracts, Call Kit theme images, native rear-screen eligibility, UTF-8 limit, timers, completion, all countdowns")
 }
