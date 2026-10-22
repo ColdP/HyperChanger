@@ -1375,8 +1375,6 @@ public class Main extends XposedModule {
         try {
             Xp.hookAll(sContainerCls, "notifStateChange", chain -> {
                 if (IosNotificationCenterPresentation.isHostedClock((View) chain.getThisObject())) {
-                    if (IosNotificationCenterPresentation.shouldSuppressHostedClockNotification(
-                            (View) chain.getThisObject())) return null;
                     return chain.proceed();
                 }
                 // Anyone calling this is by definition the live instance.

@@ -281,7 +281,7 @@ private enum class PageId {
     SOFT_GLASS_PARAMETERS,
     SOFT_GLASS_PRESETS,
     GESTURE_HANDLE_STYLE, DESKTOP, DESKTOP_MATERIAL,
-    ISLAND, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_CLEAR, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
+    ISLAND, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_CLEAR, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_ADJUSTMENT, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
     SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, OTHER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND,
@@ -876,6 +876,9 @@ private fun Root(
                 appearances.syncRemote(it)
                 airDrop.syncRemote(it)
                 IslandWidthSettingsStore(context).syncRemote(it)
+                StatusBarAdjustmentSettingsStore(context).syncRemote(it)
+                StatusBarIconSpacingSettingsStore(context).syncRemote(it)
+                StatusBarIconImportStore(context).syncRemote(it)
                 NotificationIslandSettingsStore(context).syncRemote(it)
                 ControlCenterHeaderHeightSettingsStore(context).syncRemote(it)
                 IosNotificationBottomOffsetSettingsStore(context).syncRemote(it)
@@ -4860,6 +4863,7 @@ private fun Detail(
         PageId.NOTIFICATION_RESTRICTIONS -> NotificationRestrictions(back)
         PageId.NOTIFICATION_MEDIA_CARD -> NotificationMediaCard(back)
         PageId.STATUS -> Status(settings, update, openPage, back)
+        PageId.STATUS_ADJUSTMENT -> StatusAdjustment(settings, update, back)
         PageId.STATUS_SIGNAL_CUSTOMIZATION -> StatusSignalCustomization(settings, update, openPage, back)
         PageId.STATUS_SIGNAL_TUNING -> StatusSignalTuning(settings, update, back)
         PageId.CONTROL -> Control(back)
@@ -7254,6 +7258,8 @@ private fun Status(
     var showCarrierTextDialog by remember { mutableStateOf(false) }
     val controlCenterClockStore = remember(context) { ControlCenterClockSettingsStore(context) }
     var controlCenterClockSettings by remember { mutableStateOf(controlCenterClockStore.settings) }
+    val adjustmentStore = remember(context) { StatusBarAdjustmentSettingsStore(context) }
+    var adjustmentSettings by remember { mutableStateOf(adjustmentStore.settings) }
     var showControlCenterClockFormatDialog by remember { mutableStateOf(false) }
     fun updateControlCenterClock(transform: (ControlCenterClockSettings) -> ControlCenterClockSettings) {
         controlCenterClockStore.update(service, transform)
@@ -7263,6 +7269,10 @@ private fun Status(
         carrierStore.update(service, transform)
         carrierSettings = carrierStore.settings
     }
+    fun updateAdjustment(transform: (StatusBarAdjustmentSettings) -> StatusBarAdjustmentSettings) {
+        adjustmentStore.update(service, transform)
+        adjustmentSettings = adjustmentStore.settings
+    }
     LaunchedEffect(service) {
         service?.let(headerHeightStore::syncRemote)
         headerHeightOffset = headerHeightStore.offsetDp
@@ -7270,21 +7280,26 @@ private fun Status(
         carrierSettings = carrierStore.settings
         service?.let(controlCenterClockStore::syncRemote)
         controlCenterClockSettings = controlCenterClockStore.settings
+        service?.let(adjustmentStore::syncRemote)
+        adjustmentSettings = adjustmentStore.settings
     }
     AppList(p, scroll, 28) {
         item { Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-        Dim(tr("\u65f6\u949f\u5927\u5c0f", "\u65f6\u949f\u5927\u5c0f"), s.clockEnabled, { v -> update { it.copy(clockEnabled = v) } }, s.clockSize, 10f..24f, defaultValue = 14.8f) { v -> update { it.copy(clockSize = v) } }
-        DeltaDim(tr("\u53f3\u8fb9\u8ddd", "\u53f3\u8fb9\u8ddd"), s.paddingEnd) { v -> update { it.copy(paddingEnd = v, paddingEndEnabled = true, paddingEndLegacyAbsolute = null) } }
-        Dim(tr("\u5de6\u8fb9\u8ddd", "\u5de6\u8fb9\u8ddd"), s.paddingStartEnabled, { v -> update { it.copy(paddingStartEnabled = v) } }, s.paddingStart, 0f..32f, defaultValue = 12.5f) { v -> update { it.copy(paddingStart = v) } }
-        Dim(tr("\u72b6\u6001\u680f\u9ad8\u5ea6", "\u72b6\u6001\u680f\u9ad8\u5ea6"), s.heightEnabled, { v -> update { it.copy(heightEnabled = v) } }, s.statusBarHeight.toFloat(), 24f..72f, defaultValue = 40f) { v -> update { it.copy(statusBarHeight = v.toInt()) } }
-        DeltaDim(tr("\u4e0a\u8fb9\u8ddd", "\u4e0a\u8fb9\u8ddd"), s.paddingTop) { v -> update { it.copy(paddingTop = v, paddingTopEnabled = true, paddingTopLegacyAbsolute = null) } }
-    } }
+            ArrowPreference(title = tr("状态栏调整", "状态栏调整"), onClick = { open(PageId.STATUS_ADJUSTMENT) })
+            StatusBarIconImportPreference()
+        } }
         item {
             Group(tr("\u72b6\u6001\u680f\u663e\u793a", "\u72b6\u6001\u680f\u663e\u793a")) {
                 SwitchPreference(
                     title = tr("\u9690\u85cf\u72b6\u6001\u680f\u7535\u6c60\u5185\u6587\u672c", "\u9690\u85cf\u72b6\u6001\u680f\u7535\u6c60\u5185\u6587\u672c"),
                     checked = s.hideStatusBarClockText,
                     onCheckedChange = { enabled -> update { it.copy(hideStatusBarClockText = enabled) } },
+                )
+                OverlayDropdownPreference(
+                    title = tr("状态栏电池百分比显示", "状态栏电池百分比显示"),
+                    items = batteryPercentageModeLabels(),
+                    selectedIndex = adjustmentSettings.statusBarBatteryPercentMode,
+                    onSelectedIndexChange = { mode -> updateAdjustment { it.copy(statusBarBatteryPercentMode = mode) } },
                 )
                 ArrowPreference(
                     title = tr("\u72b6\u6001\u680f\u4fe1\u53f7\u81ea\u5b9a\u4e49", "\u72b6\u6001\u680f\u4fe1\u53f7\u81ea\u5b9a\u4e49"),
@@ -7294,6 +7309,12 @@ private fun Status(
         }
         item {
             Group(tr("\u63a7\u5236\u4e2d\u5fc3", "\u63a7\u5236\u4e2d\u5fc3")) {
+                OverlayDropdownPreference(
+                    title = tr("控制中心中电池百分比显示", "控制中心中电池百分比显示"),
+                    items = batteryPercentageModeLabels(),
+                    selectedIndex = adjustmentSettings.controlCenterBatteryPercentMode,
+                    onSelectedIndexChange = { mode -> updateAdjustment { it.copy(controlCenterBatteryPercentMode = mode) } },
+                )
                 ArrowPreference(
                     title = tr("\u63a7\u5236\u4e2d\u5fc3\u5706\u89d2\u8be6\u7ec6\u8bbe\u7f6e", "\u63a7\u5236\u4e2d\u5fc3\u5706\u89d2\u8be6\u7ec6\u8bbe\u7f6e"),
                     onClick = { open(PageId.CONTROL) },
@@ -7787,6 +7808,71 @@ private fun StatusSignalTuning(
                 )
             }
         }
+    }
+}
+
+private fun batteryPercentageModeLabels() = listOf(
+    tr("系统默认", "系统默认"),
+    tr("显示在电池内", "显示在电池内"),
+    tr("显示在电池外", "显示在电池外"),
+    tr("不显示百分比", "不显示百分比"),
+)
+
+@Composable
+private fun StatusAdjustment(
+    s: HookSettings,
+    update: ((HookSettings) -> HookSettings) -> Unit,
+    back: () -> Unit,
+) = AppPage(tr("状态栏调整", "状态栏调整"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI)) { p, scroll ->
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    val store = remember(context) { StatusBarAdjustmentSettingsStore(context) }
+    var settings by remember { mutableStateOf(store.settings) }
+    val spacingStore = remember(context) { StatusBarIconSpacingSettingsStore(context) }
+    var spacingPercent by remember { mutableIntStateOf(spacingStore.spacingPercent) }
+    var spacingSlider by remember(spacingPercent) { mutableFloatStateOf(spacingPercent.toFloat()) }
+    LaunchedEffect(service) {
+        service?.let(store::syncRemote)
+        settings = store.settings
+        service?.let(spacingStore::syncRemote)
+        spacingPercent = spacingStore.spacingPercent
+    }
+    fun save(transform: (StatusBarAdjustmentSettings) -> StatusBarAdjustmentSettings) {
+        store.update(service, transform)
+        settings = store.settings
+    }
+    AppList(p, scroll, 28) {
+        item { Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+            Dim(tr("时钟大小", "时钟大小"), s.clockEnabled, { v -> update { it.copy(clockEnabled = v) } }, s.clockSize, 10f..24f, defaultValue = 14.8f) { v -> update { it.copy(clockSize = v) } }
+            RelativePercentSlide(
+                tr("状态栏图标大小", "状态栏图标大小"),
+                settings.iconSizePercent,
+            ) { value -> save { it.copy(iconSizePercent = value) } }
+            EditableSliderPreference(
+                title = tr("statusBarIconSpacing", "状态栏图标间距"),
+                value = spacingSlider,
+                valueText = if (spacingSlider.roundToInt() == 0) {
+                    tr("statusBarIconSpacingDefault", "0%（系统默认）")
+                } else {
+                    tr("statusBarIconSpacingValue", "%s%%").format(
+                        spacingSlider.roundToInt().let { if (it > 0) "+$it" else it.toString() },
+                    )
+                },
+                valueRange = STATUS_BAR_ICON_SPACING_RANGE.first.toFloat()..STATUS_BAR_ICON_SPACING_RANGE.last.toFloat(),
+                steps = 199,
+                defaultValue = 0f,
+                centerValue = 0f,
+                onValueChange = { spacingSlider = it },
+                onValueChangeFinished = {
+                    spacingStore.update(service, spacingSlider.roundToInt())
+                    spacingPercent = spacingStore.spacingPercent
+                },
+            )
+            DeltaDim(tr("右边距", "右边距"), s.paddingEnd) { v -> update { it.copy(paddingEnd = v, paddingEndEnabled = true, paddingEndLegacyAbsolute = null) } }
+            Dim(tr("左边距", "左边距"), s.paddingStartEnabled, { v -> update { it.copy(paddingStartEnabled = v) } }, s.paddingStart, 0f..32f, defaultValue = 12.5f) { v -> update { it.copy(paddingStart = v) } }
+            Dim(tr("状态栏高度", "状态栏高度"), s.heightEnabled, { v -> update { it.copy(heightEnabled = v) } }, s.statusBarHeight.toFloat(), 24f..72f, defaultValue = 40f) { v -> update { it.copy(statusBarHeight = v.toInt()) } }
+            DeltaDim(tr("上边距", "上边距"), s.paddingTop) { v -> update { it.copy(paddingTop = v, paddingTopEnabled = true, paddingTopLegacyAbsolute = null) } }
+        } }
     }
 }
 
@@ -10938,6 +11024,28 @@ private fun Dim(title: String, enabled: Boolean, changeEnabled: (Boolean) -> Uni
 @Composable
 private fun DeltaDim(title: String, value: Float, save: (Float) -> Unit) {
     FloatSlide(title, value, -35f..35f, 0f, save)
+}
+
+@Composable
+private fun RelativePercentSlide(title: String, value: Float, save: (Float) -> Unit) {
+    var current by remember(value) { mutableFloatStateOf(value) }
+    EditableSliderPreference(
+        value = current,
+        onValueChange = { current = it },
+        onValueChangeFinished = { save(current.roundToInt().toFloat()) },
+        title = title,
+        valueText = if (current.roundToInt() == 0) {
+            tr("statusBarIconSizeDefault", "0%（系统默认）")
+        } else {
+            tr("statusBarIconSizePercent", "%s%%").format(
+                current.roundToInt().let { if (it > 0) "+$it" else it.toString() },
+            )
+        },
+        valueRange = STATUS_BAR_ICON_SIZE_PERCENT_RANGE,
+        steps = 199,
+        defaultValue = STATUS_BAR_ICON_SIZE_PERCENT_DEFAULT,
+        centerValue = STATUS_BAR_ICON_SIZE_PERCENT_DEFAULT,
+    )
 }
 
 @Composable

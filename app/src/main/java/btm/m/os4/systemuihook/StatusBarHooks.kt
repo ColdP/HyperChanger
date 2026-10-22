@@ -4,14 +4,20 @@ package btm.m.os4.systemuihook
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.res.Configuration
+import android.content.res.Resources
+import android.graphics.BitmapFactory
 import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorFilter
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
+import android.graphics.drawable.BitmapDrawable
+import android.net.Uri
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -21,6 +27,7 @@ import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.RelativeSizeSpan
 import android.util.Log
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -36,6 +43,9 @@ import java.util.Collections
 import java.util.IdentityHashMap
 import java.util.LinkedHashMap
 import java.util.WeakHashMap
+import java.io.ByteArrayInputStream
+import java.util.zip.ZipInputStream
+import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 private data class StackedMobileSubscription(
@@ -188,7 +198,479 @@ internal class StatusBarHooks(
     private val mobileNetworkTypeModeKey: String,
     private val stackedMobileDualContainerId: Int,
     private val logTag: String,
+    private val applicationContext: () -> Context?,
 ) {
+    fun installAdjustmentHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (statusBarAdjustmentHooksInstalled) return
+        installClockSizeRefreshHook(classLoader, preferences)
+        installStatusBarIconSizeHooks(classLoader, preferences)
+        installIconSpacingHooks(classLoader, preferences)
+        installBatteryPercentageHook(classLoader, preferences)
+        installAdjustmentPreferenceListener(preferences)
+        installImportedIconHooks(preferences)
+        statusBarAdjustmentHooksInstalled = true
+    }
+
+    private fun installClockSizeRefreshHook(classLoader: ClassLoader, preferences: SharedPreferences) {
+        runCatching {
+            val controller = classLoader.loadClass("com.android.systemui.statusbar.policy.MiuiStatusBarClockController")
+            controller.declaredMethods.filter {
+                it.name == "onMiuiThemeChanged" || it.name == "onDensityOrFontScaleChanged"
+            }.forEachIndexed { index, method ->
+                hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("status-bar:clock-size-refresh-$index")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        if (preferences.getBoolean("clock_enabled", false)) {
+                            val size = preferences.getFloat("clock_size", 14.8f).coerceIn(10f, 24f)
+                            (readInheritedField(chain.thisObject, "mClockListeners") as? Iterable<*>)
+                                ?.forEach { (it as? TextView)?.setTextSize(TypedValue.COMPLEX_UNIT_SP, size) }
+                        }
+                        result
+                    }
+            }
+        }.onFailure { module.log(Log.WARN, logTag, "Could not install clock size refresh hook", it) }
+    }
+
+    private fun installStatusBarIconSizeHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
+        installIconSizeLayoutHooks(classLoader, preferences)
+        runCatching {
+            val iconClass = classLoader.loadClass("com.android.systemui.statusbar.StatusBarIconView")
+            iconClass.declaredConstructors.forEachIndexed { index, constructor ->
+                hookDeoptimized(constructor).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("status-bar:icon-size-init-$index")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        (chain.thisObject as? View)?.let { trackIconSize(it, preferences) }
+                        result
+                    }
+            }
+        }.onFailure { module.log(Log.WARN, logTag, "Could not install legacy status icon size hook", it) }
+
+        runCatching {
+            val modernClass = classLoader.loadClass(MODERN_STATUS_BAR_VIEW_CLASS)
+            modernClass.declaredMethods.filter {
+                (it.name == "initView" || it.name == "onDensityOrFontScaleChanged")
+            }.forEachIndexed { index, method ->
+                hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("status-bar:modern-icon-size-$index")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        (chain.thisObject as? View)?.let { trackIconSize(it, preferences) }
+                        result
+                    }
+            }
+        }.onFailure { module.log(Log.WARN, logTag, "Could not install modern status icon size hook", it) }
+    }
+
+    private fun statusBarIconSizeFactor(preferences: SharedPreferences): Float =
+        (1f + preferences.getFloat(
+            KEY_STATUS_BAR_ICON_SIZE_PERCENT,
+            STATUS_BAR_ICON_SIZE_PERCENT_DEFAULT,
+        ).coerceIn(STATUS_BAR_ICON_SIZE_PERCENT_RANGE) / 100f).coerceIn(0f, 2f)
+
+    private fun installIconSizeLayoutHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
+        val measuredDimension = View::class.java.getDeclaredMethod(
+            "setMeasuredDimension", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType,
+        ).apply { isAccessible = true }
+        fun setWidth(view: View, width: Int) {
+            measuredDimension.invoke(
+                view,
+                width or (view.measuredWidthAndState and View.MEASURED_STATE_MASK),
+                view.measuredHeightAndState,
+            )
+        }
+        runCatching {
+            val type = classLoader.loadClass(BATTERY_METER_VIEW_CLASS)
+            hookDeoptimized(type.getDeclaredMethod("onMeasure", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType))
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("status-bar:battery-size-measure")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    val view = chain.thisObject as? View ?: return@intercept result
+                    if (!sizedIconViews.containsKey(view)) return@intercept result
+                    val nativeWidth = view.measuredWidth
+                    batteryIconLayouts[view] = BatteryIconLayout(nativeWidth)
+                    val allocatedWidth = ceil(nativeWidth * iconSizeFactor(view, preferences).coerceAtLeast(1f)).toInt()
+                    if (allocatedWidth != nativeWidth) setWidth(view, allocatedWidth)
+                    result
+                }
+            hookDeoptimized(type.getDeclaredMethod(
+                "onLayout", Boolean::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType, Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType, Int::class.javaPrimitiveType,
+            )).setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("status-bar:battery-size-content-layout")
+                .intercept { chain ->
+                    val view = chain.thisObject as? View
+                    val nativeWidth = view?.let { batteryIconLayouts[it]?.nativeWidth }
+                    val result = if (nativeWidth == null || view.width == nativeWidth) {
+                        chain.proceed()
+                    } else {
+                        val args = chain.args.toTypedArray()
+                        args[3] = (chain.getArg(1) as Int) + nativeWidth
+                        chain.proceed(args)
+                    }
+                    // Also refresh when only the boundary allocation changed at a fixed outer size.
+                    if (view != null && sizedIconViews.containsKey(view)) applyIconSize(view, preferences)
+                    result
+                }
+        }.onFailure { module.log(Log.WARN, logTag, "Could not install battery size layout hooks", it) }
+
+        runCatching {
+            val type = classLoader.loadClass("com.android.systemui.statusbar.views.MiuiStatusBatteryContainer")
+            hookDeoptimized(type.getDeclaredMethod("onMeasure", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType))
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("status-bar:signal-battery-boundary-measure")
+                .intercept { chain ->
+                    val owner = chain.thisObject as? View ?: return@intercept chain.proceed()
+                    val battery = readInheritedField(owner, "mBattery") as? View
+                    // View.measure may reuse a cached measurement. Remove only our previous
+                    // boundary allocation before the parent's one original measurement.
+                    battery?.let { view -> batteryIconLayouts[view]?.let { previous ->
+                        if (previous.boundarySpacing != 0) {
+                            setWidth(view, (view.measuredWidth - previous.boundarySpacing).coerceAtLeast(0))
+                            batteryIconLayouts[view] = previous.copy(boundarySpacing = 0)
+                        }
+                    } }
+                    val result = chain.proceed()
+                    val layout = battery?.let { batteryIconLayouts[it] } ?: return@intercept result
+                    val statusIcons = readInheritedField(owner, "mStatusIcon") as? View ?: return@intercept result
+                    val privacy = readInheritedField(owner, "mPrivacyState").toString()
+                    if (battery.visibility != View.VISIBLE || statusIcons.visibility != View.VISIBLE ||
+                        (readInheritedField(battery, "mLayoutFromTag") as? Number)?.toInt() != 0 ||
+                        readInheritedField(owner, "mIsHideBattery") == true ||
+                        privacy == "START_SHOW_PRIVACY" || privacy == "COMPLETE_SHOW_PRIVACY"
+                    ) return@intercept result
+                    // measureViews already excludes blocked/hidden slots and is ordered from
+                    // start to end. Only the icon next to the battery contributes edge overflow;
+                    // never reserve a scaled width for each SIM or multiply the manual spacing.
+                    val edge = (readInheritedField(statusIcons, "measureViews") as? List<*>)
+                        ?.filterIsInstance<View>()?.lastOrNull {
+                            it.visibility == View.VISIBLE && it.measuredWidth > 0
+                        } ?: return@intercept result
+                    val edgeScale = iconSizeFactor(edge, preferences)
+                    // A zero native inter-icon gap leaves the enlarged signal flush against the
+                    // battery even after its overflow is reserved. Keep a visible gap at this
+                    // one boundary; the manual icon-spacing setting stays independent.
+                    val clearance = if (edgeScale > 1f) 2f * owner.resources.displayMetrics.density else 0f
+                    val extra = ceil(edge.measuredWidth * (edgeScale - 1f).coerceAtLeast(0f) / 2f + clearance).toInt()
+                    if (extra != 0) {
+                        setWidth(battery, battery.measuredWidth + extra)
+                        batteryIconLayouts[battery] = layout.copy(boundarySpacing = extra)
+                        val widthSpec = chain.getArg(0) as Int
+                        val width = when (View.MeasureSpec.getMode(widthSpec)) {
+                            View.MeasureSpec.EXACTLY -> owner.measuredWidth
+                            View.MeasureSpec.AT_MOST -> (owner.measuredWidth + extra).coerceAtMost(View.MeasureSpec.getSize(widthSpec))
+                            else -> owner.measuredWidth + extra
+                        }
+                        if (width != owner.measuredWidth) setWidth(owner, width)
+                    }
+                    result
+                }
+        }.onFailure { module.log(Log.WARN, logTag, "Could not install signal/battery boundary hook", it) }
+    }
+
+    private fun installIconSpacingHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
+        runCatching {
+            val containerClass = classLoader.loadClass("com.android.systemui.statusbar.views.MiuiStatusIconContainer")
+            val spacingField = containerClass.getDeclaredField("iconSpacing").apply { isAccessible = true }
+            val layoutFromField = containerClass.getDeclaredField("_layoutFrom").apply { isAccessible = true }
+            containerClass.declaredMethods.filter { it.name == "onMeasure" || it.name == "onLayout" }
+                .forEachIndexed { index, method ->
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("status-bar:icon-spacing-$index")
+                        .intercept { chain ->
+                            val view = chain.thisObject as? View ?: return@intercept chain.proceed()
+                            if (layoutFromField.getInt(view) != 0) return@intercept chain.proceed()
+                            spacedIconContainers[view] = true
+                            val original = spacingField.getInt(view)
+                            val percent = readStatusBarIconSpacing(preferences) / 100f
+                            // HyperOS ships this resource as 0sp. Multiplication alone then
+                            // makes every slider value identical; preserve zero at the default
+                            // and use a density-aware basis for positive adjustments.
+                            val basis = if (original > 0) original.toFloat()
+                                else 4f * view.resources.displayMetrics.density
+                            spacingField.setInt(view, (original + basis * percent).roundToInt().coerceAtLeast(0))
+                            try {
+                                chain.proceed()
+                            } finally {
+                                spacingField.setInt(view, original)
+                            }
+                        }
+                }
+        }.onFailure { module.log(Log.WARN, logTag, "Could not install status icon spacing hooks", it) }
+    }
+
+    private data class BatteryIconLayout(val nativeWidth: Int, val boundarySpacing: Int = 0)
+
+    private fun trackIconSize(view: View, preferences: SharedPreferences) {
+        if (sizedIconViews.put(view, true) == null) {
+            view.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+                applyIconSize(view, preferences)
+            }
+        }
+        applyIconSize(view, preferences)
+    }
+
+    private fun applyIconSize(view: View, preferences: SharedPreferences) {
+        val factor = iconSizeFactor(view, preferences)
+        val batteryLayout = batteryIconLayouts[view]
+        val contentWidth = batteryLayout?.nativeWidth ?: view.width
+        val extraGap = batteryLayout?.boundarySpacing ?: 0
+        val gapTranslation = if (view.layoutDirection == View.LAYOUT_DIRECTION_RTL) -extraGap / 2f else extraGap / 2f
+        view.animationMatrix = if (factor == 1f && extraGap == 0) null else Matrix().apply {
+            setScale(factor, factor, contentWidth / 2f, view.height / 2f)
+            postTranslate((view.width - contentWidth) / 2f + gapTranslation, 0f)
+        }
+        view.invalidate()
+    }
+
+    private fun iconSizeFactor(view: View, preferences: SharedPreferences): Float {
+        // Overflow dots are StatusBarIconViews nested inside modern signal views.
+        // Scale the owning view only, and leave Folme's scaleX/scaleY animation intact.
+        val nested = generateSequence(view.parent as? View) { it.parent as? View }
+            .any { sizedIconViews.containsKey(it) }
+        val batteryOutsideStatusBar = view.javaClass.name == BATTERY_METER_VIEW_CLASS &&
+            (readInheritedField(view, "mLayoutFromTag") as? Number)?.toInt() != 0
+        return if (nested || batteryOutsideStatusBar) 1f else statusBarIconSizeFactor(preferences)
+    }
+
+    private fun installAdjustmentPreferenceListener(preferences: SharedPreferences) {
+        if (adjustmentPreferenceListener != null) return
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == null || key == KEY_STATUS_BAR_ICON_SIZE_PERCENT || key == KEY_STATUS_BAR_ICON_SPACING_PERCENT) {
+                val views = synchronized(sizedIconViews) { sizedIconViews.keys.toList() }
+                views.forEach { view -> view.post {
+                    view.requestLayout()
+                    applyIconSize(view, preferences)
+                } }
+                val containers = synchronized(spacedIconContainers) { spacedIconContainers.keys.toList() }
+                containers.forEach { view -> view.post { view.requestLayout() } }
+            }
+            if (key == null || key == KEY_STATUS_BAR_BATTERY_PERCENT_MODE ||
+                key == KEY_CONTROL_CENTER_BATTERY_PERCENT_MODE
+            ) {
+                val views = synchronized(batteryStyleViews) { batteryStyleViews.keys.toList() }
+                views.forEach { view -> view.post { replayBatteryStyle(view) } }
+            }
+        }
+        adjustmentPreferenceListener = listener
+        preferences.registerOnSharedPreferenceChangeListener(listener)
+    }
+
+    private fun replayBatteryStyle(target: Any) {
+        val style = (readInheritedField(target, "mStoreRealStyle") as? Number)?.toInt() ?: return
+        if (style < 0) return // The first controller callback has not arrived yet.
+        runCatching { batteryStyleMethod?.invoke(target, style) }
+            .onFailure { module.log(Log.WARN, logTag, "Could not refresh battery percentage style", it) }
+    }
+
+    private fun installBatteryPercentageHook(classLoader: ClassLoader, preferences: SharedPreferences) {
+        runCatching {
+            val viewClass = classLoader.loadClass(BATTERY_METER_VIEW_CLASS)
+            val realStyleField = viewClass.getDeclaredField("mStoreRealStyle").apply { isAccessible = true }
+            val styleMethods = viewClass.declaredMethods.filter {
+                it.name == "onBatteryStyleChanged" &&
+                    it.parameterTypes.contentEquals(arrayOf(Int::class.javaPrimitiveType))
+            }.onEach { it.isAccessible = true }
+            styleMethods.forEachIndexed { index, method ->
+                    hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("status-bar:battery-percent-mode-$index")
+                        .intercept { chain ->
+                            val target = chain.thisObject
+                            val desiredStyle = batteryPercentMode(
+                                (readInheritedField(target, "mLayoutFromTag") as? Number)?.toInt(),
+                                preferences,
+                            ).takeIf { it != 0 }?.let(::batteryStyleForMode)
+                            if (desiredStyle == null) chain.proceed()
+                            else {
+                                val originalStyle = chain.getArg(0) as Int
+                                try {
+                                    chain.proceed(arrayOf(desiredStyle))
+                                } finally {
+                                    // Internal theme/island callbacks must keep the real system style
+                                    // so returning either scope to default can restore it.
+                                    realStyleField.setInt(target, originalStyle)
+                                }
+                            }
+                        }
+                }
+            batteryStyleMethod = styleMethods.firstOrNull()
+                ?: error("MiuiBatteryMeterView.onBatteryStyleChanged(int) was not found")
+            viewClass.declaredMethods.filter {
+                it.name == "setLayoutFromTag" &&
+                    it.parameterTypes.contentEquals(arrayOf(Int::class.javaPrimitiveType))
+            }.forEachIndexed { index, method ->
+                hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("status-bar:battery-layout-tag-$index")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        val target = chain.thisObject
+                        (target as? View)?.let { view ->
+                            batteryStyleViews[view] = true
+                            trackIconSize(view, preferences)
+                        }
+                        replayBatteryStyle(target)
+                        result
+                    }
+            }
+            viewClass.declaredMethods.filter {
+                it.name == "onAttachedToWindow" && it.parameterCount == 0
+            }.forEachIndexed { index, method ->
+                hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("status-bar:battery-percent-attach-$index")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        replayBatteryStyle(chain.thisObject)
+                        result
+                    }
+            }
+        }.onFailure { module.log(Log.WARN, logTag, "Could not install battery percentage hook", it) }
+    }
+
+    private fun batteryPercentMode(tag: Int?, preferences: SharedPreferences): Int = when (tag) {
+        0 -> preferences.getInt(KEY_STATUS_BAR_BATTERY_PERCENT_MODE, 0)
+        5, 6 -> preferences.getInt(KEY_CONTROL_CENTER_BATTERY_PERCENT_MODE, 0)
+        else -> 0
+    }.coerceIn(0, 3)
+
+    private fun batteryStyleForMode(mode: Int): Int = when (mode) {
+        1 -> 1
+        2 -> 3
+        else -> 0
+    }
+
+    private data class ImportedIcon(val bytes: ByteArray, val density: Int)
+
+    fun installImportedIconHooks(preferences: SharedPreferences) {
+        if (importedIconHooksInstalled) return
+        runCatching {
+            listOf(
+                Resources::class.java.getMethod("getDrawable", Int::class.javaPrimitiveType),
+                Resources::class.java.getMethod("getDrawable", Int::class.javaPrimitiveType, Resources.Theme::class.java),
+                Resources::class.java.getMethod("getDrawableForDensity", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType),
+                Resources::class.java.getMethod("getDrawableForDensity", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Resources.Theme::class.java),
+            ).forEachIndexed { index, method ->
+                hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("status-bar:imported-drawable-$index")
+                    .intercept { chain ->
+                        val resources = chain.thisObject as? Resources ?: return@intercept chain.proceed()
+                        val id = chain.getArg(0) as? Int ?: return@intercept chain.proceed()
+                        val icon = findImportedIcon(resources, id, preferences) ?: return@intercept chain.proceed()
+                        val options = BitmapFactory.Options().apply { inDensity = icon.density; inTargetDensity = resources.displayMetrics.densityDpi }
+                        val bitmap = BitmapFactory.decodeByteArray(icon.bytes, 0, icon.bytes.size, options)
+                            ?: return@intercept chain.proceed()
+                        BitmapDrawable(resources, bitmap)
+                    }
+            }
+            Resources::class.java.declaredMethods.filter {
+                it.name == "openRawResource" && it.parameterTypes.isNotEmpty() && it.parameterTypes[0] == Int::class.javaPrimitiveType
+            }.forEachIndexed { index, method ->
+                hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("status-bar:imported-raw-$index")
+                    .intercept { chain ->
+                        val resources = chain.thisObject as? Resources ?: return@intercept chain.proceed()
+                        val id = chain.getArg(0) as? Int ?: return@intercept chain.proceed()
+                        val icon = findImportedIcon(resources, id, preferences) ?: return@intercept chain.proceed()
+                        (chain.args.getOrNull(1) as? TypedValue)?.density = icon.density
+                        ByteArrayInputStream(icon.bytes)
+                    }
+            }
+            hookDeoptimized(ImageView::class.java.getMethod("setImageResource", Int::class.javaPrimitiveType))
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("status-bar:imported-image-resource")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    val view = chain.thisObject as? ImageView ?: return@intercept result
+                    val id = chain.getArg(0) as? Int ?: return@intercept result
+                    val resources = view.resources
+                    val icon = findImportedIcon(resources, id, preferences) ?: return@intercept result
+                    val options = BitmapFactory.Options().apply {
+                        inDensity = icon.density
+                        inTargetDensity = resources.displayMetrics.densityDpi
+                    }
+                    BitmapFactory.decodeByteArray(icon.bytes, 0, icon.bytes.size, options)?.let { bitmap ->
+                        view.setImageDrawable(BitmapDrawable(resources, bitmap))
+                    }
+                    result
+                }
+            importedIconHooksInstalled = true
+        }.onFailure { module.log(Log.WARN, logTag, "Could not install imported status icon hooks", it) }
+    }
+
+    private fun findImportedIcon(resources: Resources, id: Int, preferences: SharedPreferences): ImportedIcon? {
+        if (!preferences.getBoolean(KEY_STATUS_BAR_ICON_IMPORT_ENABLED, false)) return null
+        val packageName = runCatching { resources.getResourcePackageName(id) }.getOrNull() ?: return null
+        if (packageName != systemUiPackageName && packageName != "miui.systemui.plugin") return null
+        val type = runCatching { resources.getResourceTypeName(id) }.getOrNull() ?: return null
+        val name = runCatching { resources.getResourceEntryName(id) }.getOrNull() ?: return null
+        if (type !in setOf("drawable", "mipmap", "raw")) return null
+        val scope = preferences.getInt(KEY_SYSTEM_UI_RESOURCE_IMPORT_SCOPE, SYSTEM_UI_RESOURCE_SCOPE_ALL)
+        val requiredScope = if (name.startsWith("ic_qs_") || name.startsWith("ic_cc_qs_")) {
+            SYSTEM_UI_RESOURCE_SCOPE_CONTROL_CENTER
+        } else {
+            SYSTEM_UI_RESOURCE_SCOPE_STATUS_BAR
+        }
+        if (scope and requiredScope == 0) return null
+        val revision = preferences.getLong(KEY_STATUS_BAR_ICON_IMPORT_REVISION, 0L)
+        val icons = synchronized(importedIconLock) {
+            if (revision != importedIconRevision) {
+                val loaded = loadImportedIcons() ?: return null
+                importedIcons = loaded
+                importedIconRevision = revision
+            }
+            importedIcons
+        }
+        val night = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+        val prefix = "$packageName/${if (night) "night" else "day"}/"
+        val candidates = icons.filterKeys { key ->
+            key.startsWith(prefix) && key.substringAfter(prefix).substringBefore('/').substringBefore('-') == type &&
+                key.substringAfterLast('/').substringBeforeLast('.') == name
+        }
+        val selected = candidates.entries.maxByOrNull { densityFromPath(it.key) }
+            ?: if (night) icons.entries.filter { (key, _) ->
+                key.startsWith("$packageName/day/") && key.substringAfterLast('/').substringBeforeLast('.') == name &&
+                    key.substringAfter("$packageName/day/").substringBefore('/').substringBefore('-') == type
+            }.maxByOrNull { densityFromPath(it.key) } else null
+        return selected?.let { ImportedIcon(it.value, densityFromPath(it.key)) }
+    }
+
+    private fun loadImportedIcons(): Map<String, ByteArray>? {
+        val context = applicationContext() ?: runCatching {
+            Class.forName("android.app.ActivityThread")
+                .getDeclaredMethod("currentApplication")
+                .apply { isAccessible = true }
+                .invoke(null) as? Context
+        }.getOrNull() ?: return null
+        return runCatching {
+            val uri = Uri.parse("content://$STATUS_BAR_ICON_AUTHORITY/icons")
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                buildMap {
+                    ZipInputStream(stream).use { zip ->
+                        var entry = zip.nextEntry
+                        while (entry != null) {
+                            if (!entry.isDirectory) put(entry.name, zip.readBytes())
+                            entry = zip.nextEntry
+                        }
+                    }
+                }
+            }
+        }.getOrElse { error ->
+            module.log(Log.WARN, logTag, "Could not read imported status icon archive", error)
+            null
+        }
+    }
+
+    private fun densityFromPath(path: String): Int = when {
+        "xxxhdpi" in path -> 640
+        "xxhdpi" in path -> 480
+        "xhdpi" in path -> 320
+        "hdpi" in path -> 240
+        "mdpi" in path -> 160
+        "ldpi" in path -> 120
+        else -> 480
+    }
     fun installStackedMobileSignalHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
         if (!stackedMobileSignalHookInstalled) {
             installStackedMobileSignalHook(classLoader, preferences)
@@ -2133,6 +2615,17 @@ private const val KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC = "mobile_network_type_d
         )
         private var stackedMobileSignalHookInstalled = false
         private var statusBarIconsLeftHookInstalled = false
+        private var statusBarAdjustmentHooksInstalled = false
+        private var importedIconHooksInstalled = false
+        private val importedIconLock = Any()
+        private var importedIconRevision = Long.MIN_VALUE
+        private var importedIcons: Map<String, ByteArray> = emptyMap()
+        private val sizedIconViews = Collections.synchronizedMap(WeakHashMap<View, Boolean>())
+        private val batteryIconLayouts = Collections.synchronizedMap(WeakHashMap<View, BatteryIconLayout>())
+        private val spacedIconContainers = Collections.synchronizedMap(WeakHashMap<View, Boolean>())
+        private val batteryStyleViews = Collections.synchronizedMap(WeakHashMap<View, Boolean>())
+        private var batteryStyleMethod: java.lang.reflect.Method? = null
+        private var adjustmentPreferenceListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
         private var statusBarDarkIconManagerFactory: Any? = null
         private var statusBarDarkIconManagerConstructor: java.lang.reflect.Constructor<*>? = null
         private var statusBarDarkIconManagerArgs: Array<Any?>? = null

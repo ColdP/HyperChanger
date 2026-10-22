@@ -475,6 +475,14 @@ final class IosNotificationStackHooks {
         try {
             Class<?> stack = Xp.findClass(
                     "com.android.systemui.statusbar.notification.stack.NotificationStackScrollLayout", loader);
+            Xp.hookAll(stack, "onMeasure", chain -> {
+                View view = (View) chain.getThisObject();
+                int width = IosNotificationCenterPresentation.landscapeStackWidth(view);
+                if (width <= 0 || chain.getArgs().size() != 2) return chain.proceed();
+                Object[] args = chain.getArgs().toArray();
+                args[0] = View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY);
+                return chain.proceed(args);
+            });
             Xp.hookAll(stack, "getScrollRange", chain -> {
                 Object result = chain.proceed();
                 if (!(chain.getThisObject() instanceof android.view.View) || !(result instanceof Number)) {

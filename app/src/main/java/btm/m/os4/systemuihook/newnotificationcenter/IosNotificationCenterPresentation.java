@@ -3,6 +3,7 @@ package btm.m.os4.systemuihook.newnotificationcenter;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Outline;
 import android.graphics.Rect;
 import android.graphics.RenderEffect;
 import android.graphics.Shader;
@@ -11,6 +12,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.animation.ValueAnimator;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewOutlineProvider;
 import android.view.MotionEvent;
 import android.view.ViewTreeObserver;
 import android.view.WindowInsets;
@@ -70,8 +72,6 @@ public final class IosNotificationCenterPresentation {
     private static float layoutProgress;
     private static float lastNotificationY = Float.NaN;
     private static float restingNotificationY = Float.NaN;
-    private static int restingNotificationScrollY = Integer.MIN_VALUE;
-    private static boolean notificationClockContact;
     private static final ThreadLocal<Boolean> DRIVING_HOSTED_CLOCK = new ThreadLocal<>();
     private static Drawable lastDepthDrawable;
     private static ViewTreeObserver observer;
@@ -131,12 +131,6 @@ public final class IosNotificationCenterPresentation {
         wallpaperSheet = sheet;
         if (progress <= 0f) {
             if (host != null) host.setAlpha(0f);
-            restingNotificationScrollY = Integer.MIN_VALUE;
-            if (clock != null) {
-                clock.setPivotY(0f);
-                clock.setScaleX(1f);
-                clock.setScaleY(1f);
-            }
             // The native window hide is deferred until this endpoint. Restoring alpha here
             // would expose the list for a frame before that hide reaches the view pipeline.
             if (transformedStack != null &&
@@ -253,16 +247,6 @@ public final class IosNotificationCenterPresentation {
 
     public static boolean isDrivingHostedClock() {
         return Boolean.TRUE.equals(DRIVING_HOSTED_CLOCK.get());
-    }
-
-    /**
-     * The hosted clock is driven from the notification list only after a real contact. SystemUI
-     * also emits its own notification-Y flow for every scroll, so suppress those unsolicited
-     * updates while this presentation owns the clock; otherwise the OEM path moves it before a
-     * card reaches the clock even when our own driver correctly stays idle.
-     */
-    public static boolean shouldSuppressHostedClockNotification(View view) {
-        return isHostedClock(view) && isActive() && !isDrivingHostedClock();
     }
 
     /** Called once the native panel reports that the notification center is actually hidden. */
@@ -551,14 +535,21 @@ public final class IosNotificationCenterPresentation {
             float y = sheetPoint[1] - panelPoint[1];
             if (host.getTranslationX() != x) host.setTranslationX(x);
             if (host.getTranslationY() != y) host.setTranslationY(y);
-            if (host.getOutlineProvider() != sheet.getOutlineProvider()) {
-                host.setOutlineProvider(sheet.getOutlineProvider());
-                host.invalidateOutline();
-            }
         }
         if (oldHeader == null) findHeader();
         syncStackTransform();
         syncLandscapeLayout();
+        if (sheet != null && sheet.isAttachedToWindow()) {
+            ViewOutlineProvider provider = landscapeLayout
+                    ? LANDSCAPE_CLOCK_OUTLINE : sheet.getOutlineProvider();
+            if (host.getOutlineProvider() != provider) {
+                host.setOutlineProvider(provider);
+                host.invalidateOutline();
+            } else if (landscapeLayout) {
+                // The sheet's reveal outline changes without resizing the left clock column.
+                host.invalidateOutline();
+            }
+        }
         hideNativeHeader();
         syncDepth();
         syncStatus();
@@ -790,44 +781,30 @@ public final class IosNotificationCenterPresentation {
         if (notificationHeaderBar == null || stack.getHeight() == 0) return;
         int[] panelPoint = new int[2];
         panel.getLocationInWindow(panelPoint);
-        int scrollY = 0;
-        try { scrollY = ((Number) stack.getClass().getMethod("getOwnScrollY").invoke(stack)).intValue(); }
-        catch (Throwable ignored) {}
+        int width = landscapeLayout ? landscapeStackWidth(stack) : ViewGroup.LayoutParams.MATCH_PARENT;
+        ViewGroup.LayoutParams params = notificationHeaderBar.getLayoutParams();
+        if (params.width != width) {
+            params.width = width;
+            notificationHeaderBar.setLayoutParams(params);
+        }
+        float x = 0f;
+        if (landscapeLayout) {
+            int[] stackPoint = new int[2];
+            stack.getLocationInWindow(stackPoint);
+            x = stackPoint[0] - panelPoint[0] - notificationHeaderBar.getLeft();
+        }
+        if (notificationHeaderBar.getTranslationX() != x) notificationHeaderBar.setTranslationX(x);
         // Use the first real row as the anchor. The stack itself starts at the panel's
         // viewport origin on some HyperOS builds, which placed the bar at screen top when
         // its top padding was used directly. The row location already includes NSSL scroll.
         float firstTop = firstNotificationTop(stack, panelPoint);
         if (Float.isNaN(firstTop)) {
             animateNotificationHeader(false, 0f);
-            if (clock != null) {
-                clock.setScaleX(1f);
-                clock.setScaleY(1f);
-            }
-            restingNotificationScrollY = Integer.MIN_VALUE;
             return;
         }
         float y = firstTop - dp(60);
         notificationHeaderBar.setTranslationY(y);
         animateNotificationHeader(true, progress * progress * (3f - 2f * progress));
-        // Match the lock-screen collapse order: compress height first, then begin uniform
-        // shrinking after the list has moved through the first 60% of its travel. The baseline
-        // is captured only after the panel is fully open, so opening the shade itself cannot
-        // shrink the clock before a notification is touched.
-        if (progress >= .95f && restingNotificationScrollY == Integer.MIN_VALUE) {
-            restingNotificationScrollY = scrollY;
-        }
-        int moved = restingNotificationScrollY == Integer.MIN_VALUE
-                ? 0 : Math.max(0, scrollY - restingNotificationScrollY);
-        float travel = Math.min(1f, moved / (float) Math.max(1, dp(180)));
-        float heightPhase = Math.min(1f, travel / .6f);
-        float overallPhase = Math.max(0f, (travel - .6f) / .4f);
-        float heightScale = 1f - .12f * heightPhase;
-        float overallScale = 1f - .12f * overallPhase;
-        if (clock != null) {
-            clock.setPivotY(0f);
-            clock.setScaleX(overallScale);
-            clock.setScaleY(heightScale * overallScale);
-        }
         float visual = progress * progress * (3f - 2f * progress);
         float blur = 28f * panel.getResources().getDisplayMetrics().density * (1f - visual);
         notificationHeaderBar.setRenderEffect(blur <= 0f ? null
@@ -1120,15 +1097,45 @@ public final class IosNotificationCenterPresentation {
         if (emptyText != null && emptyText.getAlpha() != 0f) emptyText.setAlpha(0f);
     }
 
+    /** Width used by the native list's measurement, before it measures its notification rows. */
+    static int landscapeStackWidth(View view) {
+        if (!ownsStack(view) || panel == null) return 0;
+        return landscapeStackWidth(panel.getMeasuredWidth(), panel.getMeasuredHeight());
+    }
+
+    private static int landscapeStackWidth(int width, int height) {
+        if (width <= height || height <= 0) return 0;
+        float density = panel.getResources().getDisplayMetrics().density;
+        int rightWidth = width - Math.round(width * .42f) - Math.round(18f * density)
+                - Math.round(16f * density);
+        return rightWidth > Math.round(220f * density) ? rightWidth : 0;
+    }
+
+    private static final ViewOutlineProvider LANDSCAPE_CLOCK_OUTLINE = new ViewOutlineProvider() {
+        @Override public void getOutline(View view, Outline outline) {
+            View sheet = wallpaperSheet;
+            if (sheet == null || !sheet.isAttachedToWindow() || sheet.getOutlineProvider() == null) {
+                outline.setRect(0, 0, view.getWidth(), view.getHeight());
+                return;
+            }
+            // Evaluate with the full sheet width, so its right corners stay at the screen edge.
+            sheet.getOutlineProvider().getOutline(sheet, outline);
+            int[] sheetPoint = new int[2];
+            int[] clockPoint = new int[2];
+            sheet.getLocationInWindow(sheetPoint);
+            view.getLocationInWindow(clockPoint);
+            outline.offset(sheetPoint[0] - clockPoint[0], sheetPoint[1] - clockPoint[1]);
+        }
+    };
+
     /**
-     * The stock shade is a single vertical column. On a wide display, give the hosted clock
-     * its own left column and resize/reposition the native notification scroller into the right
-     * column. Layout params are restored as soon as the display returns to portrait so the OEM
-     * shade keeps its original geometry after rotation or when the presentation is released.
+     * Give the clock and notifications separate columns. Restore the native layout when the
+     * display returns to portrait or the presentation is released.
      */
     private static void syncLandscapeLayout() {
         if (panel == null || host == null || panel.getWidth() <= 0 || panel.getHeight() <= 0) return;
-        boolean wantLandscape = panel.getWidth() > panel.getHeight();
+        int rightWidth = landscapeStackWidth(panel.getWidth(), panel.getHeight());
+        boolean wantLandscape = rightWidth > 0;
         if (!wantLandscape) {
             if (landscapeLayout) restoreLandscapeStackLayout();
             ViewGroup.LayoutParams hostParams = host.getLayoutParams();
@@ -1146,8 +1153,6 @@ public final class IosNotificationCenterPresentation {
         int divider = Math.round(18f * density);
         int leftWidth = Math.round(panel.getWidth() * 0.42f);
         int rightLeft = leftWidth + divider;
-        int rightWidth = panel.getWidth() - rightLeft - outer;
-        if (rightWidth <= Math.round(220f * density)) return;
 
         if (!landscapeLayout) {
             landscapeLayout = true;
@@ -1188,14 +1193,17 @@ public final class IosNotificationCenterPresentation {
                     changed |= margins.leftMargin != rightLeft || margins.rightMargin != outer;
                     margins.leftMargin = rightLeft;
                     margins.rightMargin = outer;
-                } else {
-                    float targetX = stackBaseTranslationX + rightLeft;
-                    if (Math.abs(stack.getTranslationX() - targetX) > .5f) {
-                        stack.setTranslationX(targetX);
-                    }
                 }
                 if (changed) stack.setLayoutParams(params);
             }
+            // NSSL can live in a nested ConstraintLayout whose start/end constraints override
+            // absolute margins. Align its actual window position with the panel's right column.
+            int[] panelPoint = new int[2];
+            int[] stackPoint = new int[2];
+            panel.getLocationInWindow(panelPoint);
+            stack.getLocationInWindow(stackPoint);
+            float deltaX = panelPoint[0] + rightLeft - stackPoint[0];
+            if (Math.abs(deltaX) > .5f) stack.setTranslationX(stack.getTranslationX() + deltaX);
         }
     }
 
@@ -1264,25 +1272,6 @@ public final class IosNotificationCenterPresentation {
         catch (Throwable ignored) {}
         float notificationY = stackPoint[1] - panelPoint[1]
                 + nativeTop + stackOffset(currentStack, nativeTop) - host.getTranslationY();
-        // The stack origin is not the notification top on every HyperOS layout. During a
-        // scroll it can remain above the first card, which made the OEM believe a notification
-        // had already touched the clock and caused a premature clock move. Prefer the actual
-        // first row whenever it is available; it also avoids feeding transient stack geometry
-        // to the clock while NSSL is relaying out its children.
-        float firstTop = firstNotificationTop(currentStack, panelPoint);
-        if (Float.isNaN(firstTop)) {
-            // An empty stack has no notification boundary. Leave the clock at its natural
-            // position and, if a previous card was touching it, settle that state once.
-            float clockBottom = hostedClockBottom(panelPoint);
-            if ((notificationClockContact || Float.isNaN(lastNotificationY))
-                    && !Float.isNaN(clockBottom)) {
-                driveHostedClock(clockBottom);
-                lastNotificationY = clockBottom;
-            }
-            notificationClockContact = false;
-            return;
-        }
-        notificationY = firstTop - host.getTranslationY();
         if (layoutProgress >= .95f && progress >= .95f) {
             if (Float.isNaN(restingNotificationY)) restingNotificationY = notificationY;
             int scrollY = 0;
@@ -1291,74 +1280,35 @@ public final class IosNotificationCenterPresentation {
                         .invoke(currentStack)).intValue();
             } catch (Throwable ignored) {}
             if (scrollY > 0) {
-                float scrolledFirstTop = firstNotificationTop(currentStack, panelPoint);
-                if (!Float.isNaN(scrolledFirstTop)) scrolledFirstTop -= host.getTranslationY();
-                if (!Float.isNaN(scrolledFirstTop)) {
+                float firstTop = firstNotificationTop(currentStack, panelPoint);
+                if (!Float.isNaN(firstTop)) firstTop -= host.getTranslationY();
+                if (!Float.isNaN(firstTop)) {
                     float lower = restingNotificationY - scrollY
                             - 16f * panel.getResources().getDisplayMetrics().density;
-                    notificationY = Math.min(restingNotificationY, Math.max(lower, scrolledFirstTop));
+                    notificationY = Math.min(restingNotificationY, Math.max(lower, firstTop));
                 }
             } else {
                 notificationY = restingNotificationY;
             }
         }
-        float clockBottom = hostedClockBottom(panelPoint);
-        if (!Float.isNaN(clockBottom)) {
-            // Do not call notifStateChange while the first notification is below the clock.
-            // The OEM call recomputes the clock layout even when its resulting translation is
-            // zero, which is visible as an unwanted upward/leftward nudge during scrolling.
-            if (notificationY > clockBottom + dpFloat(1f)) {
-                if (notificationClockContact || Float.isNaN(lastNotificationY)) {
-                    driveHostedClock(clockBottom);
-                    notificationClockContact = false;
-                    lastNotificationY = clockBottom;
-                }
-                return;
-            }
-            notificationClockContact = true;
-        }
         if (Float.isNaN(lastNotificationY) || Math.abs(notificationY - lastNotificationY) > 1f) {
-            driveHostedClock(notificationY);
-        }
-    }
-
-    /** Drive the hosted OEM clock only after a real notification/clock contact. */
-    private static void driveHostedClock(float notificationY) {
-        try {
-            Class<?> kind = Class.forName(
-                    "com.miui.systemui.notification.data.repository.NotificationTopChangeType",
-                    false, clock.getClass().getClassLoader());
-            Object changed = kind.getField("NOTIFS_CHANGED").get(null);
-            Method method = clock.getClass().getMethod("notifStateChange", float.class, boolean.class, kind);
-            DRIVING_HOSTED_CLOCK.set(true);
             try {
-                method.invoke(clock, notificationY, true, changed);
-                lastNotificationY = notificationY;
-            } finally {
-                DRIVING_HOSTED_CLOCK.remove();
+                Class<?> kind = Class.forName(
+                        "com.miui.systemui.notification.data.repository.NotificationTopChangeType",
+                        false, clock.getClass().getClassLoader());
+                Object changed = kind.getField("NOTIFS_CHANGED").get(null);
+                Method method = clock.getClass().getMethod("notifStateChange", float.class, boolean.class, kind);
+                DRIVING_HOSTED_CLOCK.set(true);
+                try {
+                    method.invoke(clock, notificationY, true, changed);
+                    lastNotificationY = notificationY;
+                } finally {
+                    DRIVING_HOSTED_CLOCK.remove();
+                }
+            } catch (Throwable ignored) {
+                // Other OEM builds may use a different notification change type.
             }
-        } catch (Throwable ignored) {
-            // Other OEM builds may use a different notification change type.
         }
-    }
-
-    /** Clock bottom in the same panel-local coordinate space as notificationY. */
-    private static float hostedClockBottom(int[] panelPoint) {
-        try {
-            Object value = clock.getClass().getMethod("getClockBottom").invoke(clock);
-            if (!(value instanceof Number)) return Float.NaN;
-            float bottom = ((Number) value).floatValue();
-            if (!(bottom > 0f)) return Float.NaN;
-            int[] clockPoint = new int[2];
-            clock.getLocationInWindow(clockPoint);
-            return clockPoint[1] - panelPoint[1] - host.getTranslationY() + bottom;
-        } catch (Throwable ignored) {
-            return Float.NaN;
-        }
-    }
-
-    private static float dpFloat(float value) {
-        return panel == null ? value : value * panel.getResources().getDisplayMetrics().density;
     }
 
     private static View findClockAnimation(View info) {
@@ -1431,11 +1381,6 @@ public final class IosNotificationCenterPresentation {
         clockAnimation = null;
         clockInfoOffset = 0f;
         clockInfoBaseTranslation = 0f;
-        if (clock != null) {
-            clock.setPivotY(0f);
-            clock.setScaleX(1f);
-            clock.setScaleY(1f);
-        }
         clockInfoRefreshMinute = -1L;
         stack = null;
         stackOriginalLayoutParams = null;
@@ -1443,8 +1388,6 @@ public final class IosNotificationCenterPresentation {
         layoutProgress = 0f;
         lastNotificationY = Float.NaN;
         restingNotificationY = Float.NaN;
-        notificationClockContact = false;
-        restingNotificationScrollY = Integer.MIN_VALUE;
         lastDepthDrawable = null;
         if (host != null && host.getParent() instanceof ViewGroup) {
             ((ViewGroup) host.getParent()).removeView(host);

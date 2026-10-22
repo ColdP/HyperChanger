@@ -72,6 +72,10 @@
             android:exported="true"
             android:grantUriPermissions="true" />
         <provider
+            android:name=".StatusBarIconProvider"
+            android:authorities="btm.m.os4.systemuihook.statusbaricons"
+            android:exported="true" />
+        <provider
             android:name=".DockMaterialProvider"
             android:authorities="btm.m.os4.systemuihook.dockmaterial"
             android:exported="true" />

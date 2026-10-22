@@ -196,6 +196,7 @@ class HyperSystemUiModule : XposedModule() {
         mobileNetworkTypeModeKey = KEY_MOBILE_NETWORK_TYPE_MODE,
         stackedMobileDualContainerId = stackedMobileDualContainerId,
         logTag = TAG,
+        applicationContext = { systemUiApplicationContext },
     )
     private val systemUiHooks = SystemUiHooks(
         module = this,
@@ -1062,6 +1063,10 @@ class HyperSystemUiModule : XposedModule() {
             when (param.packageName) {
                 SYSTEM_UI, SYSTEM_UI_PLUGIN -> {
                     controlCenterHooks.installHeaderHooks(param.defaultClassLoader, preferences)
+                    statusBarHooks.installImportedIconHooks(preferences)
+                    if (param.packageName == SYSTEM_UI) {
+                        statusBarHooks.installAdjustmentHooks(param.defaultClassLoader, preferences)
+                    }
                     islandSmoothingHook.install(param.defaultClassLoader, preferences)
                     if (param.packageName == SYSTEM_UI) {
                         lockscreenFaceUnlockHook.install(param.defaultClassLoader, preferences)
