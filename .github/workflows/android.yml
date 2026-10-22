@@ -11,31 +11,47 @@ name: HyperChanger - Github Actions Building
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          java-version: "21"
-          distribution: "temurin"
+          java-version: '21'
+          distribution: temurin
           cache: gradle
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android NDK r28c
-        run: sdkmanager --install "ndk;28.2.13676358"
+        uses: android-actions/setup-android@v3
+        with:
+          packages: ndk;28.2.13676358
+
+      - name: Verify Android NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ANDROID_HOME=${ANDROID_HOME:-}"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-}"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$SDK_ROOT" ]; then
+            echo "Android SDK path is not set."
+            exit 1
+          fi
+          NDK_DIR="$SDK_ROOT/ndk/28.2.13676358"
+          test -f "$NDK_DIR/source.properties"
+          cat "$NDK_DIR/source.properties"
 
       - name: Configure project NDK path
         shell: bash
         run: |
           set -euo pipefail
-          NDK_DIR="${ANDROID_HOME}/ndk/28.2.13676358"
-          test -f "${NDK_DIR}/source.properties"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          NDK_DIR="$SDK_ROOT/ndk/28.2.13676358"
           mkdir -p .build-tmp
           rm -rf .build-tmp/android-ndk-r28c
-          ln -s "${NDK_DIR}" .build-tmp/android-ndk-r28c
+          ln -s "$NDK_DIR" .build-tmp/android-ndk-r28c
           test -f .build-tmp/android-ndk-r28c/source.properties
 
       - name: Grant execute permission for gradlew
