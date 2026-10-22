@@ -3758,6 +3758,7 @@ class HyperSystemUiModule : XposedModule() {
         generateSequence<View>(view) { it.parent as? View }.any { it.javaClass.name.contains("dynamicisland", true) }
 
     private var softGlassRuntime: SoftGlassRuntimeSettings? = null
+    private var iosNotificationClockGlassRuntime: btm.m.os4.systemuihook.newnotificationcenter.IosNotificationClockGlassRuntime? = null
     private var volumeGlassRuntime: VolumePanelGlassRuntimeSettings? = null
     private var controlCenterRadiusRuntime: ControlCenterRadiusRuntimeSettings? = null
     private val volumeGlobalRecipes = WeakHashMap<View, SoftGlassRecipeCache>()
@@ -3793,7 +3794,17 @@ class HyperSystemUiModule : XposedModule() {
         } finally {
             softGlassRefreshing.remove()
             if (softGlassRuntime?.settings?.enabled != true) {
-                synchronized(softGlassBaselines) { softGlassBaselines.clear(); softGlassArrayPairs.clear(); softGlassLegacyBlends.clear(); volumeGlobalRecipes.clear() }
+                val retainClock = iosNotificationClockGlassRuntime?.settings?.enabled == true
+                if (retainClock) {
+                    synchronized(softGlassBaselines) {
+                        val retired = softGlassBaselines.keys.filterNot {
+                            btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterPresentation.isHostedClockView(it)
+                        }
+                        retired.forEach { softGlassBaselines.remove(it); softGlassArrayPairs.remove(it); softGlassLegacyBlends.remove(it); volumeGlobalRecipes.remove(it) }
+                    }
+                } else {
+                    synchronized(softGlassBaselines) { softGlassBaselines.clear(); softGlassArrayPairs.clear(); softGlassLegacyBlends.clear(); volumeGlobalRecipes.clear() }
+                }
                 standaloneSoftGlassSurfaces.clear()
             } else if (!volumeGlobalGlassSelected()) {
                 // Restore once when leaving global mode, then retire the old volume
@@ -3812,6 +3823,13 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun volumeGlobalGlassSelected(): Boolean = volumeGlassRuntime?.state?.globalSelected == true
+
+    private fun iosClockGlassSettings(view: View): btm.m.os4.systemuihook.SoftGlassSettings? {
+        if (!btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterPresentation.isHostedClockView(view)) return null
+        val selected = iosNotificationClockGlassRuntime?.settings?.takeIf { it.enabled } ?: return null
+        return if (selected.useGlobal) (softGlassRuntime?.settings ?: SoftGlassSettings(enabled = true)).copy(enabled = true)
+        else selected.glass.copy(enabled = true)
+    }
 
     private fun isSoftGlassSurface(view: View): Boolean {
         if (isVolumePanelSurface(view) || stackContainsClass("com.android.systemui.miui.volume.")) {
@@ -3859,6 +3877,10 @@ class HyperSystemUiModule : XposedModule() {
             softGlassRefreshHandler.removeCallbacks(softGlassRefresh)
             softGlassRefreshHandler.postDelayed(softGlassRefresh, 16L)
         }
+        iosNotificationClockGlassRuntime = btm.m.os4.systemuihook.newnotificationcenter.IosNotificationClockGlassRuntime(preferences) {
+            softGlassRefreshHandler.removeCallbacks(softGlassRefresh)
+            softGlassRefreshHandler.postDelayed(softGlassRefresh, 16L)
+        }
         installFocusNotificationMaterialEnforcementHooks(preferences, classLoader)
         installFocusNotificationBackgroundHook(preferences, classLoader)
         runCatching {
@@ -3870,6 +3892,17 @@ class HyperSystemUiModule : XposedModule() {
                     val view = chain.thisObject as? View ?: return@intercept chain.proceed()
                     val original = chain.getArg(0) as? FloatArray ?: return@intercept chain.proceed()
                     val settings = softGlassRuntime?.settings
+                    val clockSettings = iosClockGlassSettings(view)
+                    if (clockSettings != null) {
+                        val baseline = synchronized(softGlassBaselines) {
+                            val previous = softGlassArrayPairs[view]
+                            if (original === previous?.second) previous.first else original.copyOf()
+                        }
+                        rememberSoftGlassBaseline(view, method, arrayOf(baseline))
+                        val tuned = tuneSoftGlass(baseline, clockSettings)
+                        synchronized(softGlassBaselines) { softGlassArrayPairs[view] = baseline to tuned }
+                        return@intercept chain.proceedWith(view, arrayOf(tuned))
+                    }
                     if (isVolumePanelSurface(view)) {
                         if (settings?.enabled != true || !volumeGlobalGlassSelected()) {
                             updateStandaloneSoftGlass(view, false)
@@ -3933,6 +3966,14 @@ class HyperSystemUiModule : XposedModule() {
                 .intercept { chain ->
                     val view = chain.thisObject as? View ?: return@intercept chain.proceed()
                     val settings = softGlassRuntime?.settings ?: return@intercept chain.proceed()
+                    val clockSettings = iosClockGlassSettings(view)
+                    if (clockSettings != null) {
+                        rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0), chain.getArg(1)))
+                        return@intercept chain.proceedWith(view, arrayOf(
+                            softGlassBlur(chain.getArg(0) as Int, clockSettings.refractionBlur),
+                            softGlassBlur(chain.getArg(1) as Int, clockSettings.refractionBlur),
+                        ))
+                    }
                     if (!settings.enabled || !isSoftGlassSurface(view)) return@intercept chain.proceed()
                     rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0), chain.getArg(1)))
                     // GlassToken.blurRadius is separate from the ordinary background blur.
@@ -3948,6 +3989,11 @@ class HyperSystemUiModule : XposedModule() {
                 .intercept { chain ->
                     val view = chain.thisObject as? View ?: return@intercept chain.proceed()
                     val settings = softGlassRuntime?.settings ?: return@intercept chain.proceed()
+                    val clockSettings = iosClockGlassSettings(view)
+                    if (clockSettings != null) {
+                        rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0)))
+                        return@intercept chain.proceedWith(view, arrayOf(softGlassBlur(chain.getArg(0) as Int, clockSettings.backgroundBlur)))
+                    }
                     if (!settings.enabled || !isSoftGlassSurface(view)) return@intercept chain.proceed()
                     rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0)))
                     chain.proceedWith(view, arrayOf(softGlassBlur(chain.getArg(0) as Int, settings.backgroundBlur)))
@@ -3961,6 +4007,11 @@ class HyperSystemUiModule : XposedModule() {
                 .intercept { chain ->
                     val view = chain.thisObject as? View ?: return@intercept chain.proceed()
                     val settings = softGlassRuntime?.settings ?: return@intercept chain.proceed()
+                    val clockSettings = iosClockGlassSettings(view)
+                    if (clockSettings != null) {
+                        rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0)))
+                        return@intercept chain.proceedWith(view, arrayOf(softGlassScale(chain.getArg(0) as Float, clockSettings.backgroundScale)))
+                    }
                     if (!settings.enabled || !isSoftGlassSurface(view)) return@intercept chain.proceed()
                     rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0)))
                     chain.proceedWith(view, arrayOf(softGlassScale(chain.getArg(0) as Float, settings.backgroundScale)))
@@ -3975,6 +4026,17 @@ class HyperSystemUiModule : XposedModule() {
                     if (softGlassBlendDispatching.get() == true) return@intercept chain.proceed()
                     val view = chain.thisObject as? View ?: return@intercept chain.proceed()
                     val original = chain.getArg(0) as? ArrayList<*> ?: return@intercept chain.proceed()
+                    val clockSettings = iosClockGlassSettings(view)
+                    if (clockSettings != null) {
+                        val copy = ArrayList(original.filterIsInstance<Point>().map { Point(it.x, it.y) })
+                        rememberSoftGlassBaseline(view, method, arrayOf(copy))
+                        softGlassBlendDispatching.set(true)
+                        try {
+                            return@intercept chain.proceedWith(view, arrayOf(softGlassBlendPoints(copy, clockSettings.backgroundOpacity)))
+                        } finally {
+                            softGlassBlendDispatching.remove()
+                        }
+                    }
                     val normal = if (isVolumePanelSurface(view)) null else normalNotificationBlendPoints(view, preferences)
                     val settings = softGlassRuntime?.settings
                     if (settings?.enabled != true || !isSoftGlassBlendSurface(view)) {
@@ -4009,6 +4071,18 @@ class HyperSystemUiModule : XposedModule() {
                 val view = chain.thisObject as? View ?: return@intercept chain.proceed()
                 val settings = softGlassRuntime?.settings ?: return@intercept chain.proceed()
                 if (softGlassBlendDispatching.get() == true) return@intercept chain.proceed()
+                val clockSettings = iosClockGlassSettings(view)
+                if (clockSettings != null) {
+                    if (softGlassRefreshing.get() != true) synchronized(softGlassBaselines) {
+                        softGlassLegacyBlends.getOrPut(view) { arrayListOf() }.add(Point(chain.getArg(0) as Int, chain.getArg(1) as Int))
+                    }
+                    softGlassBlendDispatching.set(true)
+                    return@intercept try {
+                        chain.proceedWith(view, arrayOf(softGlassColorAlpha(chain.getArg(0) as Int, clockSettings.backgroundOpacity), chain.getArg(1)))
+                    } finally {
+                        softGlassBlendDispatching.remove()
+                    }
+                }
                 if (!settings.enabled || !isSoftGlassBlendSurface(view)) return@intercept chain.proceed()
                 if (softGlassRefreshing.get() != true) synchronized(softGlassBaselines) {
                     softGlassLegacyBlends.getOrPut(view) { arrayListOf() }.add(Point(chain.getArg(0) as Int, chain.getArg(1) as Int))

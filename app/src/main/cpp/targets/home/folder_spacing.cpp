@@ -427,6 +427,8 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
         if (!need_glass && !need_dock && !need_native) continue;
         std::vector<uintptr_t> glass, dock, gates, supports, new_supports, newer_supports, strategies, glass_radii, advanced_radii, paddings;
         std::vector<uintptr_t> release8583_supports;
+        std::vector<uintptr_t> release8583_strategies, release8583_glass_radii,
+            release8583_advanced_radii, release8583_paddings;
         for (const auto &mapping : generation) {
             std::vector<uint32_t> code((mapping.end - mapping.begin) / 4);
             if (!nhk::safe_read(mapping.begin, std::as_writable_bytes(std::span(code)))) continue;
@@ -461,6 +463,10 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
                     if(home_native_dock::matches(candidate,home_native_dock::kGlassRadiusShape)) glass_radii.push_back(mapping.begin+i*4);
                     if(home_native_dock::matches(candidate,home_native_dock::kAdvancedRadiusShape)) advanced_radii.push_back(mapping.begin+i*4);
                     if(home_native_dock::matches(candidate,home_native_dock::kPaddingShape)) paddings.push_back(mapping.begin+i*4);
+                    if(home_native_dock::matches(candidate,home_native_dock::kRelease8583StrategyShape)) release8583_strategies.push_back(mapping.begin+i*4);
+                    if(home_native_dock::matches(candidate,home_native_dock::kRelease8583GlassRadiusShape)) release8583_glass_radii.push_back(mapping.begin+i*4);
+                    if(home_native_dock::matches(candidate,home_native_dock::kRelease8583AdvancedRadiusShape)) release8583_advanced_radii.push_back(mapping.begin+i*4);
+                    if(home_native_dock::matches(candidate,home_native_dock::kRelease8583PaddingShape)) release8583_paddings.push_back(mapping.begin+i*4);
                 }
             }
         }
@@ -656,6 +662,7 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
         // layout. Require exactly one release signature, then validate every
         // Dock-only branch against its live instruction before patching.
         if (need_native && release8583_supports.size() == 1) {
+            if (release8583_supports[0] < home_native_dock::kRelease8583SupportRva) continue;
             const uintptr_t base = release8583_supports[0] - home_native_dock::kRelease8583SupportRva;
             const std::array<std::pair<uintptr_t, uint32_t>, 4> checks{{
                 {base + home_native_dock::kRelease8583BackgroundGateRva, 0x37200101},
@@ -668,11 +675,17 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
                 uint32_t live = 0;
                 if (!source_at(generation, address)
                     || source_at(inventory(), address) != source_at(generation, address)
-                    || !nhk::safe_read(address, std::as_writable_bytes(std::span(&live, 1)))
-                    || live != expected) {
+                    || !nhk::safe_read(address, std::as_writable_bytes(std::span(&live, 1)))) {
                     valid = false;
                     break;
                 }
+                // A previous pass may have installed only some targets. Accept
+                // only our own replacement with the same image ownership so
+                // material-island allocation can retry after gates are active.
+                for (const auto &gate : native_gates)
+                    if (gate.address == address && source_at(generation, address) == gate.source
+                        && live == gate.replacement) live = gate.original;
+                if (live != expected) { valid = false; break; }
             }
             if (!valid) {
                 __android_log_print(ANDROID_LOG_WARN, kTag,
@@ -694,6 +707,17 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
             add_gate(base + home_native_dock::kRelease8583NoLabelPositionGateRva, 0x372000a0,
                 home_native_dock::kNoLabelFallthrough, "no-label-position", home_native_dock::kNoLabelPositionShape);
         }
+        const bool release8583 = release8583_supports.size() == 1;
+        if (release8583) {
+            strategies = std::move(release8583_strategies);
+            glass_radii = std::move(release8583_glass_radii);
+            advanced_radii = std::move(release8583_advanced_radii);
+            paddings = std::move(release8583_paddings);
+        }
+        const auto &strategy_shape = release8583 ? home_native_dock::kRelease8583StrategyShape : home_native_dock::kStrategyShape;
+        const auto &glass_shape = release8583 ? home_native_dock::kRelease8583GlassRadiusShape : home_native_dock::kGlassRadiusShape;
+        const auto &advanced_shape = release8583 ? home_native_dock::kRelease8583AdvancedRadiusShape : home_native_dock::kAdvancedRadiusShape;
+        const auto &padding_shape = release8583 ? home_native_dock::kRelease8583PaddingShape : home_native_dock::kPaddingShape;
         if (need_native && gates.size()==1 && strategies.size()==1 && glass_radii.size()==1 && advanced_radii.size()==1 && paddings.size()==1) {
             std::array<uint32_t,109> strategy{};
             std::array<uint32_t,14> gate{};
@@ -703,7 +727,7 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
                 if (patched.address == gates[0] + 8 && source_at(generation, patched.address) == patched.source
                     && gate[2] == 0xd503201f) gate[2] = patched.original;
             }
-            if (!home_native_dock::matches(std::span(strategy), home_native_dock::kStrategyShape)
+            if (!home_native_dock::matches(std::span(strategy), strategy_shape)
                 || !home_native_dock::matches(std::span(gate), home_native_dock::kGateShape)) continue;
             // Discover both official class headers from the strategy's allocation
             // calls; class IDs are neither guessed nor pinned to a runtime address.
@@ -723,6 +747,13 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
             for(const auto &s:effect_slots) if(s.address==stub && s.native_parameter==1 && source_at(generation,stub)==s.source) old[0]=s.original;
             const auto ah=home_native_dock::class_header(a),bh=home_native_dock::class_header(b),oh=home_native_dock::class_header(old);
             if(!ah || !bh || !oh || *ah==*bh) continue;
+            // 3.4's reference resolves the two official 48/32-byte classes.
+            // Validate that ABI and the shared allocator in this image before
+            // changing the phone stub; never import its class IDs as constants.
+            if (release8583 && (((*ah >> 8) & 15) != 3 || ((*bh >> 8) & 15) != 2
+                || (*ah >> 12) != (*bh >> 12) + 1
+                || home_native_dock::call_target(glass_stub + 8, a[2]) != home_native_dock::call_target(advanced_stub + 8, b[2])
+                || home_native_dock::call_target(glass_stub + 8, a[2]) != home_native_dock::call_target(stub + 8, old[2]))) continue;
             const auto add_native=[&](uintptr_t addr,uint32_t original,unsigned role) {
                 const auto source=source_at(generation,addr);
                 if(!source || source_at(inventory(),addr)!=source || effect_slots.size()>=64
@@ -736,9 +767,9 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
                     "Native Dock role=%u installed at %p", role, reinterpret_cast<void *>(addr));
             };
             add_native(stub,old[0],1);
-            add_native(glass_radii[0]+22*4,home_native_dock::kGlassRadiusShape[22],2);
-            add_native(advanced_radii[0]+28*4,home_native_dock::kAdvancedRadiusShape[28],3);
-            add_native(paddings[0]+9*4,home_native_dock::kPaddingShape[9],4);
+            add_native(glass_radii[0]+22*4,glass_shape[22],2);
+            add_native(advanced_radii[0]+28*4,advanced_shape[28],3);
+            add_native(paddings[0]+9*4,padding_shape[9],4);
         }
     }
 }

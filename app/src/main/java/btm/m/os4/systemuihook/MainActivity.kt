@@ -6,6 +6,7 @@ import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSetting
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationBottomOffsetSettingsStore
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsStore
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettings
+import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationLayoutSettingsStore
 
 import android.app.Activity
 import android.app.DownloadManager
@@ -281,8 +282,9 @@ private enum class PageId {
     SHADE_PRESETS,
     SOFT_GLASS_PARAMETERS,
     SOFT_GLASS_PRESETS,
+    IOS_NOTIFICATION_CLOCK_GLASS,
     GESTURE_HANDLE_STYLE, DESKTOP, DESKTOP_MATERIAL,
-    ISLAND, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_CLEAR, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_ADJUSTMENT, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
+    ISLAND, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_HEADER_SETTINGS, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_ADJUSTMENT, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
     SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, OTHER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND,
@@ -383,7 +385,7 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
         tr("iosNotificationHideClear", "隐藏通知中心清除按钮"),
         tr("iosNotificationHideClearSummary", "隐藏通知中心底部的清除按钮"),
         setOf(ScopeApplication.SYSTEM_UI),
-        PageId.SHADE,
+        PageId.IOS_NOTIFICATION_CENTER,
     ),
     CategorySearchItem(
         tr("controlCenterBigClock", "在控制中心顶栏日期之上添加大时钟"),
@@ -4859,7 +4861,8 @@ private fun Detail(
         PageId.GESTURE_HANDLE_STYLE -> GestureHandleStylePage(back)
         PageId.ISLAND -> Island(openPage, onRequestNotificationPermission, back)
         PageId.IOS_NOTIFICATION_CENTER -> IosNotificationCenterPage(openPage, back)
-        PageId.IOS_NOTIFICATION_CLEAR -> IosNotificationClearPage(back)
+        PageId.IOS_NOTIFICATION_HEADER_SETTINGS -> IosNotificationHeaderSettingsPage(back)
+        PageId.IOS_NOTIFICATION_CLOCK_GLASS -> IosNotificationClockGlassPage(back)
         PageId.UNLOCK_ISLAND -> UnlockIslandPage(back)
         PageId.NOTIFICATION_RESTRICTIONS -> NotificationRestrictions(back)
         PageId.NOTIFICATION_MEDIA_CARD -> NotificationMediaCard(back)
@@ -5664,13 +5667,17 @@ private fun IosNotificationCenterPage(
     var headerSettings by remember { mutableStateOf(headerStore.settings) }
     val offsetStore = remember(context) { IosNotificationBottomOffsetSettingsStore(context) }
     var offsetDp by remember { mutableStateOf(offsetStore.offsetDp) }
+    val layoutStore = remember(context) { IosNotificationLayoutSettingsStore(context) }
+    var headerGapDp by remember { mutableIntStateOf(layoutStore.headerGapDp) }
     LaunchedEffect(service) {
         service?.let(iosStore::syncRemote)
         service?.let(headerStore::syncRemote)
         service?.let(offsetStore::syncRemote)
+        service?.let(layoutStore::syncRemote)
         iosSettings = iosStore.settings
         headerSettings = headerStore.settings
         offsetDp = offsetStore.offsetDp
+        headerGapDp = layoutStore.headerGapDp
     }
     AppPage(tr("iosNotificationCenter", "iOS 风格通知中心"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.AOD, ScopeApplication.THEME_MANAGER)) { p, scroll ->
         AppList(p, scroll, 28) {
@@ -5682,6 +5689,15 @@ private fun IosNotificationCenterPage(
                         checked = iosSettings.enabled,
                         onCheckedChange = { enabled ->
                             iosStore.update(service) { it.copy(enabled = enabled) }
+                            iosSettings = iosStore.settings
+                        },
+                    )
+                    SwitchPreference(
+                        title = tr("iosNotificationHideClear", "隐藏通知中心清除按钮"),
+                        summary = tr("iosNotificationHideClearSummary", "隐藏通知中心底部的清除按钮"),
+                        checked = iosSettings.hideClearButton,
+                        onCheckedChange = { hidden ->
+                            iosStore.update(service) { it.copy(hideClearButton = hidden) }
                             iosSettings = iosStore.settings
                         },
                     )
@@ -5699,9 +5715,24 @@ private fun IosNotificationCenterPage(
                             },
                         )
                         ArrowPreference(
-                            title = tr("iosNotificationClearSettings", "清除按钮设置"),
+                            title = tr("iosNotificationHeaderSettings", "通知横条设置"),
                             summary = if (headerSettings.enabled) tr("已开启", "已开启") else tr("未开启", "未开启"),
-                            onClick = { openPage(PageId.IOS_NOTIFICATION_CLEAR) },
+                            onClick = { openPage(PageId.IOS_NOTIFICATION_HEADER_SETTINGS) },
+                        )
+                        ArrowPreference(
+                            title = tr("iosNotificationClockGlass", "通知中心大时钟柔光玻璃"),
+                            onClick = { openPage(PageId.IOS_NOTIFICATION_CLOCK_GLASS) },
+                        )
+                        EditableSliderPreference(
+                            title = tr("iosNotificationHeaderGap", "通知横条和通知的间距"),
+                            value = headerGapDp.toFloat(),
+                            valueText = "$headerGapDp dp",
+                            valueRange = -40f..64f,
+                            steps = 103,
+                            defaultValue = 0f,
+                            centerValue = 0f,
+                            onValueChange = { headerGapDp = it.roundToInt().coerceIn(-40, 64) },
+                            onValueChangeFinished = { layoutStore.updateHeaderGap(service, headerGapDp) },
                         )
                         EditableSliderPreference(
                             title = tr("iosNotificationBottomOffset", "通知下沉底部偏移"),
@@ -5722,38 +5753,92 @@ private fun IosNotificationCenterPage(
 }
 
 @Composable
-private fun IosNotificationClearPage(back: () -> Unit) {
+private fun IosNotificationClockGlassPage(back: () -> Unit) {
     val context = LocalContext.current
     val service by HookApplication.service.collectAsStateWithLifecycle()
-    val centerStore = remember(context) { IosNotificationCenterSettingsStore(context) }
-    var centerSettings by remember { mutableStateOf(centerStore.settings) }
+    val changed = LocalNotificationSettingsChanged.current
+    val store = remember(context) { IosNotificationLayoutSettingsStore(context) }
+    var value by remember { mutableStateOf(store.clock) }
+    LaunchedEffect(service) {
+        service?.let(store::syncRemote)
+        value = store.clock
+    }
+    val update: ((btm.m.os4.systemuihook.newnotificationcenter.IosNotificationClockSettings) -> btm.m.os4.systemuihook.newnotificationcenter.IosNotificationClockSettings) -> Unit = { transform ->
+        store.updateClock(service, transform)
+        value = store.clock
+        changed()
+    }
+    AppPage(tr("iosNotificationClockGlass", "通知中心大时钟柔光玻璃"), back,
+        restartScopes = setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.AOD, ScopeApplication.THEME_MANAGER)) { padding, scroll ->
+        AppList(padding, scroll, 28) {
+            item {
+                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                    SwitchPreference(
+                        title = tr("iosNotificationClockGlassEnabled", "启用大时钟柔光玻璃调整"),
+                        checked = value.enabled,
+                        onCheckedChange = { enabled -> update { it.copy(enabled = enabled) } },
+                    )
+                    AnimatedVisibility(visible = value.enabled) {
+                        SwitchPreference(
+                            title = tr("iosNotificationClockGlassUseGlobal", "使用全局柔光玻璃材质参数"),
+                            checked = value.useGlobal,
+                            onCheckedChange = { useGlobal -> update { it.copy(useGlobal = useGlobal) } },
+                        )
+                    }
+                }
+            }
+            if (value.enabled && !value.useGlobal) item {
+                Group(tr("iosNotificationClockGlassParameters", "大时钟柔光玻璃参数")) {
+                    val glass = value.glass
+                    ParameterIntSlide(tr("玻璃模糊", "玻璃模糊"), glass.refractionBlur, 0..200, "%", 100) { number ->
+                        update { it.copy(glass = it.glass.copy(refractionBlur = number)) }
+                    }
+                    softGlassParameters.forEach { definition ->
+                        ParameterIntSlide(
+                            tr(definition.title, definition.title),
+                            glass.adjustments[definition.key] ?: 0,
+                            definition.adjustmentRange,
+                            "%",
+                            if (definition.key == "darker") -100 else 0,
+                        ) { number ->
+                            update { it.copy(glass = it.glass.copy(adjustments = it.glass.adjustments + (definition.key to number))) }
+                        }
+                    }
+                    ParameterIntSlide(tr("softGlassBackgroundBlur", "背景模糊度"), glass.backgroundBlur, 0..200, "%", 100) { number ->
+                        update { it.copy(glass = it.glass.copy(backgroundBlur = number)) }
+                    }
+                    ParameterIntSlide(tr("softGlassBackgroundScale", "背景缩放程度"), glass.backgroundScale, 0..200, "%", 100) { number ->
+                        update { it.copy(glass = it.glass.copy(backgroundScale = number)) }
+                    }
+                    ParameterIntSlide(tr("背景不透明度", "背景不透明度"), glass.backgroundOpacity, 0..200, "%", 100) { number ->
+                        update { it.copy(glass = it.glass.copy(backgroundOpacity = number)) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun IosNotificationHeaderSettingsPage(back: () -> Unit) {
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsStateWithLifecycle()
     val store = remember(context) { IosNotificationHeaderSettingsStore(context) }
     var settings by remember { mutableStateOf(store.settings) }
     var showHeaderText by remember { mutableStateOf(false) }
     var showHeaderIcon by remember { mutableStateOf(false) }
     LaunchedEffect(service) {
-        service?.let(centerStore::syncRemote)
         service?.let(store::syncRemote)
-        centerSettings = centerStore.settings
         settings = store.settings
     }
     fun update(transform: (IosNotificationHeaderSettings) -> IosNotificationHeaderSettings) {
         store.update(service, transform)
         settings = store.settings
     }
-    AppPage(tr("iosNotificationClearSettings", "清除按钮设置"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI)) { p, scroll ->
+    AppPage(tr("iosNotificationHeaderSettings", "通知横条设置"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI)) { p, scroll ->
         AppList(p, scroll, 28) {
             item {
-                Group(tr("iosNotificationClearSettings", "清除按钮设置")) {
-                    SwitchPreference(
-                        title = tr("iosNotificationHideClear", "隐藏通知中心清除按钮"),
-                        summary = tr("iosNotificationHideClearSummary", "隐藏通知中心底部的清除按钮"),
-                        checked = centerSettings.hideClearButton,
-                        onCheckedChange = { hidden ->
-                            centerStore.update(service) { it.copy(hideClearButton = hidden) }
-                            centerSettings = centerStore.settings
-                        },
-                    )
+                Group(tr("iosNotificationHeaderSettings", "通知横条设置")) {
                     SwitchPreference(
                         title = tr("iosNotificationHeader", "通知顶部显示通知横条"),
                         summary = tr("iosNotificationHeaderSummary", "在通知顶部显示可滚动的“通知中心”和清除按钮"),
@@ -6198,9 +6283,14 @@ private fun SoftGlassPresetsPage(back: () -> Unit) {
     val store = remember(context) { SoftGlassSettingsStore(context) }
     var presets by remember { mutableStateOf(store.presets) }
     var showSave by remember { mutableStateOf(false) }
+    var saveAs by remember { mutableStateOf(false) }
+    var showNewPresetConfirmation by remember { mutableStateOf(false) }
     var showImport by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<SoftGlassPreset?>(null) }
+    var deleteConfirmation by remember { mutableStateOf<SoftGlassPreset?>(null) }
     var export by remember { mutableStateOf<SoftGlassPreset?>(null) }
+    var currentSettings by remember { mutableStateOf(store.settings) }
+    var appliedPresetId by remember { mutableStateOf<String?>(null) }
     var pendingJson by remember { mutableStateOf<String?>(null) }
     var qr by remember { mutableStateOf<QrShareRequest?>(null) }
     var pendingQr by remember { mutableStateOf<QrShareRequest?>(null) }
@@ -6210,12 +6300,52 @@ private fun SoftGlassPresetsPage(back: () -> Unit) {
         store.reload()
         service?.let(store::syncRemote)
         presets = store.presets
+        currentSettings = store.settings
+        appliedPresetId = store.appliedPresetId ?: (builtInSoftGlassPresets() + presets).firstOrNull {
+            currentSettings.matchesSoftGlassParameters(it.settings)
+        }?.id
+    }
+    DisposableEffect(store) {
+        val preferences = context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE)
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key != "soft_glass_custom_presets_v1") {
+                store.reload()
+                currentSettings = store.settings
+                appliedPresetId = store.appliedPresetId ?: appliedPresetId
+            }
+        }
+        preferences.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
     }
     fun applyPreset(preset: SoftGlassPreset) {
         store.reload()
         store.update(service, preset::applyTo)
+        store.setAppliedPreset(service, preset.id)
+        currentSettings = store.settings
+        appliedPresetId = preset.id
         changed()
         toast("预设已应用")
+    }
+    fun hasUnsavedPresetChanges(): Boolean {
+        val baseline = (builtInSoftGlassPresets() + presets).firstOrNull { it.id == appliedPresetId }?.settings
+            ?: return false
+        return !currentSettings.matchesSoftGlassParameters(baseline)
+    }
+    fun resetAndOpenNewPreset() {
+        store.update(service) { it.resetParameters() }
+        currentSettings = store.settings
+        appliedPresetId = null
+        store.setAppliedPreset(service, null)
+        changed()
+        saveAs = false
+        showSave = true
+    }
+    fun beginNewPreset() {
+        if (hasUnsavedPresetChanges()) {
+            showNewPresetConfirmation = true
+            return
+        }
+        resetAndOpenNewPreset()
     }
     fun importPayload(payload: String) {
         runCatching { SoftGlassPresetCodec.decode(payload) }.onSuccess { preset ->
@@ -6295,15 +6425,23 @@ private fun SoftGlassPresetsPage(back: () -> Unit) {
         AppList(padding, scroll, 28) {
             item {
                 Group(tr("softGlassPresets", "柔光玻璃预设")) {
-                    Text(tr("softGlassPresetHint", "所有预设同时应用玻璃与背景参数，不会更改总开关。旧版单独预设缺少的部分恢复系统默认值。长按预设可导出或删除。"), modifier = Modifier.padding(16.dp), style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                    ArrowPreference(title = tr("保存当前预设", "保存当前预设"), onClick = { showSave = true })
+                    Text(tr("softGlassPresetHint", "所有预设同时应用玻璃与背景参数，不会更改总开关。旧版单独预设缺少的部分恢复系统默认值。点击或长按预设可保存、另存为、使用、导出或删除。"), modifier = Modifier.padding(16.dp), style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                    ArrowPreference(title = tr("新建预设", "新建预设"), onClick = ::beginNewPreset)
                     ArrowPreference(title = tr("导入预设", "导入预设"), onClick = { showImport = true })
                 }
             }
             item {
                 Group(tr("内置预设", "内置预设")) {
                     builtInSoftGlassPresets().forEach { preset ->
-                        PresetRow(display(preset), onUse = { applyPreset(preset) }, onLongPress = { selected = preset })
+                        val applied = appliedPresetId == preset.id
+                        PresetRow(
+                            display(preset),
+                            applied = applied,
+                            modified = applied && !currentSettings.matchesSoftGlassParameters(preset.settings),
+                            onUse = { applyPreset(preset) },
+                            onClick = { selected = preset },
+                            onLongPress = { selected = preset },
+                        )
                     }
                 }
             }
@@ -6311,29 +6449,85 @@ private fun SoftGlassPresetsPage(back: () -> Unit) {
                 Group(tr("用户预设", "用户预设")) {
                     if (presets.isEmpty()) Text(tr("暂无保存的用户预设", "暂无保存的用户预设"), modifier = Modifier.padding(16.dp), style = MiuixTheme.textStyles.body2)
                     presets.forEach { preset ->
-                        PresetRow(display(preset), onUse = { applyPreset(preset) }, onLongPress = { selected = preset })
+                        val applied = appliedPresetId == preset.id
+                        PresetRow(
+                            display(preset),
+                            applied = applied,
+                            modified = applied && !currentSettings.matchesSoftGlassParameters(preset.settings),
+                            onUse = { applyPreset(preset) },
+                            onClick = { selected = preset },
+                            onLongPress = { selected = preset },
+                        )
                     }
                 }
             }
         }
     }
-    SavePresetDialog(showSave, { showSave = false }) { name ->
+    SavePresetDialog(showSave, { showSave = false }, titleKey = if (saveAs) "另存为" else "新建预设") { name ->
         store.reload()
-        val preset = SoftGlassPreset(name.trim(), store.settings)
+        val preset = SoftGlassPreset(name.trim(), currentSettings.copy(enabled = false).normalized())
         store.savePreset(service, preset)
         presets = store.presets
+        appliedPresetId = preset.id
+        store.setAppliedPreset(service, preset.id)
         showSave = false
-        export = preset
+        saveAs = false
+        toast("预设已保存")
     }
     ImportPresetDialog(showImport, { showImport = false },
         { showImport = false; jsonImport.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
         { showImport = false; qrImport.launch("image/*") },
     )
+    NewPresetConfirmationDialog(
+        show = showNewPresetConfirmation,
+        onDismiss = { showNewPresetConfirmation = false },
+        onConfirm = {
+            showNewPresetConfirmation = false
+            resetAndOpenNewPreset()
+        },
+    )
     selected?.let { preset ->
-        PresetActionDialog(display(preset), { selected = null },
-            { applyPreset(preset); selected = null },
-            { selected = null; export = preset },
-            { store.deletePreset(service, preset.id); presets = store.presets; selected = null },
+        SoftGlassPresetActionDialog(
+            preset = display(preset),
+            canSave = !currentSettings.matchesSoftGlassParameters(preset.settings),
+            onDismiss = { selected = null },
+            onSave = {
+                val updated = if (preset.builtIn) {
+                    SoftGlassPreset(preset.name, currentSettings.copy(enabled = false).normalized())
+                } else {
+                    preset.copy(settings = currentSettings.copy(enabled = false).normalized(), builtIn = false)
+                }
+                store.savePreset(service, updated)
+                presets = store.presets
+                appliedPresetId = updated.id
+                store.setAppliedPreset(service, updated.id)
+                selected = null
+                toast("预设已保存")
+            },
+            onSaveAs = { selected = null; saveAs = true; showSave = true },
+            onUse = { applyPreset(preset); selected = null },
+            onExport = { selected = null; export = preset },
+            onDelete = { selected = null; deleteConfirmation = preset },
+            editableName = !preset.builtIn,
+            onRename = { name ->
+                if (!preset.builtIn && name.isNotBlank()) {
+                    store.renamePreset(service, preset.id, name)
+                    presets = store.presets
+                    selected = presets.firstOrNull { it.id == preset.id }
+                }
+            },
+        )
+    }
+    deleteConfirmation?.let { preset ->
+        PresetDeleteConfirmationDialog(
+            name = display(preset).name,
+            onDismiss = { deleteConfirmation = null },
+            onConfirm = {
+                store.deletePreset(service, preset.id)
+                presets = store.presets
+                if (appliedPresetId == preset.id) appliedPresetId = null
+                deleteConfirmation = null
+            },
         )
     }
     export?.let { preset ->
@@ -6594,6 +6788,7 @@ private fun ShadePresets(
     back: () -> Unit,
 ) = AppPage(tr("\u9884\u8bbe", "\u9884\u8bbe"), back) { p, scroll ->
     var selectedPreset by remember { mutableStateOf<ShadePreset?>(null) }
+    var deleteConfirmation by remember { mutableStateOf<ShadePreset?>(null) }
     var showImportDialog by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
     val presets = builtInShadePresets(settings)
@@ -6633,8 +6828,8 @@ private fun ShadePresets(
             onUse = { update { preset.applyTo(it) }; selectedPreset = null },
             onExport = { showExportDialog = true },
             onDelete = {
-                actions.deleteUserPreset(preset)
                 selectedPreset = null
+                deleteConfirmation = preset
             },
         )
         ExportPresetDialog(
@@ -6645,19 +6840,49 @@ private fun ShadePresets(
             onQr = { showExportDialog = false; selectedPreset = null; actions.exportQr(preset) },
         )
     }
+    deleteConfirmation?.let { preset ->
+        PresetDeleteConfirmationDialog(
+            name = preset.name,
+            onDismiss = { deleteConfirmation = null },
+            onConfirm = {
+                actions.deleteUserPreset(preset)
+                deleteConfirmation = null
+            },
+        )
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PresetRow(preset: ShadePreset, onUse: () -> Unit, onLongPress: () -> Unit) {
+private fun PresetRow(
+    preset: ShadePreset,
+    applied: Boolean = false,
+    modified: Boolean = false,
+    onUse: () -> Unit,
+    onClick: (() -> Unit)? = null,
+    onLongPress: () -> Unit,
+) {
     Row(
-        Modifier.fillMaxWidth().combinedClickable(onClick = onUse, onLongClick = onLongPress).padding(horizontal = 16.dp, vertical = 16.dp),
+        Modifier.fillMaxWidth().combinedClickable(onClick = onClick ?: onUse, onLongClick = onLongPress).padding(horizontal = 16.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(preset.name, modifier = Modifier.weight(1f), style = MiuixTheme.textStyles.body1)
-        Image(MiuixIcons.Regular.ChevronForward, null, Modifier.size(22.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary))
+        val icon = when {
+            !applied -> MiuixIcons.Regular.ChevronForward
+            modified -> MiuixIcons.Regular.MoreCircle
+            else -> MiuixIcons.Regular.Check
+        }
+        val color = when {
+            modified -> ComposeColor(0xFFFFB200)
+            applied -> ComposeColor(0xFF0088FF)
+            else -> MiuixTheme.colorScheme.onSurfaceVariantSummary
+        }
+        Image(icon, null, Modifier.size(22.dp), colorFilter = ColorFilter.tint(color))
     }
 }
+
+private fun SoftGlassSettings.matchesSoftGlassParameters(other: SoftGlassSettings): Boolean =
+    normalized().copy(enabled = false) == other.normalized().copy(enabled = false)
 
 private fun builtInShadePresets(settings: HookSettings): List<ShadePreset> {
     val presets: List<Pair<String, (HookSettings) -> HookSettings>> = listOf(
@@ -6850,11 +7075,11 @@ private fun builtInShadePresets(settings: HookSettings): List<ShadePreset> {
 }
 
 @Composable
-private fun SavePresetDialog(show: Boolean, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+private fun SavePresetDialog(show: Boolean, onDismiss: () -> Unit, titleKey: String = "新建预设", onSave: (String) -> Unit) {
     var name by remember(show) { mutableStateOf("") }
     WindowDialog(show = show, onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(tr("保存当前预设", "保存当前预设"), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
+            Text(tr(titleKey, titleKey), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
             TextField(
                 value = name,
                 onValueChange = { name = it.take(40) },
@@ -6904,6 +7129,105 @@ private fun PresetActionDialog(
             GlassDialogButton(onExport, Modifier.fillMaxWidth()) { Text(tr("导出", "导出")) }
             if (!preset.builtIn) GlassDialogButton(onDelete, Modifier.fillMaxWidth()) { Text(tr("删除", "删除")) }
             GlassDialogButton(onDismiss, Modifier.fillMaxWidth()) { Text(tr("取消", "取消")) }
+        }
+    }
+}
+
+@Composable
+private fun SoftGlassPresetActionDialog(
+    preset: ShadePreset,
+    canSave: Boolean,
+    editableName: Boolean,
+    onDismiss: () -> Unit,
+    onSave: () -> Unit,
+    onSaveAs: () -> Unit,
+    onUse: () -> Unit,
+    onExport: () -> Unit,
+    onDelete: () -> Unit,
+    onRename: (String) -> Unit,
+) {
+    var editingName by remember(preset.name) { mutableStateOf(false) }
+    var name by remember(preset.name) { mutableStateOf(preset.name) }
+    fun commitName() {
+        val normalized = name.trim().take(40)
+        if (normalized.isNotBlank()) {
+            onRename(normalized)
+            editingName = false
+        }
+    }
+    WindowDialog(show = true, onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (editingName) {
+                TextField(
+                    value = name,
+                    onValueChange = { name = it.take(40) },
+                    label = tr("预设名", "预设名"),
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                    cornerRadius = 999.dp,
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { commitName() }),
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    GlassDialogButton({ editingName = false; name = preset.name }, Modifier.weight(1f)) { Text(tr("取消", "取消")) }
+                    GlassDialogButton(::commitName, Modifier.weight(1f), enabled = name.trim().isNotBlank(), colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("保存", "保存")) }
+                }
+            } else {
+                Text(
+                    preset.name,
+                    style = MiuixTheme.textStyles.title3,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable(enabled = editableName) { editingName = true },
+                )
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GlassDialogButton(onSave, Modifier.weight(1f), enabled = canSave) { Text(tr("保存", "保存")) }
+                GlassDialogButton(onSaveAs, Modifier.weight(1f)) { Text(tr("另存为", "另存为")) }
+            }
+            GlassDialogButton(onUse, Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("使用", "使用")) }
+            GlassDialogButton(onExport, Modifier.fillMaxWidth()) { Text(tr("导出", "导出")) }
+            if (!preset.builtIn) GlassDialogButton(onDelete, Modifier.fillMaxWidth()) { Text(tr("删除", "删除")) }
+            GlassDialogButton(onDismiss, Modifier.fillMaxWidth()) { Text(tr("取消", "取消")) }
+        }
+    }
+}
+
+@Composable
+private fun NewPresetConfirmationDialog(
+    show: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    WindowDialog(show = show, onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(tr("新建预设确认", "新建预设确认"), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
+            Text(tr("新建预设确认内容", "当前预设有未保存的修改。继续新建预设将恢复默认参数，是否继续？"), style = MiuixTheme.textStyles.body1)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GlassDialogButton(onDismiss, Modifier.weight(1f)) { Text(tr("取消", "取消")) }
+                GlassDialogButton(onConfirm, Modifier.weight(1f), colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("继续", "继续")) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PresetDeleteConfirmationDialog(
+    name: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    WindowDialog(show = true, onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(tr("确认删除预设", "确认删除预设"), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
+            Text(
+                String.format(Locale.getDefault(), tr("确认删除预设内容", "确定要删除预设“%s”吗？删除后无法恢复。"), name),
+                style = MiuixTheme.textStyles.body1,
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GlassDialogButton(onDismiss, Modifier.weight(1f)) { Text(tr("取消", "取消")) }
+                GlassDialogButton(onConfirm, Modifier.weight(1f), colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("删除", "删除")) }
+            }
         }
     }
 }

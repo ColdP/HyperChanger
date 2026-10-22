@@ -26,6 +26,8 @@ import android.view.View.OnClickListener;
 import android.util.Base64;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.WeakHashMap;
 
 import btm.m.os4.systemuihook.hypermusiccover.Xp;
 
@@ -77,8 +79,13 @@ public final class IosNotificationCenterPresentation {
     private static float lastNotificationY = Float.NaN;
     private static float restingNotificationY = Float.NaN;
     private static final ThreadLocal<Boolean> DRIVING_HOSTED_CLOCK = new ThreadLocal<>();
+    private static final ViewTreeObserver.OnPreDrawListener CLEAR_SYNC = () -> {
+        syncClearButton();
+        return true;
+    };
     private static Drawable lastDepthDrawable;
     private static ViewTreeObserver observer;
+    private static ViewTreeObserver clearObserver;
     private static boolean clockUnavailable;
     private static View wallpaperSheet;
     private static boolean hideClearButton;
@@ -87,6 +94,9 @@ public final class IosNotificationCenterPresentation {
     private static int clearButtonVisibility = View.VISIBLE;
     private static float clearButtonAlpha = 1f;
     private static boolean clearButtonCaptured;
+    private static View capturedClearButton;
+    private static final WeakHashMap<View, int[]> clearButtonStates = new WeakHashMap<>();
+    private static Boolean keyguardLockedOverride;
     private static int lastBlur = -1;
     private static int lastStatusBlur = -1;
     private static boolean switching;
@@ -104,6 +114,7 @@ public final class IosNotificationCenterPresentation {
     private static int notificationHeaderIconScale = 100;
     private static int notificationHeaderTextScale = 100;
     private static int notificationHeaderIconTextSpacing = 8;
+    private static int notificationHeaderGapDp;
     private static OnClickListener nativeClearAction;
     private static View nativeDismissView;
     private static int notificationClearStyle;
@@ -124,10 +135,18 @@ public final class IosNotificationCenterPresentation {
     private IosNotificationCenterPresentation() {}
 
     public static void attach(ViewGroup root) {
-        if (window == root) return;
+        if (window == root) {
+            syncClearButton();
+            return;
+        }
         release();
         window = root;
+        if (root != null) {
+            clearObserver = root.getViewTreeObserver();
+            clearObserver.addOnPreDrawListener(CLEAR_SYNC);
+        }
         clockUnavailable = false;
+        syncClearButton();
     }
 
     public static void update(float fraction, float layoutFraction, boolean enabled, View sheet) {
@@ -186,7 +205,12 @@ public final class IosNotificationCenterPresentation {
             notificationHeaderVisibilityAnimator.cancel();
             notificationHeaderVisibilityAnimator = null;
         }
+        if (clearObserver != null && clearObserver.isAlive()) {
+            clearObserver.removeOnPreDrawListener(CLEAR_SYNC);
+        }
+        clearObserver = null;
         releasePresentation();
+        restoreNativeClearButtons();
         window = null;
     }
 
@@ -374,9 +398,15 @@ public final class IosNotificationCenterPresentation {
             if (!(candidate instanceof View)) return;
             View view = (View) candidate;
             captureNativeClearAction(view);
+            syncClearButton();
         } catch (Throwable error) {
             Xp.log(TAG + "native clear action capture unavailable: " + error);
         }
+    }
+
+    static void onKeyguardStateChanged(boolean locked) {
+        keyguardLockedOverride = locked;
+        syncClearButton();
     }
 
     private static void captureNativeClearAction(View view) {
@@ -401,6 +431,23 @@ public final class IosNotificationCenterPresentation {
         restingNotificationY = Float.NaN;
         lastNotificationY = Float.NaN;
         requestStackUpdate(stack);
+    }
+
+    public static void setNotificationHeaderGap(int gapDp) {
+        int bounded = Math.max(-40, Math.min(64, gapDp));
+        if (notificationHeaderGapDp == bounded) return;
+        notificationHeaderGapDp = bounded;
+        if (notificationHeaderBar != null) syncNotificationHeader();
+    }
+
+    public static boolean isHostedClockView(View view) {
+        if (clock == null || view == null) return false;
+        for (View current = view; current != null; ) {
+            if (current == clock) return true;
+            android.view.ViewParent parent = current.getParent();
+            current = parent instanceof View ? (View) parent : null;
+        }
+        return false;
     }
 
     static void captureStack(View view) {
@@ -631,8 +678,8 @@ public final class IosNotificationCenterPresentation {
                     statusBlur, statusBlur, Shader.TileMode.CLAMP));
             lastStatusBlur = statusBlur;
         }
-        syncNotifications();
         syncNotificationHeader();
+        syncNotifications();
         syncClockInfo();
     }
 
@@ -740,45 +787,71 @@ public final class IosNotificationCenterPresentation {
 
     private static void syncClearButton() {
         if (window == null) return;
-        if (notificationHeaderEnabled) {
-            findClearButton();
-            if (clearButton != null) {
-                if (!clearButtonCaptured) {
-                    clearButtonVisibility = clearButton.getVisibility();
-                    clearButtonAlpha = clearButton.getAlpha();
-                    clearButtonCaptured = true;
-                }
-                // Keep the OEM click target alive for performClick(), while the custom
-                // button owns the visible surface.
-                clearButton.setVisibility(View.VISIBLE);
-                clearButton.setAlpha(0f);
-                captureNativeClearAction(clearButton);
-            }
-            if (notificationHeaderBar != null) notificationHeaderBar.setClearEnabled(true);
+        boolean keyguardLocked = isKeyguardLocked();
+        if (!notificationHeaderEnabled && !hideClearButton && !keyguardLocked) {
+            restoreNativeClearButtons();
             return;
         }
-        if (!hideClearButton) {
-            if (clearButton != null) {
-                clearButton.setVisibility(clearButtonVisibility);
-                clearButton.setAlpha(clearButtonAlpha);
+        if (notificationHeaderBar != null) notificationHeaderBar.setClearEnabled(true);
+        ArrayList<View> candidates = new ArrayList<>();
+        collectClearButtons(window, candidates);
+        if (nativeDismissView != null && nativeDismissView.getRootView() == window.getRootView()
+                && !candidates.contains(nativeDismissView)) candidates.add(nativeDismissView);
+        if (clearButton != null && clearButton.getRootView() == window.getRootView()
+                && !candidates.contains(clearButton)) candidates.add(clearButton);
+        if (candidates.isEmpty()) return;
+        clearButton = candidates.get(0);
+        for (View candidate : candidates) {
+            int[] state = clearButtonStates.get(candidate);
+            if (state == null) {
+                state = new int[]{candidate.getVisibility(), Float.floatToIntBits(candidate.getAlpha())};
+                clearButtonStates.put(candidate, state);
             }
-            return;
+            candidate.setVisibility(View.GONE);
+            candidate.setAlpha(Float.intBitsToFloat(state[1]));
+            captureNativeClearAction(candidate);
         }
-        if (clearButton == null) {
-            String[] ids = {"notification_dismiss_view", "clear_all", "clear_all_button",
-                    "notification_clear_all", "dismiss_button"};
-            for (String id : ids) {
-                clearButton = byId(window, id);
-                if (clearButton != null) break;
-            }
-            if (clearButton == null) clearButton = findViewByClass(window, "NotificationDismissView");
-            if (clearButton == null) clearButton = findViewByClass(window, "DismissView");
+    }
+
+    private static void restoreNativeClearButtons() {
+        for (java.util.Map.Entry<View, int[]> entry : new ArrayList<>(clearButtonStates.entrySet())) {
+            View view = entry.getKey();
+            int[] state = entry.getValue();
+            if (view == null || state == null) continue;
+            view.setVisibility(state[0]);
+            view.setAlpha(Float.intBitsToFloat(state[1]));
         }
-        if (clearButton != null) {
-            if (clearButton.getVisibility() != View.GONE) clearButtonVisibility = clearButton.getVisibility();
-            clearButtonAlpha = clearButton.getAlpha();
-            clearButton.setVisibility(View.GONE);
+        clearButtonStates.clear();
+        clearButtonCaptured = false;
+        capturedClearButton = null;
+        clearButton = null;
+    }
+
+    private static void collectClearButtons(View view, ArrayList<View> output) {
+        if (view == null) return;
+        String name = view.getClass().getName();
+        boolean candidate = name.endsWith(".NotificationDismissView")
+                || name.endsWith(".DismissView")
+                || name.endsWith(".CircleAndTickAnimView");
+        int id = view.getId();
+        if (!candidate && id != View.NO_ID) {
+            try {
+                String entry = view.getResources().getResourceEntryName(id).toLowerCase(java.util.Locale.ROOT);
+                candidate = entry.contains("dismiss_view") || entry.contains("clear_all")
+                        || entry.equals("notification_dismiss_view");
+            } catch (Throwable ignored) {}
         }
+        if (candidate && !output.contains(view)) output.add(view);
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) collectClearButtons(group.getChildAt(i), output);
+        }
+    }
+
+    private static boolean isKeyguardLocked() {
+        return keyguardLockedOverride != null
+                ? keyguardLockedOverride
+                : btm.m.os4.systemuihook.hypermusiccover.ShadeLayer.keyguardLocked();
     }
 
     private static void findClearButton() {
@@ -810,6 +883,7 @@ public final class IosNotificationCenterPresentation {
         notificationHeaderBar.applySettings();
         notificationHeaderBar.setAlpha(0f);
         notificationHeaderBar.setClickable(false);
+        notificationHeaderBar.setClearEnabled(true);
         panel.addView(notificationHeaderBar, new FrameLayout.LayoutParams(-1, dp(52)));
     }
 
@@ -855,7 +929,7 @@ public final class IosNotificationCenterPresentation {
             animateNotificationHeader(false, 0f);
             return;
         }
-        float y = firstTop - dp(60);
+        float y = firstTop - dp(60 + notificationHeaderGapDp);
         notificationHeaderBar.setTranslationY(y);
         animateNotificationHeader(true, progress * progress * (3f - 2f * progress));
         float visual = progress * progress * (3f - 2f * progress);
@@ -895,20 +969,29 @@ public final class IosNotificationCenterPresentation {
 
     private static void performNativeClear() {
         findClearButton();
-        try {
-            if (window != null && nativeClearAction != null && nativeDismissView != null
-                    && nativeDismissView.getRootView() == window.getRootView()) {
-                nativeClearAction.onClick(nativeDismissView);
-                return;
-            }
-            if (clearButton != null && clearButton.performClick()) return;
-            if (stack != null) Xp.callMethod(stack, "clearNotifications", 0, true, true);
-        } catch (Throwable error) {
-            Xp.log(TAG + "clear-all click unavailable: " + error);
+        if (window != null && nativeClearAction != null && nativeDismissView != null
+                && nativeDismissView.getRootView() == window.getRootView()) {
             try {
-                if (stack != null) Xp.callMethod(stack, "clearNotifications", 0, true, true);
-            } catch (Throwable fallbackError) {
-                Xp.log(TAG + "clear-all fallback unavailable: " + fallbackError);
+                nativeClearAction.onClick(nativeDismissView);
+            } catch (Throwable error) {
+                Xp.log(TAG + "native clear action unavailable: " + error);
+            }
+        }
+        // The captured view listener can return without clearing while the custom bar owns
+        // the visible control. Always drive the live stack as well when it is available.
+        if (stack != null) {
+            try {
+                Xp.callMethod(stack, "clearNotifications", 0, true, true);
+                return;
+            } catch (Throwable error) {
+                Xp.log(TAG + "notification stack clear unavailable: " + error);
+            }
+        }
+        if (clearButton != null) {
+            try {
+                clearButton.performClick();
+            } catch (Throwable error) {
+                Xp.log(TAG + "clear-all view click unavailable: " + error);
             }
         }
     }
@@ -1375,6 +1458,15 @@ public final class IosNotificationCenterPresentation {
                 notificationY = restingNotificationY;
             }
         }
+        // Apply the header edge after native resting/scroll clamping, otherwise that
+        // clamp replaces our edge on the next frame and the clock only sees the row.
+        if (notificationHeaderEnabled && notificationHeaderBar != null
+                && notificationHeaderHasContent) {
+            int[] headerPoint = new int[2];
+            notificationHeaderBar.getLocationInWindow(headerPoint);
+            float headerTop = headerPoint[1] - panelPoint[1] - host.getTranslationY();
+            notificationY = Math.min(notificationY, headerTop);
+        }
         if (Float.isNaN(lastNotificationY) || Math.abs(notificationY - lastNotificationY) > 1f) {
             try {
                 Class<?> kind = Class.forName(
@@ -1479,12 +1571,21 @@ public final class IosNotificationCenterPresentation {
         if (status != null && status.getParent() instanceof ViewGroup) {
             ((ViewGroup) status.getParent()).removeView(status);
         }
+        boolean keyguardLocked = isKeyguardLocked();
         if (clearButton != null) {
-            clearButton.setVisibility(clearButtonVisibility);
-            clearButton.setAlpha(clearButtonAlpha);
+            if (keyguardLocked) {
+                clearButton.setVisibility(View.GONE);
+                clearButton.setAlpha(clearButtonAlpha);
+            } else {
+                clearButton.setVisibility(clearButtonVisibility);
+                clearButton.setAlpha(clearButtonAlpha);
+            }
         }
-        clearButton = null;
-        clearButtonCaptured = false;
+        if (!keyguardLocked) {
+            clearButton = null;
+            clearButtonCaptured = false;
+            capturedClearButton = null;
+        }
         removeNotificationHeader();
         host = null;
         panel = null;

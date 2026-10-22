@@ -9,6 +9,7 @@ import io.github.libxposed.service.XposedService
 private const val PREFIX = "soft_glass_parameters_v3_"
 internal const val KEY_SOFT_GLASS_ENABLED = "${PREFIX}enabled"
 private const val KEY_SOFT_GLASS_PRESETS = "soft_glass_custom_presets_v1"
+private const val KEY_SOFT_GLASS_APPLIED_PRESET = "soft_glass_applied_preset_v1"
 
 internal fun readSoftGlassSettings(p: SharedPreferences) = SoftGlassSettings(
     enabled = p.getBoolean(KEY_SOFT_GLASS_ENABLED, false),
@@ -40,10 +41,12 @@ internal class SoftGlassSettingsStore(private val local: SharedPreferences) {
     constructor(context: Context) : this(context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE))
     var settings = readSoftGlassSettings(local); private set
     var presets = SoftGlassPresetCodec.decodeLibrary(local.getString(KEY_SOFT_GLASS_PRESETS, "[]") ?: "[]"); private set
+    var appliedPresetId: String? = local.getString(KEY_SOFT_GLASS_APPLIED_PRESET, null); private set
 
     fun reload() {
         settings = readSoftGlassSettings(local)
         presets = SoftGlassPresetCodec.decodeLibrary(local.getString(KEY_SOFT_GLASS_PRESETS, "[]") ?: "[]")
+        appliedPresetId = local.getString(KEY_SOFT_GLASS_APPLIED_PRESET, null)
     }
 
     fun syncRemote(service: XposedService) {
@@ -56,6 +59,7 @@ internal class SoftGlassSettingsStore(private val local: SharedPreferences) {
         // preset; only recover from them when no local library has ever been saved.
         val library = if (local.contains(KEY_SOFT_GLASS_PRESETS)) local else remote
         presets = SoftGlassPresetCodec.decodeLibrary(library.getString(KEY_SOFT_GLASS_PRESETS, "[]") ?: "[]")
+        appliedPresetId = local.getString(KEY_SOFT_GLASS_APPLIED_PRESET, null)
         write(local)
         write(remote)
         writePresets(local)
@@ -75,9 +79,25 @@ internal class SoftGlassSettingsStore(private val local: SharedPreferences) {
         service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.let(::writePresets)
     }
 
+    fun renamePreset(service: XposedService?, id: String, name: String) {
+        reload()
+        presets.firstOrNull { it.id == id }?.let { savePreset(service, it.copy(name = name.trim().take(40))) }
+    }
+
+    fun setAppliedPreset(service: XposedService?, id: String?) {
+        appliedPresetId = id
+        local.edit().apply {
+            if (id == null) remove(KEY_SOFT_GLASS_APPLIED_PRESET) else putString(KEY_SOFT_GLASS_APPLIED_PRESET, id)
+        }.apply()
+        service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.edit()?.apply {
+            if (id == null) remove(KEY_SOFT_GLASS_APPLIED_PRESET) else putString(KEY_SOFT_GLASS_APPLIED_PRESET, id)
+        }?.apply()
+    }
+
     fun deletePreset(service: XposedService?, id: String) {
         reload()
         presets = presets.filterNot { it.id == id }
+        if (appliedPresetId == id) setAppliedPreset(service, null)
         writePresets(local)
         service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.let(::writePresets)
     }

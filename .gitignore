@@ -87,6 +87,9 @@ hyperos4-glass-blur-main/
 # Handoff documents are kept locally and out of version control
 /HANDOFF/
 
+# Ignore project documentation
+/docs/
+
 # Python inspection caches
 __pycache__/
 *.py[cod]

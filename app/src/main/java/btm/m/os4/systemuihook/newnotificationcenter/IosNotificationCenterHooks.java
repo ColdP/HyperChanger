@@ -28,6 +28,34 @@ public final class IosNotificationCenterHooks {
             Xp.log("[IOSShade] native clear action capture unavailable: " + error);
         }
         try {
+            Class<?> keyguardController = Xp.findClass(
+                    "com.android.systemui.statusbar.policy.KeyguardStateControllerImpl", loader);
+            Xp.hookAll(keyguardController, "notifyKeyguardState", chain -> {
+                Object result = chain.proceed();
+                if (!chain.getArgs().isEmpty() && chain.getArgs().get(0) instanceof Boolean) {
+                    IosNotificationCenterPresentation.onKeyguardStateChanged(
+                            (Boolean) chain.getArgs().get(0));
+                }
+                return result;
+            });
+        } catch (Throwable error) {
+            Xp.log("[IOSShade] keyguard state callback unavailable: " + error);
+        }
+        try {
+            Class<?> keyguardMonitor = Xp.findClass(
+                    "com.android.keyguard.KeyguardUpdateMonitor", loader);
+            Xp.hookAll(keyguardMonitor, "setKeyguardShowing", chain -> {
+                Object result = chain.proceed();
+                if (!chain.getArgs().isEmpty() && chain.getArgs().get(0) instanceof Boolean) {
+                    IosNotificationCenterPresentation.onKeyguardStateChanged(
+                            (Boolean) chain.getArgs().get(0));
+                }
+                return result;
+            });
+        } catch (Throwable error) {
+            Xp.log("[IOSShade] keyguard monitor callback unavailable: " + error);
+        }
+        try {
             Class<?> shadeWindow = Xp.findClass(
                     "com.android.systemui.shade.NotificationShadeWindowView", loader);
             Xp.hookAll(shadeWindow, "dispatchTouchEvent", chain -> {

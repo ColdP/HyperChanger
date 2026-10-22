@@ -89,6 +89,10 @@ public final class ShadeLayer {
         return sIosEnabled;
     }
 
+    public static boolean keyguardLocked() {
+        return Main.keyguardLocked();
+    }
+
     public static boolean iosWallpaperEnabled() {
         return sIosEnabled && sIosWallpaper != 2;
     }
@@ -307,7 +311,8 @@ public final class ShadeLayer {
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER_ICON_SCALE.equals(key)
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER_TEXT_SCALE.equals(key)
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER_ICON_TEXT_SPACING.equals(key)
-                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationBottomOffsetSettingsKt.KEY_IOS_NOTIFICATION_BOTTOM_OFFSET.equals(key)) {
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationBottomOffsetSettingsKt.KEY_IOS_NOTIFICATION_BOTTOM_OFFSET.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationClockSettingsKt.KEY_IOS_NOTIFICATION_HEADER_GAP.equals(key)) {
                     UI.post(() -> readPreferences(prefs));
                 }
             };
@@ -353,6 +358,9 @@ public final class ShadeLayer {
         IosNotificationCenterPresentation.setNotificationBottomOffset(
                 btm.m.os4.systemuihook.newnotificationcenter.IosNotificationBottomOffsetSettingsKt
                         .readIosNotificationBottomOffset(prefs));
+        IosNotificationCenterPresentation.setNotificationHeaderGap(
+                prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationClockSettingsKt
+                        .KEY_IOS_NOTIFICATION_HEADER_GAP, 0));
         if (enabled == sIosEnabled && source == sIosWallpaper) return;
         reset();
         if (sEffectOn) Main.setCardBlurActive(false);

@@ -113,6 +113,39 @@ inline constexpr std::array<uint32_t, 26> kPaddingShape{
     0xfc007000, 0xaa1d03ef, 0xa8c179fd, 0xd65f03c0, 0x3c9f0de0, 0x9443c17b,
     0x3cc105e0, 0x17fffff9,
 };
+// Verified against the 8583 image. Its phone-background allocation path still
+// uses the strategy's two official constructors, but field/pool loads changed.
+// Keep separate shapes instead of loosening checks for all launcher versions.
+inline constexpr auto kRelease8583StrategyShape = [] {
+    auto shape = kStrategyShape;
+    shape[31] = 0xb8423003;
+    for (size_t i : {48, 56, 80, 93}) shape[i] = 0x91438b61;
+    for (size_t i : {49, 57, 94}) shape[i] = 0xf9423421;
+    for (size_t i : {62, 70}) shape[i] = 0x91438b64;
+    for (size_t i : {63, 71}) shape[i] = 0xf9423484;
+    shape[81] = 0xf9423821;
+    return shape;
+}();
+inline constexpr auto kRelease8583GlassRadiusShape = [] {
+    auto shape = kGlassRadiusShape;
+    shape[8] = 0xf9529000;
+    shape[18] = 0x9143a370;
+    shape[19] = 0xf9437610;
+    return shape;
+}();
+inline constexpr auto kRelease8583AdvancedRadiusShape = [] {
+    auto shape = kAdvancedRadiusShape;
+    shape[14] = 0xf9529000;
+    shape[24] = 0x9143a370;
+    shape[25] = 0xf9436610;
+    return shape;
+}();
+inline constexpr auto kRelease8583PaddingShape = [] {
+    auto shape = kPaddingShape;
+    shape[5] = 0xfd475e20;
+    shape[8] = 0xfd476220;
+    return shape;
+}();
 template<size_t N> inline bool matches(std::span<const uint32_t> code, const std::array<uint32_t,N> &shape) {
     if(code.size()<N) return false;
     for(size_t i=0;i<N;++i) {
