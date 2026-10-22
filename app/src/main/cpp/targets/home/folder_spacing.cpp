@@ -426,6 +426,7 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
         }) != 4;
         if (!need_glass && !need_dock && !need_native) continue;
         std::vector<uintptr_t> glass, dock, gates, supports, new_supports, newer_supports, strategies, glass_radii, advanced_radii, paddings;
+        std::vector<uintptr_t> release8583_supports;
         for (const auto &mapping : generation) {
             std::vector<uint32_t> code((mapping.end - mapping.begin) / 4);
             if (!nhk::safe_read(mapping.begin, std::as_writable_bytes(std::span(code)))) continue;
@@ -449,6 +450,9 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
                     && home_native_dock::matches(candidate,home_native_dock::kNewSupportShape)) new_supports.push_back(mapping.begin+i*4);
                 if (need_native && code[i] == home_native_dock::kNewerSupportShape[0]
                     && home_native_dock::matches(candidate,home_native_dock::kNewerSupportShape)) newer_supports.push_back(mapping.begin+i*4);
+                if (need_native && code[i] == home_native_dock::kRelease8583SupportShape[0]
+                    && home_native_dock::matches(candidate,home_native_dock::kRelease8583SupportShape))
+                    release8583_supports.push_back(mapping.begin+i*4);
                 if (code[i] != 0xa9bf79fd) continue;
                 if (need_glass && home_effects::matches_glass(candidate)) glass.push_back(mapping.begin + i * 4);
                 if (need_dock && home_effects::matches_dock(candidate)) dock.push_back(mapping.begin + i * 4);
@@ -462,8 +466,9 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
         }
         if (need_native)
             __android_log_print(ANDROID_LOG_INFO, kTag,
-                "Native Dock scan: legacy_gates=%zu legacy_support=%zu new_support=%zu newer_support=%zu strategies=%zu radius=%zu advanced=%zu padding=%zu",
-                gates.size(), supports.size(), new_supports.size(), newer_supports.size(), strategies.size(), glass_radii.size(), advanced_radii.size(), paddings.size());
+                "Native Dock scan: legacy_gates=%zu legacy_support=%zu new_support=%zu newer_support=%zu release8583_support=%zu strategies=%zu radius=%zu advanced=%zu padding=%zu",
+                gates.size(), supports.size(), new_supports.size(), newer_supports.size(), release8583_supports.size(),
+                strategies.size(), glass_radii.size(), advanced_radii.size(), paddings.size());
         // Refuse unsupported/ambiguous bodies; never derive an address from
         // load_bias, which includes the ZIP container offset for APK images.
         const auto install = [&](uintptr_t base, auto shape, size_t index,
@@ -645,6 +650,48 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
             add_gate(base + selected->offset, 0x37200160,
                 home_native_dock::kNoLabelFallthrough, "no-label-offset", home_native_dock::kNoLabelOffsetShape);
             add_gate(base + selected->position, 0x372000a0,
+                home_native_dock::kNoLabelFallthrough, "no-label-position", home_native_dock::kNoLabelPositionShape);
+        }
+        // 8.01.02.8583 has a distinct support predicate load and a fresh AOT
+        // layout. Require exactly one release signature, then validate every
+        // Dock-only branch against its live instruction before patching.
+        if (need_native && release8583_supports.size() == 1) {
+            const uintptr_t base = release8583_supports[0] - home_native_dock::kRelease8583SupportRva;
+            const std::array<std::pair<uintptr_t, uint32_t>, 4> checks{{
+                {base + home_native_dock::kRelease8583BackgroundGateRva, 0x37200101},
+                {base + home_native_dock::kRelease8583NoLabelLayoutGateRva, 0x37200220},
+                {base + home_native_dock::kRelease8583NoLabelOffsetGateRva, 0x37200160},
+                {base + home_native_dock::kRelease8583NoLabelPositionGateRva, 0x372000a0},
+            }};
+            bool valid = true;
+            for (const auto &[address, expected] : checks) {
+                uint32_t live = 0;
+                if (!source_at(generation, address)
+                    || source_at(inventory(), address) != source_at(generation, address)
+                    || !nhk::safe_read(address, std::as_writable_bytes(std::span(&live, 1)))
+                    || live != expected) {
+                    valid = false;
+                    break;
+                }
+            }
+            if (!valid) {
+                __android_log_print(ANDROID_LOG_WARN, kTag,
+                    "Native Dock 8.01.02.8583 support matched but layout targets failed validation at %p",
+                    reinterpret_cast<void *>(release8583_supports[0]));
+                continue;
+            }
+            __android_log_print(ANDROID_LOG_INFO, kTag,
+                "Native Dock layout variant 8.01.02.8583 validated (base=%p)",
+                reinterpret_cast<void *>(base));
+            add_gate(release8583_supports[0] + 8, home_native_dock::kRelease8583SupportShape[2],
+                0x14000001, "support");
+            add_gate(base + home_native_dock::kRelease8583BackgroundGateRva, 0x37200101,
+                0x14000008, "background");
+            add_gate(base + home_native_dock::kRelease8583NoLabelLayoutGateRva, 0x37200220,
+                home_native_dock::kNoLabelFallthrough, "no-label-layout", home_native_dock::kNoLabelLayoutShape);
+            add_gate(base + home_native_dock::kRelease8583NoLabelOffsetGateRva, 0x37200160,
+                home_native_dock::kNoLabelFallthrough, "no-label-offset", home_native_dock::kNoLabelOffsetShape);
+            add_gate(base + home_native_dock::kRelease8583NoLabelPositionGateRva, 0x372000a0,
                 home_native_dock::kNoLabelFallthrough, "no-label-position", home_native_dock::kNoLabelPositionShape);
         }
         if (need_native && gates.size()==1 && strategies.size()==1 && glass_radii.size()==1 && advanced_radii.size()==1 && paddings.size()==1) {

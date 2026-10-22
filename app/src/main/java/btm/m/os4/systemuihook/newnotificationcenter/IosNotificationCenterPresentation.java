@@ -2,6 +2,8 @@ package btm.m.os4.systemuihook.newnotificationcenter;
 
 import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.Rect;
@@ -20,6 +22,8 @@ import android.view.Gravity;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
+import android.view.View.OnClickListener;
+import android.util.Base64;
 
 import java.lang.reflect.Method;
 
@@ -93,6 +97,15 @@ public final class IosNotificationCenterPresentation {
     private static boolean notificationHeaderHasContent;
     private static NotificationHeaderView notificationHeaderBar;
     private static boolean notificationHeaderEnabled;
+    private static int notificationHeaderContentMode;
+    private static String notificationHeaderContentText = "";
+    private static String notificationHeaderContentIcon = "";
+    private static String notificationHeaderBuiltinIcon = "";
+    private static int notificationHeaderIconScale = 100;
+    private static int notificationHeaderTextScale = 100;
+    private static int notificationHeaderIconTextSpacing = 8;
+    private static OnClickListener nativeClearAction;
+    private static View nativeDismissView;
     private static int notificationClearStyle;
     private static int notificationClearMaterial;
     private static float notificationClearRadius = 22f;
@@ -320,7 +333,9 @@ public final class IosNotificationCenterPresentation {
     public static void setNotificationHeaderSettings(boolean enabled, int style, int material,
             float radius, int pureColor, int advancedColor, int advancedOpacity, int advancedBlur,
             boolean advancedHighlight, int softColor, int softOpacity, int softBackdropBlur,
-            int softBlur, float softLuminance, int softRefraction) {
+            int softBlur, float softLuminance, int softRefraction, int contentMode,
+            String contentText, String contentIcon, String builtinIcon, int iconScale,
+            int textScale, int iconTextSpacing) {
         notificationHeaderEnabled = enabled;
         notificationClearStyle = Math.max(0, Math.min(2, style));
         notificationClearMaterial = Math.max(0, Math.min(2, material));
@@ -336,6 +351,13 @@ public final class IosNotificationCenterPresentation {
         notificationClearSoftBlur = Math.max(0, Math.min(120, softBlur));
         notificationClearSoftLuminance = Math.max(0f, Math.min(.4f, softLuminance));
         notificationClearSoftRefraction = Math.max(-100, Math.min(100, softRefraction));
+        notificationHeaderContentMode = Math.max(0, Math.min(6, contentMode));
+        notificationHeaderContentText = contentText == null ? "" : contentText;
+        notificationHeaderContentIcon = contentIcon == null ? "" : contentIcon;
+        notificationHeaderBuiltinIcon = builtinIcon == null ? "" : builtinIcon;
+        notificationHeaderIconScale = Math.max(-60, Math.min(200, iconScale));
+        notificationHeaderTextScale = Math.max(-60, Math.min(200, textScale));
+        notificationHeaderIconTextSpacing = Math.max(0, Math.min(48, iconTextSpacing));
         if (notificationHeaderBar != null) {
             if (!enabled) removeNotificationHeader();
             else {
@@ -344,6 +366,32 @@ public final class IosNotificationCenterPresentation {
             }
         }
         syncClearButton();
+    }
+
+    static void captureNativeDismissController(Object controller) {
+        try {
+            Object candidate = Xp.getObjectField(controller, "dismissView");
+            if (!(candidate instanceof View)) return;
+            View view = (View) candidate;
+            captureNativeClearAction(view);
+        } catch (Throwable error) {
+            Xp.log(TAG + "native clear action capture unavailable: " + error);
+        }
+    }
+
+    private static void captureNativeClearAction(View view) {
+        if (view == null) return;
+        try {
+            Object listenerInfo = Xp.getObjectField(view, "mListenerInfo");
+            Object listener = listenerInfo == null ? null : Xp.getObjectField(listenerInfo, "mOnClickListener");
+            if (listener instanceof OnClickListener) {
+                nativeDismissView = view;
+                nativeClearAction = (OnClickListener) listener;
+                clearButton = view;
+            }
+        } catch (Throwable error) {
+            Xp.log(TAG + "native clear action lookup unavailable: " + error);
+        }
     }
 
     public static void setNotificationBottomOffset(int offsetDp) {
@@ -539,6 +587,7 @@ public final class IosNotificationCenterPresentation {
         if (oldHeader == null) findHeader();
         syncStackTransform();
         syncLandscapeLayout();
+        syncLandscapeClockHeight();
         if (sheet != null && sheet.isAttachedToWindow()) {
             ViewOutlineProvider provider = landscapeLayout
                     ? LANDSCAPE_CLOCK_OUTLINE : sheet.getOutlineProvider();
@@ -703,10 +752,9 @@ public final class IosNotificationCenterPresentation {
                 // button owns the visible surface.
                 clearButton.setVisibility(View.VISIBLE);
                 clearButton.setAlpha(0f);
-                if (notificationHeaderBar != null) {
-                    notificationHeaderBar.setClearEnabled(clearButton.isEnabled());
-                }
+                captureNativeClearAction(clearButton);
             }
+            if (notificationHeaderBar != null) notificationHeaderBar.setClearEnabled(true);
             return;
         }
         if (!hideClearButton) {
@@ -734,7 +782,11 @@ public final class IosNotificationCenterPresentation {
     }
 
     private static void findClearButton() {
-        if (clearButton != null && clearButton.getRootView() == window.getRootView()) return;
+        if (window == null) return;
+        if (clearButton != null && clearButton.getRootView() == window.getRootView()) {
+            captureNativeClearAction(clearButton);
+            return;
+        }
         String[] ids = {"notification_dismiss_view", "clear_all", "clear_all_button",
                 "notification_clear_all", "dismiss_button"};
         for (String id : ids) {
@@ -744,6 +796,7 @@ public final class IosNotificationCenterPresentation {
         if (clearButton == null) clearButton = findViewByClass(window, "NotificationDismissView");
         if (clearButton == null) clearButton = findViewByClass(window, "DismissView");
         if (clearButton == null) clearButton = findViewByClass(window, "CircleAndTickAnimView");
+        captureNativeClearAction(clearButton);
     }
 
     private static void ensureNotificationHeader() {
@@ -842,31 +895,62 @@ public final class IosNotificationCenterPresentation {
 
     private static void performNativeClear() {
         findClearButton();
-        if (clearButton == null) return;
-        boolean clickable = clearButton.isClickable();
-        boolean enabled = clearButton.isEnabled();
         try {
-            // CircleAndTickAnimView temporarily clears its clickable flag while the native
-            // dismiss animation is settling. The custom header remains the active affordance,
-            // so replay the same listener once and restore the native state afterward.
-            if (!clickable) clearButton.setClickable(true);
-            if (!enabled) clearButton.setEnabled(true);
-            boolean handled = clearButton.performClick();
-            if (!handled && stack != null) {
-                // Some HyperOS builds expose the dismiss view without its listener after the
-                // shade header is rebound. Keep the same clear-all behavior as that listener.
-                try {
-                    Xp.callMethod(stack, "clearNotifications", 0, true, true);
-                } catch (Throwable fallbackError) {
-                    Xp.log(TAG + "clear-all fallback unavailable: " + fallbackError);
-                }
+            if (window != null && nativeClearAction != null && nativeDismissView != null
+                    && nativeDismissView.getRootView() == window.getRootView()) {
+                nativeClearAction.onClick(nativeDismissView);
+                return;
             }
+            if (clearButton != null && clearButton.performClick()) return;
+            if (stack != null) Xp.callMethod(stack, "clearNotifications", 0, true, true);
         } catch (Throwable error) {
             Xp.log(TAG + "clear-all click unavailable: " + error);
-        } finally {
-            if (!clickable && clearButton != null) clearButton.setClickable(false);
-            if (!enabled && clearButton != null) clearButton.setEnabled(false);
+            try {
+                if (stack != null) Xp.callMethod(stack, "clearNotifications", 0, true, true);
+            } catch (Throwable fallbackError) {
+                Xp.log(TAG + "clear-all fallback unavailable: " + fallbackError);
+            }
         }
+    }
+
+    private static void syncLandscapeClockHeight() {
+        if (clock == null || panel == null || clock.getHeight() <= 0) return;
+        if (!landscapeLayout) {
+            clock.setPivotY(clock.getHeight() / 2f);
+            clock.setScaleY(1f);
+            return;
+        }
+        float contentBottom = 0f;
+        try {
+            Object value = clock.getClass().getMethod("getClockBottom").invoke(clock);
+            if (value instanceof Number) contentBottom = ((Number) value).floatValue();
+        } catch (Throwable ignored) {}
+        if (contentBottom <= 0f || Float.isNaN(contentBottom) || Float.isInfinite(contentBottom))
+            contentBottom = largestVisibleContentBottom(clock, clock);
+        if (contentBottom <= 0f) contentBottom = clock.getHeight();
+        float inset = dp(28);
+        float available = Math.max(1f, panel.getHeight() - inset * 2f);
+        float scale = contentBottom > available ? available / contentBottom : 1f;
+        clock.setPivotY(0f);
+        if (Math.abs(clock.getScaleY() - scale) > .001f) clock.setScaleY(scale);
+    }
+
+    private static float largestVisibleContentBottom(View root, View view) {
+        if (root == null || view == null || view.getVisibility() != View.VISIBLE) return 0f;
+        if (!(view instanceof ViewGroup) || ((ViewGroup) view).getChildCount() == 0) {
+            if (view.getHeight() <= 0) return 0f;
+            int[] rootPoint = new int[2];
+            int[] viewPoint = new int[2];
+            root.getLocationInWindow(rootPoint);
+            view.getLocationInWindow(viewPoint);
+            return viewPoint[1] - rootPoint[1] + view.getHeight();
+        }
+        float bottom = 0f;
+        ViewGroup group = (ViewGroup) view;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            bottom = Math.max(bottom, largestVisibleContentBottom(root, group.getChildAt(i)));
+        }
+        return bottom;
     }
 
     private static void syncClockInfo() {
@@ -1463,6 +1547,7 @@ public final class IosNotificationCenterPresentation {
 
     private static final class NotificationHeaderView extends FrameLayout {
         private final TextView title;
+        private final ImageView leftIcon;
         private final ClearButtonView clear;
         private final View glassSurface;
         private final GradientDrawable background = new GradientDrawable();
@@ -1480,6 +1565,13 @@ public final class IosNotificationCenterPresentation {
             title.setPadding(Math.round(24.5f * getResources().getDisplayMetrics().density), 0, dp(12), 0);
             title.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
             addView(title, new FrameLayout.LayoutParams(-2, -1, Gravity.START));
+            leftIcon = new ImageView(context);
+            leftIcon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            leftIcon.setVisibility(View.GONE);
+            FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(dp(24), dp(24),
+                    Gravity.START | Gravity.CENTER_VERTICAL);
+            iconParams.leftMargin = dp(24);
+            addView(leftIcon, iconParams);
 
             glassSurface = new View(context);
             glassSurface.setClickable(false);
@@ -1525,6 +1617,7 @@ public final class IosNotificationCenterPresentation {
         }
 
         void applySettings() {
+            applyLeftContent();
             clear.applyStyle(notificationClearStyle,
                     localized(getContext(), "清除", "Clear", "消去"), 13.5f * .92f);
             FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) clear.getLayoutParams();
@@ -1563,6 +1656,57 @@ public final class IosNotificationCenterPresentation {
             glassSurface.setBackground(background);
             clear.setBackgroundColor(Color.TRANSPARENT);
             applyNativeMaterial(glassSurface);
+        }
+
+        private void applyLeftContent() {
+            title.setText(localized(getContext(), "通知中心", "Notification Center", "通知センター"));
+            title.setVisibility(View.VISIBLE);
+            leftIcon.setVisibility(View.GONE);
+            title.setTextSize(20f);
+            title.setPadding(Math.round(24.5f * getResources().getDisplayMetrics().density), 0, dp(12), 0);
+            FrameLayout.LayoutParams defaultIconParams = (FrameLayout.LayoutParams) leftIcon.getLayoutParams();
+            defaultIconParams.width = dp(24);
+            defaultIconParams.height = dp(24);
+            defaultIconParams.leftMargin = dp(24);
+            leftIcon.setLayoutParams(defaultIconParams);
+            if (notificationHeaderContentMode == 1) {
+                title.setVisibility(View.GONE);
+                return;
+            }
+            boolean composite = notificationHeaderContentMode == 5 || notificationHeaderContentMode == 6;
+            if (notificationHeaderContentMode == 2 || notificationHeaderContentMode == 4 || composite) {
+                try {
+                    boolean customIcon = notificationHeaderContentMode == 4 || notificationHeaderContentMode == 6;
+                    String iconData = !customIcon
+                            ? notificationHeaderBuiltinIcon : notificationHeaderContentIcon;
+                    if (iconData.isEmpty()) iconData = notificationHeaderBuiltinIcon;
+                    byte[] bytes = Base64.decode(iconData, Base64.DEFAULT);
+                    Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                    if (bitmap != null) {
+                        leftIcon.setImageBitmap(bitmap);
+                        leftIcon.setVisibility(View.VISIBLE);
+                        if (!composite) {
+                            title.setVisibility(View.GONE);
+                            return;
+                        }
+                    }
+                } catch (Throwable ignored) {}
+            }
+            if (composite) {
+                if (notificationHeaderContentMode == 6 && !notificationHeaderContentText.trim().isEmpty()) {
+                    title.setText(notificationHeaderContentText.trim());
+                }
+                title.setTextSize(20f * (100 + notificationHeaderTextScale) / 100f);
+                int iconSize = dp(Math.round(24f * (100 + notificationHeaderIconScale) / 100f));
+                FrameLayout.LayoutParams iconParams = (FrameLayout.LayoutParams) leftIcon.getLayoutParams();
+                iconParams.width = iconSize;
+                iconParams.height = iconSize;
+                iconParams.leftMargin = dp(24);
+                leftIcon.setLayoutParams(iconParams);
+                title.setPadding(dp(24) + iconSize + dp(notificationHeaderIconTextSpacing), 0, dp(12), 0);
+            } else if (notificationHeaderContentMode == 3 && !notificationHeaderContentText.trim().isEmpty()) {
+                title.setText(notificationHeaderContentText.trim());
+            }
         }
 
         private void applyNativeMaterial(View view) {

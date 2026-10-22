@@ -34,6 +34,7 @@ import android.os.Bundle
 import android.os.Build
 import android.os.Environment
 import android.util.Log
+import android.util.Base64
 import android.widget.Toast
 import android.widget.ImageView
 import org.json.JSONArray
@@ -5728,6 +5729,8 @@ private fun IosNotificationClearPage(back: () -> Unit) {
     var centerSettings by remember { mutableStateOf(centerStore.settings) }
     val store = remember(context) { IosNotificationHeaderSettingsStore(context) }
     var settings by remember { mutableStateOf(store.settings) }
+    var showHeaderText by remember { mutableStateOf(false) }
+    var showHeaderIcon by remember { mutableStateOf(false) }
     LaunchedEffect(service) {
         service?.let(centerStore::syncRemote)
         service?.let(store::syncRemote)
@@ -5759,6 +5762,60 @@ private fun IosNotificationClearPage(back: () -> Unit) {
                     )
                     AnimatedVisibility(visible = settings.enabled) {
                         Column {
+                            OverlayDropdownPreference(
+                                title = tr("iosNotificationHeaderLeftContent", "自定义通知中心横条左侧文本"),
+                                items = listOf(
+                                    tr("iosNotificationHeaderContentDefault", "模块默认"),
+                                    tr("iosNotificationHeaderContentHidden", "不显示"),
+                                    tr("iosNotificationHeaderContentIcon", "图标"),
+                                    tr("iosNotificationHeaderContentCustomText", "自定义文本"),
+                                    tr("iosNotificationHeaderContentCustomIcon", "自定义图标"),
+                                    tr("iosNotificationHeaderContentIconText", "图标加文本"),
+                                    tr("iosNotificationHeaderContentCustomIconText", "自定义图标和文本"),
+                                ),
+                                selectedIndex = settings.leftContentMode,
+                                onSelectedIndexChange = { value -> update { it.copy(leftContentMode = value) } },
+                            )
+                            if (settings.leftContentMode == 3 || settings.leftContentMode == 4 || settings.leftContentMode == 6) {
+                                if (settings.leftContentMode == 3 || settings.leftContentMode == 6) {
+                                    ArrowPreference(
+                                        title = tr("iosNotificationHeaderEditText", "设置横条文本"),
+                                        summary = settings.leftContentText.ifBlank { tr("iosNotificationHeaderDefaultText", "模块默认") },
+                                        onClick = { showHeaderText = true },
+                                    )
+                                }
+                                if (settings.leftContentMode == 4 || settings.leftContentMode == 6) {
+                                    ArrowPreference(
+                                        title = tr("iosNotificationHeaderEditIcon", "设置横条图标"),
+                                        summary = if (settings.leftContentIcon.isBlank()) tr("iosNotificationHeaderNotImported", "未导入")
+                                            else tr("iosNotificationHeaderIconImported", "已导入图标"),
+                                        onClick = { showHeaderIcon = true },
+                                    )
+                                }
+                            }
+                            if (settings.leftContentMode == 5 || settings.leftContentMode == 6) {
+                                ParameterIntSlide(
+                                    tr("iosNotificationHeaderIconScale", "图标缩放"),
+                                    settings.leftContentIconScale,
+                                    -60..200,
+                                    "%",
+                                    0,
+                                ) { value -> update { it.copy(leftContentIconScale = value) } }
+                                ParameterIntSlide(
+                                    tr("iosNotificationHeaderTextScale", "文本缩放"),
+                                    settings.leftContentTextScale,
+                                    -60..200,
+                                    "%",
+                                    0,
+                                ) { value -> update { it.copy(leftContentTextScale = value) } }
+                                ParameterIntSlide(
+                                    tr("iosNotificationHeaderIconTextSpacing", "图标文本间距"),
+                                    settings.leftContentIconTextSpacing,
+                                    0..48,
+                                    " dp",
+                                    8,
+                                ) { value -> update { it.copy(leftContentIconTextSpacing = value) } }
+                            }
                             OverlayDropdownPreference(
                                 title = tr("iosNotificationClearStyle", "清除按钮样式"),
                                 items = listOf(
@@ -5801,6 +5858,133 @@ private fun IosNotificationClearPage(back: () -> Unit) {
                     }
                 }
             }
+        }
+    }
+    if (showHeaderText) IosNotificationHeaderTextDialog(
+        current = settings.leftContentText,
+        onSave = { value -> update { it.copy(leftContentText = value) }; showHeaderText = false },
+        onDismiss = { showHeaderText = false },
+    )
+    if (showHeaderIcon) IosNotificationHeaderIconDialog(
+        store = store,
+        current = settings.leftContentIcon,
+        onSave = { value -> update { it.copy(leftContentIcon = value) }; showHeaderIcon = false },
+        onDismiss = { showHeaderIcon = false },
+    )
+}
+
+@Composable
+private fun IosNotificationHeaderTextDialog(
+    current: String,
+    onSave: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var draft by remember(current) { mutableStateOf(current) }
+    WindowDialog(show = true, onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(tr("iosNotificationHeaderEditText", "设置横条文本"), style = MiuixTheme.textStyles.title3)
+            TextField(
+                value = draft,
+                onValueChange = { draft = it.take(160) },
+                label = tr("iosNotificationHeaderTextInput", "输入文本"),
+                useLabelAsPlaceholder = true,
+                singleLine = true,
+                cornerRadius = 16.dp,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                GlassDialogButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
+                    Text(tr("iosNotificationHeaderCancel", "取消"))
+                }
+                GlassDialogButton(onClick = { draft = "" }, modifier = Modifier.weight(1f)) {
+                    Text(tr("iosNotificationHeaderRestoreDefault", "恢复默认"))
+                }
+            }
+            GlassDialogButton(
+                onClick = { onSave(draft.trim()) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColorsPrimary(),
+            ) { Text(tr("iosNotificationHeaderSave", "保存")) }
+        }
+    }
+}
+
+@Composable
+private fun IosNotificationHeaderIconDialog(
+    store: IosNotificationHeaderSettingsStore,
+    current: String,
+    onSave: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    var draft by remember(current) { mutableStateOf(current) }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            busy = true
+            try {
+                draft = withContext(Dispatchers.IO) {
+                    val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
+                        val output = ByteArrayOutputStream()
+                        val buffer = ByteArray(8192)
+                        var total = 0
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            total += count
+                            require(total <= 256 * 1024) { "Image is too large" }
+                            output.write(buffer, 0, count)
+                        }
+                        output.toByteArray()
+                    } ?: error("Cannot read image")
+                    store.importHeaderIcon(bytes)
+                }
+            } catch (_: Exception) {
+                Toast.makeText(context, tr("iosNotificationHeaderIconImportFailed", "图标导入失败"), Toast.LENGTH_SHORT).show()
+            } finally { busy = false }
+        }
+    }
+    val preview = remember(draft) {
+        runCatching {
+            val bytes = Base64.decode(draft, Base64.DEFAULT)
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        }.getOrNull()
+    }
+    WindowDialog(show = true, onDismissRequest = { if (!busy) onDismiss() }) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(tr("iosNotificationHeaderEditIcon", "设置横条图标"), style = MiuixTheme.textStyles.title3)
+            if (preview == null) {
+                Text(tr("iosNotificationHeaderNotImported", "未导入"), style = MiuixTheme.textStyles.body2)
+            } else {
+                Image(
+                    bitmap = preview.asImageBitmap(),
+                    contentDescription = tr("iosNotificationHeaderIconPreview", "横条图标预览"),
+                    modifier = Modifier.size(56.dp),
+                    contentScale = ContentScale.Fit,
+                )
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                GlassDialogButton(
+                    onClick = { picker.launch(arrayOf("image/*")) },
+                    modifier = Modifier.weight(1f),
+                    enabled = !busy,
+                ) { Text(tr("iosNotificationHeaderImport", "导入")) }
+                GlassDialogButton(
+                    onClick = { draft = "" },
+                    modifier = Modifier.weight(1f),
+                    enabled = !busy,
+                ) { Text(tr("iosNotificationHeaderRestoreDefault", "恢复默认")) }
+            }
+            GlassDialogButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth(), enabled = !busy) {
+                Text(tr("iosNotificationHeaderCancel", "取消"))
+            }
+            GlassDialogButton(
+                onClick = { onSave(draft) },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !busy,
+                colors = ButtonDefaults.buttonColorsPrimary(),
+            ) { Text(tr("iosNotificationHeaderSave", "保存")) }
         }
     }
 }

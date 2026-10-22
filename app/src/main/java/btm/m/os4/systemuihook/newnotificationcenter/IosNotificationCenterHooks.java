@@ -17,6 +17,17 @@ public final class IosNotificationCenterHooks {
     public static void install(ClassLoader loader) {
         IosNotificationStackHooks.install(loader);
         try {
+            Class<?> dismissController = Xp.findClass(
+                    "com.android.systemui.shade.NotificationDismissViewController", loader);
+            Xp.hookAll(dismissController, "onInit", chain -> {
+                Object result = chain.proceed();
+                IosNotificationCenterPresentation.captureNativeDismissController(chain.getThisObject());
+                return result;
+            });
+        } catch (Throwable error) {
+            Xp.log("[IOSShade] native clear action capture unavailable: " + error);
+        }
+        try {
             Class<?> shadeWindow = Xp.findClass(
                     "com.android.systemui.shade.NotificationShadeWindowView", loader);
             Xp.hookAll(shadeWindow, "dispatchTouchEvent", chain -> {

@@ -4,6 +4,9 @@ package btm.m.os4.systemuihook.newnotificationcenter
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.Base64
 import btm.m.os4.systemuihook.REMOTE_PREFERENCE_GROUP
 import io.github.libxposed.service.XposedService
 
@@ -24,6 +27,13 @@ data class IosNotificationHeaderSettings(
     val clearButtonSoftGlassBlurRadius: Int = 36,
     val clearButtonSoftGlassLuminance: Float = 0.14f,
     val clearButtonSoftGlassRefraction: Int = 0,
+    val leftContentMode: Int = 0, // 0 = default, 1 = hidden, 2 = built-in icon, 3 = custom text, 4 = custom icon, 5 = icon and text, 6 = custom icon and text
+    val leftContentText: String = "",
+    val leftContentIcon: String = "",
+    val builtInHeaderIcon: String = "",
+    val leftContentIconScale: Int = 0,
+    val leftContentTextScale: Int = 0,
+    val leftContentIconTextSpacing: Int = 8,
 ) {
     fun normalized() = copy(
         clearButtonStyle = clearButtonStyle.coerceIn(0, 2),
@@ -36,12 +46,24 @@ data class IosNotificationHeaderSettings(
         clearButtonSoftGlassBlurRadius = clearButtonSoftGlassBlurRadius.coerceIn(0, 120),
         clearButtonSoftGlassLuminance = clearButtonSoftGlassLuminance.coerceIn(0f, 0.4f),
         clearButtonSoftGlassRefraction = clearButtonSoftGlassRefraction.coerceIn(-100, 100),
+        leftContentMode = leftContentMode.coerceIn(0, 6),
+        leftContentText = leftContentText.take(160),
+        leftContentIconScale = leftContentIconScale.coerceIn(-60, 200),
+        leftContentTextScale = leftContentTextScale.coerceIn(-60, 200),
+        leftContentIconTextSpacing = leftContentIconTextSpacing.coerceIn(0, 48),
     )
 }
 
-class IosNotificationHeaderSettingsStore(context: Context) {
+class IosNotificationHeaderSettingsStore(private val context: Context) {
     private val local = context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE)
-    var settings = local.read().normalized()
+    var settings = local.read().let { stored ->
+        if (local.getInt(KEY_IOS_NOTIFICATION_HEADER_SCALE_VERSION, 0) < 1) {
+            stored.copy(
+                leftContentIconScale = stored.leftContentIconScale - 100,
+                leftContentTextScale = stored.leftContentTextScale - 100,
+            ).normalized().also { write(local, it) }
+        } else stored.normalized()
+    }
         private set
 
     fun syncRemote(service: XposedService) {
@@ -70,6 +92,14 @@ class IosNotificationHeaderSettingsStore(context: Context) {
         clearButtonSoftGlassBlurRadius = getInt(KEY_IOS_NOTIFICATION_CLEAR_SOFT_BLUR, 36),
         clearButtonSoftGlassLuminance = getFloat(KEY_IOS_NOTIFICATION_CLEAR_SOFT_LUMINANCE, 0.14f),
         clearButtonSoftGlassRefraction = getInt(KEY_IOS_NOTIFICATION_CLEAR_SOFT_REFRACTION, 0),
+        leftContentMode = getInt(KEY_IOS_NOTIFICATION_HEADER_CONTENT_MODE, 0),
+        leftContentText = getString(KEY_IOS_NOTIFICATION_HEADER_CONTENT_TEXT, "") ?: "",
+        leftContentIcon = getString(KEY_IOS_NOTIFICATION_HEADER_CONTENT_ICON, "") ?: "",
+        builtInHeaderIcon = getString(KEY_IOS_NOTIFICATION_HEADER_BUILTIN_ICON, null)
+            ?: defaultHeaderIcon(context),
+        leftContentIconScale = getInt(KEY_IOS_NOTIFICATION_HEADER_ICON_SCALE, 100),
+        leftContentTextScale = getInt(KEY_IOS_NOTIFICATION_HEADER_TEXT_SCALE, 100),
+        leftContentIconTextSpacing = getInt(KEY_IOS_NOTIFICATION_HEADER_ICON_TEXT_SPACING, 8),
     )
 
     private fun write(p: SharedPreferences, value: IosNotificationHeaderSettings) {
@@ -90,7 +120,51 @@ class IosNotificationHeaderSettingsStore(context: Context) {
             .putInt(KEY_IOS_NOTIFICATION_CLEAR_SOFT_BLUR, v.clearButtonSoftGlassBlurRadius)
             .putFloat(KEY_IOS_NOTIFICATION_CLEAR_SOFT_LUMINANCE, v.clearButtonSoftGlassLuminance)
             .putInt(KEY_IOS_NOTIFICATION_CLEAR_SOFT_REFRACTION, v.clearButtonSoftGlassRefraction)
+            .putInt(KEY_IOS_NOTIFICATION_HEADER_CONTENT_MODE, v.leftContentMode)
+            .putString(KEY_IOS_NOTIFICATION_HEADER_CONTENT_TEXT, v.leftContentText)
+            .putString(KEY_IOS_NOTIFICATION_HEADER_CONTENT_ICON, v.leftContentIcon)
+            .putString(KEY_IOS_NOTIFICATION_HEADER_BUILTIN_ICON, v.builtInHeaderIcon)
+            .putInt(KEY_IOS_NOTIFICATION_HEADER_ICON_SCALE, v.leftContentIconScale)
+            .putInt(KEY_IOS_NOTIFICATION_HEADER_TEXT_SCALE, v.leftContentTextScale)
+            .putInt(KEY_IOS_NOTIFICATION_HEADER_ICON_TEXT_SPACING, v.leftContentIconTextSpacing)
+            .putInt(KEY_IOS_NOTIFICATION_HEADER_SCALE_VERSION, 1)
             .apply()
+    }
+
+    fun importHeaderIcon(bytes: ByteArray): String {
+        require(bytes.size <= MAX_HEADER_ICON_BYTES) { "Image is too large" }
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+        require(options.outWidth > 0 && options.outHeight > 0 &&
+            options.outWidth.toLong() * options.outHeight <= MAX_HEADER_ICON_PIXELS) { "Invalid image" }
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            ?: error("Invalid image")
+        val scaled = if (bitmap.width > MAX_HEADER_ICON_DIMENSION || bitmap.height > MAX_HEADER_ICON_DIMENSION) {
+            val scale = minOf(
+                MAX_HEADER_ICON_DIMENSION.toFloat() / bitmap.width,
+                MAX_HEADER_ICON_DIMENSION.toFloat() / bitmap.height,
+            )
+            Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true)
+                .also { if (it !== bitmap) bitmap.recycle() }
+        } else bitmap
+        val output = java.io.ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.PNG, 100, output)
+        if (scaled !== bitmap) scaled.recycle() else bitmap.recycle()
+        require(output.size() <= MAX_HEADER_ICON_BYTES) { "Image is too large" }
+        return Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
+    }
+
+    fun defaultHeaderIconData(): String = defaultHeaderIcon(context)
+
+    private fun defaultHeaderIcon(context: Context): String = runCatching {
+        context.resources.openRawResource(btm.m.os4.systemuihook.R.drawable.notification_center)
+            .use { Base64.encodeToString(it.readBytes(), Base64.NO_WRAP) }
+    }.getOrDefault("")
+
+    private companion object {
+        const val MAX_HEADER_ICON_BYTES = 256 * 1024
+        const val MAX_HEADER_ICON_PIXELS = 16_000_000L
+        const val MAX_HEADER_ICON_DIMENSION = 512
     }
 }
 
@@ -109,3 +183,11 @@ const val KEY_IOS_NOTIFICATION_CLEAR_SOFT_BACKDROP_BLUR = "ios_notification_clea
 const val KEY_IOS_NOTIFICATION_CLEAR_SOFT_BLUR = "ios_notification_clear_soft_blur"
 const val KEY_IOS_NOTIFICATION_CLEAR_SOFT_LUMINANCE = "ios_notification_clear_soft_luminance"
 const val KEY_IOS_NOTIFICATION_CLEAR_SOFT_REFRACTION = "ios_notification_clear_soft_refraction"
+const val KEY_IOS_NOTIFICATION_HEADER_CONTENT_MODE = "ios_notification_header_content_mode"
+const val KEY_IOS_NOTIFICATION_HEADER_CONTENT_TEXT = "ios_notification_header_content_text"
+const val KEY_IOS_NOTIFICATION_HEADER_CONTENT_ICON = "ios_notification_header_content_icon"
+const val KEY_IOS_NOTIFICATION_HEADER_BUILTIN_ICON = "ios_notification_header_builtin_icon"
+const val KEY_IOS_NOTIFICATION_HEADER_ICON_SCALE = "ios_notification_header_icon_scale"
+const val KEY_IOS_NOTIFICATION_HEADER_TEXT_SCALE = "ios_notification_header_text_scale"
+const val KEY_IOS_NOTIFICATION_HEADER_ICON_TEXT_SPACING = "ios_notification_header_icon_text_spacing"
+private const val KEY_IOS_NOTIFICATION_HEADER_SCALE_VERSION = "ios_notification_header_scale_version"

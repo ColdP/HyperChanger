@@ -300,6 +300,13 @@ public final class ShadeLayer {
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_SOFT_BLUR.equals(key)
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_SOFT_LUMINANCE.equals(key)
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_SOFT_REFRACTION.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER_CONTENT_MODE.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER_CONTENT_TEXT.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER_CONTENT_ICON.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER_BUILTIN_ICON.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER_ICON_SCALE.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER_TEXT_SCALE.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER_ICON_TEXT_SPACING.equals(key)
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationBottomOffsetSettingsKt.KEY_IOS_NOTIFICATION_BOTTOM_OFFSET.equals(key)) {
                     UI.post(() -> readPreferences(prefs));
                 }
@@ -335,7 +342,14 @@ public final class ShadeLayer {
                 prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_SOFT_BACKDROP_BLUR, 80),
                 prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_SOFT_BLUR, 36),
                 prefs.getFloat(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_SOFT_LUMINANCE, .14f),
-                prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_SOFT_REFRACTION, 0));
+                prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_CLEAR_SOFT_REFRACTION, 0),
+                prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER_CONTENT_MODE, 0),
+                prefs.getString(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER_CONTENT_TEXT, ""),
+                prefs.getString(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER_CONTENT_ICON, ""),
+                prefs.getString(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER_BUILTIN_ICON, ""),
+                prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER_ICON_SCALE, 100),
+                prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER_TEXT_SCALE, 100),
+                prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER_ICON_TEXT_SPACING, 8));
         IosNotificationCenterPresentation.setNotificationBottomOffset(
                 btm.m.os4.systemuihook.newnotificationcenter.IosNotificationBottomOffsetSettingsKt
                         .readIosNotificationBottomOffset(prefs));

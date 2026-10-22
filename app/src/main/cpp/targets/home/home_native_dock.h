@@ -30,6 +30,14 @@ inline constexpr uintptr_t kNewestBackgroundGateRva = 0x112a2f0;
 inline constexpr uintptr_t kNewestNoLabelLayoutGateRva = 0xe9b2c0;
 inline constexpr uintptr_t kNewestNoLabelOffsetGateRva = 0xa8b240;
 inline constexpr uintptr_t kNewestNoLabelPositionGateRva = 0xb77c4c;
+// 8.01.02.8583 changed the support predicate's first field load and rebuilt
+// the Dock callers again. Keep this release behind its own signature and
+// RVA set; the 7748 offsets are not valid for this image.
+inline constexpr uintptr_t kRelease8583SupportRva = 0x101395c;
+inline constexpr uintptr_t kRelease8583BackgroundGateRva = 0x11786a4;
+inline constexpr uintptr_t kRelease8583NoLabelLayoutGateRva = 0xee21d0;
+inline constexpr uintptr_t kRelease8583NoLabelOffsetGateRva = 0x8f60f0;
+inline constexpr uintptr_t kRelease8583NoLabelPositionGateRva = 0xbe7eac;
 inline constexpr uint32_t kNoLabelFallthrough = 0xd503201f;
 // Include the predicate call and the first four fallthrough instructions so a
 // single coincidental branch word cannot select a target in an unknown image.
@@ -47,6 +55,10 @@ inline constexpr std::array<uint32_t, 5> kNewSupportShape{
 };
 inline constexpr std::array<uint32_t, 5> kNewerSupportShape{
     0xb84db022, 0x8b1c8042, 0x36200062, 0x910082c0, 0x14000007,
+};
+inline constexpr std::array<uint32_t, 5> kRelease8583SupportShape{
+    0xb84d7022, 0x8b1c8042, 0x36200062, 0x910082c0,
+    0x14000007,
 };
 inline constexpr std::array<uint32_t, 14> kGateShape{
     0xb841b001, 0x8b1c8021, 0x372004c1, 0xf85e83a3, 0xb840f061, 0x8b1c8021,
