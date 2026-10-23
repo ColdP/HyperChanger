@@ -285,7 +285,7 @@ private enum class PageId {
     SOFT_GLASS_PRESETS,
     IOS_NOTIFICATION_CLOCK_GLASS,
     GESTURE_HANDLE_STYLE, DESKTOP, DESKTOP_MATERIAL,
-    ISLAND, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_HEADER_SETTINGS, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_ADJUSTMENT, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LOCKSCREEN_SHORTCUT_BACKGROUND, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
+    ISLAND, ISLAND_COLLAPSED, ISLAND_EXPANDED, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_HEADER_SETTINGS, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_ADJUSTMENT, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LOCKSCREEN_SHORTCUT_BACKGROUND, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
     SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND,
@@ -4910,6 +4910,8 @@ private fun Detail(
         PageId.SOFT_GLASS_PRESETS -> SoftGlassPresetsPage(back)
         PageId.GESTURE_HANDLE_STYLE -> GestureHandleStylePage(back)
         PageId.ISLAND -> Island(openPage, onRequestNotificationPermission, back)
+        PageId.ISLAND_COLLAPSED -> IslandCollapsedPage(back)
+        PageId.ISLAND_EXPANDED -> IslandExpandedPage(back)
         PageId.IOS_NOTIFICATION_CENTER -> IosNotificationCenterPage(openPage, back)
         PageId.IOS_NOTIFICATION_HEADER_SETTINGS -> IosNotificationHeaderSettingsPage(back)
         PageId.IOS_NOTIFICATION_CLOCK_GLASS -> IosNotificationClockGlassPage(back)
@@ -7426,41 +7428,6 @@ private fun Island(
         stackBlurEnabled = stackBlurStore.enabled
         stackBlurOffset = stackBlurStore.offset
     }
-    val widthStore = remember(context) { IslandWidthSettingsStore(context) }
-    var widthSettings by remember { mutableStateOf(widthStore.settings) }
-    val smoothingStore = remember(context) { IslandSmoothingSettingsStore(context) }
-    var smoothingSettings by remember { mutableStateOf(smoothingStore.settings) }
-    val spacingStore = remember(context) { IslandSpacingSettingsStore(context) }
-    var spacingSettings by remember { mutableStateOf(spacingStore.settings) }
-    val appearanceStore = remember(context) { DynamicIslandAppearanceSettingsStore(context) }
-    var appearanceSettings by remember { mutableStateOf(appearanceStore.settings) }
-    fun updateWidth(transform: (IslandWidthSettings) -> IslandWidthSettings) {
-        widthStore.update(service, transform)
-        widthSettings = widthStore.settings
-    }
-    fun updateSpacing(transform: (IslandSpacingSettings) -> IslandSpacingSettings) {
-        spacingStore.update(service, transform)
-        spacingSettings = spacingStore.settings
-    }
-    fun updateSmoothing(transform: (IslandSmoothingSettings) -> IslandSmoothingSettings) {
-        smoothingStore.update(service, transform)
-        smoothingSettings = smoothingStore.settings
-    }
-    fun updateAppearance(transform: (DynamicIslandAppearanceSettings) -> DynamicIslandAppearanceSettings) {
-        appearanceStore.update(service, transform)
-        appearanceSettings = appearanceStore.settings
-    }
-    LaunchedEffect(service) {
-        service?.let(widthStore::syncRemote)
-        widthSettings = widthStore.settings
-        service?.let(smoothingStore::syncRemote)
-        smoothingSettings = smoothingStore.settings
-        service?.let(spacingStore::syncRemote)
-        spacingSettings = spacingStore.settings
-        service?.let(appearanceStore::syncRemote)
-        appearanceSettings = appearanceStore.settings
-    }
-
     AppList(p, scroll, 28) {
         item {
             Group(tr("iosNotificationCenter", "iOS 风格通知中心")) {
@@ -7472,103 +7439,14 @@ private fun Island(
             }
         }
         item {
-            Group(tr("islandCollapsedGroup", "超级岛收起时")) {
-                SwitchPreference(
-                    title = tr("islandCollapsedSmoothing", "平滑收起时的超级岛背景"),
-                    checked = smoothingSettings.enabled,
-                    onCheckedChange = { enabled -> updateSmoothing { it.copy(enabled = enabled) } },
+            Group(tr("超级岛", "超级岛")) {
+                ArrowPreference(
+                    title = tr("islandCollapsedPage", "超级岛收起态"),
+                    onClick = { openPage(PageId.ISLAND_COLLAPSED) },
                 )
-                AnimatedVisibility(visible = smoothingSettings.enabled) {
-                    ParameterIntSlide(
-                        title = tr("islandCollapsedSmoothingPercent", "收起时的超级岛背景平滑度"),
-                        value = smoothingSettings.percent,
-                        range = 0..100,
-                        suffix = "%",
-                        defaultValue = ISLAND_SMOOTHING_DEFAULT_PERCENT,
-                    ) { percent -> updateSmoothing { it.copy(percent = percent) } }
-                }
-                SwitchPreference(title = tr("islandWidthCustomization", "自定义岛宽度"), checked = widthSettings.enabled, onCheckedChange = { v -> updateWidth { it.copy(enabled = v) } })
-                if (widthSettings.enabled) {
-                    IntSlide(tr("\u5927\u5c9b\u6700\u5c0f\u5bbd\u5ea6", "\u5927\u5c9b\u6700\u5c0f\u5bbd\u5ea6"), widthSettings.bigMinWidth, ISLAND_BIG_WIDTH_RANGE, defaultValue = ISLAND_BIG_WIDTH_DEFAULT) { v -> updateWidth { it.copy(bigMinWidth = v) } }
-                    IntSlide(tr("\u5c0f\u5c9b\u6700\u5c0f\u5bbd\u5ea6", "\u5c0f\u5c9b\u6700\u5c0f\u5bbd\u5ea6"), widthSettings.smallMinWidth, ISLAND_SMALL_WIDTH_RANGE, defaultValue = ISLAND_SMALL_WIDTH_DEFAULT) { v -> updateWidth { it.copy(smallMinWidth = v) } }
-                }
-                SwitchPreference(
-                    title = tr("small_island_media_icon_corner_radius", "收起时的媒体图标圆角"),
-                    checked = appearanceSettings.smallMediaIconCornerRadiusEnabled,
-                    onCheckedChange = { enabled -> updateAppearance { it.copy(smallMediaIconCornerRadiusEnabled = enabled) } },
-                )
-                AnimatedVisibility(visible = appearanceSettings.smallMediaIconCornerRadiusEnabled) {
-                    IntSlide(
-                        tr("small_island_media_icon_corner_radius", "收起时的媒体图标圆角"),
-                        appearanceSettings.smallMediaIconCornerRadius,
-                        -64..96,
-                        defaultValue = SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS_DEFAULT,
-                    ) { value -> updateAppearance { it.copy(smallMediaIconCornerRadius = value) } }
-                }
-                SwitchPreference(
-                    title = tr("islandSpacingEnabled", "自定义大小岛间距"),
-                    checked = spacingSettings.enabled,
-                    onCheckedChange = { enabled -> updateSpacing { it.copy(enabled = enabled) } },
-                )
-                AnimatedVisibility(visible = spacingSettings.enabled) {
-                    ParameterIntSlide(
-                        title = tr("islandSpacingOffset", "大小岛间距调整"),
-                        value = spacingSettings.offsetDp,
-                        range = ISLAND_SPACING_RANGE,
-                        suffix = " dp",
-                        defaultValue = ISLAND_SPACING_DEFAULT_OFFSET,
-                    ) { offset -> updateSpacing { it.copy(offsetDp = offset) } }
-                }
-            }
-        }
-        item {
-            Group(tr("islandExpandedGroup", "超级岛展开时")) {
-                SwitchPreference(
-                    title = tr("\u5c55\u5f00\u6001\u4e0b\u7684\u8d85\u7ea7\u5c9b\u80cc\u666f\u8c03\u6574", "\u5c55\u5f00\u6001\u4e0b\u7684\u8d85\u7ea7\u5c9b\u80cc\u666f\u8c03\u6574"),
-                    checked = s.expandedIslandBackgroundEnabled,
-                    onCheckedChange = { v -> update { it.copy(expandedIslandBackgroundEnabled = v) } },
-                )
-                AnimatedVisibility(
-                    visible = s.expandedIslandBackgroundEnabled,
-                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
-                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
-                ) {
-                    Column {
-                        ParameterIntSlide(tr("\u80cc\u666f\u4e0d\u900f\u660e\u5ea6", "\u80cc\u666f\u4e0d\u900f\u660e\u5ea6"), s.expandedIslandBackgroundOpacity, 0..100, "%", defaultValue = 97) { value ->
-                            update { it.copy(expandedIslandBackgroundOpacity = value) }
-                        }
-                        ParameterIntSlide(tr("\u80cc\u666f\u6a21\u7cca\u5ea6", "\u80cc\u666f\u6a21\u7cca\u5ea6"), s.expandedIslandBackgroundBlurRadius, 0..120, " px", defaultValue = 40) { value ->
-                            update { it.copy(expandedIslandBackgroundBlurRadius = value) }
-                        }
-                        ParameterIntSlide(tr("\u73bb\u7483\u53cd\u5c04\u5f3a\u5ea6", "\u73bb\u7483\u53cd\u5c04\u5f3a\u5ea6"), s.expandedIslandGlassReflection, 0..100, "%", defaultValue = 0) { value ->
-                            update { it.copy(expandedIslandGlassReflection = value) }
-                        }
-                        SwitchPreference(
-                            title = tr("\u663e\u793a\u9ad8\u5149", "\u663e\u793a\u9ad8\u5149"),
-                            checked = s.expandedIslandShowHighlight,
-                            onCheckedChange = { value -> update { it.copy(expandedIslandShowHighlight = value) } },
-                        )
-                    }
-                }
-                SwitchPreference(
-                    title = tr("media_island_info_vertical_offset", "调整超级岛歌曲信息行垂直定位"),
-                    checked = s.mediaIslandInfoVerticalOffsetEnabled,
-                    onCheckedChange = { enabled -> update { it.copy(mediaIslandInfoVerticalOffsetEnabled = enabled) } },
-                )
-                AnimatedVisibility(visible = s.mediaIslandInfoVerticalOffsetEnabled) {
-                IntSlide(tr("media_island_info_vertical_offset", "调整超级岛歌曲信息行垂直定位"), s.mediaIslandInfoVerticalOffset, -50..50, defaultValue = 0) { value ->
-                    update { it.copy(mediaIslandInfoVerticalOffset = value) }
-                }
-                }
-                SwitchPreference(
-                    title = tr("hide_media_island_source_icon", "隐藏媒体超级岛来源图标"),
-                    checked = s.hideMediaIslandSourceIcon,
-                    onCheckedChange = { value -> update { it.copy(hideMediaIslandSourceIcon = value) } },
-                )
-                SwitchPreference(
-                    title = tr("关闭媒体超级岛底部的氛围光感", "关闭媒体超级岛底部的氛围光感"),
-                    checked = s.disableMediaIslandBottomGlow,
-                    onCheckedChange = { value -> update { it.copy(disableMediaIslandBottomGlow = value) } },
+                ArrowPreference(
+                    title = tr("islandExpandedPage", "超级岛展开态"),
+                    onClick = { openPage(PageId.ISLAND_EXPANDED) },
                 )
             }
         }
@@ -7641,7 +7519,6 @@ private fun Island(
                 }
                 ArrowPreference(title = tr("通知限制去除", "通知限制去除"), onClick = { openPage(PageId.NOTIFICATION_RESTRICTIONS) })
                 ArrowPreference(title = tr("notificationMediaCard", "媒体卡片"), onClick = { openPage(PageId.NOTIFICATION_MEDIA_CARD) })
-                ArrowPreference(title = tr("unlockIslandPage", "解锁岛"), onClick = { openPage(PageId.UNLOCK_ISLAND) })
             }
         }
         item {
@@ -7667,6 +7544,209 @@ private fun Island(
             onRequestNotificationPermission = onRequestNotificationPermission,
             onDismiss = { showNormalNotificationDialog = false },
         )
+    }
+}
+
+@Composable
+private fun IslandCollapsedPage(back: () -> Unit) = AppPage(
+    tr("islandCollapsedPage", "超级岛收起态"),
+    back,
+    restartScopes = setOf(ScopeApplication.SYSTEM_UI),
+) { p, scroll ->
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    val widthStore = remember(context) { IslandWidthSettingsStore(context) }
+    var widthSettings by remember { mutableStateOf(widthStore.settings) }
+    val smoothingStore = remember(context) { IslandSmoothingSettingsStore(context) }
+    var smoothingSettings by remember { mutableStateOf(smoothingStore.settings) }
+    val spacingStore = remember(context) { IslandSpacingSettingsStore(context) }
+    var spacingSettings by remember { mutableStateOf(spacingStore.settings) }
+    val appearanceStore = remember(context) { DynamicIslandAppearanceSettingsStore(context) }
+    var appearanceSettings by remember { mutableStateOf(appearanceStore.settings) }
+    fun updateWidth(transform: (IslandWidthSettings) -> IslandWidthSettings) {
+        widthStore.update(service, transform)
+        widthSettings = widthStore.settings
+    }
+    fun updateSpacing(transform: (IslandSpacingSettings) -> IslandSpacingSettings) {
+        spacingStore.update(service, transform)
+        spacingSettings = spacingStore.settings
+    }
+    fun updateSmoothing(transform: (IslandSmoothingSettings) -> IslandSmoothingSettings) {
+        smoothingStore.update(service, transform)
+        smoothingSettings = smoothingStore.settings
+    }
+    fun updateAppearance(transform: (DynamicIslandAppearanceSettings) -> DynamicIslandAppearanceSettings) {
+        appearanceStore.update(service, transform)
+        appearanceSettings = appearanceStore.settings
+    }
+    LaunchedEffect(service) {
+        service?.let(widthStore::syncRemote)
+        widthSettings = widthStore.settings
+        service?.let(smoothingStore::syncRemote)
+        smoothingSettings = smoothingStore.settings
+        service?.let(spacingStore::syncRemote)
+        spacingSettings = spacingStore.settings
+        service?.let(appearanceStore::syncRemote)
+        appearanceSettings = appearanceStore.settings
+    }
+    AppList(p, scroll, 28) {
+        item {
+            Group(tr("islandCollapsedSmoothingGroup", "背景平滑")) {
+                SwitchPreference(
+                    title = tr("islandCollapsedSmoothing", "平滑收起时的超级岛背景"),
+                    checked = smoothingSettings.enabled,
+                    onCheckedChange = { enabled -> updateSmoothing { it.copy(enabled = enabled) } },
+                )
+                AnimatedVisibility(visible = smoothingSettings.enabled) {
+                    ParameterIntSlide(
+                        title = tr("islandCollapsedSmoothingPercent", "收起时的超级岛背景平滑度"),
+                        value = smoothingSettings.percent,
+                        range = 0..100,
+                        suffix = "%",
+                        defaultValue = ISLAND_SMOOTHING_DEFAULT_PERCENT,
+                    ) { percent -> updateSmoothing { it.copy(percent = percent) } }
+                }
+            }
+        }
+        item {
+            Group(tr("islandWidthGroup", "岛宽度")) {
+                SwitchPreference(
+                    title = tr("islandWidthCustomization", "自定义岛宽度"),
+                    checked = widthSettings.enabled,
+                    onCheckedChange = { enabled -> updateWidth { it.copy(enabled = enabled) } },
+                )
+                if (widthSettings.enabled) {
+                    IntSlide(
+                        tr("大岛最小宽度", "大岛最小宽度"),
+                        widthSettings.bigMinWidth,
+                        ISLAND_BIG_WIDTH_RANGE,
+                        defaultValue = ISLAND_BIG_WIDTH_DEFAULT,
+                    ) { value -> updateWidth { it.copy(bigMinWidth = value) } }
+                    IntSlide(
+                        tr("小岛最小宽度", "小岛最小宽度"),
+                        widthSettings.smallMinWidth,
+                        ISLAND_SMALL_WIDTH_RANGE,
+                        defaultValue = ISLAND_SMALL_WIDTH_DEFAULT,
+                    ) { value -> updateWidth { it.copy(smallMinWidth = value) } }
+                }
+            }
+        }
+        item {
+            Group(tr("islandMediaIconGroup", "媒体图标")) {
+                SwitchPreference(
+                    title = tr("small_island_media_icon_corner_radius", "收起时的媒体图标圆角"),
+                    checked = appearanceSettings.smallMediaIconCornerRadiusEnabled,
+                    onCheckedChange = { enabled -> updateAppearance { it.copy(smallMediaIconCornerRadiusEnabled = enabled) } },
+                )
+                AnimatedVisibility(visible = appearanceSettings.smallMediaIconCornerRadiusEnabled) {
+                    IntSlide(
+                        tr("small_island_media_icon_corner_radius", "收起时的媒体图标圆角"),
+                        appearanceSettings.smallMediaIconCornerRadius,
+                        -64..96,
+                        defaultValue = SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS_DEFAULT,
+                    ) { value -> updateAppearance { it.copy(smallMediaIconCornerRadius = value) } }
+                }
+            }
+        }
+        item {
+            Group(tr("islandSpacingGroup", "岛间距")) {
+                SwitchPreference(
+                    title = tr("islandSpacingEnabled", "自定义大小岛间距"),
+                    checked = spacingSettings.enabled,
+                    onCheckedChange = { enabled -> updateSpacing { it.copy(enabled = enabled) } },
+                )
+                AnimatedVisibility(visible = spacingSettings.enabled) {
+                    ParameterIntSlide(
+                        title = tr("islandSpacingOffset", "大小岛间距调整"),
+                        value = spacingSettings.offsetDp,
+                        range = ISLAND_SPACING_RANGE,
+                        suffix = " dp",
+                        defaultValue = ISLAND_SPACING_DEFAULT_OFFSET,
+                    ) { offset -> updateSpacing { it.copy(offsetDp = offset) } }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun IslandExpandedPage(back: () -> Unit) = AppPage(
+    tr("islandExpandedPage", "超级岛展开态"),
+    back,
+    restartScopes = setOf(ScopeApplication.SYSTEM_UI),
+) { p, scroll ->
+    val (s, update) = rememberNotificationIslandSettings()
+    AppList(p, scroll, 28) {
+        item {
+            Group(tr("islandExpandedBackgroundGroup", "背景")) {
+                SwitchPreference(
+                    title = tr("展开态下的超级岛背景调整", "展开态下的超级岛背景调整"),
+                    checked = s.expandedIslandBackgroundEnabled,
+                    onCheckedChange = { enabled -> update { it.copy(expandedIslandBackgroundEnabled = enabled) } },
+                )
+                AnimatedVisibility(
+                    visible = s.expandedIslandBackgroundEnabled,
+                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                ) {
+                    Column {
+                        ParameterIntSlide(
+                            tr("背景不透明度", "背景不透明度"),
+                            s.expandedIslandBackgroundOpacity,
+                            0..100,
+                            "%",
+                            defaultValue = 97,
+                        ) { value -> update { it.copy(expandedIslandBackgroundOpacity = value) } }
+                        ParameterIntSlide(
+                            tr("背景模糊度", "背景模糊度"),
+                            s.expandedIslandBackgroundBlurRadius,
+                            0..120,
+                            " px",
+                            defaultValue = 40,
+                        ) { value -> update { it.copy(expandedIslandBackgroundBlurRadius = value) } }
+                        ParameterIntSlide(
+                            tr("玻璃反射强度", "玻璃反射强度"),
+                            s.expandedIslandGlassReflection,
+                            0..100,
+                            "%",
+                            defaultValue = 0,
+                        ) { value -> update { it.copy(expandedIslandGlassReflection = value) } }
+                        SwitchPreference(
+                            title = tr("显示高光", "显示高光"),
+                            checked = s.expandedIslandShowHighlight,
+                            onCheckedChange = { value -> update { it.copy(expandedIslandShowHighlight = value) } },
+                        )
+                    }
+                }
+            }
+        }
+        item {
+            Group(tr("islandExpandedMediaGroup", "媒体内容")) {
+                SwitchPreference(
+                    title = tr("media_island_info_vertical_offset", "调整超级岛歌曲信息行垂直定位"),
+                    checked = s.mediaIslandInfoVerticalOffsetEnabled,
+                    onCheckedChange = { enabled -> update { it.copy(mediaIslandInfoVerticalOffsetEnabled = enabled) } },
+                )
+                AnimatedVisibility(visible = s.mediaIslandInfoVerticalOffsetEnabled) {
+                    IntSlide(
+                        tr("media_island_info_vertical_offset", "调整超级岛歌曲信息行垂直定位"),
+                        s.mediaIslandInfoVerticalOffset,
+                        -50..50,
+                        defaultValue = 0,
+                    ) { value -> update { it.copy(mediaIslandInfoVerticalOffset = value) } }
+                }
+                SwitchPreference(
+                    title = tr("hide_media_island_source_icon", "隐藏媒体超级岛来源图标"),
+                    checked = s.hideMediaIslandSourceIcon,
+                    onCheckedChange = { value -> update { it.copy(hideMediaIslandSourceIcon = value) } },
+                )
+                SwitchPreference(
+                    title = tr("关闭媒体超级岛底部的氛围光感", "关闭媒体超级岛底部的氛围光感"),
+                    checked = s.disableMediaIslandBottomGlow,
+                    onCheckedChange = { value -> update { it.copy(disableMediaIslandBottomGlow = value) } },
+                )
+            }
+        }
     }
 }
 
