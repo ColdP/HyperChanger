@@ -23,14 +23,20 @@ jobs:
           distribution: temurin
           cache: gradle
 
-      - name: Install Android SDK packages
-        uses: android-actions/setup-android@v3
+      - name: Setup Android SDK tools
+        uses: android-actions/setup-android@v4
         with:
-          packages: |
-            platform-tools
-            platforms;android-37
-            cmake;3.22.1
-            ndk;28.2.13676358
+          packages: ''
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-37" \
+            "cmake;3.22.1" \
+            "ndk;28.2.13676358"
 
       - name: Verify Android SDK, CMake, and NDK
         shell: bash
@@ -42,8 +48,6 @@ jobs:
             echo "Android SDK path is not set."
             exit 1
           fi
-
-          echo "Android SDK: $SDK_ROOT"
 
           NDK_DIR="$SDK_ROOT/ndk/28.2.13676358"
           CMAKE_DIR="$SDK_ROOT/cmake/3.22.1"
