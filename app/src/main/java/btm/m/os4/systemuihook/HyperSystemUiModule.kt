@@ -416,6 +416,53 @@ class HyperSystemUiModule : XposedModule() {
         deoptimize(member)
     }.let { hook(member) }
 
+    // Reference: REAREye RearScreenActivityWhitelistModule / ExternalDisplayLaunchUnlockModule.
+    // This new feature is dispatched only by package `system`, independently of the existing
+    // onSystemServerStarting/installFrameworkHooks lifecycle. Do not add android dispatch.
+    private val rearActivityPolicyMethods = mutableSetOf<Method>()
+
+    private fun installRearActivityPolicyHooks(loader: ClassLoader, prefs: SharedPreferences) {
+        val miuiLoader = resolveMiuiServicesLoader(loader) ?: loader
+        fun install(method: Method, onlyDisplayOne: Boolean = false) {
+            if (method in rearActivityPolicyMethods) return
+            hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("hyperchanger:rear-activity-policy:${method.toGenericString()}")
+                .intercept { chain ->
+                    // Retain original callbacks/side effects exactly once, including when enabled.
+                    val result = chain.proceed()
+                    if (result == false && prefs.isRearMiniPlayerAllowAllActivities() &&
+                        (!onlyDisplayOne || chain.getArg(2) == 1)) true else result
+                }
+            rearActivityPolicyMethods += method
+            log(Log.INFO, TAG, "Installed rear Activity policy: ${method.toGenericString()}")
+        }
+        runCatching {
+            val cls = loadFrameworkClass(loader, miuiLoader, "com.android.server.wm.ActivityStarterImpl")
+                ?: error("MIUI ActivityStarterImpl unavailable")
+            val methods = cls.declaredMethods.filter { method ->
+                method.returnType == Boolean::class.javaPrimitiveType && when (method.name) {
+                    "isShouldShowOnRearDisplay" -> method.parameterCount == 1 &&
+                        method.parameterTypes[0].name in setOf("android.content.pm.ActivityInfo", "com.android.server.wm.ActivityRecord")
+                    "isAllowedToStartOnRearDisplay" -> method.parameterTypes.firstOrNull()?.name == "com.android.server.wm.ActivityRecord"
+                    else -> false
+                }
+            }
+            require(methods.any { it.name == "isShouldShowOnRearDisplay" }) { "Rear Activity eligibility method unavailable" }
+            require(methods.any { it.name == "isAllowedToStartOnRearDisplay" }) { "Rear Activity start method unavailable" }
+            methods.forEach { install(it) }
+        }.onFailure { log(Log.WARN, TAG, "Could not install rear Activity eligibility policy", it) }
+        runCatching {
+            val cls = loadFrameworkClass(loader, miuiLoader, "com.android.server.wm.ActivityTaskSupervisor")
+                ?: error("ActivityTaskSupervisor unavailable")
+            val methods = cls.declaredMethods.filter { method ->
+                method.name == "isCallerAllowedToLaunchOnDisplay" && method.returnType == Boolean::class.javaPrimitiveType &&
+                    method.parameterTypes.map { it.name } == listOf("int", "int", "int", "android.content.pm.ActivityInfo")
+            }
+            require(methods.isNotEmpty()) { "External display caller check unavailable" }
+            methods.forEach { install(it, onlyDisplayOne = true) }
+        }.onFailure { log(Log.WARN, TAG, "Could not install rear display caller policy", it) }
+    }
+
     private fun installFrameworkHooks(loader: ClassLoader, prefs: SharedPreferences) {
         val miuiLoader = resolveMiuiServicesLoader(loader) ?: loader
         fun on(block: (FrameworkPreferences) -> Boolean): Boolean {
@@ -994,6 +1041,9 @@ class HyperSystemUiModule : XposedModule() {
             return
         }
         if (param.packageName == "system") {
+            runCatching {
+                installRearActivityPolicyHooks(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install rear Activity policies", error) }
             // HyperCeiler hooks system_server through onPackageLoaded, so this path is known to work
             // even though onSystemServerStarting also fires. Either one installs the framework hooks.
             runCatching {
@@ -1001,11 +1051,16 @@ class HyperSystemUiModule : XposedModule() {
             }.onFailure { error -> log(Log.ERROR, TAG, "Could not install system framework hooks", error) }
             return
         }
+        if (param.packageName == RearMiniPlayerLaunch.MUSIC_PACKAGE) {
+            runCatching { othersHooks.installRearMiniPlayerMusicHooks(getRemotePreferences(REMOTE_PREFERENCE_GROUP)) }
+                .onFailure { error -> log(Log.ERROR, TAG, "Could not install NetEase rear mini player hooks", error) }
+            return
+        }
         if (param.packageName == "com.miui.home") {
             runCatching {
                 val preferences = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
                 syncHomeRecentsNativeConfig(
-                    param, readHomeRecentsSettings(preferences), readHomeFolderSettings(preferences), readHomeMaterialSettings(preferences), readHomeNativeDockSettings(preferences), readHomeMultiSplitSettings(preferences),
+                    param, readHomeRecentsSettings(preferences), readHomeFolderSettings(preferences), readHomeMaterialSettings(preferences), readHomeNativeDockSettings(preferences), readHomeMultiSplitSettings(preferences), resolveHomeGlassNativeSettings(preferences),
                 )
             }.onFailure { error ->
                 log(Log.ERROR, TAG, "Could not sync native desktop recents config", error)
@@ -1015,7 +1070,7 @@ class HyperSystemUiModule : XposedModule() {
         if (param.packageName == "com.xiaomi.shop" || param.packageName == "com.mipay.wallet" ||
             param.packageName == "com.mi.health" || param.packageName == "com.apple.android.music" ||
             param.packageName == "com.sina.weibo" || param.packageName == "com.xingin.xhs" ||
-            param.packageName == "com.lucky.luckyclient"
+            param.packageName == "com.lucky.luckyclient" || param.packageName == "com.tencent.wemeet.app"
         ) {
             othersHooks.installAppNavigation(param)
             return
@@ -1292,6 +1347,7 @@ class HyperSystemUiModule : XposedModule() {
                     installAodEditorBackgroundHook(param.defaultClassLoader, preferences)
                 }
                 SUBSCREEN_CENTER -> {
+                    othersHooks.installRearMiniPlayerSubScreenHooks(preferences)
                     othersHooks.installIslandSimulationRearScreenHook(param.defaultClassLoader)
                     othersHooks.installRearScreenAppWidgetUnlockHooks(param.defaultClassLoader)
                     if (preferences.getBoolean("unlock_xiaomi_18_rear_screen_ai", false) || preferences.getBoolean("remove_custom_rear_screen_restrictions", false)) {

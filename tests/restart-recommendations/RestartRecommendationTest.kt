@@ -51,6 +51,12 @@ fun main() {
     check(events.removeLast() == setOf(ScopeApplication.SUBSCREEN_CENTER))
     local.write(KEY_REAR_SCREEN_LEFT_SWIPE_PACKAGE to "example.app")
     check(events.removeLast() == setOf(ScopeApplication.SUBSCREEN_CENTER))
+    local.write(KEY_REAR_MINI_PLAYER_ENABLED to false, KEY_REAR_MINI_PLAYER_ALLOW_ALL_ACTIVITIES to false)
+    check(events.isEmpty()) { "Mini player default materialization must stay quiet" }
+    local.write(KEY_REAR_MINI_PLAYER_ENABLED to true)
+    check(events.removeLast() == setOf(ScopeApplication.NETEASE_MUSIC, ScopeApplication.SUBSCREEN_CENTER))
+    local.write(KEY_REAR_MINI_PLAYER_ALLOW_ALL_ACTIVITIES to true)
+    check(events.isEmpty()) { "Framework policy must not recommend unrelated app restarts" }
 
     local.write("island_spacing_enabled" to true, "island_spacing_offset_dp" to 12)
     check(events.removeLast() == setOf(ScopeApplication.SYSTEM_UI))
@@ -74,6 +80,15 @@ fun main() {
     check(events.removeLast() == setOf(ScopeApplication.SOUND_EFFECT))
     local.write("mi_settings_show_more_fps" to true)
     check(events.removeLast() == setOf(ScopeApplication.MI_SETTINGS))
+
+    local.write("home_material_enabled" to true, "home_full_glass_v1_use_global" to true)
+    check(events.removeLast() == setOf(ScopeApplication.DESKTOP))
+    local.write("soft_glass_parameters_v3_refraction_blur_percent" to 120)
+    check(events.removeLast() == setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.DESKTOP))
+    local.write("home_full_glass_v1_use_global" to false)
+    check(events.removeLast() == setOf(ScopeApplication.DESKTOP))
+    local.write("soft_glass_parameters_v3_refraction_blur_percent" to 130)
+    check(events.removeLast() == setOf(ScopeApplication.SYSTEM_UI))
 
     local.write("navigation_style" to "liquid", "soft_glass_custom_presets_v1" to "[]", "initialized" to true)
     check(events.isEmpty()) { "Module-only preferences must stay quiet" }

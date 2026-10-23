@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
     <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
+    <permission android:name="btm.m.os4.systemuihook.permission.LAUNCH_REAR_MINI_PLAYER"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="btm.m.os4.systemuihook.permission.LAUNCH_REAR_MINI_PLAYER" />
     <uses-permission android:name="android.permission.SET_WALLPAPER" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />

@@ -20,6 +20,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.view.TextureView
+import androidx.compose.foundation.Image
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
@@ -29,9 +30,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.unit.dp
@@ -228,6 +232,16 @@ object AppBottomNavHooks {
             TabKey.HOME, TabKey.COFFEE_MENU, TabKey.ENJOY, TabKey.MEMBERSHIP, TabKey.PROFILE
         ),
         pageContentResourceName = "fl_page_container"
+    )
+
+    private val tencentMeeting = AppConfig(
+        displayName = "Tencent Meeting",
+        packageName = "com.tencent.wemeet.app",
+        activityName = "com.tencent.wemeet.sdk.meeting.premeeting.home.HomeActivity",
+        barResourceName = null,
+        anchorResourceName = null,
+        requiredTabs = emptySet(),
+        targetVersion = "3.47.2.410 (2024081672)"
     )
 
     private val sessions = WeakHashMap<Activity, Session>()
@@ -432,6 +446,18 @@ object AppBottomNavHooks {
             }
         module.log(Log.INFO, TAG, "Waiting for LuckinCoffee protected activity class")
     }
+
+    @JvmStatic
+    @Throws(ReflectiveOperationException::class)
+    fun installTencentMeeting(
+        module: XposedModule,
+        loader: ClassLoader,
+        blurRadius: Int,
+        labelMode: String,
+        navigationStyle: String,
+        advancedMaterial: Boolean,
+        colorMode: String
+    ) = install(module, loader, tencentMeeting, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode)
 
     @JvmStatic
     @Throws(ReflectiveOperationException::class)
@@ -655,6 +681,8 @@ object AppBottomNavHooks {
         private var lastWeiboHierarchySearchAt = 0L
         private var detectedTabs = emptyList<DetectedTab>()
         private var navigationTabs by mutableStateOf(emptyList<DetectedTab>())
+        private var navigationAction by mutableStateOf<DetectedTab?>(null)
+        private val meetingNavigation = if (config === tencentMeeting) TencentMeetingNavigation() else null
         private var nav: ComposeView? = null
         private var lifecycleOwner: InjectedLifecycleOwner? = null
         private var guardRoot: ViewGroup? = null
@@ -791,7 +819,7 @@ object AppBottomNavHooks {
                 syncCloudMusicMiniPlayer(content)
                 syncAppleMusicMiniPlayer(content)
                 syncQQMusicMiniPlayer(content)
-                selectedIndex.intValue = navigationTabs.indexOfFirst { tab ->
+                if (config !== tencentMeeting) selectedIndex.intValue = navigationTabs.indexOfFirst { tab ->
                     tab.key != TabKey.PUBLISH && (
                         isSelectedRecursively(tab.view) ||
                             (config === xiaomiHealthWatchFaceMarket &&
@@ -823,6 +851,7 @@ object AppBottomNavHooks {
                     setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
                     setContent {
                         val currentNavigationTabs = navigationTabs
+                        val currentNavigationAction = navigationAction
                         val watchFaceBackdrop = if (config === xiaomiHealthWatchFaceMarket) {
                             rememberBitmapNativeViewBackdrop(
                                 sourceView = navigationBackdropSource,
@@ -845,6 +874,13 @@ object AppBottomNavHooks {
                                         openTab(tab)
                                     }
                                 },
+                                trailingAction = currentNavigationAction?.let { action ->
+                                    HostTab(
+                                        label = action.displayLabel,
+                                        className = "search",
+                                        iconBitmap = action.nativeIcon
+                                    ) { action.clickTarget.performClick() }
+                                },
                                 selectedIndex = selectedIndex,
                                 blurRadius = blurRadius,
                                 labelMode = labelMode,
@@ -855,7 +891,9 @@ object AppBottomNavHooks {
                                 dragWholeFloatingBar = config === xiaomiHealth ||
                                     config === xiaomiHealthWatchFaceMarket || config === appleMusic,
                                 adaptiveLiquidWidth = config === xiaomiHealth ||
-                                    config === xiaomiHealthWatchFaceMarket || config === appleMusic,
+                                    config === xiaomiHealthWatchFaceMarket || config === appleMusic ||
+                                    config === tencentMeeting,
+                                softBackdropShadow = config === tencentMeeting,
                                 liquidBottomSpacingDp = if (config === xiaomiWallet) -8 else 8,
                                 concealHostBottomBar = config.concealHostBottomBar ||
                                     config === xiaomiWallet,
@@ -872,6 +910,15 @@ object AppBottomNavHooks {
                                     }
                                     else -> null
                                 },
+                                tabIconContent = if (config === tencentMeeting) {
+                                    { index, color ->
+                                        val tab = currentNavigationTabs[index]
+                                        val bitmap = tab.nativeIcon
+                                        if (bitmap != null) {
+                                            Image(bitmap, null, Modifier.size(24.dp), colorFilter = ColorFilter.tint(color))
+                                        }
+                                    }
+                                } else null,
                                 redrawNativeText = config === cloudMusic ||
                                     config === qqMusic || config === appleMusic,
                                 onHostPreDraw = ::syncHostState,
@@ -1022,6 +1069,11 @@ object AppBottomNavHooks {
             if (guard != null) return
             guardRoot = content
             guard = ViewTreeObserver.OnPreDrawListener {
+                if (config === tencentMeeting) {
+                    // Discovery must continue while the host hides or replaces its native bar.
+                    syncHostState()
+                    return@OnPreDrawListener true
+                }
                 val bar = when (config) {
                     weibo -> refreshDetectedBar(content)?.container
                     qqMusic -> refreshDetectedBar(content)?.container ?: originalBar
@@ -1052,6 +1104,24 @@ object AppBottomNavHooks {
 
         private fun syncHostState() {
             val content = activity.findViewById<ViewGroup>(android.R.id.content)
+            if (config === tencentMeeting) {
+                val detected = content?.let(::detectBottomBar)
+                if (detected == null) {
+                    nav?.visibility = View.GONE
+                    restoreHostContentSpace()
+                    restoreOriginalBar()
+                    return
+                }
+                if (detected.container !== originalBar) {
+                    restoreOriginalBar()
+                    originalBar = detected.container
+                    rememberOriginalNavigationLayers(content, detected.container)
+                }
+                detectedTabs = detected.tabs
+                if (navigationTabs != detected.tabs) navigationTabs = detected.tabs
+                if (navigationAction != detected.trailingAction) navigationAction = detected.trailingAction
+                nav?.visibility = if (resumed) View.VISIBLE else View.GONE
+            }
             if (content != null) {
                 syncCloudMusicMiniPlayer(content)
                 syncAppleMusicMiniPlayer(content)
@@ -1071,7 +1141,7 @@ object AppBottomNavHooks {
             hideOriginalBar()
             adaptMiniPlayer()
             if (config !== xiaohongshu && config !== qqMusic && config !== weibo &&
-                config !== xiaomiHealthWatchFaceMarket
+                config !== xiaomiHealthWatchFaceMarket && config !== tencentMeeting
             ) {
                 navigationTabs.indexOfFirst {
                     it.key != TabKey.PUBLISH && isSelectedRecursively(it.view)
@@ -1092,6 +1162,13 @@ object AppBottomNavHooks {
         }
 
         private fun openTab(tab: DetectedTab) {
+            if (config === tencentMeeting) {
+                val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
+                val current = detectBottomBar(content)?.tabs?.firstOrNull { it.identity == tab.identity } ?: return
+                current.clickTarget.performClick()
+                current.view.postDelayed(::syncHostState, 120L)
+                return
+            }
             if (config === xiaomiHealthWatchFaceMarket) {
                 openXiaomiHealthWatchFaceMarketTab(tab)
                 return
@@ -1347,8 +1424,9 @@ object AppBottomNavHooks {
             ) return
             val bar = originalBar ?: return
             val params = bar.layoutParams ?: return
-            if (params.height != 0) {
-                params.height = 0
+            val height = meetingNavigation?.collapsedHeight(bar) ?: 0
+            if (params.height != height) {
+                params.height = height
                 bar.layoutParams = params
                 bar.requestLayout()
             }
@@ -1364,6 +1442,10 @@ object AppBottomNavHooks {
                 releaseXiaomiStorePageNavigationInset(content)
             } else if (config === luckinCoffee) {
                 releaseLuckinCoffeePageNavigationInset(content)
+            } else if (config === tencentMeeting) {
+                val home = findResourceView(content, "tabView") ?: return
+                val pager = findResourceView(home, "viewPager") as? ViewGroup ?: return
+                releaseTencentMeetingPageNavigationInset(pager)
             } else if (config === xiaohongshu) {
                 val pager = descendants(content).firstOrNull {
                     it.javaClass.simpleName == "ExploreScrollableViewPager"
@@ -1670,6 +1752,28 @@ object AppBottomNavHooks {
                     originalContentBottomMargins.putIfAbsent(view, childParams.bottomMargin)
                     childParams.bottomMargin = 0
                     view.layoutParams = childParams
+                }
+            }
+        }
+
+        private fun releaseTencentMeetingPageNavigationInset(pager: ViewGroup) {
+            val inset = navigationBarInset()
+            if (inset <= 0) return
+            descendants(pager).forEach { view ->
+                if (!view.isShown || view is ComposeView || view.height < inset * 4 ||
+                    view.width < pager.width * 3 / 4
+                ) return@forEach
+                if (view.paddingBottom == inset) {
+                    originalContentPaddings.putIfAbsent(view, intArrayOf(
+                        view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom
+                    ))
+                    view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, 0)
+                }
+                val params = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return@forEach
+                if (params.bottomMargin == inset) {
+                    originalContentBottomMargins.putIfAbsent(view, params.bottomMargin)
+                    params.bottomMargin = 0
+                    view.layoutParams = params
                 }
             }
         }
@@ -2853,6 +2957,29 @@ object AppBottomNavHooks {
         }
 
         private fun detectBottomBar(content: ViewGroup): DetectedBar? {
+            if (config === tencentMeeting) {
+                val native = meetingNavigation?.detect(content) ?: return null
+                selectedIndex.intValue = native.selectedIndex
+                val trailingAction = native.trailingAction?.let { item ->
+                    DetectedTab(
+                        TabKey.PUBLISH,
+                        tr(item.label, item.label),
+                        item.view,
+                        item.view,
+                        identity = "meeting:search",
+                        nativeIcon = item.icon
+                    )
+                }
+                navigationAction = trailingAction
+                return DetectedBar(native.view, native.items.mapIndexed { index, item ->
+                    DetectedTab(
+                        TabKey.NATIVE,
+                        tr(item.label, item.label), item.view, item.view,
+                        identity = "meeting:$index:${item.label}",
+                        nativeIcon = item.icon
+                    )
+                }, trailingAction)
+            }
             if (config === weibo) {
                 val cached = WeiboBottomBarDetector.detect(content, originalBar, searchHierarchy = false)
                 val bar = cached ?: run {
@@ -3248,14 +3375,19 @@ object AppBottomNavHooks {
         val pageContentResourceName: String? = null
     )
 
-    private data class DetectedBar(val container: ViewGroup, val tabs: List<DetectedTab>)
+    private data class DetectedBar(
+        val container: ViewGroup,
+        val tabs: List<DetectedTab>,
+        val trailingAction: DetectedTab? = null
+    )
 
     private data class DetectedTab(
         val key: TabKey,
         val displayLabel: String,
         val view: View,
         val clickTarget: View,
-        val identity: String = key.name
+        val identity: String = key.name,
+        val nativeIcon: ImageBitmap? = null
     )
 
     private data class OriginalViewState(

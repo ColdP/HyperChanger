@@ -13,6 +13,7 @@ internal fun buildHomeLauncherBlob(
     material: HomeMaterialSettings = HomeMaterialSettings(),
     nativeDock: HomeNativeDockSettings = HomeNativeDockSettings(),
     multiSplitEnabled: Boolean = false,
+    fullGlass: HomeGlassNativeSettings? = null,
 ): ByteArray {
     require(clearMode in 0..2)
     require(folderColumns in 0..15)
@@ -23,6 +24,7 @@ internal fun buildHomeLauncherBlob(
     }
     require(material == material.normalized())
     require(nativeDock == nativeDock.normalized())
+    require(fullGlass == null || (fullGlass.desktop.isValid() && fullGlass.dock.isValid()))
     val output = ByteArrayOutputStream(232)
     fun u32(value: Int) {
         output.write(value and 0xff)
@@ -52,7 +54,7 @@ internal fun buildHomeLauncherBlob(
     // Independent glass parameter ratios; no material selector or global gate.
     u32(0x4c52544d) // MTRL
     u32(4)
-    u32(if (material.enabled) 1 else 0)
+    u32(if (material.enabled && fullGlass == null) 1 else 0)
     listOf(material.blur, material.refraction, material.softLight, material.saturation, material.brightness, material.opacity).forEach(::u32)
     u32(0x464f4944) // DIOF
     u32(1)
@@ -71,5 +73,13 @@ internal fun buildHomeLauncherBlob(
     u32(0x4c50534d) // MSPL
     u32(1)
     u32(if (multiSplitEnabled) 1 else 0)
+    fullGlass?.let {
+        u32(0x534c4748) // HGLS: complete glass-only parameters, no View backdrop values.
+        u32(1)
+        listOf(it.desktop, it.dock).forEach { record ->
+            u32(if (record.enabled) 1 else 0)
+            record.values.forEach(::u32)
+        }
+    }
     return output.toByteArray()
 }

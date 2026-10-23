@@ -43,6 +43,10 @@ inline Settings read_settings(std::span<const std::byte> bytes) {
     return {word(bytes, extension + 8) != 0, value};
 }
 
+struct FullGlassRecord {
+    bool enabled = false;
+    std::array<int32_t, 15> values{100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -100};
+};
 struct MaterialSettings {
     bool enabled = false;
     std::array<uint32_t, 6> percent{100, 100, 100, 100, 100, 100};
@@ -54,6 +58,8 @@ struct MaterialSettings {
     uint32_t native_dock_padding = 25;
     uint32_t native_dock_height = 150;
     uint32_t native_dock_bottom = 15;
+    bool full_glass_present = false;
+    FullGlassRecord desktop_glass, dock_glass;
 };
 
 struct MultiSplitSettings {
@@ -112,6 +118,29 @@ inline MaterialSettings read_material_settings(std::span<const std::byte> bytes)
             settings.native_dock_height = word(bytes, native + 24);
             settings.native_dock_bottom = word(bytes, native + 28);
             if (settings.native_dock_height < 40 || settings.native_dock_height > 300 || settings.native_dock_bottom > 150) return {};
+            const size_t full = native + 44; // HNDK v2 (32) then MSPL v1 (12).
+            if (bytes.size() > full) {
+                // No magic-word search through user values. Refuse malformed tails.
+                settings.enabled = false;
+                settings.full_glass_present = true;
+                if (bytes.size() != full + 136 || word(bytes, native + 32) != 0x4c50534d
+                    || word(bytes, native + 36) != 1 || word(bytes, native + 40) > 1
+                    || word(bytes, full) != 0x534c4748 || word(bytes, full + 4) != 1) return settings;
+                std::array<FullGlassRecord, 2> records{};
+                for (size_t r = 0; r < 2; ++r) {
+                    const size_t at = full + 8 + r * 64;
+                    if (word(bytes, at) > 1) return settings;
+                    records[r].enabled = word(bytes, at) != 0;
+                    for (size_t i = 0; i < 15; ++i) {
+                        const int32_t value = static_cast<int32_t>(word(bytes, at + 4 + i * 4));
+                        const int low = i == 0 ? 0 : i == 11 ? -200 : -100;
+                        const int high = i == 11 ? 100 : 200;
+                        if (value < low || value > high) return settings;
+                        records[r].values[i] = value;
+                    }
+                }
+                settings.desktop_glass = records[0]; settings.dock_glass = records[1];
+            }
         }
     }
     return settings;

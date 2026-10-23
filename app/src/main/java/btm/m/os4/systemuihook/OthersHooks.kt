@@ -49,6 +49,11 @@ internal class OthersHooks(
     private var customRearScreenWidgetRegistrationInstalled = false
     private var rearScreenLeftSwipeInstalled = false
     private var islandSimulationRearScreenInstalled = false
+    private val rearMiniPlayerHooks = RearMiniPlayerHooks(module)
+
+    fun installRearMiniPlayerMusicHooks(preferences: SharedPreferences) = rearMiniPlayerHooks.installMusic(preferences)
+
+    fun installRearMiniPlayerSubScreenHooks(preferences: SharedPreferences) = rearMiniPlayerHooks.installRear(preferences)
 
     /** Only our simulator notifications enter the verified SubScreen native card pipeline. */
     fun installIslandSimulationRearScreenHook(classLoader: ClassLoader) {
@@ -245,7 +250,7 @@ internal class OthersHooks(
         if (packageName != "com.xiaomi.shop" && packageName != "com.mipay.wallet" &&
             packageName != "com.mi.health" && packageName != "com.apple.android.music" &&
             packageName != "com.sina.weibo" && packageName != "com.xingin.xhs" &&
-            packageName != "com.lucky.luckyclient"
+            packageName != "com.lucky.luckyclient" && packageName != "com.tencent.wemeet.app"
         ) return
         if (!runCatching { android.app.Application.getProcessName() == packageName }.getOrDefault(false)) return
         runCatching {
@@ -280,6 +285,7 @@ internal class OthersHooks(
                 "com.apple.android.music" -> AppBottomNavHooks.installAppleMusic(module, param.defaultClassLoader, blur, label, style, advanced, color)
                 "com.sina.weibo" -> AppBottomNavHooks.installWeibo(module, param.defaultClassLoader, blur, label, style, advanced, color)
                 "com.xingin.xhs" -> AppBottomNavHooks.installXiaohongshu(module, param.defaultClassLoader, blur, label, style, advanced, color)
+                "com.tencent.wemeet.app" -> AppBottomNavHooks.installTencentMeeting(module, param.defaultClassLoader, blur, label, style, advanced, color)
                 "com.lucky.luckyclient" -> {
                     LuckinAntiDetectionHooks.install(module)
                     AppBottomNavHooks.installLuckinCoffee(module, param.defaultClassLoader, blur, label, style, advanced, color)

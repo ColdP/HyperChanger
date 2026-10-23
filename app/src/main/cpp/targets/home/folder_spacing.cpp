@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "folder_spacing.h"
 #include "home_effects.h"
+#include "home_full_glass.h"
 #include "home_native_dock.h"
 #include "nativehook/memory_io.h"
 #include "nativehook/native_image.h"
@@ -52,6 +53,7 @@ struct EffectSlot {
     std::array<uint64_t, 2> class_headers{};
 };
 std::vector<EffectSlot> effect_slots;
+std::vector<EffectSlot> full_glass_slots;
 struct NativeGate {
     uintptr_t address;
     nhk::CodeSource source;
@@ -268,7 +270,8 @@ std::optional<EffectSlot> make_effect(uintptr_t target, const nhk::CodeSource &s
                 munmap(page, page_size * 2);
                 continue;
             }
-            const auto code = native == 1 ? home_native_dock::class_program(address, address + page_size, original, target)
+            const auto code = native == 5 ? home_full_glass::island_program(address, address + page_size, original, reg, target + 4)
+                : native == 1 ? home_native_dock::class_program(address, address + page_size, original, target)
                 : home_effects::island_program(address, address + page_size,
                     original, reg, ior, dock, target + 4, native != 0 || (!dock && parameter == 5));
             std::memcpy(page, code.data(), code.size() * 4);
@@ -396,6 +399,70 @@ void publish_effect(const EffectSlot &slot, const folder_spacing::MaterialSettin
     if (enabled) __atomic_store_n(slot.data, uint64_t{1}, __ATOMIC_RELEASE);
 }
 
+void publish_full_glass(const EffectSlot &slot, const folder_spacing::MaterialSettings &settings) {
+    const size_t p = slot.parameter;
+    const std::array<folder_spacing::FullGlassRecord, 2> records{settings.desktop_glass, settings.dock_glass};
+    for (size_t r = 0; r < records.size(); ++r) {
+        uint64_t *data = slot.data + r * 5;
+        __atomic_store_n(data, uint64_t{0}, __ATOMIC_RELEASE);
+        const int delta = p == 0 ? records[r].values[p] - 100 : p == 11 ? -records[r].values[p] : records[r].values[p];
+        const double factor = 1.0 + delta / 100.0;
+        const double fallback = p == 0 ? 0.0 : delta / 100.0;
+        __atomic_store_n(data+1, std::bit_cast<uint64_t>(factor), __ATOMIC_RELEASE);
+        __atomic_store_n(data+2, std::bit_cast<uint64_t>(fallback), __ATOMIC_RELEASE);
+        __atomic_store_n(data+3, std::bit_cast<uint64_t>(home_full_glass::kMinimum[p]), __ATOMIC_RELEASE);
+        __atomic_store_n(data+4, std::bit_cast<uint64_t>(home_full_glass::kMaximum[p]), __ATOMIC_RELEASE);
+        if (settings.full_glass_present && records[r].enabled && delta != 0)
+            __atomic_store_n(data, uint64_t{1}, __ATOMIC_RELEASE);
+    }
+}
+
+void install_full_glass(uintptr_t v7, const std::vector<nhk::ExecutableMapping> &generation,
+        const folder_spacing::MaterialSettings &settings) {
+    using namespace home_full_glass;
+    if (v7 < kV7Rva) return;
+    const uintptr_t base = v7 - kV7Rva;
+    const auto verify = [&](uintptr_t rva, const auto &shape) {
+        std::vector<uint32_t> live(shape.size());
+        if (!source_at(generation, base+rva) || !nhk::safe_read(base+rva, std::as_writable_bytes(std::span(live)))) return false;
+        for (const auto &slot : full_glass_slots) {
+            if (slot.address < base+rva || slot.address >= base+rva+live.size()*4
+                || source_at(generation,slot.address) != slot.source) continue;
+            auto &word = live[(slot.address-base-rva)/4];
+            if (word == slot.branch) word = slot.original;
+        }
+        return home_full_glass::matches(live,shape);
+    };
+    if (!verify(kConstructorRva,kConstructorShape) || !verify(0x117a1cc,kFactoryTailShape)
+        || !verify(0x1179948,kDarkCallShape) || !verify(0x117acd8,kLightCallShape)) return;
+    // Confirm both Dock builders call this factory, and the factory this exact
+    // constructor. A BL-shaped instruction alone is not an ABI proof.
+    for (const auto &[rva, target] : std::array<std::pair<uintptr_t,uintptr_t>,3>{{
+            {kDarkReturnRva-4,0x1179990}, {kLightReturnRva-4,0x1179990}, {kFactoryCallRva,kConstructorRva}}}) {
+        uint32_t call=0;
+        if (!nhk::safe_read(base+rva,std::as_writable_bytes(std::span(&call,1)))
+            || home_native_dock::call_target(base+rva,call) != base+target) return;
+    }
+    for (const auto &field : kFields) {
+        const uintptr_t address=base+kConstructorRva+field.index*4;
+        const auto source=source_at(generation,address);
+        if (!source || full_glass_slots.size() >= 60 || std::ranges::any_of(full_glass_slots,[&](const EffectSlot &s) {
+                return s.address==address && s.source==*source;
+            })) continue;
+        uint32_t live=0;
+        if (source_at(inventory(),address)!=source || !nhk::safe_read(address,std::as_writable_bytes(std::span(&live,1)))
+            || live!=kConstructorShape[field.index]) continue;
+        auto slot=make_effect(address,*source,live,field.parameter,field.reg,false,false,5);
+        if (!slot) continue;
+        __atomic_store_n(slot->data+10,uint64_t{base+kDarkReturnRva},__ATOMIC_RELEASE);
+        __atomic_store_n(slot->data+11,uint64_t{base+kLightReturnRva},__ATOMIC_RELEASE);
+        __atomic_store_n(slot->data+12,uint64_t{base+kFactoryCallRva+4},__ATOMIC_RELEASE);
+        publish_full_glass(*slot,settings);
+        full_glass_slots.push_back(*slot);
+        if (source_at(inventory(),address)==source) write_effect(*slot,true);
+    }
+}
+
 void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
         const folder_spacing::MaterialSettings &settings,
         const folder_spacing::MultiSplitSettings &multi_split, unsigned tick) {
@@ -408,7 +475,12 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
         if (source_at(mappings, slot.address) == slot.source)
             write_effect(slot, slot.native_parameter ? settings.native_dock_enabled : slot.dock ? settings.dock_enabled : settings.enabled);
     }
-    if ((!settings.enabled && !settings.dock_enabled && !settings.native_dock_enabled && !multi_split.enabled)
+    const bool full_enabled = settings.full_glass_present && (settings.desktop_glass.enabled || settings.dock_glass.enabled);
+    for (const auto &slot : full_glass_slots) {
+        publish_full_glass(slot,settings);
+        if (source_at(mappings,slot.address)==slot.source) write_effect(slot,full_enabled);
+    }
+    if ((!settings.enabled && !settings.dock_enabled && !settings.native_dock_enabled && !multi_split.enabled && !full_enabled)
         || (tick >= 40 && tick % 10 != 0)) return;
     for (const auto &generation : nhk::runtime_generations(mappings)) {
         size_t total = 0;
@@ -420,11 +492,14 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
             });
         };
         const bool need_glass = settings.enabled && known(false) != home_effects::kGlassFields.size();
+        const bool need_full = full_enabled && std::ranges::count_if(full_glass_slots,[&](const EffectSlot &s) {
+            return source_at(generation,s.address)==s.source;
+        }) != home_full_glass::kFields.size();
         const bool need_dock = settings.dock_enabled && known(true) != 1;
         const bool need_native = settings.native_dock_enabled && std::ranges::count_if(effect_slots, [&](const EffectSlot &s) {
             return s.native_parameter != 0 && source_at(generation,s.address) == s.source;
         }) != 4;
-        if (!need_glass && !need_dock && !need_native) continue;
+        if (!need_glass && !need_dock && !need_native && !need_full) continue;
         std::vector<uintptr_t> glass, dock, gates, supports, new_supports, newer_supports, strategies, glass_radii, advanced_radii, paddings;
         std::vector<uintptr_t> release8583_supports;
         std::vector<uintptr_t> release8583_strategies, release8583_glass_radii,
@@ -456,7 +531,7 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
                     && home_native_dock::matches(candidate,home_native_dock::kRelease8583SupportShape))
                     release8583_supports.push_back(mapping.begin+i*4);
                 if (code[i] != 0xa9bf79fd) continue;
-                if (need_glass && home_effects::matches_glass(candidate)) glass.push_back(mapping.begin + i * 4);
+                if ((need_glass || need_full) && home_effects::matches_glass(candidate)) glass.push_back(mapping.begin + i * 4);
                 if (need_dock && home_effects::matches_dock(candidate)) dock.push_back(mapping.begin + i * 4);
                 if (need_native) {
                     if(home_native_dock::matches(candidate,home_native_dock::kStrategyShape)) strategies.push_back(mapping.begin+i*4);
@@ -504,7 +579,8 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
             if (write_effect(*slot, true)) __android_log_print(ANDROID_LOG_INFO, kTag,
                 "%s parameter %zu installed at %p", is_dock ? "Dock icon offset" : "Soft glass", parameter, reinterpret_cast<void *>(address));
         };
-        if (glass.size() == 1) for (const auto &field : home_effects::kGlassFields)
+        if (need_full && glass.size()==1) install_full_glass(glass[0],generation,settings);
+        if (need_glass && glass.size() == 1) for (const auto &field : home_effects::kGlassFields)
             install(glass[0], std::span(home_effects::kGlassShape), field.index, field.parameter, field.reg, field.refractive_index, false);
         if (dock.size() == 1) install(dock[0], std::span(home_effects::kDockShape), home_effects::kDockReturnIndex, 0, 0, false, true);
         // The Dock capability branch is independent from the optional

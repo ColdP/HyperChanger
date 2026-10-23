@@ -228,6 +228,7 @@ class MainActivity : ComponentActivity() {
 private enum class Tab { CATEGORY, SETTINGS }
 
 private val LocalNotificationSettingsChanged = compositionLocalOf<() -> Unit> { {} }
+private val LocalDesktopSettingsChanged = compositionLocalOf<() -> Unit> { {} }
 private val LocalXiaoAiSettingsChanged = compositionLocalOf<() -> Unit> { {} }
 private val LocalPageBackSuppressed = compositionLocalOf<(Boolean) -> Unit> { {} }
 private val LocalLanguageChanged = compositionLocalOf<() -> Unit> { {} }
@@ -287,7 +288,7 @@ private enum class PageId {
     ISLAND, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_HEADER_SETTINGS, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_ADJUSTMENT, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LOCKSCREEN_SHORTCUT_BACKGROUND, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
-    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, OTHER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND,
+    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND,
 }
 
 private data class CategorySearchItem(
@@ -452,6 +453,7 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
             ScopeApplication.XIAOMI_WALLET,
             ScopeApplication.XIAOMI_HEALTH,
             ScopeApplication.LUCKIN_COFFEE,
+            ScopeApplication.TENCENT_MEETING,
         ),
         PageId.APP_NAVIGATION,
     ),
@@ -872,6 +874,7 @@ private fun Root(
                 ControlCenterRadiusSettingsStore(context).syncRemote(it)
                 SuperXiaoAiInputGlassSettingsStore(context).syncRemote(it)
                 RearScreenGestureSettingsStore(context).syncRemote(it)
+                RearMiniPlayerSettingsStore(context).syncRemote(it)
                 navigation.syncRemote(it)
                 lockscreenCapsules.syncRemote(it)
                 cameras.syncRemote(it)
@@ -893,6 +896,7 @@ private fun Root(
                 DynamicIslandAppearanceSettingsStore(context).syncRemote(it)
                 LockscreenFaceUnlockSettingsStore(context).syncRemote(it)
                 musicStore.syncRemote(it)
+                HomeGlassSettingsStore(context).syncRemote(it)
                 dockStore.syncRemote(it)
                 homeRecentsStore.syncRemote(it)
                 homeMultiSplitStore.syncRemote(it)
@@ -928,6 +932,7 @@ private fun Root(
         CompositionLocalProvider(
             LocalLanguageChanged provides { languageRevision++ },
             LocalNotificationSettingsChanged provides { markRestartTargets(setOf(ScopeApplication.SYSTEM_UI)) },
+            LocalDesktopSettingsChanged provides { markRestartTargets(setOf(ScopeApplication.DESKTOP)) },
             LocalXiaoAiSettingsChanged provides { markRestartTargets(setOf(ScopeApplication.SUPER_XIAOAI)) },
         ) {
         AnimatedContent(
@@ -2062,6 +2067,8 @@ private fun RearScreen(
     val context = LocalContext.current
     val service by HookApplication.service.collectAsState()
     val rearScreenThemeApplyStore = remember(context) { RearScreenThemeApplySettingsStore(context) }
+    val miniPlayerStore = remember(context) { RearMiniPlayerSettingsStore(context) }
+    var allowAllActivities by remember { mutableStateOf(miniPlayerStore.allowAllActivities) }
     val (gestureSettings, updateGestureSettings) = rememberRearScreenGestureSettings()
     var showGestureAppActions by remember { mutableStateOf(false) }
     val configuration = LocalConfiguration.current
@@ -2097,6 +2104,8 @@ private fun RearScreen(
     LaunchedEffect(service) {
         service?.let {
             rearScreenThemeApplyStore.syncRemote(it)
+            miniPlayerStore.syncRemote(it)
+            allowAllActivities = miniPlayerStore.allowAllActivities
             rearScreenThemeApplyFix = rearScreenThemeApplyStore.enabled
             wallpaperLimitStore.syncRemote(it)
             wallpaperLimit = wallpaperLimitStore.settings
@@ -2113,6 +2122,24 @@ private fun RearScreen(
     )
     val apps = rememberRearApps()
     AppList(padding, scroll, 28) {
+        item {
+            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                ArrowPreference(
+                    title = tr("rear_mini_player_title", "在背屏启动小折叠版迷你音乐播放器"),
+                    summary = tr("rear_mini_player_entry", "将网易云音乐原生迷你播放器投放到背屏。"),
+                    onClick = { open(PageId.REAR_MINI_PLAYER) },
+                )
+                SwitchPreference(
+                    title = tr("rear_allow_all_activities", "强制允许所有 Activity 可以在背屏上被打开"),
+                    summary = tr("rear_allow_all_activities_hint", "需要勾选系统框架（system）作用域并手动重启设备。放宽背屏 Activity 白名单和显示屏 1 的启动限制；不保证所有应用布局适配。"),
+                    checked = allowAllActivities,
+                    onCheckedChange = {
+                        miniPlayerStore.updateAllowAllActivities(service, it)
+                        allowAllActivities = it
+                    },
+                )
+            }
+        }
         item {
             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
                 SwitchPreference(
@@ -2934,6 +2961,7 @@ private fun RestartScopesPage(
         ScopeApplication.XIAOMI_STORE,
         ScopeApplication.XIAOMI_WALLET,
         ScopeApplication.XIAOMI_HEALTH,
+        ScopeApplication.TENCENT_MEETING,
     )
     val toggleTarget: (ScopeApplication) -> Unit = { target ->
         selectedTargets = if (target in selectedTargets) selectedTargets - target else selectedTargets + target
@@ -3400,24 +3428,7 @@ private fun Desktop(
                                 onCheckedChange = { value -> update { it.copy(advancedHighlight = value) } },
                             )
                         }
-                        else -> Column {
-                            ShortcutBackgroundColorPreference(
-                                color = settings.glassColor,
-                                onColorChange = { value -> update { it.copy(glassColor = value) } },
-                            )
-                            ParameterIntSlide(tr("不透明度", "不透明度"), settings.glassOpacity, 0..100, "%", defaultValue = 85) { value ->
-                                update { it.copy(glassOpacity = value) }
-                            }
-                            ParameterIntSlide(tr("背景模糊度", "背景模糊度"), settings.glassBackdropBlur, 0..100, " px", defaultValue = 40) { value ->
-                                update { it.copy(glassBackdropBlur = value) }
-                            }
-                            ParameterIntSlide(tr("Glass 模糊度", "Glass 模糊度"), settings.glassBlur, 0..100, " px", defaultValue = 30) { value ->
-                                update { it.copy(glassBlur = value) }
-                            }
-                            ParameterIntSlide(tr("柔光强度", "柔光强度"), settings.glassSoftLight, 0..100, "%", defaultValue = 50) { value ->
-                                update { it.copy(glassSoftLight = value) }
-                            }
-                        }
+                        else -> HomeGlassMaterialControls(dock = true)
                     }
                 }
             }
@@ -3498,20 +3509,58 @@ private fun Desktop(
 }
 
 @Composable
-private fun HomeMaterialPage(
-    settings: HomeMaterialSettings,
-    update: ((HomeMaterialSettings) -> HomeMaterialSettings) -> Unit,
-    back: () -> Unit,
-) = AppPage(tr("桌面材质调整", "桌面材质调整"), back, restartScopes = setOf(ScopeApplication.DESKTOP)) { padding, scroll ->
+private fun HomeGlassMaterialControls(dock: Boolean) {
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    val store = remember(context) { HomeGlassSettingsStore(context) }
+    var selected by remember(dock) { mutableStateOf(store.read(dock)) }
+    val changed = LocalDesktopSettingsChanged.current
+    LaunchedEffect(service) {
+        service?.let(store::syncRemote)
+        selected = store.read(dock)
+    }
+    fun apply(transform: (HomeGlassSurfaceSettings) -> HomeGlassSurfaceSettings) {
+        store.update(service, dock, transform)
+        selected = store.read(dock)
+        val p = context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE)
+        if (stageHomeRecentsNativeConfig(context, readHomeRecentsSettings(p))) changed()
+        else Toast.makeText(context, tr("写入桌面配置失败，请检查 Root 权限", "写入桌面配置失败，请检查 Root 权限"), Toast.LENGTH_LONG).show()
+    }
+    Column {
+        if (dock) {
+            OverlayDropdownPreference(
+                title = tr("柔光玻璃参数来源", "柔光玻璃参数来源"),
+                items = listOf(tr("系统默认", "系统默认"), tr("全局柔光玻璃参数", "全局柔光玻璃参数"), tr("自定义", "自定义")),
+                selectedIndex = selected.dockSource.ordinal,
+                onSelectedIndexChange = { index -> apply { it.copy(dockSource = DockGlassParameterSource.entries[index]) } },
+            )
+        } else {
+            SwitchPreference(
+                title = tr("使用全局柔光玻璃参数", "使用全局柔光玻璃参数"),
+                checked = selected.useGlobal,
+                onCheckedChange = { value -> apply { it.copy(useGlobal = value) } },
+            )
+        }
+        AnimatedVisibility(
+            visible = if (dock) selected.dockSource == DockGlassParameterSource.CUSTOM else !selected.useGlobal,
+            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+        ) {
+            SoftGlassMaterialSliders(
+                glass = selected.glass,
+                onChange = { transform -> apply { it.copy(glass = transform(it.glass)) } },
+                includeBackdrop = false,
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeMaterialPage(back: () -> Unit) = AppPage(tr("桌面材质调整", "桌面材质调整"), back, restartScopes = setOf(ScopeApplication.DESKTOP)) { padding, scroll ->
     AppList(padding, scroll) {
         item {
             Group(tr("柔光玻璃", "柔光玻璃")) {
-                ParameterIntSlide(tr("模糊度", "模糊度"), settings.blur, 0..200, "%", defaultValue = 100) { value -> update { it.copy(blur = value) } }
-                ParameterIntSlide(tr("折射强度", "折射强度"), settings.refraction, 0..200, "%", defaultValue = 100) { value -> update { it.copy(refraction = value) } }
-                ParameterIntSlide(tr("柔光强度", "柔光强度"), settings.softLight, 0..200, "%", defaultValue = 100) { value -> update { it.copy(softLight = value) } }
-                ParameterIntSlide(tr("背景饱和度", "背景饱和度"), settings.saturation, 0..200, "%", defaultValue = 100) { value -> update { it.copy(saturation = value) } }
-                ParameterIntSlide(tr("背景亮度", "背景亮度"), settings.brightness, 0..200, "%", defaultValue = 100) { value -> update { it.copy(brightness = value) } }
-                ParameterIntSlide(tr("不透明度", "Opacity"), settings.opacity, 0..100, "%", defaultValue = 100) { value -> update { it.copy(opacity = value) } }
+                HomeGlassMaterialControls(dock = false)
             }
         }
     }
@@ -4855,7 +4904,7 @@ private fun Detail(
     when (page) {
         PageId.SHADE -> Shade(settings, update, presetActions, openPage, back)
         PageId.DESKTOP -> Desktop(dockSettings, updateDock, homeRecentsSettings, updateHomeRecents, homeFolderSettings, updateHomeFolder, homeMaterialSettings, updateHomeMaterial, openPage, back)
-        PageId.DESKTOP_MATERIAL -> HomeMaterialPage(homeMaterialSettings, updateHomeMaterial, back)
+        PageId.DESKTOP_MATERIAL -> HomeMaterialPage(back)
         PageId.SHADE_PRESETS -> ShadePresets(settings, update, presetActions, back)
         PageId.SOFT_GLASS_PARAMETERS -> SoftGlassParametersPage(openPage, back)
         PageId.SOFT_GLASS_PRESETS -> SoftGlassPresetsPage(back)
@@ -4904,6 +4953,7 @@ private fun Detail(
         PageId.OPEN -> OpenSource(back)
         PageId.CONTRIBUTORS -> Contributors(back)
         PageId.REAR_SCREEN -> RearScreen(settings, update, musicWhitelist, updateMusicWhitelist, openPage, back)
+        PageId.REAR_MINI_PLAYER -> RearMiniPlayerPage(back)
         PageId.REAR_CUSTOM_CENTER -> CustomRearScreenCenter(back)
         PageId.REAR_MUSIC_APPS -> RearMusicApps(musicWhitelist, updateMusicWhitelist, back)
         PageId.REAR_SWIPE_APP -> RearSwipeAppPicker(back)
@@ -9049,6 +9099,7 @@ private fun LockscreenShortcutBackgroundPage(back: () -> Unit) {
 @Composable
 private fun SoftGlassMaterialSliders(
     glass: SoftGlassSettings,
+    includeBackdrop: Boolean = true,
     onChange: ((SoftGlassSettings) -> SoftGlassSettings) -> Unit,
 ) {
     Column {
@@ -9056,9 +9107,11 @@ private fun SoftGlassMaterialSliders(
         softGlassParameters.filter { it.key != "darker" }.forEach { definition ->
             ParameterIntSlide(tr(definition.title, definition.title), glass.adjustments[definition.key] ?: if (definition.key == "darker") -100 else 0, definition.adjustmentRange, "%", if (definition.key == "darker") -100 else 0) { value -> onChange { it.copy(adjustments = it.adjustments + (definition.key to value)) } }
         }
-        ParameterIntSlide(tr("softGlassBackgroundBlur", "背景模糊度"), glass.backgroundBlur, 0..200, "%", 100) { value -> onChange { it.copy(backgroundBlur = value) } }
-        ParameterIntSlide(tr("softGlassBackgroundScale", "背景缩放程度"), glass.backgroundScale, 0..200, "%", 100) { value -> onChange { it.copy(backgroundScale = value) } }
-        ParameterIntSlide(tr("背景不透明度", "背景不透明度"), glass.backgroundOpacity, 0..200, "%", 100) { value -> onChange { it.copy(backgroundOpacity = value) } }
+        if (includeBackdrop) {
+            ParameterIntSlide(tr("softGlassBackgroundBlur", "背景模糊度"), glass.backgroundBlur, 0..200, "%", 100) { value -> onChange { it.copy(backgroundBlur = value) } }
+            ParameterIntSlide(tr("softGlassBackgroundScale", "背景缩放程度"), glass.backgroundScale, 0..200, "%", 100) { value -> onChange { it.copy(backgroundScale = value) } }
+            ParameterIntSlide(tr("背景不透明度", "背景不透明度"), glass.backgroundOpacity, 0..200, "%", 100) { value -> onChange { it.copy(backgroundOpacity = value) } }
+        }
         ParameterIntSlide(tr("压暗强度", "压暗强度"), glass.adjustments["darker"] ?: -100, -100..200, "%", -100) { value -> onChange { it.copy(adjustments = it.adjustments + ("darker" to value)) } }
     }
 }

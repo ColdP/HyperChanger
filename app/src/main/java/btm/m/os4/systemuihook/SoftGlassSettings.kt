@@ -44,8 +44,8 @@ internal class SoftGlassRuntimeSettings(private val preferences: SharedPreferenc
     init { preferences.registerOnSharedPreferenceChangeListener(listener) }
 }
 
-internal class SoftGlassSettingsStore(private val local: SharedPreferences) {
-    constructor(context: Context) : this(context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE))
+internal class SoftGlassSettingsStore(private val local: SharedPreferences, private val onGlassChanged: () -> Unit = {}) {
+    constructor(context: Context) : this(context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE), { stageGlobalHomeGlass(context) })
     var settings = readSoftGlassSettings(local); private set
     var presets = SoftGlassPresetCodec.decodeLibrary(local.getString(KEY_SOFT_GLASS_PRESETS, "[]") ?: "[]"); private set
     var appliedPresetId: String? = local.getString(KEY_SOFT_GLASS_APPLIED_PRESET, null); private set
@@ -73,18 +73,21 @@ internal class SoftGlassSettingsStore(private val local: SharedPreferences) {
         write(remote)
         writePresets(local)
         writePresets(remote)
+        onGlassChanged()
     }
 
     fun update(service: XposedService?, transform: (SoftGlassSettings) -> SoftGlassSettings) {
         settings = transform(readSoftGlassSettings(local)).normalized()
         write(local)
         service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.let(::write)
+        onGlassChanged()
     }
 
     fun applyPreset(service: XposedService?, preset: SoftGlassPreset): SoftGlassSettings {
         settings = preset.applyTo(settings)
         write(local)
         service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.let(::write)
+        onGlassChanged()
         return settings
     }
 

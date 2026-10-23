@@ -90,10 +90,11 @@ internal fun syncHomeRecentsNativeConfig(
     materialSettings: HomeMaterialSettings = HomeMaterialSettings(),
     nativeDock: HomeNativeDockSettings = HomeNativeDockSettings(),
     multiSplitSettings: HomeMultiSplitSettings = HomeMultiSplitSettings(),
+    fullGlass: HomeGlassNativeSettings = HomeGlassNativeSettings(),
 ) {
     val dataDir = param.applicationInfo.dataDir ?: return
     val target = File(dataDir, "files/hyperpatch.bin")
-    val blob = buildHomeLauncherBlob(settings.clearMode.value, folderSettings.effectiveColumns, folderSettings.rowSpacing, folderSettings.rowSpacingEnabled, materialSettings, nativeDock, multiSplitSettings.enabled)
+    val blob = buildHomeLauncherBlob(settings.clearMode.value, folderSettings.effectiveColumns, folderSettings.rowSpacing, folderSettings.rowSpacingEnabled, materialSettings, nativeDock, multiSplitSettings.enabled, fullGlass)
     runCatching {
         target.parentFile?.mkdirs()
         val temp = File(target.parentFile, "${target.name}.tmp")
@@ -123,7 +124,8 @@ internal fun stageHomeRecentsNativeConfig(
     ),
     multiSplitSettings: HomeMultiSplitSettings = readLocalHomeMultiSplitSettings(context),
 ): Boolean = runCatching {
-    val blob = buildHomeLauncherBlob(settings.clearMode.value, folderSettings.effectiveColumns, folderSettings.rowSpacing, folderSettings.rowSpacingEnabled, materialSettings, nativeDock, multiSplitSettings.enabled)
+    val blob = buildHomeLauncherBlob(settings.clearMode.value, folderSettings.effectiveColumns, folderSettings.rowSpacing, folderSettings.rowSpacingEnabled, materialSettings, nativeDock, multiSplitSettings.enabled,
+        resolveHomeGlassNativeSettings(context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE)))
     // The Rust launcher cannot reliably read /data/adb, and its native startup
     // can precede Java package callbacks. Stage the complete config directly in
     // its own data directory with the launcher's UID and SELinux file context.

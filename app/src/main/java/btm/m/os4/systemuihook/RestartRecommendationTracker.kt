@@ -23,7 +23,9 @@ internal class RestartRecommendationTracker(
             val changedKeys = (snapshot.keys + current.keys).filter { snapshot[it] != current[it] }
             snapshot = current
             if (!ignoringChanges) {
-                val scopes = changedKeys.flatMap { restartScopesForPreference(group, it) }.toSet()
+                val scopes = changedKeys.flatMap { restartScopesForPreference(group, it) }.toMutableSet()
+                if (group == REMOTE_PREFERENCE_GROUP && changedKeys.any { it.startsWith("soft_glass_parameters_v3_") }
+                    && homeGlassFollowsGlobal(prefs)) scopes += ScopeApplication.DESKTOP
                 if (scopes.isNotEmpty()) onChanged(scopes)
             }
         }
@@ -88,6 +90,9 @@ internal fun restartScopesForPreference(group: String, key: String): Set<ScopeAp
         key.startsWith("super_xiaoai_") -> setOf(ScopeApplication.SUPER_XIAOAI_IME)
         key == KEY_REAR_SCREEN_LEFT_SWIPE_ENABLED || key == KEY_REAR_SCREEN_LEFT_SWIPE_PACKAGE ->
             setOf(ScopeApplication.SUBSCREEN_CENTER)
+        key == KEY_REAR_MINI_PLAYER_ENABLED -> setOf(ScopeApplication.NETEASE_MUSIC, ScopeApplication.SUBSCREEN_CENTER)
+        // Framework scope is not an app restart target; the page requests a manual reboot.
+        key == KEY_REAR_MINI_PLAYER_ALLOW_ALL_ACTIVITIES -> emptySet()
         key == "rear_screen_theme_apply_fix" || key.startsWith("rear_wallpaper_limit_") ->
             setOf(ScopeApplication.THEME_MANAGER)
         key.startsWith("rear_") || key.contains("rear_screen") || key.contains("subscreen") ->

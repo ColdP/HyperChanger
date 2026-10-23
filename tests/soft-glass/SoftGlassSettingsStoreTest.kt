@@ -8,6 +8,7 @@ const val REMOTE_PREFERENCE_GROUP = "hyper_system_ui_hook"
 
 /** Exercise separate page stores and a stale remote snapshot using the real store. */
 internal fun testPresetPersistence() {
+    testHomeGlass()
     testLockscreenCapsuleGlass()
     testLockscreenShortcutBackground()
     testControlCenterRadius()
@@ -132,7 +133,7 @@ private fun testLockscreenShortcutBackground() {
     check(store.settings.glass == custom && store.settings.backgroundMode == 3) { "Stale remote data must not replace saved local parameters" }
 }
 
-private fun memoryPreferences(values: MutableMap<String, Any>): SharedPreferences {
+internal fun memoryPreferences(values: MutableMap<String, Any>): SharedPreferences {
     return Proxy.newProxyInstance(SharedPreferences::class.java.classLoader, arrayOf(SharedPreferences::class.java)) { _, method, args ->
         when (method.name) {
             "contains" -> values.containsKey(args!![0])
