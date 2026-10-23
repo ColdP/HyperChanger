@@ -23,44 +23,25 @@ jobs:
           distribution: temurin
           cache: gradle
 
-      - name: Setup Android SDK tools
-        uses: android-actions/setup-android@v4
+      - name: Install Android NDK r28c
+        uses: android-actions/setup-android@v3
         with:
-          packages: ''
+          packages: 'ndk;28.2.13676358'
 
-      - name: Install Android SDK packages
+      - name: Verify Android NDK
         shell: bash
         run: |
           set -euo pipefail
-          sdkmanager --install \
-            "platform-tools" \
-            "platforms;android-37" \
-            "cmake;3.22.1" \
-            "ndk;28.2.13676358"
-
-      - name: Verify Android SDK, CMake, and NDK
-        shell: bash
-        run: |
-          set -euo pipefail
-
+          echo "ANDROID_HOME=${ANDROID_HOME:-}"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-}"
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
           if [ -z "$SDK_ROOT" ]; then
             echo "Android SDK path is not set."
             exit 1
           fi
-
           NDK_DIR="$SDK_ROOT/ndk/28.2.13676358"
-          CMAKE_DIR="$SDK_ROOT/cmake/3.22.1"
-
           test -f "$NDK_DIR/source.properties"
-          test -x "$CMAKE_DIR/bin/cmake"
-          test -d "$SDK_ROOT/platforms/android-37"
-
-          echo "NDK version:"
-          grep -E '^(Pkg.Desc|Pkg.Revision)' "$NDK_DIR/source.properties"
-
-          echo "CMake version:"
-          "$CMAKE_DIR/bin/cmake" --version
+          cat "$NDK_DIR/source.properties"
 
       - name: Configure project NDK path
         shell: bash
@@ -68,26 +49,16 @@ jobs:
           set -euo pipefail
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
           NDK_DIR="$SDK_ROOT/ndk/28.2.13676358"
-
           mkdir -p .build-tmp
           rm -rf .build-tmp/android-ndk-r28c
           ln -s "$NDK_DIR" .build-tmp/android-ndk-r28c
-
           test -f .build-tmp/android-ndk-r28c/source.properties
-          readlink -f .build-tmp/android-ndk-r28c
 
       - name: Grant execute permission for gradlew
-        run: chmod +x ./gradlew
+        run: chmod +x gradlew
 
-      - name: Build Debug APK
+      - name: Build with Gradle
         run: ./gradlew --no-daemon --stacktrace assembleDebug
-
-      - name: Verify APK output
-        shell: bash
-        run: |
-          set -euo pipefail
-          find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print -quit | grep -q .
-          ls -lh app/build/outputs/apk/debug/*.apk
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
