@@ -9,14 +9,8 @@ import io.github.libxposed.service.XposedService
 internal const val KEY_ALLOW_ALL_NOTIFICATIONS_ON_LOCKSCREEN = "allow_all_notifications_on_lockscreen"
 internal const val KEY_DISABLE_MEDIA_ISLAND_BOTTOM_GLOW = "disable_media_island_bottom_glow"
 internal const val KEY_DISABLE_NOTIFICATION_HISTORY_FOLDING = "disable_notification_history_folding"
-internal const val KEY_EXPANDED_ISLAND_BACKGROUND_BLUR_RADIUS = "expanded_island_background_blur_radius"
 internal const val KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED = "expanded_island_background_enabled"
 internal const val KEY_EXPANDED_ISLAND_BACKGROUND_OPACITY = "expanded_island_background_opacity"
-internal const val KEY_EXPANDED_ISLAND_GLASS_BLUR_RADIUS = "expanded_island_glass_blur_radius"
-internal const val KEY_EXPANDED_ISLAND_GLASS_LARGE_BLUR_RADIUS = "expanded_island_glass_large_blur_radius"
-internal const val KEY_EXPANDED_ISLAND_GLASS_REFLECTION = "expanded_island_glass_reflection"
-internal const val KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS = "expanded_island_self_blur_radius"
-internal const val KEY_EXPANDED_ISLAND_SHOW_HIGHLIGHT = "expanded_island_show_highlight"
 internal const val KEY_FORCE_ALL_NOTIFICATIONS_HEADS_UP = "force_all_notifications_heads_up"
 internal const val KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS = "heads_up_notification_soft_glass"
 internal const val KEY_HIDE_MEDIA_ISLAND_SOURCE_ICON = "hide_media_island_source_icon"
@@ -47,12 +41,6 @@ data class NotificationIslandSettings(
     val hideNotificationMiniWindowBar: Boolean = false,
     val expandedIslandBackgroundEnabled: Boolean = false,
     val expandedIslandBackgroundOpacity: Int = 97,
-    val expandedIslandBackgroundBlurRadius: Int = 40,
-    val expandedIslandGlassReflection: Int = 0,
-    val expandedIslandGlassBlurRadius: Int = 110,
-    val expandedIslandGlassLargeBlurRadius: Int = 110,
-    val expandedIslandSelfBlurRadius: Int = 0,
-    val expandedIslandShowHighlight: Boolean = false,
     val disableMediaIslandBottomGlow: Boolean = false,
     val hideSystemMediaSourceIcon: Boolean = false,
     val hideMediaIslandSourceIcon: Boolean = false,
@@ -83,19 +71,6 @@ internal fun SharedPreferences.toNotificationIslandSettings() = NotificationIsla
     hideNotificationMiniWindowBar = getBoolean(KEY_HIDE_NOTIFICATION_MINI_WINDOW_BAR, false),
     expandedIslandBackgroundEnabled = getBoolean(KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED, false),
     expandedIslandBackgroundOpacity = getInt(KEY_EXPANDED_ISLAND_BACKGROUND_OPACITY, 97).coerceIn(0, 100),
-    expandedIslandBackgroundBlurRadius = getInt(
-        KEY_EXPANDED_ISLAND_BACKGROUND_BLUR_RADIUS,
-        maxOf(
-            getInt(KEY_EXPANDED_ISLAND_GLASS_BLUR_RADIUS, 40),
-            getInt(KEY_EXPANDED_ISLAND_GLASS_LARGE_BLUR_RADIUS, 40),
-            getInt(KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS, 0),
-        ),
-    ).coerceIn(0, 120),
-    expandedIslandGlassReflection = getInt(KEY_EXPANDED_ISLAND_GLASS_REFLECTION, 0).coerceIn(0, 100),
-    expandedIslandGlassBlurRadius = getInt(KEY_EXPANDED_ISLAND_GLASS_BLUR_RADIUS, 40).coerceIn(0, 120),
-    expandedIslandGlassLargeBlurRadius = getInt(KEY_EXPANDED_ISLAND_GLASS_LARGE_BLUR_RADIUS, 40).coerceIn(0, 120),
-    expandedIslandSelfBlurRadius = getInt(KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS, 0).coerceIn(0, 120),
-    expandedIslandShowHighlight = getBoolean(KEY_EXPANDED_ISLAND_SHOW_HIGHLIGHT, false),
     disableMediaIslandBottomGlow = getBoolean(KEY_DISABLE_MEDIA_ISLAND_BOTTOM_GLOW, false),
     hideSystemMediaSourceIcon = getBoolean(KEY_HIDE_SYSTEM_MEDIA_SOURCE_ICON, false),
     hideMediaIslandSourceIcon = getBoolean(KEY_HIDE_MEDIA_ISLAND_SOURCE_ICON, false),
@@ -157,12 +132,6 @@ class NotificationIslandSettingsStore(context: Context) {
         .putBoolean(KEY_HIDE_NOTIFICATION_MINI_WINDOW_BAR, settings.hideNotificationMiniWindowBar)
         .putBoolean(KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED, settings.expandedIslandBackgroundEnabled)
         .putInt(KEY_EXPANDED_ISLAND_BACKGROUND_OPACITY, settings.expandedIslandBackgroundOpacity)
-        .putInt(KEY_EXPANDED_ISLAND_BACKGROUND_BLUR_RADIUS, settings.expandedIslandBackgroundBlurRadius)
-        .putInt(KEY_EXPANDED_ISLAND_GLASS_REFLECTION, settings.expandedIslandGlassReflection)
-        .putInt(KEY_EXPANDED_ISLAND_GLASS_BLUR_RADIUS, settings.expandedIslandGlassBlurRadius)
-        .putInt(KEY_EXPANDED_ISLAND_GLASS_LARGE_BLUR_RADIUS, settings.expandedIslandGlassLargeBlurRadius)
-        .putInt(KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS, settings.expandedIslandSelfBlurRadius)
-        .putBoolean(KEY_EXPANDED_ISLAND_SHOW_HIGHLIGHT, settings.expandedIslandShowHighlight)
         .putBoolean(KEY_DISABLE_MEDIA_ISLAND_BOTTOM_GLOW, settings.disableMediaIslandBottomGlow)
         .putBoolean(KEY_HIDE_SYSTEM_MEDIA_SOURCE_ICON, settings.hideSystemMediaSourceIcon)
         .putBoolean(KEY_HIDE_MEDIA_ISLAND_SOURCE_ICON, settings.hideMediaIslandSourceIcon)

@@ -10,6 +10,7 @@ const val REMOTE_PREFERENCE_GROUP = "hyper_system_ui_hook"
 internal fun testPresetPersistence() {
     testHomeGlass()
     testLockscreenCapsuleGlass()
+    testExpandedIslandGlass()
     testLockscreenShortcutBackground()
     testControlCenterRadius()
     testVolumePanelLayout()
@@ -235,4 +236,64 @@ private fun testVolumePanelLayout() {
     VolumePanelLayoutPreferences.write(local, custom.copy(width = 999, height = -999, corner = 999))
     check(VolumePanelLayoutPreferences.read(local).let { it.width == 60 && it.height == -64 && it.corner == 80 })
     check(volumePanelLayoutDimensionDp("unrelated", 24f, custom) == null)
+}
+
+private fun testExpandedIslandGlass() {
+    val disk = mutableMapOf<String, Any>(
+        "expanded_island_background_blur_radius" to 120,
+        "expanded_island_glass_reflection" to 100,
+        "expanded_island_show_highlight" to true,
+        "soft_glass_parameters_v3_enabled" to false,
+        "soft_glass_parameters_v3_refraction_blur_percent" to 75,
+        "soft_glass_parameters_v3_refraction" to 60,
+        "soft_glass_parameters_v3_blur_percent" to 25,
+        "soft_glass_parameters_v3_scale_percent" to 15,
+        "soft_glass_parameters_v3_opacity_percent" to 0,
+    )
+    val local = memoryPreferences(disk)
+    val store = ExpandedIslandGlassSettingsStore(local)
+    check(store.settings.glass.refractionBlur == 100)
+    check(store.settings.glass.adjustments["darker"] == -100)
+    check(store.settings.glass.adjustments["refraction"] == 0)
+    val selected = store.settings.glass.copy(refractionBlur = 150,
+        adjustments = softGlassParameters.associate { it.key to if (it.key == "darker") -100 else 50 })
+    store.update(null) { it.copy(glass = selected) }
+    store.update(null) { it.copy(useGlobal = true) }
+    val staleRemote = memoryPreferences(mutableMapOf(EXPANDED_ISLAND_GLASS_PREFIX + "refraction_blur" to 10))
+    store.syncPreferences(staleRemote)
+    check(readExpandedIslandGlassSettings(staleRemote) == store.settings)
+    val global = resolveExpandedIslandGlass(local)
+    check(global.enabled && global.refractionBlur == 75 && global.adjustments["refraction"] == 60)
+    check(global.backgroundBlur == 100 && global.backgroundScale == 100 && global.backgroundOpacity == 100)
+    check(!readSoftGlassSettings(local).enabled) { "Following global must not enable its master switch" }
+    val reopened = ExpandedIslandGlassSettingsStore(local)
+    reopened.update(null) { it.copy(useGlobal = false) }
+    check(reopened.settings.glass == selected) { "Global selection must preserve custom values" }
+    val custom = resolveExpandedIslandGlass(local)
+    check(custom == selected.copy(enabled = true))
+    val fresh = ExpandedIslandGlassSettingsStore(memoryPreferences(mutableMapOf()))
+    fresh.syncPreferences(staleRemote)
+    check(fresh.settings.useGlobal && fresh.settings.glass == selected)
+    fresh.update(null) { it.copy(glass = it.glass.copy(refractionBlur = 999,
+        backgroundBlur = 0, backgroundScale = 0, backgroundOpacity = 0,
+        adjustments = it.glass.adjustments + ("edge_feather" to 999))) }
+    check(fresh.settings.glass.refractionBlur == 200 && fresh.settings.glass.adjustments["edge_feather"] == 100)
+    check(fresh.settings.glass.backgroundBlur == 100 && fresh.settings.glass.backgroundScale == 100 && fresh.settings.glass.backgroundOpacity == 100)
+    val keys = disk.keys.filter { it.startsWith(EXPANDED_ISLAND_GLASS_PREFIX) }
+    check(keys.size == 17) { "Store only fifteen controls plus selection/enabled metadata" }
+    // 18.3.2.22.0 EXPANDED_GLASS_TOKEN, padded exactly as getToBionicsParams().
+    val original = floatArrayOf(0f, 2f, .5f, .8f, .15f, 2.4f, .3f, .2f,
+        0f, 0f, 0f, .06f, .06f, .06f, .6f, .15f, .4f, 1.36f, 1f,
+        72f, 3.8f, 80f, 1000f, 1.2f, .6f, -.4f, .6f, -.8f, 1.8f,
+        1.2f, 1f, 1.1764706f, 3f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f)
+    val saved = original.copyOf()
+    val tuned = tuneExpandedIslandGlass(original, 50, custom)
+    check(kotlin.math.abs(tuned[14] - .45f) < .00001f) { "Opacity must compose with the optical alpha slider" }
+    val globalMapping = tuneSoftGlass(original, custom)
+    for (i in original.indices) if (i != 14) check(tuned[i] == globalMapping[i])
+    repeat(100) { check(tuneExpandedIslandGlass(original, 50, custom).contentEquals(tuned)) }
+    check(original.contentEquals(saved)) { "Never mutate the shared native token" }
+    check(tuneExpandedIslandGlass(original, 0, custom)[14] == 0f)
+    check(softGlassBlur(50, custom.refractionBlur) == 75)
+    check(softGlassBlur(0, custom.refractionBlur) == 0)
 }

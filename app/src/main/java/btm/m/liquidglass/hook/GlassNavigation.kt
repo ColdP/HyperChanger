@@ -165,7 +165,7 @@ private class NativeViewMiuixBackdrop(
 }
 
 @Composable
-fun CustomNavigation(
+internal fun CustomNavigation(
     sourceView: View,
     tabs: List<HostTab>,
     selectedIndex: MutableIntState,
@@ -231,7 +231,7 @@ fun CustomNavigation(
                 trailingAction = trailingAction,
                 suppressFloatingShadow = suppressFloatingShadow,
                 floatingShadow = floatingShadow,
-                softBackdropShadow = softBackdropShadow
+                softBackdropShadow = softBackdropShadow,
             )
         }
         return
@@ -1364,7 +1364,9 @@ private fun HyperFloatingNavigationBar(
                                 drawRect(containerSurface)
                             },
                         )
-                    } else Modifier.clip(capsule).background(fallbackSurface)
+                    } else {
+                        Modifier.clip(capsule).background(fallbackSurface)
+                    }
                 )
         )
         Box(Modifier.fillMaxSize().padding(innerPadding)) {

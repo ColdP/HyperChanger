@@ -145,6 +145,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import btm.m.liquidglass.LabelMode
+import btm.m.liquidglass.NavigationStyle
 import btm.m.liquidglass.ScopedSettings
 import btm.m.liquidglass.hook.DampedDragAnimation
 import btm.m.liquidglass.hook.CustomNavigation
@@ -285,7 +286,7 @@ private enum class PageId {
     SOFT_GLASS_PRESETS,
     IOS_NOTIFICATION_CLOCK_GLASS,
     GESTURE_HANDLE_STYLE, DESKTOP, DESKTOP_MATERIAL,
-    ISLAND, ISLAND_COLLAPSED, ISLAND_EXPANDED, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_HEADER_SETTINGS, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_ADJUSTMENT, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LOCKSCREEN_SHORTCUT_BACKGROUND, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
+    ISLAND, ISLAND_COLLAPSED, ISLAND_EXPANDED, ISLAND_EXPANDED_BACKGROUND, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_HEADER_SETTINGS, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_ADJUSTMENT, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LOCKSCREEN_SHORTCUT_BACKGROUND, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
     SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND,
@@ -533,6 +534,7 @@ private fun Root(
     var languageRevision by remember { mutableIntStateOf(0) }
     var userPresets by remember { mutableStateOf(hooks.userShadePresets()) }
     val context = LocalContext.current
+    val globalSoftGlassStore = remember(context) { SoftGlassSettingsStore(context) }
     val oobePreferences = remember { context.getSharedPreferences("oobe", Context.MODE_PRIVATE) }
     var showOobe by remember {
         // OOBE is a one-time acknowledgement. Keep recognizing the legacy
@@ -867,7 +869,7 @@ private fun Root(
         service?.let {
             restartTracker.withoutTracking {
                 hooks.syncRemote(it)
-                SoftGlassSettingsStore(context).syncRemote(it)
+                globalSoftGlassStore.syncRemote(it)
                 VolumePanelGlassSettingsStore(context).syncRemote(it)
                 VolumePanelLayoutSettingsStore(context).syncRemote(it)
                 NotificationTextColorSettingsStore(context).syncRemote(it)
@@ -886,6 +888,7 @@ private fun Root(
                 StatusBarIconSpacingSettingsStore(context).syncRemote(it)
                 StatusBarIconImportStore(context).syncRemote(it)
                 NotificationIslandSettingsStore(context).syncRemote(it)
+                ExpandedIslandGlassSettingsStore(context).syncRemote(it)
                 NotificationStackBlurSettingsStore(context).syncRemote(it)
                 ControlCenterHeaderHeightSettingsStore(context).syncRemote(it)
                 IosNotificationBottomOffsetSettingsStore(context).syncRemote(it)
@@ -2853,16 +2856,17 @@ private fun SettingsHome(
                     selectedIndex = listOf("system", "light", "dark").indexOf(settings.themeMode).coerceAtLeast(0),
                     onSelectedIndexChange = { i -> update { it.copy(themeMode = listOf("system", "light", "dark")[i]) } }
                 )
-OverlayDropdownPreference(
+                val navigationStyles = listOf(
+                    NavigationStyle.HYPER_OS_FLOATING,
+                    NavigationStyle.HYPER_OS,
+                    NavigationStyle.HARMONY_OS_FLOATING,
+                    NavigationStyle.LIQUID_GLASS,
+                )
+                OverlayDropdownPreference(
                     title = tr("navigation_style", tr("\u5e95\u90e8\u5bfc\u822a\u680f\u6837\u5f0f", "\u5e95\u90e8\u5bfc\u822a\u680f\u6837\u5f0f")),
-                    items = listOf(
-                        tr("hyperos_bar", tr("HyperOS 底栏", "HyperOS 底栏")),
-                        tr("hyperos_floating_bar", tr("HyperOS 悬浮底栏", "HyperOS 悬浮底栏")),
-                        tr("harmonyos_floating_bar", tr("HarmonyOS 悬浮底栏", "HarmonyOS 悬浮底栏")),
-                        tr("liquid_glass_bar", tr("液态玻璃底栏", "液态玻璃底栏")),
-                    ),
-                    selectedIndex = listOf("hyper_os", "hyper_os_floating", "harmony_os_floating", "liquid_glass").indexOf(navigationSettings.style).coerceAtLeast(0),
-                    onSelectedIndexChange = { i -> updateNavigation { it.copy(style = listOf("hyper_os", "hyper_os_floating", "harmony_os_floating", "liquid_glass")[i]) } }
+                    items = navigationStyles.map { style -> tr(style.displayName, style.displayName) },
+                    selectedIndex = navigationStyles.indexOfFirst { it.preferenceValue == navigationSettings.style }.coerceAtLeast(0),
+                    onSelectedIndexChange = { i -> updateNavigation { it.copy(style = navigationStyles[i].preferenceValue) } }
                 )
                 OverlayDropdownPreference(
                     title = tr("\u5e95\u90e8\u5bfc\u822a\u680f\u6807\u7b7e\u663e\u793a\u65b9\u5f0f", "\u5e95\u90e8\u5bfc\u822a\u680f\u6807\u7b7e\u663e\u793a\u65b9\u5f0f"),
@@ -4911,7 +4915,8 @@ private fun Detail(
         PageId.GESTURE_HANDLE_STYLE -> GestureHandleStylePage(back)
         PageId.ISLAND -> Island(openPage, onRequestNotificationPermission, back)
         PageId.ISLAND_COLLAPSED -> IslandCollapsedPage(back)
-        PageId.ISLAND_EXPANDED -> IslandExpandedPage(back)
+        PageId.ISLAND_EXPANDED -> IslandExpandedPage(openPage, back)
+        PageId.ISLAND_EXPANDED_BACKGROUND -> IslandExpandedBackgroundPage(back)
         PageId.IOS_NOTIFICATION_CENTER -> IosNotificationCenterPage(openPage, back)
         PageId.IOS_NOTIFICATION_HEADER_SETTINGS -> IosNotificationHeaderSettingsPage(back)
         PageId.IOS_NOTIFICATION_CLOCK_GLASS -> IosNotificationClockGlassPage(back)
@@ -7670,7 +7675,7 @@ private fun IslandCollapsedPage(back: () -> Unit) = AppPage(
 }
 
 @Composable
-private fun IslandExpandedPage(back: () -> Unit) = AppPage(
+private fun IslandExpandedPage(openPage: (PageId) -> Unit, back: () -> Unit) = AppPage(
     tr("islandExpandedPage", "超级岛展开态"),
     back,
     restartScopes = setOf(ScopeApplication.SYSTEM_UI),
@@ -7680,7 +7685,7 @@ private fun IslandExpandedPage(back: () -> Unit) = AppPage(
         item {
             Group(tr("islandExpandedBackgroundGroup", "背景")) {
                 SwitchPreference(
-                    title = tr("展开态下的超级岛背景调整", "展开态下的超级岛背景调整"),
+                    title = tr("超级岛展开态背景调整", "超级岛展开态背景调整"),
                     checked = s.expandedIslandBackgroundEnabled,
                     onCheckedChange = { enabled -> update { it.copy(expandedIslandBackgroundEnabled = enabled) } },
                 )
@@ -7689,34 +7694,10 @@ private fun IslandExpandedPage(back: () -> Unit) = AppPage(
                     enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
                     exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
                 ) {
-                    Column {
-                        ParameterIntSlide(
-                            tr("背景不透明度", "背景不透明度"),
-                            s.expandedIslandBackgroundOpacity,
-                            0..100,
-                            "%",
-                            defaultValue = 97,
-                        ) { value -> update { it.copy(expandedIslandBackgroundOpacity = value) } }
-                        ParameterIntSlide(
-                            tr("背景模糊度", "背景模糊度"),
-                            s.expandedIslandBackgroundBlurRadius,
-                            0..120,
-                            " px",
-                            defaultValue = 40,
-                        ) { value -> update { it.copy(expandedIslandBackgroundBlurRadius = value) } }
-                        ParameterIntSlide(
-                            tr("玻璃反射强度", "玻璃反射强度"),
-                            s.expandedIslandGlassReflection,
-                            0..100,
-                            "%",
-                            defaultValue = 0,
-                        ) { value -> update { it.copy(expandedIslandGlassReflection = value) } }
-                        SwitchPreference(
-                            title = tr("显示高光", "显示高光"),
-                            checked = s.expandedIslandShowHighlight,
-                            onCheckedChange = { value -> update { it.copy(expandedIslandShowHighlight = value) } },
-                        )
-                    }
+                    ArrowPreference(
+                        title = tr("超级岛展开态背景参数", "超级岛展开态背景参数"),
+                        onClick = { openPage(PageId.ISLAND_EXPANDED_BACKGROUND) },
+                    )
                 }
             }
         }
@@ -7745,6 +7726,55 @@ private fun IslandExpandedPage(back: () -> Unit) = AppPage(
                     checked = s.disableMediaIslandBottomGlow,
                     onCheckedChange = { value -> update { it.copy(disableMediaIslandBottomGlow = value) } },
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun IslandExpandedBackgroundPage(back: () -> Unit) {
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    val store = remember(context) { ExpandedIslandGlassSettingsStore(context) }
+    var state by remember { mutableStateOf(store.settings) }
+    val changed = LocalNotificationSettingsChanged.current
+    val (s, update) = rememberNotificationIslandSettings()
+    LaunchedEffect(service) { service?.let { store.syncRemote(it); state = store.settings } }
+    fun updateGlass(transform: (ExpandedIslandGlassSettings) -> ExpandedIslandGlassSettings) {
+        store.update(service, transform)
+        state = store.settings
+        changed()
+    }
+    AppPage(tr("超级岛展开态背景参数", "超级岛展开态背景参数"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI)) { p, scroll ->
+        AppList(p, scroll, 28) {
+            item {
+                Group(tr("柔光玻璃", "柔光玻璃")) {
+                    SwitchPreference(
+                        title = tr("使用全局柔光玻璃参数", "使用全局柔光玻璃参数"),
+                        checked = state.useGlobal,
+                        onCheckedChange = { value -> updateGlass { it.copy(useGlobal = value) } },
+                    )
+                    AnimatedVisibility(
+                        visible = !state.useGlobal,
+                        enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                        exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                    ) {
+                        SoftGlassMaterialSliders(state.glass, includeBackdrop = false) { transform ->
+                            updateGlass { it.copy(glass = transform(it.glass)) }
+                        }
+                    }
+                }
+            }
+            item {
+                Group(tr("islandExpandedBackgroundGroup", "背景")) {
+                    ParameterIntSlide(
+                        tr("背景不透明度", "背景不透明度"),
+                        s.expandedIslandBackgroundOpacity,
+                        0..100,
+                        "%",
+                        defaultValue = 97,
+                    ) { value -> update { it.copy(expandedIslandBackgroundOpacity = value) } }
+                }
             }
         }
     }

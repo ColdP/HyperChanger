@@ -3,6 +3,8 @@
   "creator": "btm_m",
   "locale": "en",
   "strings": {
+    "超级岛展开态背景调整": "超级岛展开态背景调整",
+    "超级岛展开态背景参数": "超级岛展开态背景参数",
     "腾讯会议": "腾讯会议",
     "会议": "会议",
     "通讯录": "通讯录",
@@ -906,7 +908,6 @@
     "暂无保存的用户预设": "No saved user presets",
     "暂无已添加的应用": "No apps added yet",
     "暂无预览": "No preview yet",
-    "展开态下的超级岛背景调整": "Super Island Background Adjustment in Expanded State",
     "站立": "standing",
     "折射偏移": "Refraction Offset",
     "至少选择 2 个素材": "Select at least 2 assets",

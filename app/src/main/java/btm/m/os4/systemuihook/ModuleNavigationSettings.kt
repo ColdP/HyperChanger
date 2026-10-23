@@ -8,7 +8,7 @@ import io.github.libxposed.service.XposedService
 
 /** Module-app-only navigation preferences kept outside HookSettings. */
 data class ModuleNavigationSettings(
-    val style: String = NavigationStyle.HYPER_OS.preferenceValue,
+    val style: String = NavigationStyle.HYPER_OS_FLOATING.preferenceValue,
     val labelMode: String = LabelMode.ICON_AND_TEXT.preferenceValue,
 )
 
@@ -36,7 +36,7 @@ class ModuleNavigationSettingsStore(context: Context) {
     }
 
     private fun SharedPreferences.read() = ModuleNavigationSettings(
-        style = NavigationStyle.fromPreference(getString(KEY_NAVIGATION_STYLE, NavigationStyle.HYPER_OS.preferenceValue)).preferenceValue,
+        style = NavigationStyle.fromPreference(getString(KEY_NAVIGATION_STYLE, NavigationStyle.DEFAULT_VALUE)).preferenceValue,
         labelMode = LabelMode.fromPreference(getString(KEY_NAVIGATION_LABEL_MODE, LabelMode.ICON_AND_TEXT.preferenceValue)).preferenceValue,
     )
 

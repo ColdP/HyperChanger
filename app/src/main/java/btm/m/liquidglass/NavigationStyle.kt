@@ -10,7 +10,7 @@ enum class NavigationStyle(val preferenceValue: String, val displayName: String)
 
     companion object {
         const val PREFERENCE_KEY = "nav_style"
-        const val DEFAULT_VALUE = "hyper_os"
+        const val DEFAULT_VALUE = "hyper_os_floating"
 
         @JvmStatic
         fun fromPreference(value: String?): NavigationStyle =

@@ -3224,7 +3224,7 @@ class HyperSystemUiModule : XposedModule() {
         installDynamicIslandExpandedMaterialHook(classLoader, preferences)
         systemUiHooks.installDynamicIslandBottomGlowHook(classLoader, preferences)
         systemUiHooks.installIslandSimulationGlowBridge(classLoader)
-        installDynamicIslandSelfBlurHook(classLoader, preferences)
+        installDynamicIslandGlassBlurHook(classLoader, preferences)
         installMediaSourceIconHooks(classLoader, preferences)
         systemUiHooks.installDynamicIslandMiniBarHook(classLoader, preferences)
         systemUiHooks.installDynamicIslandAppearanceHooks(classLoader, preferences)
@@ -3712,30 +3712,29 @@ class HyperSystemUiModule : XposedModule() {
     }
 
 
-    private fun installDynamicIslandSelfBlurHook(
-        classLoader: ClassLoader,
-        preferences: SharedPreferences,
-    ) {
+    private fun installDynamicIslandGlassBlurHook(classLoader: ClassLoader, preferences: SharedPreferences) {
         runCatching {
-            val blurClass = classLoader.loadClass(MI_BLUR_COMPAT_CLASS)
-            hook(blurClass.getMethod("setMiSelfBlur", View::class.java, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType))
-                .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("dynamic-island-self-blur")
-                .intercept { chain ->
+            val style = classLoader.loadClass(MI_BACKGROUND_STYLE_CLASS)
+            val method = style.getDeclaredMethod("setBackgroundBlurRadius", View::class.java,
+                Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+            hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("dynamic-island-glass-blur").intercept { chain ->
                     val view = chain.getArg(0) as? View
-                    if (view != null && isDynamicIslandView(view) &&
-                        preferences.getBoolean(KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED, false)
-                    ) {
-                        val radius = expandedIslandBlurRadius(preferences)
-                        chain.proceedWith(chain.thisObject, arrayOf(view, radius, chain.getArg(2)))
-                    } else {
-                        chain.proceed()
+                    if (view?.javaClass?.name != "miui.systemui.dynamicisland.window.DynamicIslandWindowView" ||
+                        !preferences.getBoolean(KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED, false)) return@intercept chain.proceed()
+                    val glass = resolveExpandedIslandGlass(preferences)
+                    expandedIslandMaterialApplying.set(true)
+                    try {
+                        // This target is static: replace arguments without replacing its null receiver.
+                        chain.proceed(arrayOf(view, chain.getArg(1),
+                            softGlassBlur(chain.getArg(2) as Int, glass.refractionBlur),
+                            softGlassBlur(chain.getArg(3) as Int, glass.refractionBlur)))
+                    } finally {
+                        expandedIslandMaterialApplying.remove()
                     }
                 }
-            log(Log.INFO, TAG, "Installed dynamic-island self-blur hook")
-        }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install dynamic-island self-blur hook", error)
-        }
+            log(Log.INFO, TAG, "Installed expanded-island glass blur hook")
+        }.onFailure { log(Log.WARN, TAG, "Could not install expanded-island glass blur hook", it) }
     }
 
     private fun installDynamicIslandExpandedMaterialHook(classLoader: ClassLoader, preferences: SharedPreferences) {
@@ -3744,45 +3743,50 @@ class HyperSystemUiModule : XposedModule() {
             val method = baseClass.getDeclaredMethod("updateBackgroundBg", View::class.java, Boolean::class.javaPrimitiveType).apply { isAccessible = true }
             val tokenField = baseClass.getDeclaredField("EXPANDED_GLASS_TOKEN").apply { isAccessible = true }
             hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE).setId("dynamic-island-expanded-native-material").intercept { chain ->
+                val view = chain.getArg(0) as? View
+                if (view != null) expandedIslandGlassSurfaces.add(view)
                 val result = chain.proceed()
-                applyExpandedIslandNativeMaterial(chain.getArg(0) as? View, tokenField.get(null), preferences, classLoader)
+                applyExpandedIslandNativeMaterial(view, tokenField.get(null), preferences, classLoader)
+                // The window owns the glass samples (50/500 in this plugin). Re-run its
+                // native update so edits and disabling take effect on the next expansion.
+                runCatching {
+                    val window = generateSequence(view) { it.parent as? View }.firstOrNull {
+                        it.javaClass.name == "miui.systemui.dynamicisland.window.DynamicIslandWindowView"
+                    } ?: return@runCatching
+                    val opened = classLoader.loadClass(MI_BLUR_COMPAT_CLASS)
+                        .getMethod("getBackgroundMaterialOpened", Context::class.java).invoke(null, window.context)
+                    window.javaClass.getMethod("updateWindowBlur", Boolean::class.javaPrimitiveType).invoke(window, opened)
+                }.onFailure { log(Log.DEBUG, TAG, "Could not refresh expanded-island glass samples", it) }
                 result
             }
             log(Log.INFO, TAG, "Installed 18.3 expanded-island material hook")
         }.onFailure { log(Log.WARN, TAG, "Could not install 18.3 expanded-island material hook", it) }
     }
 
+    private val expandedIslandMaterialApplying = ThreadLocal<Boolean>()
+    private val expandedIslandGlassSurfaces = Collections.synchronizedSet(
+        Collections.newSetFromMap(WeakHashMap<View, Boolean>()),
+    )
+
     private fun applyExpandedIslandNativeMaterial(view: View?, token: Any?, preferences: SharedPreferences, classLoader: ClassLoader) {
         if (view == null || token == null || !preferences.getBoolean(KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED, false)) return
-        val blur = expandedIslandBlurRadius(preferences)
         val opacity = preferences.getInt(KEY_EXPANDED_ISLAND_BACKGROUND_OPACITY, 97).coerceIn(0, 100)
-        val reflection = preferences.getInt(KEY_EXPANDED_ISLAND_GLASS_REFLECTION, 0).coerceIn(0, 100)
-        val highlight = preferences.getBoolean(KEY_EXPANDED_ISLAND_SHOW_HIGHLIGHT, false)
-        runCatching {
-            val style = classLoader.loadClass(MI_BACKGROUND_STYLE_CLASS)
-            val params = token.javaClass.getMethod("getToBionicsParams").invoke(token) as? FloatArray
-            if (params != null && params.size >= MIN_GLASS_PARAMS_SIZE) {
-                val tuned = params.clone()
-                tuned[GLASS_ALPHA_INDEX] = opacity / 100f
-                view.javaClass.getMethod("setMiGlass", FloatArray::class.java).invoke(view, tuned)
-            }
-            runCatching { view.javaClass.getMethod("setMiBackgroundBlurRadius", Int::class.javaPrimitiveType).invoke(view, blur) }
-            classLoader.loadClass(MIUI_BLUR_UTILS_CLASS).getMethod("setMiGlassBlurRadius", View::class.java, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
-                .invoke(null, view, blur, (blur * 10).coerceIn(0, 1200))
-            if (reflection > 0 || highlight) {
-                val bloom = (style.getDeclaredField("defaultBloomStrokeParams").apply { isAccessible = true }.get(null) as FloatArray).clone()
-                if (bloom.size > 1) bloom[1] *= if (reflection > 0) reflection / 100f else 1f
-                style.getMethod("setMiBloomStrokeCompat", View::class.java, FloatArray::class.java).invoke(null, view, bloom)
-            }
-            view.invalidate()
-        }.onFailure { log(Log.DEBUG, TAG, "Could not tune 18.3 expanded-island material", it) }
+        val glass = resolveExpandedIslandGlass(preferences)
+        expandedIslandMaterialApplying.set(true)
+        try {
+            runCatching {
+                val style = classLoader.loadClass(MI_BACKGROUND_STYLE_CLASS)
+                // Respect solid/classic modes and detached views just like the original method.
+                if (view.parent == null || style.getMethod("isBionicsActive", Context::class.java).invoke(null, view.context) != true) return@runCatching
+                val params = token.javaClass.getMethod("getToBionicsParams").invoke(token) as? FloatArray ?: return@runCatching
+                view.javaClass.getMethod("setMiGlass", FloatArray::class.java)
+                    .invoke(view, tuneExpandedIslandGlass(params, opacity, glass))
+                view.invalidate()
+            }.onFailure { log(Log.DEBUG, TAG, "Could not tune 18.3 expanded-island material", it) }
+        } finally {
+            expandedIslandMaterialApplying.remove()
+        }
     }
-
-    private fun expandedIslandBlurRadius(preferences: SharedPreferences): Int = preferences.getInt(
-        KEY_EXPANDED_ISLAND_BACKGROUND_BLUR_RADIUS,
-        maxOf(preferences.getInt(KEY_EXPANDED_ISLAND_GLASS_BLUR_RADIUS, 40), preferences.getInt(KEY_EXPANDED_ISLAND_GLASS_LARGE_BLUR_RADIUS, 40), preferences.getInt(KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS, 0)),
-    ).coerceIn(0, 120)
-
 
     private fun applyExpandedIslandBackground(view: View?, preferences: SharedPreferences, classLoader: ClassLoader) {
         if (view == null || !preferences.getBoolean(KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED, false)) return
@@ -3891,6 +3895,7 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun isSoftGlassSurface(view: View): Boolean {
+        if (expandedIslandMaterialApplying.get() == true || expandedIslandGlassSurfaces.contains(view)) return false
         if (view.tag == SHORTCUT_GLASS_TAG || view.tag == LOCKSCREEN_CAPSULE_MATERIAL_TAG) return false
         if (isVolumePanelSurface(view) || stackContainsClass("com.android.systemui.miui.volume.")) {
             // Some anonymous volume views receive their first recipe before attachment.
@@ -3902,12 +3907,13 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun isSoftGlassPanelLayer(view: View): Boolean =
-        view.tag != SHORTCUT_GLASS_TAG && view.tag != LOCKSCREEN_CAPSULE_MATERIAL_TAG && (
+        expandedIslandMaterialApplying.get() != true && !expandedIslandGlassSurfaces.contains(view) && view.tag != SHORTCUT_GLASS_TAG && view.tag != LOCKSCREEN_CAPSULE_MATERIAL_TAG && (
             (volumeGlobalGlassSelected() && (isVolumePanelSurface(view) || stackContainsClass("com.android.systemui.miui.volume."))) ||
             isShadeBackgroundView(view) || stackContainsClass("ShadeBlendBlurController") ||
             stackContainsClass("ShadeWindowBlurController") || stackContainsClass("ShadeSolidBackgroundController"))
 
     private fun isSoftGlassBlendSurface(view: View): Boolean {
+        if (expandedIslandMaterialApplying.get() == true || expandedIslandGlassSurfaces.contains(view)) return false
         if (view.tag == SHORTCUT_GLASS_TAG || view.tag == LOCKSCREEN_CAPSULE_MATERIAL_TAG) return false
         if (isVolumePanelSurface(view)) return volumeGlobalGlassSelected()
         return (isNotificationRowBackground(view) && isHeadsUpNotificationSurface(view)) ||
@@ -11641,12 +11647,6 @@ class HyperSystemUiModule : XposedModule() {
         private const val KEY_HIDE_NOTIFICATION_MINI_WINDOW_BAR = "hide_notification_mini_window_bar"
         private const val KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED = "expanded_island_background_enabled"
         private const val KEY_EXPANDED_ISLAND_BACKGROUND_OPACITY = "expanded_island_background_opacity"
-        private const val KEY_EXPANDED_ISLAND_BACKGROUND_BLUR_RADIUS = "expanded_island_background_blur_radius"
-        private const val KEY_EXPANDED_ISLAND_GLASS_REFLECTION = "expanded_island_glass_reflection"
-        private const val KEY_EXPANDED_ISLAND_GLASS_BLUR_RADIUS = "expanded_island_glass_blur_radius"
-        private const val KEY_EXPANDED_ISLAND_GLASS_LARGE_BLUR_RADIUS = "expanded_island_glass_large_blur_radius"
-        private const val KEY_EXPANDED_ISLAND_SELF_BLUR_RADIUS = "expanded_island_self_blur_radius"
-        private const val KEY_EXPANDED_ISLAND_SHOW_HIGHLIGHT = "expanded_island_show_highlight"
         private const val KEY_HIDE_SYSTEM_MEDIA_SOURCE_ICON = "hide_system_media_source_icon"
         private const val KEY_HIDE_MEDIA_ISLAND_SOURCE_ICON = "hide_media_island_source_icon"
         private const val KEY_SYSTEM_MEDIA_INFO_VERTICAL_OFFSET = "system_media_info_vertical_offset"
