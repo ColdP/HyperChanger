@@ -49,6 +49,8 @@ import kotlin.math.min
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
+internal const val LOCKSCREEN_CAPSULE_MATERIAL_TAG = "hyperchanger_lockscreen_capsule_material"
+
 internal const val MINI_PLAYER_BACKGROUND_DEFAULT = 0
 internal const val MINI_PLAYER_BACKGROUND_PURE = 1
 internal const val MINI_PLAYER_BACKGROUND_ADVANCED = 2
@@ -64,11 +66,7 @@ internal data class MiniPlayerAppearance(
     val advancedOpacity: Int = 14,
     val advancedBlurRadius: Int = 80,
     val advancedHighlight: Boolean = false,
-    val softGlassColor: Int = 0xFFFFFFFF.toInt(),
-    val softGlassOpacity: Int = 10,
-    val softGlassBackdropBlurRadius: Int = 80,
-    val softGlassBlurRadius: Int = 36,
-    val softGlassLuminance: Float = 0.14f,
+    val glass: SoftGlassSettings = SoftGlassSettings().resetParameters(),
 )
 
 /** Values sourced from SystemUI's NotificationMediaManager rather than an inferred session list. */
@@ -481,6 +479,8 @@ internal class LockscreenMiniPlayerController(
         PlaybackState.STATE_REWINDING -> true
         else -> false
     }
+
+    internal fun onMaterialSettingsChanged() = scheduleRefresh()
 
     private fun refresh() {
         runCatching { refreshUnsafe() }
@@ -966,6 +966,7 @@ private class LockscreenLyricsView(context: Context) : FrameLayout(context) {
                 outline.setRoundRect(0, 0, view.width, view.height, view.height / 2f)
             }
         }
+        materialLayer.tag = LOCKSCREEN_CAPSULE_MATERIAL_TAG
         materialLayer.scaleType = ImageView.ScaleType.FIT_XY
         materialLayer.clipToOutline = true
         materialLayer.outlineProvider = outlineProvider
@@ -1021,11 +1022,7 @@ private class LockscreenLyricsView(context: Context) : FrameLayout(context) {
                     }
                 },
             )
-            if (appearance.backgroundMode == MINI_PLAYER_BACKGROUND_ADVANCED ||
-                appearance.backgroundMode == MINI_PLAYER_BACKGROUND_SOFT_GLASS
-            ) {
-                applyPlatformMaterial(materialLayer, appearance)
-            }
+            applyPlatformMaterial(materialLayer, appearance)
         }
         updateTextGeometry()
     }
@@ -1102,6 +1099,7 @@ private class LockscreenMiniPlayerView(context: Context) : FrameLayout(context) 
                 outline.setRoundRect(0, 0, view.width, view.height, view.height / 2f)
             }
         }
+        materialLayer.tag = LOCKSCREEN_CAPSULE_MATERIAL_TAG
         materialLayer.scaleType = ImageView.ScaleType.FIT_XY
         materialLayer.clipToOutline = true
         materialLayer.outlineProvider = outlineProvider
@@ -1342,11 +1340,7 @@ private class LockscreenMiniPlayerView(context: Context) : FrameLayout(context) 
                 }
             },
         )
-        if (appearance.backgroundMode == MINI_PLAYER_BACKGROUND_ADVANCED ||
-            appearance.backgroundMode == MINI_PLAYER_BACKGROUND_SOFT_GLASS
-        ) {
-            applyPlatformMaterial(materialLayer, appearance)
-        }
+        applyPlatformMaterial(materialLayer, appearance)
     }
 
     private fun updateGeometry(heightDp: Float, artworkCornerRadiusDp: Float) {

@@ -9,7 +9,7 @@ private fun preferences(values: MutableMap<String, Any>): SharedPreferences =
     Proxy.newProxyInstance(SharedPreferences::class.java.classLoader, arrayOf(SharedPreferences::class.java)) { _, method, args ->
         when (method.name) {
             "contains" -> values.containsKey(args!![0])
-            "getInt" -> values[args!![0]] ?: args[1]
+            "getInt", "getBoolean" -> values[args!![0]] ?: args[1]
             "edit" -> {
                 val pending = mutableMapOf<String, Any>()
                 Proxy.newProxyInstance(SharedPreferences.Editor::class.java.classLoader, arrayOf(SharedPreferences.Editor::class.java)) { proxy, setter, input ->
@@ -60,5 +60,17 @@ fun main() {
     val unchanged = "{\"future_protocol\":true}"
     check(unifyFlashlightNotificationPayload(unchanged) == unchanged)
     check(unifyFlashlightNotificationPayload(unifyFlashlightNotificationPayload(payload)) == unifyFlashlightNotificationPayload(payload))
+    check(notificationStackBlurRadius(0f, false) == 0f)
+    check(notificationStackBlurRadius(.2f, false) == 0f)
+    check(notificationStackBlurRadius(.6f, false) in 0f..30f)
+    check(notificationStackBlurRadius(.3f, true) == 0f)
+    check(notificationStackBlurRadius(.5f, false, -30) == 0f)
+    check(notificationStackBlurRadius(1f, false, 40) == 50f)
+    check(readNotificationStackBlurSettings(preferences(mutableMapOf(
+        KEY_NOTIFICATION_STACK_BLUR to true, KEY_NOTIFICATION_STACK_BLUR_OFFSET to -100,
+    ))).let { it.enabled && it.offset == -30 })
+    check(readNotificationStackBlurSettings(preferences(mutableMapOf(
+        KEY_NOTIFICATION_STACK_BLUR to true, KEY_NOTIFICATION_STACK_BLUR_OFFSET to 28,
+    ))).let { it.enabled && it.offset == 28 })
     println("Notification text modes, persistence, sync and flashlight payload preservation checks passed")
 }

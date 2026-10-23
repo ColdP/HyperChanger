@@ -1130,6 +1130,7 @@ class HyperSystemUiModule : XposedModule() {
                     if (param.packageName == SYSTEM_UI) {
                         notificationHooks.installNotificationRestrictions(param.defaultClassLoader, preferences)
                         notificationHooks.installNotificationTextHooks(param.defaultClassLoader, preferences)
+                        notificationHooks.installNotificationStackBlurHooks(param.defaultClassLoader, preferences)
                     }
                     notificationHooks.installFlashlightMaterialHook(param.defaultClassLoader, preferences)
                     if (!focusIslandWhitelistPluginHooksInstalled) {
@@ -1204,6 +1205,7 @@ class HyperSystemUiModule : XposedModule() {
                         installGlobalGestureControllerHook(param.defaultClassLoader, preferences)
                     }
                     if (param.packageName == SYSTEM_UI && !lockscreenShortcutGlassHookInstalled) {
+                        installLockscreenShortcutPluginHook(param.defaultClassLoader, preferences)
                         installLockscreenShortcutGlassHook(param.defaultClassLoader, preferences)
                         lockscreenShortcutGlassHookInstalled = true
                     }
@@ -1256,6 +1258,7 @@ class HyperSystemUiModule : XposedModule() {
                     }
                 }
                 AOD -> {
+                    lockscreenHooks.installShortcutGestureHooks(param.defaultClassLoader, preferences)
                     if (!depthEffectHookInstalled) {
                         installDepthEffectHook(param.defaultClassLoader, preferences)
                         installAodThirdPartyWallpaperDepthHook(param.defaultClassLoader, preferences)
@@ -3832,6 +3835,7 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun isSoftGlassSurface(view: View): Boolean {
+        if (view.tag == SHORTCUT_GLASS_TAG || view.tag == LOCKSCREEN_CAPSULE_MATERIAL_TAG) return false
         if (isVolumePanelSurface(view) || stackContainsClass("com.android.systemui.miui.volume.")) {
             // Some anonymous volume views receive their first recipe before attachment.
             volumePanelSurfaceRoots.add(view)
@@ -3842,11 +3846,13 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun isSoftGlassPanelLayer(view: View): Boolean =
-        (volumeGlobalGlassSelected() && (isVolumePanelSurface(view) || stackContainsClass("com.android.systemui.miui.volume."))) ||
+        view.tag != SHORTCUT_GLASS_TAG && view.tag != LOCKSCREEN_CAPSULE_MATERIAL_TAG && (
+            (volumeGlobalGlassSelected() && (isVolumePanelSurface(view) || stackContainsClass("com.android.systemui.miui.volume."))) ||
             isShadeBackgroundView(view) || stackContainsClass("ShadeBlendBlurController") ||
-            stackContainsClass("ShadeWindowBlurController") || stackContainsClass("ShadeSolidBackgroundController")
+            stackContainsClass("ShadeWindowBlurController") || stackContainsClass("ShadeSolidBackgroundController"))
 
     private fun isSoftGlassBlendSurface(view: View): Boolean {
+        if (view.tag == SHORTCUT_GLASS_TAG || view.tag == LOCKSCREEN_CAPSULE_MATERIAL_TAG) return false
         if (isVolumePanelSurface(view)) return volumeGlobalGlassSelected()
         return (isNotificationRowBackground(view) && isHeadsUpNotificationSurface(view)) ||
             isSoftGlassPanelLayer(view) || softGlassRefreshing.get() == true
@@ -5848,6 +5854,29 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
+    // Package and plugin dispatch stay in the lifecycle owner. Gesture state belongs
+    // to LockscreenHooks, including SystemUI-hosted AOD plugin instances.
+    private fun installLockscreenShortcutPluginHook(loader: ClassLoader, preferences: SharedPreferences) {
+        runCatching {
+            val pluginClass = loader.loadClass("com.android.systemui.shared.plugins.PluginInstance")
+            hookDeoptimized(pluginClass.getDeclaredMethod("loadPlugin"))
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("lockscreen-shortcut-aod-plugin")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    runCatching {
+                        val instance = chain.thisObject
+                        if (pluginClass.getMethod("getPackageName").invoke(instance) == AOD) {
+                            pluginClass.getMethod("getPlugin").invoke(instance)?.javaClass?.classLoader?.let {
+                                lockscreenHooks.installShortcutGestureHooks(it, preferences)
+                            }
+                        }
+                    }.onFailure { log(Log.WARN, TAG, "Could not bind AOD shortcut plugin", it) }
+                    result
+                }
+        }.onFailure { log(Log.WARN, TAG, "Could not install AOD shortcut plugin dispatch", it) }
+    }
+
     /**
      * The lockscreen editor and charge animation both sit above the normal keyguard hierarchy.
      * Their windows retain the shortcut host, so a KeyguardManager-only check briefly exposes
@@ -6467,39 +6496,21 @@ class HyperSystemUiModule : XposedModule() {
             12f,
         ).coerceIn(0f, 60f)
         val requestedMode = preferences.getInt(KEY_LOCKSCREEN_MINI_PLAYER_BACKGROUND_MODE, 0).coerceIn(0, 3)
-        fun shortcutAppearance(mode: Int) = MiniPlayerAppearance(
-            backgroundMode = mode,
-            widthDp = width,
-            heightDp = height,
-            artworkCornerRadiusDp = artworkCornerRadius,
-            pureColor = preferences.getInt(KEY_SHORTCUT_PURE_COLOR, SHORTCUT_PURE_COLOR),
-            advancedColor = preferences.getInt(
-                KEY_SHORTCUT_ADVANCED_MATERIAL_COLOR,
-                DEFAULT_ADVANCED_MATERIAL_COLOR,
-            ),
-            advancedOpacity = preferences.getInt(
-                KEY_SHORTCUT_ADVANCED_MATERIAL_OPACITY,
-                DEFAULT_ADVANCED_MATERIAL_OPACITY,
-            ).coerceIn(0, 100),
-            advancedBlurRadius = preferences.getInt(
-                KEY_SHORTCUT_ADVANCED_MATERIAL_BLUR_RADIUS,
-                10,
-            ).coerceIn(0, 40),
-            advancedHighlight = preferences.getBoolean(KEY_SHORTCUT_ADVANCED_MATERIAL_HIGHLIGHT, false),
-            softGlassColor = preferences.getInt(KEY_SHORTCUT_SOFT_GLASS_COLOR, DEFAULT_SOFT_GLASS_COLOR),
-            softGlassOpacity = preferences.getInt(KEY_SHORTCUT_SOFT_GLASS_OPACITY, DEFAULT_SOFT_GLASS_OPACITY)
-                .coerceIn(0, 100),
-            softGlassBackdropBlurRadius = preferences.getInt(
-                KEY_SHORTCUT_SOFT_GLASS_BACKDROP_BLUR_RADIUS,
-                10,
-            ).coerceIn(0, 40),
-            softGlassBlurRadius = preferences.getInt(KEY_SHORTCUT_SOFT_GLASS_BLUR_RADIUS, 10)
-                .coerceIn(0, 40),
-            softGlassLuminance = preferences.getFloat(
-                KEY_SHORTCUT_SOFT_GLASS_LUMINANCE,
-                DEFAULT_SOFT_GLASS_LUMINANCE,
-            ).coerceIn(0f, MAX_SHORTCUT_GLASS_LUMINANCE),
-        )
+        fun shortcutAppearance(mode: Int): MiniPlayerAppearance {
+            val shortcut = readLockscreenShortcutBackgroundSettings(preferences)
+            return MiniPlayerAppearance(
+                backgroundMode = mode,
+                widthDp = width,
+                heightDp = height,
+                artworkCornerRadiusDp = artworkCornerRadius,
+                pureColor = shortcut.pureColor,
+                advancedColor = shortcut.advancedColor,
+                advancedOpacity = shortcut.advancedOpacity,
+                advancedBlurRadius = shortcut.advancedBlur,
+                advancedHighlight = shortcut.advancedHighlight,
+                glass = if (shortcut.useGlobalGlass) readSoftGlassSettings(preferences) else shortcut.glass,
+            )
+        }
         if (requestedMode == MINI_PLAYER_BACKGROUND_DEFAULT) {
             val shortcutMode = shortcutBackgroundMode(preferences)
             return if (shortcutMode == SHORTCUT_BACKGROUND_NONE) {
@@ -6530,51 +6541,72 @@ class HyperSystemUiModule : XposedModule() {
             advancedBlurRadius = preferences.getInt(KEY_MINI_PLAYER_ADVANCED_MATERIAL_BLUR_RADIUS, 10)
                 .coerceIn(0, 40),
             advancedHighlight = preferences.getBoolean(KEY_MINI_PLAYER_ADVANCED_MATERIAL_HIGHLIGHT, false),
-            softGlassColor = preferences.getInt(KEY_MINI_PLAYER_SOFT_GLASS_COLOR, DEFAULT_SOFT_GLASS_COLOR),
-            softGlassOpacity = preferences.getInt(KEY_MINI_PLAYER_SOFT_GLASS_OPACITY, DEFAULT_SOFT_GLASS_OPACITY)
-                .coerceIn(0, 100),
-            softGlassBackdropBlurRadius = preferences.getInt(
-                KEY_MINI_PLAYER_SOFT_GLASS_BACKDROP_BLUR_RADIUS,
-                10,
-            ).coerceIn(0, 40),
-            softGlassBlurRadius = preferences.getInt(KEY_MINI_PLAYER_SOFT_GLASS_BLUR_RADIUS, 10)
-                .coerceIn(0, 40),
-            softGlassLuminance = preferences.getFloat(
-                KEY_MINI_PLAYER_SOFT_GLASS_LUMINANCE,
-                DEFAULT_SOFT_GLASS_LUMINANCE,
-            ).coerceIn(0f, MAX_SHORTCUT_GLASS_LUMINANCE),
+            glass = readLockscreenCapsuleGlassSettings(preferences).let {
+                if (it.useGlobal) readSoftGlassSettings(preferences) else it.glass
+            },
         )
     }
 
-    private fun applyMiniPlayerMaterial(
-        view: ImageView,
-        appearance: MiniPlayerAppearance,
-        classLoader: ClassLoader,
-    ) {
-        when (appearance.backgroundMode) {
-            MINI_PLAYER_BACKGROUND_ADVANCED -> applyLegacyBackdropMaterial(
-                view = view,
-                opacity = appearance.advancedOpacity,
-                blurRadius = appearance.advancedBlurRadius,
-                color = appearance.advancedColor,
-                showHighlight = appearance.advancedHighlight,
-            )
-            MINI_PLAYER_BACKGROUND_SOFT_GLASS -> {
-                applyLegacyBackdropMaterial(
-                    view = view,
-                    opacity = appearance.softGlassOpacity,
-                    blurRadius = appearance.softGlassBackdropBlurRadius,
-                    color = appearance.softGlassColor,
-                    showHighlight = false,
-                )
-                applySystemGlassMaterial(
-                    view = view,
-                    classLoader = classLoader,
-                    blurRadius = appearance.softGlassBlurRadius,
-                    luminance = appearance.softGlassLuminance,
-                )
+    private val capsuleMaterialStates = WeakHashMap<ImageView, Pair<MiniPlayerAppearance, ClassLoader>>()
+
+    private fun applyMiniPlayerMaterial(view: ImageView, appearance: MiniPlayerAppearance, classLoader: ClassLoader) {
+        if (capsuleMaterialStates.put(view, appearance to classLoader) == null) {
+            view.addOnLayoutChangeListener { target, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+                if (right > left && bottom > top &&
+                    (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop)) {
+                    refreshMiniPlayerMaterial(target as ImageView)
+                }
             }
+            view.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(target: View) {
+                    target.post { if (target.isAttachedToWindow) refreshMiniPlayerMaterial(target as ImageView) }
+                }
+                override fun onViewDetachedFromWindow(target: View) = Unit
+            })
         }
+        if (view.isAttachedToWindow && view.width > 0 && view.height > 0) refreshMiniPlayerMaterial(view)
+    }
+
+    private fun refreshMiniPlayerMaterial(view: ImageView) {
+        val (appearance, classLoader) = capsuleMaterialStates[view] ?: return
+        if (view.width <= 0 || view.height <= 0) return
+        runCatching {
+            if (appearance.backgroundMode != MINI_PLAYER_BACKGROUND_SOFT_GLASS) {
+                // The same layer survives material changes; retire the old glass shader.
+                View::class.java.getMethod("setMiViewMaterialType", Int::class.javaPrimitiveType).invoke(view, 0)
+                View::class.java.getMethod("clearMiBackgroundBlendColor").invoke(view)
+                View::class.java.getMethod("setMiBackgroundBlurMode", Int::class.javaPrimitiveType).invoke(view, 0)
+                View::class.java.getMethod("setMiViewBlurMode", Int::class.javaPrimitiveType).invoke(view, 0)
+            }
+            when (appearance.backgroundMode) {
+                MINI_PLAYER_BACKGROUND_ADVANCED -> applyLegacyBackdropMaterial(
+                    view = view,
+                    opacity = appearance.advancedOpacity,
+                    blurRadius = appearance.advancedBlurRadius,
+                    color = appearance.advancedColor,
+                    showHighlight = appearance.advancedHighlight,
+                )
+                MINI_PLAYER_BACKGROUND_SOFT_GLASS -> {
+                    val glass = appearance.glass.copy(enabled = true)
+                    applyLegacyBackdropMaterial(
+                        view = view,
+                        opacity = softGlassBlur(10, glass.backgroundOpacity),
+                        blurRadius = softGlassBlur(40, glass.backgroundBlur),
+                        color = Color.WHITE,
+                        showHighlight = false,
+                    )
+                    View::class.java.getMethod("setMiBackgroundBlurScaleRatio", Float::class.javaPrimitiveType)
+                        .invoke(view, softGlassScale(1f, glass.backgroundScale))
+                    applySystemGlassMaterial(
+                        view = view,
+                        classLoader = classLoader,
+                        blurRadius = softGlassBlur(36, glass.refractionBlur),
+                        luminance = DEFAULT_SOFT_GLASS_LUMINANCE,
+                        parameters = tuneSoftGlass(SHORTCUT_GLASS_PARAMETERS, glass, standaloneBackground = true),
+                    )
+                }
+            }
+        }.onFailure { log(Log.ERROR, TAG, "Could not refresh capsule material", it) }
     }
 
     private fun commonShortcutParent(first: View, second: View): ViewGroup? {
@@ -6592,22 +6624,54 @@ class HyperSystemUiModule : XposedModule() {
         return null
     }
 
+    private val shortcutMaterialRoots = Collections.synchronizedMap(WeakHashMap<View, ClassLoader>())
+    private val shortcutMaterialHandler by lazy { Handler(Looper.getMainLooper()) }
+    private var shortcutMaterialPreferences: SharedPreferences? = null
+    private val shortcutMaterialRefresh = Runnable {
+        val preferences = shortcutMaterialPreferences ?: return@Runnable
+        val roots = synchronized(shortcutMaterialRoots) { shortcutMaterialRoots.entries.map { it.key to it.value } }
+        roots.forEach { (root, loader) ->
+            if (root.isAttachedToWindow) runCatching {
+                installShortcutGlassBackgrounds(root, preferences, loader)
+                applyLockscreenShortcutGeometry(root, preferences)
+            }.onFailure { log(Log.WARN, TAG, "Could not refresh shortcut material", it) }
+        }
+        val capsules = synchronized(lockscreenMiniPlayerControllers) { lockscreenMiniPlayerControllers.values.toList() }
+        capsules.forEach { it.onMaterialSettingsChanged() }
+    }
+    private val shortcutMaterialPreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == null || key.startsWith("lockscreen_shortcut_") || key.startsWith("shortcut_") ||
+            key.startsWith("soft_glass_parameters_v3_") || key.startsWith(LOCKSCREEN_CAPSULE_GLASS_PREFIX) ||
+            key.startsWith("mini_player_") || key.startsWith("lockscreen_mini_player_")) {
+            shortcutMaterialHandler.removeCallbacks(shortcutMaterialRefresh)
+            shortcutMaterialHandler.post(shortcutMaterialRefresh)
+        }
+    }
+
     private fun installShortcutGlassBackgrounds(
         root: View,
         preferences: SharedPreferences,
         classLoader: ClassLoader,
     ) {
-        val backgroundMode = shortcutBackgroundMode(preferences)
-        val radius = preferences.getFloat(KEY_LOCKSCREEN_SHORTCUT_GLASS_RADIUS, DEFAULT_SHORTCUT_GLASS_RADIUS)
-            .coerceIn(MIN_SHORTCUT_GLASS_RADIUS, MAX_SHORTCUT_GLASS_RADIUS)
-        val backgroundRadiusEnabled = preferences.getBoolean(
-            KEY_LOCKSCREEN_SHORTCUT_BACKGROUND_RADIUS_ENABLED,
-            false,
-        )
-        val backgroundRadius = preferences.getFloat(
-            KEY_LOCKSCREEN_SHORTCUT_BACKGROUND_RADIUS,
-            24f,
-        ).coerceIn(0f, 60f)
+        if (shortcutMaterialRoots.put(root, classLoader) == null) {
+            root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(view: View) {
+                    shortcutMaterialHandler.removeCallbacks(shortcutMaterialRefresh)
+                    shortcutMaterialHandler.post(shortcutMaterialRefresh)
+                }
+                override fun onViewDetachedFromWindow(view: View) = Unit
+            })
+        }
+        if (shortcutMaterialPreferences !== preferences) {
+            shortcutMaterialPreferences?.unregisterOnSharedPreferenceChangeListener(shortcutMaterialPreferenceListener)
+            shortcutMaterialPreferences = preferences
+            preferences.registerOnSharedPreferenceChangeListener(shortcutMaterialPreferenceListener)
+        }
+        val shortcutSettings = readLockscreenShortcutBackgroundSettings(preferences)
+        val backgroundMode = shortcutSettings.effectiveBackgroundMode
+        val radius = shortcutSettings.circleRadius
+        val backgroundRadiusEnabled = shortcutSettings.radiusEnabled
+        val backgroundRadius = shortcutSettings.radius
         val diameter = (radius * root.resources.displayMetrics.density).toInt().coerceAtLeast(1) * 2
         findShortcutContainers(root).forEach { shortcutContainer ->
             shortcutContainer.clipChildren = false
@@ -6628,7 +6692,7 @@ class HyperSystemUiModule : XposedModule() {
                         setImageDrawable(GradientDrawable().apply { setColor(Color.TRANSPARENT) })
                     }
                     SHORTCUT_BACKGROUND_PURE_COLOR -> {
-                        setBackgroundColor(preferences.getInt(KEY_SHORTCUT_PURE_COLOR, SHORTCUT_PURE_COLOR))
+                        setBackgroundColor(shortcutSettings.pureColor)
                     }
                     else -> {
                         // Miui's backdrop renderer only registers views that have drawable content.
@@ -6661,58 +6725,54 @@ class HyperSystemUiModule : XposedModule() {
                 FrameLayout.LayoutParams(diameter, diameter, Gravity.CENTER),
             )
             glassBackground.invalidateOutline()
-            if (backgroundMode == SHORTCUT_BACKGROUND_ADVANCED_MATERIAL) {
-                    runCatching {
-                        applyLegacyBackdropMaterial(
+            // Match the platform's layout-bound material initialization: SDF dimensions
+            // are zero before layout and cannot describe a usable glass surface.
+            val applyMaterial = {
+                runCatching {
+                    when (backgroundMode) {
+                        SHORTCUT_BACKGROUND_ADVANCED_MATERIAL -> applyLegacyBackdropMaterial(
                             view = glassBackground,
-                            opacity = preferences.getInt(
-                                KEY_SHORTCUT_ADVANCED_MATERIAL_OPACITY,
-                                DEFAULT_ADVANCED_MATERIAL_OPACITY,
-                            ).coerceIn(0, 100),
-                            blurRadius = preferences.getInt(
-                                KEY_SHORTCUT_ADVANCED_MATERIAL_BLUR_RADIUS,
-                                DEFAULT_ADVANCED_MATERIAL_BLUR_RADIUS,
-                            ).coerceIn(0, 40),
-                            color = preferences.getInt(
-                                KEY_SHORTCUT_ADVANCED_MATERIAL_COLOR,
-                                DEFAULT_ADVANCED_MATERIAL_COLOR,
-                            ),
-                            showHighlight = preferences.getBoolean(KEY_SHORTCUT_ADVANCED_MATERIAL_HIGHLIGHT, false),
+                            opacity = shortcutSettings.advancedOpacity,
+                            blurRadius = shortcutSettings.advancedBlur,
+                            color = shortcutSettings.advancedColor,
+                            showHighlight = shortcutSettings.advancedHighlight,
                         )
-                    }.onFailure { error -> log(Log.ERROR, TAG, "Could not initialize shortcut backdrop", error) }
+                        SHORTCUT_BACKGROUND_SOFT_GLASS -> {
+                            val activeGlass = (if (shortcutSettings.useGlobalGlass) readSoftGlassSettings(preferences)
+                                else shortcutSettings.glass).copy(enabled = true)
+                            applyLegacyBackdropMaterial(
+                                view = glassBackground,
+                                // 100% means the existing translucent 10% blend, not solid white.
+                                opacity = softGlassBlur(10, activeGlass.backgroundOpacity),
+                                blurRadius = softGlassBlur(40, activeGlass.backgroundBlur),
+                                color = Color.WHITE,
+                                showHighlight = false,
+                            )
+                            View::class.java.getMethod("setMiBackgroundBlurScaleRatio", Float::class.javaPrimitiveType)
+                                .invoke(glassBackground, softGlassScale(1f, activeGlass.backgroundScale))
+                            applySystemGlassMaterial(
+                                view = glassBackground,
+                                classLoader = classLoader,
+                                blurRadius = softGlassBlur(36, activeGlass.refractionBlur),
+                                luminance = DEFAULT_SOFT_GLASS_LUMINANCE,
+                                parameters = tuneSoftGlass(SHORTCUT_GLASS_PARAMETERS, activeGlass, standaloneBackground = true),
+                            )
+                        }
+                    }
+                }.onFailure { log(Log.ERROR, TAG, "Could not initialize shortcut material", it) }
+                Unit
+            }
+            glassBackground.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+                if (right > left && bottom > top &&
+                    (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop)) applyMaterial()
+            }
+            glassBackground.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(view: View) {
+                    view.post { if (view.isAttachedToWindow && view.width > 0 && view.height > 0) applyMaterial() }
                 }
-                if (backgroundMode == SHORTCUT_BACKGROUND_SOFT_GLASS) {
-                    runCatching {
-                        applyLegacyBackdropMaterial(
-                            view = glassBackground,
-                            opacity = preferences.getInt(
-                                KEY_SHORTCUT_SOFT_GLASS_OPACITY,
-                                DEFAULT_SOFT_GLASS_OPACITY,
-                            ).coerceIn(0, 100),
-                            blurRadius = preferences.getInt(
-                                KEY_SHORTCUT_SOFT_GLASS_BACKDROP_BLUR_RADIUS,
-                                DEFAULT_SOFT_GLASS_BACKDROP_BLUR_RADIUS,
-                            ).coerceIn(0, 40),
-                            color = preferences.getInt(
-                                KEY_SHORTCUT_SOFT_GLASS_COLOR,
-                                DEFAULT_SOFT_GLASS_COLOR,
-                            ),
-                            showHighlight = false,
-                        )
-                        applySystemGlassMaterial(
-                            view = glassBackground,
-                            classLoader = classLoader,
-                            blurRadius = preferences.getInt(
-                                KEY_SHORTCUT_SOFT_GLASS_BLUR_RADIUS,
-                                DEFAULT_SOFT_GLASS_BLUR_RADIUS,
-                            ).coerceIn(0, 40),
-                            luminance = preferences.getFloat(
-                                KEY_SHORTCUT_SOFT_GLASS_LUMINANCE,
-                                DEFAULT_SOFT_GLASS_LUMINANCE,
-                            ),
-                        )
-                    }.onFailure { error -> log(Log.ERROR, TAG, "Could not initialize OS4 shortcut glass", error) }
-                }
+                override fun onViewDetachedFromWindow(view: View) = Unit
+            })
+            if (glassBackground.isAttachedToWindow && glassBackground.width > 0 && glassBackground.height > 0) applyMaterial()
             applyShortcutIconColorMode(shortcutContainer, shortcutIconColorMode(preferences))
         }
         log(
@@ -6737,24 +6797,36 @@ class HyperSystemUiModule : XposedModule() {
         return result
     }
 
+    private val shortcutOriginalMargins = WeakHashMap<View, Triple<Int, Int, Int>>()
+    private val shortcutOriginalIconSizes = WeakHashMap<View, Pair<Int, Int>>()
+
     private fun applyLockscreenShortcutGeometry(root: View, preferences: SharedPreferences) {
         val shortcuts = findShortcutContainers(root)
         if (shortcuts.size < 2) return
-        val spacingEnabled = preferences.getBoolean(KEY_LOCKSCREEN_SHORTCUT_SPACING_ENABLED, false)
-        val spacing = (preferences.getFloat(KEY_LOCKSCREEN_SHORTCUT_SPACING, 0f).coerceIn(0f, 48f) *
+        val shortcutSettings = readLockscreenShortcutBackgroundSettings(preferences)
+        val spacingEnabled = shortcutSettings.enabled && shortcutSettings.spacingEnabled
+        val spacing = (shortcutSettings.spacing.coerceIn(0f, 48f) *
             root.resources.displayMetrics.density + .5f).toInt()
-        val iconEnabled = preferences.getBoolean(KEY_LOCKSCREEN_SHORTCUT_ICON_SIZE_ENABLED, false)
-        val iconSize = (preferences.getFloat(KEY_LOCKSCREEN_SHORTCUT_ICON_SIZE, 32f).coerceIn(16f, 64f) *
+        val iconEnabled = shortcutSettings.enabled && shortcutSettings.iconSizeEnabled
+        val iconSize = (shortcutSettings.iconSize.coerceIn(16f, 64f) *
             root.resources.displayMetrics.density + .5f).toInt()
         shortcuts.forEachIndexed { index, shortcut ->
-            if (spacingEnabled) {
-                (shortcut.layoutParams as? ViewGroup.MarginLayoutParams)?.let { params ->
+            (shortcut.layoutParams as? ViewGroup.MarginLayoutParams)?.let { params ->
+                if (spacingEnabled) {
+                    shortcutOriginalMargins.getOrPut(shortcut) { Triple(params.leftMargin, params.rightMargin, params.bottomMargin) }
                     if (index == 0) params.leftMargin = spacing else params.rightMargin = spacing
                     params.bottomMargin = spacing
                     shortcut.layoutParams = params
+                } else {
+                    shortcutOriginalMargins.remove(shortcut)?.let { original ->
+                        params.leftMargin = original.first
+                        params.rightMargin = original.second
+                        params.bottomMargin = original.third
+                        shortcut.layoutParams = params
+                    }
                 }
             }
-            if (iconEnabled) {
+            if (iconEnabled || shortcutOriginalIconSizes.isNotEmpty()) {
                 val images = ArrayList<ImageView>()
                 fun collect(view: View) {
                     if (view is ImageView && view.tag != SHORTCUT_GLASS_TAG) images += view
@@ -6765,9 +6837,18 @@ class HyperSystemUiModule : XposedModule() {
                 collect(shortcut)
                 images.forEach { image ->
                     (image.layoutParams as? ViewGroup.LayoutParams)?.let { params ->
-                        params.width = iconSize
-                        params.height = iconSize
-                        image.layoutParams = params
+                        if (iconEnabled) {
+                            shortcutOriginalIconSizes.getOrPut(image) { params.width to params.height }
+                            params.width = iconSize
+                            params.height = iconSize
+                            image.layoutParams = params
+                        } else {
+                            shortcutOriginalIconSizes.remove(image)?.let { original ->
+                                params.width = original.first
+                                params.height = original.second
+                                image.layoutParams = params
+                            }
+                        }
                     }
                 }
             }
@@ -7073,6 +7154,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         blurRadius: Int,
         luminance: Float,
+        parameters: FloatArray? = null,
     ) {
         val loaders = LinkedHashSet<ClassLoader>().apply {
             add(classLoader)
@@ -7088,8 +7170,8 @@ class HyperSystemUiModule : XposedModule() {
             "$MI_GLASS_COMPAT_CLASS was not available from any SystemUI class loader",
         )
         val smallBlur = blurRadius.coerceIn(0, MAX_SHORTCUT_GLASS_BLUR_RADIUS)
-        val glassParameters = SHORTCUT_GLASS_PARAMETERS.copyOf().apply {
-            this[GLASS_LUMINANCE_AMOUNT_INDEX] = luminance.coerceIn(0f, MAX_SHORTCUT_GLASS_LUMINANCE)
+        val glassParameters = (parameters ?: SHORTCUT_GLASS_PARAMETERS).copyOf().apply {
+            if (parameters == null) this[GLASS_LUMINANCE_AMOUNT_INDEX] = luminance.coerceIn(0f, MAX_SHORTCUT_GLASS_LUMINANCE)
         }
         glassCompat.getMethod(
             "setMiGlassBlurRadius",
@@ -7118,14 +7200,8 @@ class HyperSystemUiModule : XposedModule() {
             .invoke(null, view, glassParameters)
     }
 
-    private fun shortcutBackgroundMode(preferences: SharedPreferences): Int = preferences.getInt(
-        KEY_LOCKSCREEN_SHORTCUT_BACKGROUND_MODE,
-        if (preferences.getBoolean(KEY_LOCKSCREEN_SHORTCUT_GLASS_ENABLED, false)) {
-            SHORTCUT_BACKGROUND_SOFT_GLASS
-        } else {
-            SHORTCUT_BACKGROUND_NONE
-        },
-    ).coerceIn(SHORTCUT_BACKGROUND_NONE, SHORTCUT_BACKGROUND_SOFT_GLASS)
+    private fun shortcutBackgroundMode(preferences: SharedPreferences): Int =
+        readLockscreenShortcutBackgroundSettings(preferences).effectiveBackgroundMode
 
     private fun shortcutIconColorMode(preferences: SharedPreferences): Int = preferences.getInt(
         KEY_SHORTCUT_ICON_COLOR_MODE,

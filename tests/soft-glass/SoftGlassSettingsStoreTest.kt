@@ -8,6 +8,8 @@ const val REMOTE_PREFERENCE_GROUP = "hyper_system_ui_hook"
 
 /** Exercise separate page stores and a stale remote snapshot using the real store. */
 internal fun testPresetPersistence() {
+    testLockscreenCapsuleGlass()
+    testLockscreenShortcutBackground()
     testControlCenterRadius()
     testVolumePanelLayout()
     val disk = mutableMapOf<String, Any>()
@@ -51,6 +53,83 @@ internal fun testPresetPersistence() {
     remoteDisk["soft_glass_custom_presets_v1"] = SoftGlassPresetCodec.encodeLibrary(listOf(saved))
     restored.syncPreferences(remote)
     check(restored.presets.single().id == saved.id) { "Recover remote presets on a fresh local store" }
+}
+
+private fun testLockscreenCapsuleGlass() {
+    val disk = mutableMapOf<String, Any>(
+        "mini_player_soft_glass_opacity" to 90,
+        "mini_player_soft_glass_luminance" to .4f,
+        "soft_glass_parameters_v3_refraction" to 80,
+    )
+    val local = memoryPreferences(disk)
+    val store = LockscreenCapsuleGlassSettingsStore(local)
+    check(!store.settings.useGlobal && store.settings.glass.backgroundOpacity == 100)
+    check(store.settings.glass.adjustments["luminance"] == 0)
+    check(store.settings.glass.adjustments["darker"] == -100)
+    val selected = store.settings.glass.copy(
+        refractionBlur = 180, backgroundBlur = 65, backgroundScale = 80, backgroundOpacity = 135,
+        adjustments = softGlassParameters.associate { it.key to if (it.key == "darker") -100 else 45 },
+    )
+    store.update(null) { it.copy(glass = selected) }
+    store.update(null) { it.copy(useGlobal = true) }
+    val remote = memoryPreferences(mutableMapOf(LOCKSCREEN_CAPSULE_GLASS_PREFIX + "refraction_blur" to 10))
+    store.syncPreferences(remote)
+    val reopened = LockscreenCapsuleGlassSettingsStore(memoryPreferences(disk))
+    check(reopened.settings.useGlobal && reopened.settings.glass == selected)
+    check(readLockscreenCapsuleGlassSettings(remote) == reopened.settings)
+    check(readSoftGlassSettings(local).adjustments["refraction"] == 80)
+    check(readLockscreenShortcutBackgroundSettings(local).glass.adjustments["refraction"] == 0)
+    reopened.update(null) { it.copy(useGlobal = false) }
+    check(reopened.settings.glass == selected) { "Global mode must retain independent capsule parameters" }
+    val fresh = LockscreenCapsuleGlassSettingsStore(memoryPreferences(mutableMapOf()))
+    fresh.syncPreferences(remote)
+    check(fresh.settings.glass == selected && fresh.settings.useGlobal)
+    fresh.update(null) { it.copy(glass = it.glass.copy(refractionBlur = 999, backgroundOpacity = -20,
+        adjustments = it.glass.adjustments + ("edge_feather" to 500))) }
+    check(fresh.settings.glass.refractionBlur == 200 && fresh.settings.glass.backgroundOpacity == 0)
+    check(fresh.settings.glass.adjustments["edge_feather"] == 100)
+    check(fresh.settings.glass.adjustments["darker"] == -100)
+}
+
+private fun testLockscreenShortcutBackground() {
+    val disk = mutableMapOf<String, Any>(
+        "lockscreen_shortcut_background_mode" to 2,
+        "lockscreen_shortcut_glass_radius" to 53f,
+        "lockscreen_shortcut_spacing_enabled" to true,
+        "lockscreen_shortcut_spacing" to 12f,
+        "shortcut_advanced_material_opacity" to 23,
+        "shortcut_soft_glass_opacity" to 100,
+        "soft_glass_parameters_v3_refraction" to 70,
+    )
+    val local = memoryPreferences(disk)
+    val store = LockscreenShortcutBackgroundSettingsStore(local)
+    check(store.settings.let { it.enabled && it.backgroundMode == 2 && it.circleRadius == 53f &&
+        it.spacingEnabled && it.spacing == 12f && it.advancedOpacity == 23 })
+    check(store.settings.glass.backgroundOpacity == 100)
+    check(store.settings.glass.adjustments["refraction"] == 0) { "Local glass must not inherit global settings" }
+    check(store.settings.glass.adjustments["darker"] == -100)
+    store.update(null) { it.copy(enabled = false) }
+    check(store.settings.effectiveBackgroundMode == 0 && store.settings.backgroundMode == 2)
+    store.update(null) { it.copy(enabled = true, useGlobalGlass = true) }
+    check(store.settings.effectiveBackgroundMode == 2 && store.settings.glass.adjustments["darker"] == -100)
+    val custom = store.settings.glass.copy(refractionBlur = 175, backgroundBlur = 60,
+        backgroundScale = 90, backgroundOpacity = 150,
+        adjustments = softGlassParameters.associate { it.key to if (it.key == "darker") -100 else 35 })
+    store.update(null) { it.copy(backgroundMode = 3, glass = custom) }
+    val reopened = LockscreenShortcutBackgroundSettingsStore(memoryPreferences(disk))
+    check(reopened.settings.glass == custom)
+    check(reopened.settings.useGlobalGlass && reopened.settings.effectiveBackgroundMode == 3)
+    check(readSoftGlassSettings(local).adjustments["refraction"] == 70)
+    val gestureDisk = mutableMapOf<String, Any>()
+    val gestureOnly = LockscreenShortcutBackgroundSettingsStore(memoryPreferences(gestureDisk))
+    gestureOnly.updateGestureMode(null, 2)
+    val remote = memoryPreferences(mutableMapOf(KEY_LOCKSCREEN_SHORTCUT_GESTURE_MODE to 0,
+        KEY_LOCKSCREEN_SHORTCUT_BACKGROUND_ENABLED to true, KEY_LOCKSCREEN_SHORTCUT_V2_PREFIX + "mode" to 1))
+    gestureOnly.syncPreferences(remote)
+    check(gestureOnly.settings.gestureMode == 2 && gestureOnly.settings.effectiveBackgroundMode == 1)
+    check(readLockscreenShortcutBackgroundSettings(remote).gestureMode == 2)
+    store.syncPreferences(remote)
+    check(store.settings.glass == custom && store.settings.backgroundMode == 3) { "Stale remote data must not replace saved local parameters" }
 }
 
 private fun memoryPreferences(values: MutableMap<String, Any>): SharedPreferences {

@@ -17,6 +17,11 @@ internal class LockscreenHooks(
     private val module: HyperSystemUiModule,
     private val logTag: String,
 ) {
+    private val shortcutGestures = LockscreenShortcutGestureHooks(module, logTag)
+
+    fun installShortcutGestureHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
+        shortcutGestures.install(classLoader, preferences)
+
     // Preserve the process-wide guard and its write point after both install attempts.
     fun installBottomTextHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
         if (!lockscreenChargingHookInstalled) {
