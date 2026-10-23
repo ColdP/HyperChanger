@@ -42,6 +42,7 @@ class LockscreenCapsuleSettingsStore(context: Context) {
     }
 
     fun syncRemote(service: XposedService) {
+        LockscreenCapsuleGlassSettingsStore(local).syncRemote(service)
         val remote = service.getRemotePreferences(REMOTE_PREFERENCE_GROUP)
         val remoteSettings = remote.read()
         settings = if (remote.contains(KEY_LOCKSCREEN_MINI_PLAYER_ENABLED)) remoteSettings else settings

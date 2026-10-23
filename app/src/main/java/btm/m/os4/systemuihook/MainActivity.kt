@@ -284,7 +284,7 @@ private enum class PageId {
     SOFT_GLASS_PRESETS,
     IOS_NOTIFICATION_CLOCK_GLASS,
     GESTURE_HANDLE_STYLE, DESKTOP, DESKTOP_MATERIAL,
-    ISLAND, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_HEADER_SETTINGS, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_ADJUSTMENT, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
+    ISLAND, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_HEADER_SETTINGS, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_ADJUSTMENT, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LOCKSCREEN_SHORTCUT_BACKGROUND, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
     SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, OTHER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND,
@@ -883,6 +883,7 @@ private fun Root(
                 StatusBarIconSpacingSettingsStore(context).syncRemote(it)
                 StatusBarIconImportStore(context).syncRemote(it)
                 NotificationIslandSettingsStore(context).syncRemote(it)
+                NotificationStackBlurSettingsStore(context).syncRemote(it)
                 ControlCenterHeaderHeightSettingsStore(context).syncRemote(it)
                 IosNotificationBottomOffsetSettingsStore(context).syncRemote(it)
                 ControlCenterCarrierSettingsStore(context).syncRemote(it)
@@ -4873,6 +4874,7 @@ private fun Detail(
         PageId.CONTROL -> Control(back)
         PageId.LOCK -> Lock(settings, lockscreenCapsuleSettings, update, openPage, back)
         PageId.LOCKSCREEN_CAPSULE -> LockscreenCapsule(lockscreenCapsuleSettings, updateLockscreenCapsule, back)
+        PageId.LOCKSCREEN_SHORTCUT_BACKGROUND -> LockscreenShortcutBackgroundPage(back)
         PageId.LIFT_TO_WAKE_SCHEDULE -> LiftToWakeSchedulePage(back)
         PageId.LOCKSCREEN_WIDGET_EDITOR -> LockscreenWidgetEditor(settings, update, back)
         PageId.LOCKSCREEN_WIDGET_BACKGROUND -> LockscreenWidgetBackgroundSettings(settings, update, back)
@@ -6180,24 +6182,45 @@ private fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, onSelected: (
         shape = { shape },
         effects = {
             vibrancy()
-            blur(6.dp.toPx())
-            lens(18.dp.toPx(), 44.dp.toPx(), depthEffect = true, chromaticAberration = true)
+            blur(3.dp.toPx())
+            lens(10.dp.toPx(), 24.dp.toPx(), depthEffect = true, chromaticAberration = true)
         },
         highlight = { Highlight.Default.copy(alpha = .62f) },
         onDrawSurface = { drawRect(surface.copy(alpha = .6f)) },
     ) else Modifier.background(surface, shape)
-    BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 8.dp).clip(shape).then(glass)) {
-        val tabWidth = (maxWidth - 8.dp) / 2
-        TabRowWithContour(
-            tabs = tabs, selectedTabIndex = selected, onTabSelected = onSelected,
-            colors = TabRowDefaults.tabRowColors(
-                backgroundColor = ComposeColor.Transparent,
-                selectedBackgroundColor = MiuixTheme.colorScheme.onSurface.copy(alpha = .10f),
-            ),
-            minWidth = tabWidth, maxWidth = tabWidth, itemSpacing = 0.dp,
-            cornerRadius = 50.dp,
-            modifier = Modifier.fillMaxWidth().padding(4.dp),
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 8.dp)) {
+        Box(
+            Modifier.matchParentSize()
+                .graphicsLayer { scaleY = .94f }
+                .clip(shape)
+                .then(glass),
         )
+        Row(
+            Modifier.fillMaxWidth().height(53.dp).padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
+        ) {
+            tabs.forEachIndexed { index, label ->
+                Box(
+                    Modifier.weight(1f)
+                        .fillMaxHeight()
+                        .clip(shape)
+                        .then(
+                            if (index == selected) {
+                                Modifier.background(MiuixTheme.colorScheme.onSurface.copy(alpha = .10f))
+                            } else Modifier
+                        )
+                        .clickable { onSelected(index) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        label,
+                        color = MiuixTheme.colorScheme.onSurface,
+                        fontWeight = if (index == selected) FontWeight.SemiBold else FontWeight.Normal,
+                        fontSize = 14.sp,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -6257,7 +6280,7 @@ private fun SoftGlassParametersPage(openPage: (PageId) -> Unit, back: () -> Unit
                         }
                     }
                 }
-            } else {
+            } else if (tab == 1) {
                 item {
                     Group(tr("背景调整", "背景调整")) {
                         Text(
@@ -6317,9 +6340,19 @@ private fun SoftGlassPresetsPage(back: () -> Unit) {
         preferences.registerOnSharedPreferenceChangeListener(listener)
         onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
     }
+    LaunchedEffect(appliedPresetId, currentSettings, selected?.id, showSave) {
+        if (selected == null && !showSave) {
+            val appliedBuiltIn = builtInSoftGlassPresets().firstOrNull { it.id == appliedPresetId }
+            if (appliedBuiltIn != null && !currentSettings.matchesSoftGlassParameters(appliedBuiltIn.settings)) {
+                store.applyPreset(service, appliedBuiltIn)
+                currentSettings = store.settings
+                changed()
+            }
+        }
+    }
     fun applyPreset(preset: SoftGlassPreset) {
         store.reload()
-        store.update(service, preset::applyTo)
+        store.applyPreset(service, preset)
         store.setAppliedPreset(service, preset.id)
         currentSettings = store.settings
         appliedPresetId = preset.id
@@ -6489,20 +6522,18 @@ private fun SoftGlassPresetsPage(back: () -> Unit) {
     selected?.let { preset ->
         SoftGlassPresetActionDialog(
             preset = display(preset),
-            canSave = !currentSettings.matchesSoftGlassParameters(preset.settings),
+            canSave = !preset.builtIn && !currentSettings.matchesSoftGlassParameters(preset.settings),
             onDismiss = { selected = null },
             onSave = {
-                val updated = if (preset.builtIn) {
-                    SoftGlassPreset(preset.name, currentSettings.copy(enabled = false).normalized())
-                } else {
-                    preset.copy(settings = currentSettings.copy(enabled = false).normalized(), builtIn = false)
+                if (!preset.builtIn) {
+                    val updated = preset.copy(settings = currentSettings.copy(enabled = false).normalized(), builtIn = false)
+                    store.savePreset(service, updated)
+                    presets = store.presets
+                    appliedPresetId = updated.id
+                    store.setAppliedPreset(service, updated.id)
+                    selected = null
+                    toast("预设已保存")
                 }
-                store.savePreset(service, updated)
-                presets = store.presets
-                appliedPresetId = updated.id
-                store.setAppliedPreset(service, updated.id)
-                selected = null
-                toast("预设已保存")
             },
             onSaveAs = { selected = null; saveAs = true; showSave = true },
             onUse = { applyPreset(preset); selected = null },
@@ -7335,9 +7366,15 @@ private fun Island(
     val service by HookApplication.service.collectAsStateWithLifecycle()
     val textColorStore = remember(context) { NotificationTextColorSettingsStore(context) }
     var textColors by remember { mutableStateOf(textColorStore.settings) }
+    val stackBlurStore = remember(context) { NotificationStackBlurSettingsStore(context) }
+    var stackBlurEnabled by remember { mutableStateOf(stackBlurStore.enabled) }
+    var stackBlurOffset by remember { mutableIntStateOf(stackBlurStore.offset) }
     LaunchedEffect(service) {
         service?.let(textColorStore::syncRemote)
         textColors = textColorStore.settings
+        service?.let(stackBlurStore::syncRemote)
+        stackBlurEnabled = stackBlurStore.enabled
+        stackBlurOffset = stackBlurStore.offset
     }
     val widthStore = remember(context) { IslandWidthSettingsStore(context) }
     var widthSettings by remember { mutableStateOf(widthStore.settings) }
@@ -7519,6 +7556,29 @@ private fun Island(
                         textColors = textColorStore.settings
                     },
                 )
+                SwitchPreference(
+                    title = tr("为通知堆叠添加模糊", "为通知堆叠添加模糊"),
+                    checked = stackBlurEnabled,
+                    onCheckedChange = { enabled ->
+                        stackBlurStore.update(service, enabled)
+                        stackBlurEnabled = stackBlurStore.enabled
+                    },
+                )
+                AnimatedVisibility(
+                    visible = stackBlurEnabled,
+                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                ) {
+                    ParameterIntSlide(
+                        tr("自定义模糊度", "自定义模糊度"), stackBlurOffset,
+                        NOTIFICATION_STACK_BLUR_OFFSET_RANGE_MIN..NOTIFICATION_STACK_BLUR_OFFSET_RANGE_MAX,
+                        " px", defaultValue = 0,
+                    ) { value ->
+                        stackBlurStore.updateOffset(service, value)
+                        stackBlurEnabled = stackBlurStore.enabled
+                        stackBlurOffset = stackBlurStore.offset
+                    }
+                }
                 SwitchPreference(
                     title = tr("notification_corner_radius_offset", "调整通知圆角大小"),
                     checked = s.notificationCornerRadiusOffsetEnabled,
@@ -8448,6 +8508,19 @@ private fun Lock(
     ),
 ) { p, scroll ->
     val context = LocalContext.current
+    val shortcutGestureStore = remember(context) { LockscreenShortcutBackgroundSettingsStore(context) }
+    val shortcutGestureService by HookApplication.service.collectAsStateWithLifecycle()
+    var shortcutGestureMode by remember { mutableIntStateOf(shortcutGestureStore.settings.gestureMode) }
+    LaunchedEffect(shortcutGestureService) {
+        shortcutGestureService?.let {
+            shortcutGestureStore.syncRemote(it)
+            shortcutGestureMode = shortcutGestureStore.settings.gestureMode
+        }
+    }
+    val updateShortcutGesture: (Int) -> Unit = { value ->
+        shortcutGestureStore.updateGestureMode(shortcutGestureService, value)
+        shortcutGestureMode = shortcutGestureStore.settings.gestureMode
+    }
     val clockHorizontalStore = remember(context) { LockscreenClockHorizontalSettingsStore(context) }
     val clockHorizontalService by HookApplication.service.collectAsStateWithLifecycle()
     var clockHorizontalEnabled by remember { mutableStateOf(clockHorizontalStore.enabled) }
@@ -8863,145 +8936,17 @@ OverlayDropdownPreference(
             }
         }
         item {
-            Group(tr("\u5feb\u6377\u529f\u80fd\u80cc\u666f", "\u5feb\u6377\u529f\u80fd\u80cc\u666f")) {
-OverlayDropdownPreference(
-            title = tr("\u9501\u5c4f\u5feb\u6377\u529f\u80fd\u80cc\u666f", "\u9501\u5c4f\u5feb\u6377\u529f\u80fd\u80cc\u666f"),
-            items = listOf(tr("\u4e0d\u663e\u793a", "\u4e0d\u663e\u793a"), tr("\u7eaf\u8272", "\u7eaf\u8272"), tr("\u9ad8\u7ea7\u6750\u8d28", "\u9ad8\u7ea7\u6750\u8d28"), tr("\u67d4\u5149\u73bb\u7483", "\u67d4\u5149\u73bb\u7483")),
-            selectedIndex = s.lockscreenShortcutBackgroundMode,
-            onSelectedIndexChange = { value ->
-                update { it.copy(lockscreenShortcutBackgroundMode = value) }
-            },
-        )
-OverlayDropdownPreference(
-            title = tr("\u5feb\u6377\u6309\u94ae\u56fe\u6807\u989c\u8272", "\u5feb\u6377\u6309\u94ae\u56fe\u6807\u989c\u8272"),
-            items = listOf(tr("\u81ea\u52a8\u6a21\u5f0f", "\u81ea\u52a8\u6a21\u5f0f"), tr("\u6d45\u8272", "\u6d45\u8272"), tr("\u6df1\u8272", "\u6df1\u8272")),
-            selectedIndex = s.shortcutIconColorMode,
-            onSelectedIndexChange = { value -> update { it.copy(shortcutIconColorMode = value) } },
-        )
-        AnimatedVisibility(
-            visible = s.lockscreenShortcutBackgroundMode != 0,
-            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
-            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
-        ) {
-            Column {
-                FloatSlide(tr("\u5706\u5f62\u534a\u5f84 (dp)", "\u5706\u5f62\u534a\u5f84 (dp)"), s.lockscreenShortcutGlassRadius, 10f..60f, defaultValue = 48f) { v ->
-                    update { it.copy(lockscreenShortcutGlassRadius = v) }
-                }
-                Dim(
-                    title = tr("\u80cc\u666f\u5706\u89d2\u534a\u5f84", "\u80cc\u666f\u5706\u89d2\u534a\u5f84"),
-                    enabled = s.lockscreenShortcutBackgroundRadiusEnabled,
-                    changeEnabled = { value ->
-                        update { it.copy(lockscreenShortcutBackgroundRadiusEnabled = value) }
-                    },
-                    value = s.lockscreenShortcutBackgroundRadius,
-                    range = 0f..60f,
-                    defaultValue = 24f,
-                ) { value ->
-                    update { it.copy(lockscreenShortcutBackgroundRadius = value) }
-                }
-            }
-        }
-        Dim(
-            title = tr("\u5feb\u6377\u6309\u94ae\u95f4\u8ddd", "\u5feb\u6377\u6309\u94ae\u95f4\u8ddd"),
-            enabled = s.lockscreenShortcutSpacingEnabled,
-            changeEnabled = { value -> update { it.copy(lockscreenShortcutSpacingEnabled = value) } },
-            value = s.lockscreenShortcutSpacing,
-            range = 0f..48f,
-            defaultValue = 0f,
-        ) { value ->
-            update { it.copy(lockscreenShortcutSpacing = value) }
-        }
-        Dim(
-            title = tr("\u5feb\u6377\u6309\u94ae\u56fe\u6807\u5927\u5c0f", "\u5feb\u6377\u6309\u94ae\u56fe\u6807\u5927\u5c0f"),
-            enabled = s.lockscreenShortcutIconSizeEnabled,
-            changeEnabled = { value -> update { it.copy(lockscreenShortcutIconSizeEnabled = value) } },
-            value = s.lockscreenShortcutIconSize,
-            range = 16f..64f,
-            defaultValue = 32f,
-        ) { value ->
-            update { it.copy(lockscreenShortcutIconSize = value) }
-        }
-        AnimatedVisibility(
-            visible = s.lockscreenShortcutBackgroundMode == 1,
-            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
-            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
-        ) {
-            ShortcutBackgroundColorPreference(
-                color = s.shortcutPureColor,
-                onColorChange = { value -> update { it.copy(shortcutPureColor = value) } },
-            )
-        }
-        AnimatedVisibility(
-            visible = s.lockscreenShortcutBackgroundMode == 2,
-            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
-            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
-        ) {
-            Column {
-                ShortcutBackgroundColorPreference(
-                    color = s.shortcutAdvancedMaterialColor,
-                    onColorChange = { value ->
-                        update { it.copy(shortcutAdvancedMaterialColor = value) }
-                    },
+            Group(tr("快捷功能背景", "快捷功能背景")) {
+                ArrowPreference(
+                    title = tr("锁屏快捷功能背景", "锁屏快捷功能背景"),
+                    onClick = { open(PageId.LOCKSCREEN_SHORTCUT_BACKGROUND) },
                 )
-                ParameterIntSlide(
-                    title = tr("\u4e0d\u900f\u660e\u5ea6", "\u4e0d\u900f\u660e\u5ea6"),
-                    value = s.shortcutAdvancedMaterialOpacity,
-                    range = 0..100,
-                    suffix = "%",
-                    defaultValue = 14,
-                ) { value -> update { it.copy(shortcutAdvancedMaterialOpacity = value) } }
-                ParameterIntSlide(
-                    title = tr("\u80cc\u666f\u6a21\u7cca\u5ea6", "\u80cc\u666f\u6a21\u7cca\u5ea6"),
-                    value = s.shortcutAdvancedMaterialBlurRadius,
-                    range = 0..40,
-                    defaultValue = 40,
-                ) { value -> update { it.copy(shortcutAdvancedMaterialBlurRadius = value) } }
-                SwitchPreference(
-                    title = tr("\u663e\u793a\u9ad8\u5149", "\u663e\u793a\u9ad8\u5149"),
-                    checked = s.shortcutAdvancedMaterialHighlight,
-                    onCheckedChange = { value ->
-                        update { it.copy(shortcutAdvancedMaterialHighlight = value) }
-                    },
+                OverlayDropdownPreference(
+                    title = tr("快捷功能按钮启用手势", "快捷功能按钮启用手势"),
+                    items = listOf(tr("系统默认", "系统默认"), tr("添加长按手势", "添加长按手势"), tr("仅长按手势", "仅长按手势")),
+                    selectedIndex = shortcutGestureMode,
+                    onSelectedIndexChange = { value -> updateShortcutGesture(value) },
                 )
-            }
-        }
-        AnimatedVisibility(
-            visible = s.lockscreenShortcutBackgroundMode == 3,
-            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
-            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
-        ) {
-            Column {
-                ShortcutBackgroundColorPreference(
-                    color = s.shortcutSoftGlassColor,
-                    onColorChange = { value -> update { it.copy(shortcutSoftGlassColor = value) } },
-                )
-                ParameterIntSlide(
-                    title = tr("\u4e0d\u900f\u660e\u5ea6", "\u4e0d\u900f\u660e\u5ea6"),
-                    value = s.shortcutSoftGlassOpacity,
-                    range = 0..100,
-                    suffix = "%",
-                    defaultValue = 10,
-                ) { value -> update { it.copy(shortcutSoftGlassOpacity = value) } }
-                ParameterIntSlide(
-                    title = tr("\u80cc\u666f\u6a21\u7cca\u5ea6", "\u80cc\u666f\u6a21\u7cca\u5ea6"),
-                    value = s.shortcutSoftGlassBackdropBlurRadius,
-                    range = 0..40,
-                    defaultValue = 40,
-                ) { value -> update { it.copy(shortcutSoftGlassBackdropBlurRadius = value) } }
-                ParameterIntSlide(
-                    title = tr("Glass \u6a21\u7cca\u5ea6", "Glass \u6a21\u7cca\u5ea6"),
-                    value = s.shortcutSoftGlassBlurRadius,
-                    range = 0..40,
-                    defaultValue = 36,
-                ) { value -> update { it.copy(shortcutSoftGlassBlurRadius = value) } }
-                ParameterFloatSlide(
-                    title = tr("\u67d4\u5149\u5f3a\u5ea6", "\u67d4\u5149\u5f3a\u5ea6"),
-                    value = s.shortcutSoftGlassLuminance,
-                    range = 0f..0.4f,
-                    defaultValue = .14f,
-                ) { value -> update { it.copy(shortcutSoftGlassLuminance = value) } }
-            }
-        }
             }
         }
     }
@@ -9037,6 +8982,86 @@ OverlayDropdownPreference(
         onDismiss = { showSaveWallpaperDialog = false },
     )
     }
+
+@Composable
+private fun LockscreenShortcutBackgroundPage(back: () -> Unit) {
+    val changed = LocalNotificationSettingsChanged.current
+    val context = LocalContext.current
+    val store = remember(context) { LockscreenShortcutBackgroundSettingsStore(context) }
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    var state by remember { mutableStateOf(store.settings) }
+    LaunchedEffect(service) { service?.let { store.syncRemote(it); state = store.settings } }
+    fun updateBackground(transform: (LockscreenShortcutBackgroundSettings) -> LockscreenShortcutBackgroundSettings) {
+        store.update(service, transform)
+        state = store.settings
+        changed()
+    }
+    AppPage(tr("锁屏快捷功能背景", "锁屏快捷功能背景"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.AOD)) { padding, scroll ->
+        AppList(padding, scroll, 28) {
+            item {
+                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                    SwitchPreference(title = tr("为锁屏快捷功能按钮添加背景", "为锁屏快捷功能按钮添加背景"), checked = state.enabled, onCheckedChange = { enabled ->
+                        updateBackground { it.copy(enabled = enabled) }
+                    })
+                    AnimatedVisibility(state.enabled, enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f), exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f)) {
+                        Column {
+                            OverlayDropdownPreference(title = tr("快捷功能按钮背景材质", "快捷功能按钮背景材质"), items = listOf(tr("柔光玻璃", "柔光玻璃"), tr("高级材质", "高级材质"), tr("纯色", "纯色")), selectedIndex = when (state.backgroundMode) { 3 -> 0; 2 -> 1; else -> 2 }, onSelectedIndexChange = { index -> updateBackground { it.copy(backgroundMode = when (index) { 0 -> 3; 1 -> 2; else -> 1 }) } })
+                            FloatSlide(tr("快捷功能按钮背景圆形半径", "快捷功能按钮背景圆形半径"), state.circleRadius, 10f..60f, defaultValue = 48f) { value -> updateBackground { it.copy(circleRadius = value) } }
+                            Dim(title = tr("快捷功能按钮背景圆角半径", "快捷功能按钮背景圆角半径"), enabled = state.radiusEnabled, changeEnabled = { value -> updateBackground { it.copy(radiusEnabled = value) } }, value = state.radius, range = 0f..60f, defaultValue = 24f) { value -> updateBackground { it.copy(radius = value) } }
+                            Dim(title = tr("快捷功能按钮间距", "快捷功能按钮间距"), enabled = state.spacingEnabled, changeEnabled = { value -> updateBackground { it.copy(spacingEnabled = value) } }, value = state.spacing, range = 0f..48f, defaultValue = 0f) { value -> updateBackground { it.copy(spacing = value) } }
+                            Dim(title = tr("快捷功能按钮图标大小", "快捷功能按钮图标大小"), enabled = state.iconSizeEnabled, changeEnabled = { value -> updateBackground { it.copy(iconSizeEnabled = value) } }, value = state.iconSize, range = 16f..64f, defaultValue = 32f) { value -> updateBackground { it.copy(iconSize = value) } }
+                        }
+                    }
+                }
+            }
+            item {
+                AnimatedVisibility(state.enabled, enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f), exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f)) {
+                    Column {
+                        SmallTitle(tr("材质参数调整", "材质参数调整"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp))
+                        Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                            when (state.backgroundMode) {
+                                1 -> ShortcutBackgroundColorPreference(color = state.pureColor, onColorChange = { value -> updateBackground { it.copy(pureColor = value) } })
+                                2 -> Column {
+                                    ShortcutBackgroundColorPreference(color = state.advancedColor, onColorChange = { value -> updateBackground { it.copy(advancedColor = value) } })
+                                    ParameterIntSlide(tr("不透明度", "不透明度"), state.advancedOpacity, 0..100, suffix = "%", defaultValue = 14) { value -> updateBackground { it.copy(advancedOpacity = value) } }
+                                    ParameterIntSlide(tr("softGlassBackgroundBlur", "背景模糊度"), state.advancedBlur, 0..120, defaultValue = 80) { value -> updateBackground { it.copy(advancedBlur = value) } }
+                                    SwitchPreference(title = tr("显示高光", "显示高光"), checked = state.advancedHighlight, onCheckedChange = { value -> updateBackground { it.copy(advancedHighlight = value) } })
+                                }
+                                else -> Column {
+                                    SwitchPreference(title = tr("使用全局柔光玻璃参数", "使用全局柔光玻璃参数"), checked = state.useGlobalGlass, onCheckedChange = { value -> updateBackground { it.copy(useGlobalGlass = value) } })
+                                    AnimatedVisibility(!state.useGlobalGlass, enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f), exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f)) {
+                                        Column {
+                                            SoftGlassMaterialSliders(state.glass) { transform ->
+                                                updateBackground { it.copy(glass = transform(it.glass)) }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SoftGlassMaterialSliders(
+    glass: SoftGlassSettings,
+    onChange: ((SoftGlassSettings) -> SoftGlassSettings) -> Unit,
+) {
+    Column {
+        ParameterIntSlide(tr("玻璃模糊", "玻璃模糊"), glass.refractionBlur, 0..200, "%", 100) { value -> onChange { it.copy(refractionBlur = value) } }
+        softGlassParameters.filter { it.key != "darker" }.forEach { definition ->
+            ParameterIntSlide(tr(definition.title, definition.title), glass.adjustments[definition.key] ?: if (definition.key == "darker") -100 else 0, definition.adjustmentRange, "%", if (definition.key == "darker") -100 else 0) { value -> onChange { it.copy(adjustments = it.adjustments + (definition.key to value)) } }
+        }
+        ParameterIntSlide(tr("softGlassBackgroundBlur", "背景模糊度"), glass.backgroundBlur, 0..200, "%", 100) { value -> onChange { it.copy(backgroundBlur = value) } }
+        ParameterIntSlide(tr("softGlassBackgroundScale", "背景缩放程度"), glass.backgroundScale, 0..200, "%", 100) { value -> onChange { it.copy(backgroundScale = value) } }
+        ParameterIntSlide(tr("背景不透明度", "背景不透明度"), glass.backgroundOpacity, 0..200, "%", 100) { value -> onChange { it.copy(backgroundOpacity = value) } }
+        ParameterIntSlide(tr("压暗强度", "压暗强度"), glass.adjustments["darker"] ?: -100, -100..200, "%", -100) { value -> onChange { it.copy(adjustments = it.adjustments + ("darker" to value)) } }
+    }
+}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -9545,85 +9570,108 @@ private fun LockscreenCapsule(
     capsule: LockscreenCapsuleSettings,
     update: ((LockscreenCapsuleSettings) -> LockscreenCapsuleSettings) -> Unit,
     back: () -> Unit,
-) = AppPage(tr("锁屏胶囊", "锁屏胶囊"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.AOD)) { p, scroll ->
-    AppList(p, scroll, 28) {
-        item {
-            Group(tr("锁屏胶囊", "锁屏胶囊")) {
-                SwitchPreference(
-                    title = tr("开启锁屏胶囊", "开启锁屏胶囊"),
-                    summary = tr("显示在底部快捷按钮之间，跟随当前媒体会话", "显示在底部快捷按钮之间，跟随当前媒体会话"),
-                    checked = capsule.enabled,
-                    onCheckedChange = { value -> update { it.copy(enabled = value) } },
-                )
-                AnimatedVisibility(
-                    visible = capsule.enabled,
-                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
-                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
-                ) {
-                    Column {
-                        SwitchPreference(
-                            title = tr("锁屏胶囊歌词", "锁屏胶囊歌词"),
-                            checked = capsule.lyricsEnabled,
-                            onCheckedChange = { value -> update { it.copy(lyricsEnabled = value) } },
-                        )
-                        OverlayDropdownPreference(
-                            title = tr("锁屏媒体通知", "锁屏媒体通知"),
-                            items = listOf(tr("不隐藏", "不隐藏"), tr("始终隐藏", "始终隐藏"), tr("动态显示", "动态显示")),
-                            selectedIndex = capsule.mediaNotificationMode,
-                            onSelectedIndexChange = { value -> update { it.copy(mediaNotificationMode = value) } },
-                        )
-                        OverlayDropdownPreference(
-                            title = tr("锁屏胶囊背景", "锁屏胶囊背景"),
-                            items = listOf(tr("跟随快捷功能背景", "跟随快捷功能背景"), tr("纯色", "纯色"), tr("高级材质", "高级材质"), tr("柔光玻璃", "柔光玻璃")),
-                            selectedIndex = capsule.backgroundMode,
-                            onSelectedIndexChange = { value -> update { it.copy(backgroundMode = value) } },
-                        )
-                        FloatSlide(tr("锁屏胶囊宽度 (dp)", "锁屏胶囊宽度 (dp)"), capsule.width, 160f..360f, defaultValue = 240f) { value -> update { it.copy(width = value) } }
-                        FloatSlide(tr("锁屏胶囊高度 (dp)", "锁屏胶囊高度 (dp)"), capsule.height, 10f..60f, defaultValue = 36f) { value -> update { it.copy(height = value) } }
-                        FloatSlide(tr("媒体封面圆角 (dp)", "媒体封面圆角 (dp)"), capsule.artworkCornerRadius, 0f..60f, defaultValue = 12f) { value -> update { it.copy(artworkCornerRadius = value) } }
-                    }
-                }
-                AnimatedVisibility(visible = capsule.enabled && capsule.backgroundMode == 1) {
-                    ShortcutBackgroundColorPreference(
-                        title = tr("锁屏胶囊背景颜色", "锁屏胶囊背景颜色"),
-                        color = capsule.pureColor,
-                        onColorChange = { value -> update { it.copy(pureColor = value) } },
+) {
+    val context = LocalContext.current
+    val glassStore = remember(context) { LockscreenCapsuleGlassSettingsStore(context) }
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    val changed = LocalNotificationSettingsChanged.current
+    var glassState by remember { mutableStateOf(glassStore.settings) }
+    LaunchedEffect(service) { service?.let { glassStore.syncRemote(it); glassState = glassStore.settings } }
+    fun updateGlass(transform: (LockscreenCapsuleGlassSettings) -> LockscreenCapsuleGlassSettings) {
+        glassStore.update(service, transform)
+        glassState = glassStore.settings
+        changed()
+    }
+    AppPage(tr("锁屏胶囊", "锁屏胶囊"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.AOD)) { p, scroll ->
+        AppList(p, scroll, 28) {
+            item {
+                Group(tr("锁屏胶囊", "锁屏胶囊")) {
+                    SwitchPreference(
+                        title = tr("开启锁屏胶囊", "开启锁屏胶囊"),
+                        summary = tr("显示在底部快捷按钮之间，跟随当前媒体会话", "显示在底部快捷按钮之间，跟随当前媒体会话"),
+                        checked = capsule.enabled,
+                        onCheckedChange = { value -> update { it.copy(enabled = value) } },
                     )
-                }
-                AnimatedVisibility(visible = capsule.enabled && capsule.backgroundMode == 2) {
-                    Column {
+                    AnimatedVisibility(
+                        visible = capsule.enabled,
+                        enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                        exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                    ) {
+                        Column {
+                            SwitchPreference(
+                                title = tr("锁屏胶囊歌词", "锁屏胶囊歌词"),
+                                checked = capsule.lyricsEnabled,
+                                onCheckedChange = { value -> update { it.copy(lyricsEnabled = value) } },
+                            )
+                            OverlayDropdownPreference(
+                                title = tr("锁屏媒体通知", "锁屏媒体通知"),
+                                items = listOf(tr("不隐藏", "不隐藏"), tr("始终隐藏", "始终隐藏"), tr("动态显示", "动态显示")),
+                                selectedIndex = capsule.mediaNotificationMode,
+                                onSelectedIndexChange = { value -> update { it.copy(mediaNotificationMode = value) } },
+                            )
+                            OverlayDropdownPreference(
+                                title = tr("锁屏胶囊背景", "锁屏胶囊背景"),
+                                items = listOf(tr("跟随快捷功能背景", "跟随快捷功能背景"), tr("纯色", "纯色"), tr("高级材质", "高级材质"), tr("柔光玻璃", "柔光玻璃")),
+                                selectedIndex = capsule.backgroundMode,
+                                onSelectedIndexChange = { value -> update { it.copy(backgroundMode = value) } },
+                            )
+                            FloatSlide(tr("锁屏胶囊宽度 (dp)", "锁屏胶囊宽度 (dp)"), capsule.width, 160f..360f, defaultValue = 240f) { value -> update { it.copy(width = value) } }
+                            FloatSlide(tr("锁屏胶囊高度 (dp)", "锁屏胶囊高度 (dp)"), capsule.height, 10f..60f, defaultValue = 36f) { value -> update { it.copy(height = value) } }
+                            FloatSlide(tr("媒体封面圆角 (dp)", "媒体封面圆角 (dp)"), capsule.artworkCornerRadius, 0f..60f, defaultValue = 12f) { value -> update { it.copy(artworkCornerRadius = value) } }
+                        }
+                    }
+                    AnimatedVisibility(visible = capsule.enabled && capsule.backgroundMode == 1) {
                         ShortcutBackgroundColorPreference(
-                            title = tr("锁屏胶囊混色颜色", "锁屏胶囊混色颜色"),
-                            color = capsule.advancedMaterialColor,
-                            onColorChange = { value -> update { it.copy(advancedMaterialColor = value) } },
-                        )
-                        ParameterIntSlide(tr("锁屏胶囊不透明度", "锁屏胶囊不透明度"), capsule.advancedMaterialOpacity, 0..100, "%", defaultValue = 14) { value -> update { it.copy(advancedMaterialOpacity = value) } }
-                        ParameterIntSlide(tr("锁屏胶囊背景模糊度", "锁屏胶囊背景模糊度"), capsule.advancedMaterialBlurRadius, 0..40, defaultValue = 40) { value -> update { it.copy(advancedMaterialBlurRadius = value) } }
-                        SwitchPreference(
-                            title = tr("锁屏胶囊显示高光", "锁屏胶囊显示高光"),
-                            checked = capsule.advancedMaterialHighlight,
-                            onCheckedChange = { value -> update { it.copy(advancedMaterialHighlight = value) } },
+                            title = tr("锁屏胶囊背景颜色", "锁屏胶囊背景颜色"),
+                            color = capsule.pureColor,
+                            onColorChange = { value -> update { it.copy(pureColor = value) } },
                         )
                     }
-                }
-                AnimatedVisibility(visible = capsule.enabled && capsule.backgroundMode == 3) {
-                    Column {
-                        ShortcutBackgroundColorPreference(
-                            title = tr("锁屏胶囊混色颜色", "锁屏胶囊混色颜色"),
-                            color = capsule.softGlassColor,
-                            onColorChange = { value -> update { it.copy(softGlassColor = value) } },
-                        )
-                        ParameterIntSlide(tr("锁屏胶囊不透明度", "锁屏胶囊不透明度"), capsule.softGlassOpacity, 0..100, "%", defaultValue = 10) { value -> update { it.copy(softGlassOpacity = value) } }
-                        ParameterIntSlide(tr("锁屏胶囊背景模糊度", "锁屏胶囊背景模糊度"), capsule.softGlassBackdropBlurRadius, 0..40, defaultValue = 40) { value -> update { it.copy(softGlassBackdropBlurRadius = value) } }
-                        ParameterIntSlide(tr("锁屏胶囊 Glass 模糊度", "锁屏胶囊 Glass 模糊度"), capsule.softGlassBlurRadius, 0..40, defaultValue = 36) { value -> update { it.copy(softGlassBlurRadius = value) } }
-                        ParameterFloatSlide(tr("锁屏胶囊柔光强度", "锁屏胶囊柔光强度"), capsule.softGlassLuminance, 0f..0.4f, defaultValue = .14f) { value -> update { it.copy(softGlassLuminance = value) } }
+                    AnimatedVisibility(visible = capsule.enabled && capsule.backgroundMode == 2) {
+                        Column {
+                            ShortcutBackgroundColorPreference(
+                                title = tr("锁屏胶囊混色颜色", "锁屏胶囊混色颜色"),
+                                color = capsule.advancedMaterialColor,
+                                onColorChange = { value -> update { it.copy(advancedMaterialColor = value) } },
+                            )
+                            ParameterIntSlide(tr("锁屏胶囊不透明度", "锁屏胶囊不透明度"), capsule.advancedMaterialOpacity, 0..100, "%", defaultValue = 14) { value -> update { it.copy(advancedMaterialOpacity = value) } }
+                            ParameterIntSlide(tr("锁屏胶囊背景模糊度", "锁屏胶囊背景模糊度"), capsule.advancedMaterialBlurRadius, 0..40, defaultValue = 40) { value -> update { it.copy(advancedMaterialBlurRadius = value) } }
+                            SwitchPreference(
+                                title = tr("锁屏胶囊显示高光", "锁屏胶囊显示高光"),
+                                checked = capsule.advancedMaterialHighlight,
+                                onCheckedChange = { value -> update { it.copy(advancedMaterialHighlight = value) } },
+                            )
+                        }
+                    }
+                    AnimatedVisibility(
+                        visible = capsule.enabled && capsule.backgroundMode == 3,
+                        enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                        exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                    ) {
+                        Column {
+                            SmallTitle(tr("锁屏胶囊柔光玻璃参数", "锁屏胶囊柔光玻璃参数"))
+                            SwitchPreference(
+                                title = tr("使用全局柔光玻璃参数", "使用全局柔光玻璃参数"),
+                                checked = glassState.useGlobal,
+                                onCheckedChange = { value -> updateGlass { it.copy(useGlobal = value) } },
+                            )
+                            AnimatedVisibility(
+                                visible = !glassState.useGlobal,
+                                enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                                exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                            ) {
+                                SoftGlassMaterialSliders(glassState.glass) { transform ->
+                                    updateGlass { it.copy(glass = transform(it.glass)) }
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
-}
 
+}
 @Composable
 private fun LockscreenTemplateLimitDialog(
     show: Boolean,

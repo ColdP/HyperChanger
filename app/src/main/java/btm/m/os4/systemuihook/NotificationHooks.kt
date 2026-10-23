@@ -7,9 +7,14 @@ import android.content.SharedPreferences
 import android.content.res.ColorStateList
 import android.content.res.Resources
 import android.content.res.Configuration
+import android.graphics.RenderEffect
+import android.graphics.Outline
+import android.graphics.Shader
+import android.os.Build
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewOutlineProvider
 import android.widget.TextView
 import android.widget.Toast
 import io.github.libxposed.api.XposedInterface.ExceptionMode
@@ -265,6 +270,34 @@ internal class NotificationHooks(
     private var textPreferenceListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
     @Volatile private var darkIntensity = 0f
     private val flashlightClasses = Collections.newSetFromMap(WeakHashMap<Class<*>, Boolean>())
+    private data class ViewRenderBaseline(
+        val effect: RenderEffect?,
+        val clipToOutline: Boolean,
+        val outlineProvider: ViewOutlineProvider?,
+    )
+    private val stackBlurBaselines = Collections.synchronizedMap(WeakHashMap<View, ViewRenderBaseline>())
+    private val stackBlurProgress = Collections.synchronizedMap(WeakHashMap<View, Float>())
+    private val stackBlurEffects = java.util.concurrent.ConcurrentHashMap<Int, RenderEffect>()
+    private val stackBlurOutline = object : ViewOutlineProvider() {
+        override fun getOutline(view: View, outline: Outline) {
+            val width = view.width
+            val height = view.height
+            if (width <= 0 || height <= 0) {
+                outline.setEmpty()
+                return
+            }
+            val radius = runCatching {
+                val method = view.javaClass.methods.firstOrNull { it.name == "getBgRadius" && it.parameterCount == 0 }
+                    ?: view.javaClass.declaredMethods.firstOrNull { it.name == "getBgRadius" && it.parameterCount == 0 }
+                (method?.apply { isAccessible = true }?.invoke(view) as? Number)?.toFloat()
+            }.getOrNull()?.takeIf { it > 0f }
+                ?: runCatching { view.resources.getDimension(view.resources.getIdentifier("notification_item_bg_radius", "dimen", "com.android.systemui")) }.getOrDefault(0f)
+            outline.setRoundRect(0, 0, width, height, radius.coerceAtLeast(0f))
+        }
+    }
+    private var stackBlurHooksInstalled = false
+    private var stackBlurPreferences: SharedPreferences? = null
+    private var stackBlurPreferenceListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
 
     private fun forEachText(view: View, action: (TextView) -> Unit) {
         if (view is TextView) action(view)
@@ -415,6 +448,120 @@ internal class NotificationHooks(
                 flashlightClasses.add(target)
             }.onFailure { module.log(Log.WARN, logTag, "Could not unify flashlight notification material", it) }
         }
+    }
+
+    private fun applyStackBlur(view: View, progress: Float, settings: NotificationStackBlurSettings) {
+        stackBlurProgress[view] = progress
+        val enabled = settings.enabled
+        if (!enabled) {
+            stackBlurBaselines.remove(view)?.let { baseline ->
+                runCatching {
+                    view.setRenderEffect(baseline.effect)
+                    view.clipToOutline = baseline.clipToOutline
+                    view.outlineProvider = baseline.outlineProvider
+                    view.invalidateOutline()
+                }
+            }
+            return
+        }
+        if (!view.isShown || view.visibility != View.VISIBLE || view.alpha <= .01f) {
+            stackBlurBaselines.remove(view)?.let { baseline ->
+                runCatching {
+                    view.setRenderEffect(baseline.effect)
+                    view.clipToOutline = baseline.clipToOutline
+                    view.outlineProvider = baseline.outlineProvider
+                    view.invalidateOutline()
+                }
+            }
+            return
+        }
+        val landscape = view.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val radius = notificationStackBlurRadius(progress, landscape, settings.offset)
+        if (radius <= 0f) {
+            stackBlurBaselines.remove(view)?.let { baseline ->
+                runCatching {
+                    view.setRenderEffect(baseline.effect)
+                    view.clipToOutline = baseline.clipToOutline
+                    view.outlineProvider = baseline.outlineProvider
+                    view.invalidateOutline()
+                }
+            }
+            return
+        }
+        val baseline = stackBlurBaselines.getOrPut(view) {
+            val originalEffect = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                runCatching { View::class.java.getMethod("getRenderEffect").invoke(view) as? RenderEffect }.getOrNull()
+            } else null
+            ViewRenderBaseline(originalEffect, view.clipToOutline, view.outlineProvider)
+        }
+        val effect = stackBlurEffects.computeIfAbsent(kotlin.math.ceil(radius).toInt()) {
+            RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP)
+        }
+        runCatching {
+            view.setRenderEffect(effect)
+            view.clipToOutline = true
+            view.outlineProvider = stackBlurOutline
+            view.invalidateOutline()
+        }.onFailure {
+            // If this surface cannot accept RenderEffect, restore its original rendering state.
+            stackBlurBaselines.remove(view)
+            view.setRenderEffect(baseline.effect)
+            view.clipToOutline = baseline.clipToOutline
+            view.outlineProvider = baseline.outlineProvider
+        }
+    }
+
+    private fun applyStackBlurFromInfo(view: View, info: Any?, preferences: SharedPreferences) {
+        val progress = info?.let { readInstanceField(it, "progress") as? Number }?.toFloat() ?: return
+        applyStackBlur(view, progress, readNotificationStackBlurSettings(preferences))
+    }
+
+    fun installNotificationStackBlurHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (stackBlurHooksInstalled) return
+        stackBlurHooksInstalled = true
+        stackBlurPreferences = preferences
+        stackBlurPreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == null || key == KEY_NOTIFICATION_STACK_BLUR || key == KEY_NOTIFICATION_STACK_BLUR_OFFSET) {
+                val settings = readNotificationStackBlurSettings(preferences)
+                val tracked = synchronized(stackBlurBaselines) { stackBlurBaselines.keys.toList() }
+                tracked.forEach { view ->
+                    val progress = stackBlurProgress[view] ?: 0f
+                    view.post { applyStackBlur(view, progress, settings) }
+                }
+            }
+        }.also(preferences::registerOnSharedPreferenceChangeListener)
+
+        runCatching {
+            val injector = classLoader.loadClass("com.android.systemui.statusbar.notification.row.ExpandableViewInjector")
+            injector.declaredMethods.filter { it.name == "applyViewStackingInfo" && it.parameterCount == 6 }
+                .forEachIndexed { index, method ->
+                    module.hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("notification-stack-blur:apply:$index").intercept { chain ->
+                            val result = chain.proceed()
+                            val view = chain.getArg(0) as? View
+                            val info = chain.getArg(1)
+                            if (view != null) applyStackBlurFromInfo(view, info, preferences)
+                            result
+                        }
+                }
+        }.onFailure { module.log(Log.WARN, logTag, "Could not hook notification stacking view updates", it) }
+
+        runCatching {
+            val interactor = classLoader.loadClass("com.miui.systemui.notification.domain.interactor.NotificationStackingInteractor")
+            interactor.declaredMethods.filter { it.name == "calculateStackingInfo" && it.parameterCount == 5 }
+                .forEachIndexed { index, method ->
+                    module.hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("notification-stack-blur:calculate:$index").intercept { chain ->
+                            val result = chain.proceed()
+                            val view = chain.getArg(0) as? View
+                            if (view != null && result != null) applyStackBlurFromInfo(view, result, preferences)
+                            result
+                        }
+                }
+            check(interactor.declaredMethods.any { it.name == "calculateStackingInfo" && it.parameterCount == 5 }) {
+                "NotificationStackingInteractor#calculateStackingInfo overloads not found"
+            }
+        }.onFailure { module.log(Log.WARN, logTag, "Could not hook notification stacking calculations", it) }
     }
 
     companion object {
