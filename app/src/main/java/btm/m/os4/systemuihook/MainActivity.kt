@@ -5569,7 +5569,7 @@ private fun SuperXiaoAi(
     }
     AppList(padding, scroll, 28) {
         item {
-            Group(tr("xiaoaiFloatingInput", "悬浮输入框")) {
+            Group(tr("xiaoaiFloatingInput", "超级小爱悬浮输入框")) {
                 SwitchPreference(
                     title = tr("xiaoaiInputGlass", "为悬浮输入框添加柔光玻璃效果"),
                     checked = floating.enabled,
@@ -5579,7 +5579,7 @@ private fun SuperXiaoAi(
         }
         if (floating.enabled) {
             item {
-                Group(tr("xiaoaiInputParameters", "悬浮输入框柔光玻璃参数")) {
+                Group(tr("xiaoaiInputParameters", "超级小爱悬浮输入框柔光玻璃参数")) {
                     XiaoAiGlassSliders(floating.parameters) { value -> updateFloating { it.copy(parameters = value) } }
                 }
             }
