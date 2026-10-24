@@ -94,6 +94,8 @@ private fun AppNavigationCard(item: AppNavItem, prefs: android.content.SharedPre
                 Text(packageInfo?.let { "${it.versionName ?: "?"} (${it.longVersionCode})" } ?: tr("未安装", "未安装"), style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             }
             Switch(checked = enabled, onCheckedChange = { prefs.edit().putBoolean(ScopedSettings.key(item.packageName, ScopedSettings.KEY_ENABLED), it).apply() })
+            Spacer(Modifier.width(8.dp))
+            Text("›", style = MiuixTheme.textStyles.body1, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
         }
     }
 }
