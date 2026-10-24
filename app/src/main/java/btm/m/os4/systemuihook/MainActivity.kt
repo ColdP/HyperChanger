@@ -1696,7 +1696,7 @@ private fun CategoryHome(
                         title = tr("系统功能", "系统功能"),
                         entries = listOf(
                             CategoryPageEntry(tr("系统框架", "系统框架"), PageId.SYSTEM_FRAMEWORK),
-                            CategoryPageEntry(tr("超级小爱", "超级小爱"), PageId.SUPER_XIAOAI),
+                            CategoryPageEntry(tr("超级小爱和输入法", "超级小爱和输入法"), PageId.SUPER_XIAOAI),
                             CategoryPageEntry(tr("相机与相册编辑", "相机与相册编辑"), PageId.CAMERA),
                             CategoryPageEntry(tr("系统更新", "系统更新"), PageId.SYSTEM_UPDATE),
                             CategoryPageEntry(tr("系统设置", "系统设置"), PageId.SYSTEM_SETTINGS),
