@@ -97,7 +97,7 @@ private fun AppNavigationCard(item: AppNavItem, prefs: android.content.SharedPre
             }
             Switch(checked = enabled, onCheckedChange = { prefs.edit().putBoolean(ScopedSettings.key(item.packageName, ScopedSettings.KEY_ENABLED), it).apply() })
             Image(
-                MiuixIcons.Regular.ChevronForward,
+                MiuixIcons.ChevronForward,
                 contentDescription = null,
                 modifier = Modifier.padding(start = 12.dp).size(22.dp),
                 colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary)
