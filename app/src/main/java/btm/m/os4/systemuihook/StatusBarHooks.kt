@@ -531,8 +531,10 @@ internal class StatusBarHooks(
     }
 
     private fun batteryPercentMode(tag: Int?, preferences: SharedPreferences): Int = when (tag) {
-        0 -> preferences.getInt(KEY_STATUS_BAR_BATTERY_PERCENT_MODE, 0)
-        5, 6 -> preferences.getInt(KEY_CONTROL_CENTER_BATTERY_PERCENT_MODE, 0)
+        // Tag 5 is the status-bar proxy shown during control-center transitions.
+        // It must match tag 0 before handing back to the real status bar.
+        0, 5 -> preferences.getInt(KEY_STATUS_BAR_BATTERY_PERCENT_MODE, 0)
+        6 -> preferences.getInt(KEY_CONTROL_CENTER_BATTERY_PERCENT_MODE, 0)
         else -> 0
     }.coerceIn(0, 3)
 

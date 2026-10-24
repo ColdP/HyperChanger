@@ -13,9 +13,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
 import java.util.UUID
-import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
-import java.util.zip.ZipOutputStream
 import org.json.JSONObject
 
 internal const val REAR_SCREENSHOT_SHELL_AUTHORITY = "btm.m.os4.systemuihook.rearscreenshot.shells"
@@ -135,28 +133,6 @@ internal class RearScreenshotShellStore(context: Context) {
         return readBytes(bytes, name, mode)
     }
 
-    fun readQr(uri: Uri, mode: RearScreenshotShellMode): RearScreenshotShellStyle {
-        val bytes = app.contentResolver.openInputStream(uri)?.use { it.readBounded(MAX_ZIP_BYTES) }
-            ?: error("Unable to open QR image")
-        val archive = RearScreenshotQrArchive.extract(bytes) ?: error("QR original has no shell archive")
-        return readBytes(archive, "shell.zip", mode)
-    }
-
-    fun qrPayload(style: RearScreenshotShellStyle): String = JSONObject()
-        .put("type", "hyperchanger_shell_png")
-        .put("version", 1)
-        .put("name", style.name)
-        .put("mode", style.mode.key)
-        .put("sha256", java.security.MessageDigest.getInstance("SHA-256").digest(style.image).joinToString("") { "%02x".format(it) })
-        .toString()
-
-    fun qrImage(style: RearScreenshotShellStyle): ByteArray {
-        val bitmap = createPresetQrCode(qrPayload(style))
-        val png = ByteArrayOutputStream()
-        try { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, png) } finally { bitmap.recycle() }
-        return RearScreenshotQrArchive.embed(png.toByteArray(), exportBytes(style))
-    }
-
     private fun readBytes(bytes: ByteArray, name: String, mode: RearScreenshotShellMode): RearScreenshotShellStyle {
         val lower = name.lowercase()
         if (!lower.endsWith(".zip") && !bytes.isZip()) {
@@ -206,20 +182,14 @@ internal class RearScreenshotShellStore(context: Context) {
         }
     }
 
-    fun writeExport(style: RearScreenshotShellStyle): File {
-        val out = File(app.cacheDir, "${style.id}_${style.mode.key}.zip")
-        out.writeBytes(exportBytes(style))
-        return out
-    }
-
-    private fun exportBytes(style: RearScreenshotShellStyle): ByteArray {
-        val out = ByteArrayOutputStream()
-        ZipOutputStream(out).use { zip ->
-            zip.putNextEntry(ZipEntry("${style.mode.prefix}_shell.png")); zip.write(style.image); zip.closeEntry()
-            zip.putNextEntry(ZipEntry("${style.mode.prefix}_shell.json")); zip.write(style.geometry.toByteArray(Charsets.UTF_8)); zip.closeEntry()
-            zip.putNextEntry(ZipEntry("meta.json")); zip.write(JSONObject().put("name", style.name).toString().toByteArray(Charsets.UTF_8)); zip.closeEntry()
-        }
-        return out.toByteArray()
+    fun pngImage(style: RearScreenshotShellStyle): ByteArray {
+        val bitmap = requireNotNull(BitmapFactory.decodeByteArray(style.image, 0, style.image.size))
+        return try {
+            ByteArrayOutputStream().use { output ->
+                check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output))
+                output.toByteArray()
+            }
+        } finally { bitmap.recycle() }
     }
 
     internal fun fileFor(uri: Uri): File? {
@@ -230,7 +200,6 @@ internal class RearScreenshotShellStore(context: Context) {
         return when (parts[2]) {
             "image" -> File(modeDir(mode), "${safeId(style.id)}/shell.png")
             "geometry" -> File(modeDir(mode), "${safeId(style.id)}/shell.json")
-            "export" -> writeExport(style)
             else -> null
         }
     }
@@ -266,9 +235,7 @@ internal class RearScreenshotShellProvider : android.content.ContentProvider() {
 
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
         if (mode != "r") return null
-        if (!isAllowedCaller() && !(uri.pathSegments.lastOrNull() == "export" &&
-                requireNotNull(context).checkUriPermission(uri, android.os.Binder.getCallingPid(), android.os.Binder.getCallingUid(),
-                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) == android.content.pm.PackageManager.PERMISSION_GRANTED)) return null
+        if (!isAllowedCaller()) return null
         val file = store.fileFor(uri) ?: return null
         return if (file.isFile) ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY) else null
     }
@@ -281,7 +248,6 @@ internal class RearScreenshotShellProvider : android.content.ContentProvider() {
 
     override fun getType(uri: Uri) = when (uri.pathSegments.lastOrNull()) {
         "image" -> "image/png"
-        "export" -> "application/zip"
         else -> "application/json"
     }
     override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?) = null
