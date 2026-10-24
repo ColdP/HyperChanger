@@ -32,7 +32,6 @@ import btm.m.liquidglass.NavigationStyle
 import btm.m.liquidglass.ScopedSettings
 import btm.m.liquidglass.rememberMomentumPredictiveBack
 import btm.m.liquidglass.momentumBackTransform
-import top.yukonga.miuix.kmp.icon.extended.ChevronForward
 
 private data class AppNavItem(val name: String, val packageName: String)
 
@@ -94,15 +93,23 @@ private fun AppNavigationCard(item: AppNavItem, prefs: android.content.SharedPre
                 Text(item.packageName, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(packageInfo?.let { "${it.versionName ?: "?"} (${it.longVersionCode})" } ?: tr("未安装", "未安装"), style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             }
-            Switch(checked = enabled, onCheckedChange = { prefs.edit().putBoolean(ScopedSettings.key(item.packageName, ScopedSettings.KEY_ENABLED), it).apply() })
-            Image(
-    image = ChevronForward,
-    contentDescription = null,
-    modifier = Modifier.padding(start = 12.dp).size(22.dp),
-    colorFilter = ColorFilter.tint(
-        MiuixTheme.colorScheme.onSurfaceVariantSummary
-    )
-)
+            Switch(
+                checked = enabled,
+                onCheckedChange = {
+                    prefs.edit()
+                        .putBoolean(
+                            ScopedSettings.key(item.packageName, ScopedSettings.KEY_ENABLED),
+                            it
+                        )
+                        .apply()
+                }
+            )
+            Text(
+                "›",
+                modifier = Modifier.padding(start = 12.dp),
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                fontSize = 28.sp
+            )
         }
     }
 }
