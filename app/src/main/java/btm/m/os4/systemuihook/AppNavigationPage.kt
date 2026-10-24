@@ -16,10 +16,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import io.github.libxposed.service.XposedService
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
@@ -104,11 +104,13 @@ private fun AppNavigationCard(item: AppNavItem, prefs: android.content.SharedPre
                         .apply()
                 }
             )
-            Text(
-                "›",
-                modifier = Modifier.padding(start = 12.dp),
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = 28.sp
+            Icon(
+                imageVector = MiuixIcons.ChevronForward,
+                contentDescription = null,
+                modifier = Modifier
+                    .padding(start = 12.dp)
+                    .size(22.dp),
+                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary
             )
         }
     }
