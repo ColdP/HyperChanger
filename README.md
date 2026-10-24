@@ -30,7 +30,7 @@
 
 HyperChanger 是面向小米 HyperOS 4 的 LSPosed 模块，通过配套应用配置系统界面、通知与控制中心、锁屏、桌面、系统设置、背屏及受支持应用的外观和行为。模块需要 Root 权限，通过 Hook 修改现有组件。
 
-当前源码版本为 **1.2.0 RC2**，以 [app/build.gradle.kts](app/build.gradle.kts) 中的 `versionName` 为准。下载版本与更新说明请查看 [Releases](https://github.com/ColdP/HyperChanger/releases)。
+当前源码版本为 **1.2.1 RC2**，以 [app/build.gradle.kts](app/build.gradle.kts) 中的 `versionName` 为准。下载版本与更新说明请查看 [Releases](https://github.com/ColdP/HyperChanger/releases)。
 
 项目仍处于测试阶段，主要适配 **HyperOS 4（Android 17）**。设备、地区、系统构建和应用版本的差异均可能影响功能；最低安装版本并不代表所有功能均受支持。
 
@@ -47,6 +47,7 @@ HyperChanger 是面向小米 HyperOS 4 的 LSPosed 模块，通过配套应用�
 ### 超级岛、状态栏与手势提示条
 
 - 调整超级岛宽度、大小岛间距、收起状态的平滑轮廓和背景材质。
+- 为展开的超级岛单独调整柔光玻璃参数，并可使用全局柔光玻璃设置。
 - 移除部分焦点通知与超级岛白名单限制，调整通知背景和媒体卡片，并提供普通、焦点与媒体通知模拟。
 - 自定义状态栏双排信号、网络类型文本、图标显示、缩放、位置和间距。
 - 调整全局手势提示条的样式与尺寸。
@@ -72,6 +73,8 @@ HyperChanger 是面向小米 HyperOS 4 的 LSPosed 模块，通过配套应用�
 - 自定义系统设置主页与设备页的背景、设备卡片、LOGO、机型图片及显示的设备参数，并添加模块入口。
 - 解锁部分背屏 AI 功能，管理导入的自定义背屏应用，选择背屏音乐控件可用的应用。
 - 自定义背屏壁纸数量上限，修复主题修改与背屏主题、壁纸授权流程的冲突；相关选项需要主题壁纸作用域。
+- 在背屏启动网易云音乐原生迷你播放器（适配 9.5.37），支持固定的显示屏 1 投放流程；需要网易云音乐和背屏作用域，并在设备解锁后使用。
+- 自定义截屏应用的背屏带壳截图聚焦版与完整样式，支持图片、压缩包和带附件二维码的导入导出。
 
 ### 相机、相册与超级小爱输入法
 
@@ -86,6 +89,7 @@ HyperChanger 是面向小米 HyperOS 4 的 LSPosed 模块，通过配套应用�
 - 移除小米运动健康表盘的 10 分钟试用限制。
 - 强制启用小米互传中的隔空投送可用性检查；实际传输仍依赖系统组件、硬件及对端支持。
 - 增加屏幕录制帧率与码率选项，自定义录制输出目录。
+- 提供快速截屏、任意界面截屏，以及腾讯会议底部导航适配。
 - 禁用系统更新、移除部分 OTA 限制，并自定义显示的系统与 SOTA 版本。
 
 ### 模块应用、语言与更新
@@ -94,6 +98,7 @@ HyperChanger 是面向小米 HyperOS 4 的 LSPosed 模块，通过配套应用�
 - 内置简体中文、英文和日文，支持语言包导入、导出与编辑。
 - 通过 JSON 导入、导出模块设置，并在应用内管理需要重启的作用域应用。
 - 从 GitHub 或 Gitee 检查模块更新，支持下载后手动安装或使用 Root 静默安装。
+- 提供模块总开关、按功能分区的安全停用策略，以及模块日志级别、筛选、保留和 ZIP 导出。
 
 ## 兼容性与要求
 
@@ -103,7 +108,7 @@ HyperChanger 是面向小米 HyperOS 4 的 LSPosed 模块，通过配套应用�
 | 最低安装版本 | Android 15（API 35）；不等同于完整功能兼容 |
 | 编译 / 目标 SDK | API 37 |
 | 模块框架 | Root 与支持现代 libxposed API 的 LSPosed；最低 API 101，目标 API 102 |
-| 原生库架构 | 当前仓库包含 `arm64-v8a/libhyperpatch.so`，桌面原生补丁依赖 ARM64 |
+| 原生库架构 | 当前仓库包含 ARM64 原生库（`libhyperpatch.so`、Dock 与文件夹补丁），桌面原生补丁依赖 `arm64-v8a` |
 | 可选组件 | 对应功能需要设备上存在兼容版本的目标应用或系统组件 |
 
 应用会检测 `ro.mi.os.version.code`：未检测到 HyperOS 时退出，非 HyperOS 4 时提示风险。检测通过不代表所有 Hook 均与当前系统兼容。
@@ -125,22 +130,29 @@ HyperChanger 是面向小米 HyperOS 4 的 LSPosed 模块，通过配套应用�
 | 相册扩展插件 | `com.hyper.gallery.plugin` |
 | 小米相册-编辑 | `com.miui.mediaeditor` |
 | 屏幕录制 | `com.miui.screenrecorder` |
+| 截屏 | `com.miui.screenshot` |
 | 超级小爱输入法 | `com.xiaomi.type` |
 | 剪切板与常用语 | `com.miui.phrase` |
 | 设置 | `com.android.settings` |
 | 系统更新 | `com.android.updater` |
 | 背屏 | `com.xiaomi.subscreencenter` |
+| 小米妙享服务 | `com.xiaomi.xmsf` |
+| 小爱语音 | `com.miui.voiceassist` |
+| 小米声音 | `com.miui.misound` |
+| 小米设置 | `com.xiaomi.misettings` |
 | 智能助理 | `com.miui.personalassistant` |
 | 主题壁纸 | `com.android.thememanager` |
 | 小米商城 | `com.xiaomi.shop` |
 | 小米钱包 | `com.mipay.wallet` |
 | 小米运动健康 | `com.mi.health` |
 | Apple Music | `com.apple.android.music` |
+| 网易云音乐 | `com.netease.cloudmusic` |
 | 微博 | `com.sina.weibo` |
 | 小红书 | `com.xingin.xhs` |
 | 瑞幸咖啡 | `com.lucky.luckyclient` |
 | 高德地图 | `com.autonavi.minimap` |
 | 小米互传 | `com.miui.mishare.connectivity` |
+| 腾讯会议 | `com.tencent.wemeet.app` |
 
 部分包并非每台设备都有。仅选择实际使用的作用域；声明作用域不保证目标应用的所有版本均受支持。
 
@@ -191,7 +203,7 @@ Windows PowerShell：
 
 Debug APK 输出位置：`app/build/outputs/apk/debug/app-debug.apk`。
 
-Release 签名通过 Gradle 属性 `releaseStoreFile`、`releaseStorePassword`、`releaseKeyAlias`、`releaseKeyPassword` 配置，密钥应存放在仓库外。签名构建输出至 `app/build/outputs/apk/release/`，发布文件命名为 `HyperChanger-v<VersionName>.apk`，将版本号中的空格替换为连字符，例如 `HyperChanger-v1.2.0-RC2.apk`。不要提交密钥、密码或构建产物。
+Release 签名通过 Gradle 属性 `releaseStoreFile`、`releaseStorePassword`、`releaseKeyAlias`、`releaseKeyPassword` 配置，密钥应存放在仓库外。签名构建输出至 `app/build/outputs/apk/release/`，发布文件命名为 `HyperChanger-v<VersionName>.apk`，将版本号中的空格替换为连字符，例如 `HyperChanger-v1.2.1-RC2.apk`。不要提交密钥、密码或构建产物。
 
 ## 目录结构
 
@@ -208,7 +220,6 @@ HyperChanger/
 |-- README.md                中文主版
 |-- README_en.md             英文版
 |-- README_ja.md             日文版
-|-- README_zh.md             旧中文链接入口
 |-- CONTRIBUTING_zh.md
 |-- NOTICE
 `-- LICENSE

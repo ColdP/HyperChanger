@@ -30,7 +30,7 @@
 
 HyperChanger は、Xiaomi HyperOS 4 向けの LSPosed モジュールです。付属の設定アプリから、システム UI、通知とコントロールセンター、ロック画面、ランチャー、システム設定、背面ディスプレイ、対応アプリの外観や動作を変更できます。Root 権限が必要で、既存のコンポーネントをフックして変更します。
 
-現在のソースコードのバージョンは **1.2.0 RC2** です。[app/build.gradle.kts](app/build.gradle.kts) の `versionName` を基準としています。ダウンロードと更新内容は [Releases](https://github.com/ColdP/HyperChanger/releases) を参照してください。
+現在のソースコードのバージョンは **1.2.1 RC2** です。[app/build.gradle.kts](app/build.gradle.kts) の `versionName` を基準としています。ダウンロードと更新内容は [Releases](https://github.com/ColdP/HyperChanger/releases) を参照してください。
 
 本プロジェクトはテスト段階にあり、主な対応環境は **HyperOS 4（Android 17）** です。端末、地域、システムビルド、アプリのバージョンによって動作が異なります。インストール可能な最小バージョンを満たしていても、すべての機能が利用できるとは限りません。
 
@@ -47,6 +47,7 @@ HyperChanger は、Xiaomi HyperOS 4 向けの LSPosed モジュールです。�
 ### スーパーアイランド、ステータスバー、ジェスチャーバー
 
 - スーパーアイランドの幅、大小アイランド間の距離、折りたたみ時の輪郭の滑らかさ、背景マテリアルを調整できます。
+- 展開されたスーパーアイランドのソフトガラスパラメータを個別に調整し、グローバル設定に追従させることもできます。
 - フォーカス通知とスーパーアイランドの一部ホワイトリスト制限を解除し、通知背景やメディアカードを変更できます。通常通知、フォーカス通知、メディア通知のシミュレーションも利用できます。
 - ステータスバーの2段式電波表示、ネットワーク種別の文字、アイコンの表示、倍率、位置、間隔を変更できます。
 - システム全体のジェスチャーバーのスタイルとサイズを調整できます。
@@ -72,6 +73,8 @@ HyperChanger は、Xiaomi HyperOS 4 向けの LSPosed モジュールです。�
 - システム設定のホームページと端末情報ページで、背景、端末カード、ロゴ、端末画像、表示される仕様を変更し、モジュールへのショートカットを追加できます。
 - 背面ディスプレイの一部 AI 機能を解除し、インポートしたアプリの管理や音楽ウィジェットで使用するアプリの選択ができます。
 - 背面ディスプレイの壁紙数の上限を変更し、テーマ変更と背面ディスプレイのテーマ・壁紙の認証処理との競合を修正できます。これらの設定にはテーマのスコープが必要です。
+- 背面ディスプレイ 1 で NetEase Cloud Music の標準ミニプレーヤーを起動できます（対応基準 9.5.37）。NetEase Cloud Music と背面ディスプレイの両スコープを選択し、端末のロックを解除して使用してください。
+- スクリーンショットアプリの背面画面シェルをフォーカス版・全体版でカスタマイズできます。画像、アーカイブ、添付ファイル付き QR の入出力に対応します。
 
 ### カメラ、ギャラリー、スーパー XiaoAi 入力方式
 
@@ -86,6 +89,7 @@ HyperChanger は、Xiaomi HyperOS 4 向けの LSPosed モジュールです。�
 - Mi Fitness のウォッチフェイスの10分間試用制限を解除できます。
 - MiShare の AirDrop 利用可否チェックを上書きできます。実際の転送にはシステムコンポーネント、ハードウェア、相手端末の対応が必要です。
 - 画面録画のフレームレートとビットレートの選択肢を追加し、保存先を変更できます。
+- クイックスクリーンショットと任意画面のスクリーンショット設定を追加し、Tencent Meeting の下部ナビゲーションに対応します。
 - システム更新の無効化、一部 OTA 制限の解除、表示上のシステムおよび SOTA バージョンの変更ができます。
 
 ### モジュールアプリ、言語、更新
@@ -94,6 +98,7 @@ HyperChanger は、Xiaomi HyperOS 4 向けの LSPosed モジュールです。�
 - 簡体字中国語、英語、日本語を内蔵し、言語パックのインポート、エクスポート、編集ができます。
 - モジュール設定を JSON で入出力し、アプリ内でスコープ対象アプリの再起動を管理できます。
 - GitHub または Gitee からモジュールの更新を確認・ダウンロードし、手動または Root によるサイレントインストールができます。
+- モジュール全体のスイッチ、機能ごとの安全無効化、ログレベル・フィルター・保持期間・ZIP 出力を利用できます。
 
 ## 互換性と動作要件
 
@@ -103,7 +108,7 @@ HyperChanger は、Xiaomi HyperOS 4 向けの LSPosed モジュールです。�
 | インストール可能な最小バージョン | Android 15（API 35）；全機能の互換性を保証するものではありません |
 | コンパイル / ターゲット SDK | API 37 |
 | モジュールフレームワーク | Root と、モダンな libxposed API に対応する LSPosed；最小 API 101、ターゲット API 102 |
-| ネイティブライブラリのアーキテクチャ | 現在のリポジトリには `arm64-v8a/libhyperpatch.so` を同梱。ランチャーのネイティブパッチには ARM64 が必要です |
+| ネイティブライブラリのアーキテクチャ | ARM64 ネイティブライブラリ（`libhyperpatch.so`、Dock、フォルダーパッチ）を同梱。ランチャーのネイティブパッチには `arm64-v8a` が必要です |
 | オプションのコンポーネント | 各機能には、対応バージョンの対象アプリまたはシステムコンポーネントが必要です |
 
 アプリは `ro.mi.os.version.code` を確認します。HyperOS が検出されない場合は終了し、HyperOS 4 以外では警告を表示します。この確認を通過しても、現在のシステムですべてのフックが動作するとは限りません。
@@ -125,22 +130,29 @@ LSPosed でモジュールを有効にし、使用する機能に必要なスコ
 | Hyper ギャラリープラグイン | `com.hyper.gallery.plugin` |
 | メディアエディター | `com.miui.mediaeditor` |
 | 画面録画 | `com.miui.screenrecorder` |
+| スクリーンショット | `com.miui.screenshot` |
 | スーパー XiaoAi 入力方式 | `com.xiaomi.type` |
 | XiaoAi フレーズ | `com.miui.phrase` |
 | システム設定 | `com.android.settings` |
 | システム更新 | `com.android.updater` |
 | 背面ディスプレイセンター | `com.xiaomi.subscreencenter` |
+| Xiaomi 連携サービス | `com.xiaomi.xmsf` |
+| XiaoAi 音声 | `com.miui.voiceassist` |
+| Xiaomi サウンド | `com.miui.misound` |
+| Xiaomi 設定 | `com.xiaomi.misettings` |
 | パーソナルアシスタント | `com.miui.personalassistant` |
 | テーマ | `com.android.thememanager` |
 | Xiaomi ショップ | `com.xiaomi.shop` |
 | Mi Wallet | `com.mipay.wallet` |
 | Mi Fitness | `com.mi.health` |
 | Apple Music | `com.apple.android.music` |
+| NetEase Cloud Music | `com.netease.cloudmusic` |
 | Weibo | `com.sina.weibo` |
 | 小紅書 | `com.xingin.xhs` |
 | Luckin Coffee | `com.lucky.luckyclient` |
 | 高徳地図（AMap） | `com.autonavi.minimap` |
 | MiShare | `com.miui.mishare.connectivity` |
+| Tencent Meeting | `com.tencent.wemeet.app` |
 
 端末によっては存在しないパッケージもあります。実際に使用するスコープだけを選択してください。スコープの宣言は、対象アプリのすべてのバージョンへの対応を保証するものではありません。
 
@@ -191,7 +203,7 @@ Windows PowerShell：
 
 Debug APK の出力先：`app/build/outputs/apk/debug/app-debug.apk`。
 
-Release の署名は Gradle プロパティ `releaseStoreFile`、`releaseStorePassword`、`releaseKeyAlias`、`releaseKeyPassword` で設定し、キーストアはリポジトリ外に保管してください。署名済みビルドは `app/build/outputs/apk/release/` に出力されます。公開するファイル名は `HyperChanger-v<VersionName>.apk` とし、バージョン内の空白をハイフンに置き換えます（例：`HyperChanger-v1.2.0-RC2.apk`）。キーストア、パスワード、ビルド生成物をコミットしないでください。
+Release の署名は Gradle プロパティ `releaseStoreFile`、`releaseStorePassword`、`releaseKeyAlias`、`releaseKeyPassword` で設定し、キーストアはリポジトリ外に保管してください。署名済みビルドは `app/build/outputs/apk/release/` に出力されます。公開するファイル名は `HyperChanger-v<VersionName>.apk` とし、バージョン内の空白をハイフンに置き換えます（例：`HyperChanger-v1.2.1-RC2.apk`）。キーストア、パスワード、ビルド生成物をコミットしないでください。
 
 ## ディレクトリ構成
 
@@ -208,7 +220,6 @@ HyperChanger/
 |-- README.md                中国語のメイン README
 |-- README_en.md             英語版
 |-- README_ja.md             日本語版
-|-- README_zh.md             旧中国語リンクの案内ページ
 |-- CONTRIBUTING_zh.md
 |-- NOTICE
 `-- LICENSE

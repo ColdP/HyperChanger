@@ -30,7 +30,7 @@
 
 HyperChanger is an LSPosed module for Xiaomi HyperOS 4. Its companion app configures the appearance and behavior of System UI, notifications, Control Center, the lock screen, the launcher, Settings, the rear screen, and supported apps. The module requires root and modifies existing components through hooks.
 
-The current source version is **1.2.0 RC2**, as defined by `versionName` in [app/build.gradle.kts](app/build.gradle.kts). See [Releases](https://github.com/ColdP/HyperChanger/releases) for downloads and release notes.
+The current source version is **1.2.1 RC2**, as defined by `versionName` in [app/build.gradle.kts](app/build.gradle.kts). See [Releases](https://github.com/ColdP/HyperChanger/releases) for downloads and release notes.
 
 The project is still in testing and primarily targets **HyperOS 4 (Android 17)**. Device, region, system build, and app version differences can affect features. Meeting the minimum installation version does not imply full feature support.
 
@@ -47,6 +47,7 @@ The project is still in testing and primarily targets **HyperOS 4 (Android 17)**
 ### Super Island, status bar, and gesture handle
 
 - Adjust Super Island width, spacing between large and small islands, collapsed contour smoothing, and background materials.
+- Tune expanded-island soft-glass parameters independently or follow the global soft-glass settings.
 - Remove selected focus-notification and Super Island whitelist restrictions, customize notification backgrounds and media cards, and simulate regular, focus, and media notifications.
 - Customize stacked mobile signal indicators, network-type labels, icon visibility, scale, position, and spacing.
 - Adjust the global gesture handle's style and dimensions.
@@ -72,6 +73,8 @@ The project is still in testing and primarily targets **HyperOS 4 (Android 17)**
 - Customize Settings home and device pages with backgrounds, device cards, logos, device images, and displayed specifications; add a module shortcut.
 - Unlock selected rear-screen AI features, manage imported rear-screen apps, and choose apps for the rear-screen music widget.
 - Customize the rear-screen wallpaper count limit and fix conflicts between theme modifications and rear-screen theme/wallpaper authorization. These options require the Themes scope.
+- Launch the native NetEase Cloud Music mini player on rear display 1 (supported baseline 9.5.37). Select both NetEase Cloud Music and Rear-screen scopes and unlock the device before casting.
+- Customize focus and full rear-screen screenshot shells in the Screenshot app, with image, archive, and attachment QR import/export.
 
 ### Camera, Gallery, and Super XiaoAi input method
 
@@ -86,6 +89,7 @@ The project is still in testing and primarily targets **HyperOS 4 (Android 17)**
 - Remove the 10-minute watch-face trial limit in Mi Fitness.
 - Override MiShare's AirDrop availability checks. Actual transfers still depend on system components, hardware, and the receiving device.
 - Add screen-recording frame-rate and bitrate options and configure a custom output directory.
+- Add quick and anywhere-screenshot options and adapt Tencent Meeting bottom navigation.
 - Disable system updates, remove selected OTA restrictions, and customize displayed system and SOTA versions.
 
 ### Module app, languages, and updates
@@ -94,6 +98,7 @@ The project is still in testing and primarily targets **HyperOS 4 (Android 17)**
 - Built-in Simplified Chinese, English, and Japanese, with language-pack import, export, and editing.
 - Import and export module settings as JSON and manage scoped app restarts from the app.
 - Check for module updates through GitHub or Gitee, download them, and install manually or silently with root.
+- Provide a module master switch, per-section safety disable policy, and module log levels, filters, retention, and ZIP export.
 
 ## Compatibility and requirements
 
@@ -125,22 +130,29 @@ Enable the module in LSPosed and select the scopes required by your features. Th
 | Hyper Gallery plugin | `com.hyper.gallery.plugin` |
 | Media editor | `com.miui.mediaeditor` |
 | Screen recorder | `com.miui.screenrecorder` |
+| Screenshot | `com.miui.screenshot` |
 | Super XiaoAi input method | `com.xiaomi.type` |
 | XiaoAi phrases | `com.miui.phrase` |
 | Settings | `com.android.settings` |
 | System updater | `com.android.updater` |
 | Rear-screen center | `com.xiaomi.subscreencenter` |
+| Xiaomi interconnect service | `com.xiaomi.xmsf` |
+| XiaoAi voice | `com.miui.voiceassist` |
+| Xiaomi sound | `com.miui.misound` |
+| Xiaomi Settings | `com.xiaomi.misettings` |
 | Personal assistant | `com.miui.personalassistant` |
 | Themes | `com.android.thememanager` |
 | Xiaomi Shop | `com.xiaomi.shop` |
 | Mi Wallet | `com.mipay.wallet` |
 | Mi Fitness | `com.mi.health` |
 | Apple Music | `com.apple.android.music` |
+| NetEase Cloud Music | `com.netease.cloudmusic` |
 | Weibo | `com.sina.weibo` |
 | Xiaohongshu | `com.xingin.xhs` |
 | Luckin Coffee | `com.lucky.luckyclient` |
 | AMap | `com.autonavi.minimap` |
 | MiShare | `com.miui.mishare.connectivity` |
+| Tencent Meeting | `com.tencent.wemeet.app` |
 
 Some packages are absent on certain devices. Select only the scopes you use. A declared scope does not guarantee support for every version of that app.
 
@@ -191,7 +203,7 @@ Windows PowerShell:
 
 Debug APK output: `app/build/outputs/apk/debug/app-debug.apk`.
 
-Configure release signing with the Gradle properties `releaseStoreFile`, `releaseStorePassword`, `releaseKeyAlias`, and `releaseKeyPassword`, keeping the keystore outside the repository. Signed builds are output to `app/build/outputs/apk/release/`. Name the published file `HyperChanger-v<VersionName>.apk`, replacing spaces in the version with hyphens, for example `HyperChanger-v1.2.0-RC2.apk`. Do not commit keystores, passwords, or build outputs.
+Configure release signing with the Gradle properties `releaseStoreFile`, `releaseStorePassword`, `releaseKeyAlias`, and `releaseKeyPassword`, keeping the keystore outside the repository. Signed builds are output to `app/build/outputs/apk/release/`. Name the published file `HyperChanger-v<VersionName>.apk`, replacing spaces in the version with hyphens, for example `HyperChanger-v1.2.1-RC2.apk`. Do not commit keystores, passwords, or build outputs.
 
 ## Project structure
 
@@ -208,7 +220,6 @@ HyperChanger/
 |-- README.md                Primary Chinese README
 |-- README_en.md             English README
 |-- README_ja.md             Japanese README
-|-- README_zh.md             Legacy Chinese link entry
 |-- CONTRIBUTING_zh.md
 |-- NOTICE
 `-- LICENSE
