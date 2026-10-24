@@ -337,7 +337,7 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
         PageId.LOCK,
     ),
     CategorySearchItem(
-        tr("超级小爱", "超级小爱"),
+        tr("超级小爱与输入法", "超级小爱与输入法"),
         tr("category_search_xiaoai_description", "调整超级小爱悬浮窗口和输入法。"),
         setOf(ScopeApplication.SUPER_XIAOAI, ScopeApplication.SUPER_XIAOAI_IME),
         PageId.SUPER_XIAOAI,
@@ -1696,7 +1696,7 @@ private fun CategoryHome(
                         title = tr("系统功能", "系统功能"),
                         entries = listOf(
                             CategoryPageEntry(tr("系统框架", "系统框架"), PageId.SYSTEM_FRAMEWORK),
-                            CategoryPageEntry(tr("超级小爱", "超级小爱"), PageId.SUPER_XIAOAI),
+                            CategoryPageEntry(tr("超级小爱与输入法", "超级小爱与输入法"), PageId.SUPER_XIAOAI),
                             CategoryPageEntry(tr("相机与相册编辑", "相机与相册编辑"), PageId.CAMERA),
                             CategoryPageEntry(tr("系统更新", "系统更新"), PageId.SYSTEM_UPDATE),
                             CategoryPageEntry(tr("系统设置", "系统设置"), PageId.SYSTEM_SETTINGS),
@@ -5552,7 +5552,7 @@ private fun SuperXiaoAi(
     superXiaoAi: SuperXiaoAiPreferences,
     update: ((SuperXiaoAiPreferences) -> SuperXiaoAiPreferences) -> Unit,
     back: () -> Unit,
-) = AppPage(tr("超级小爱", "超级小爱"), back, restartScopes = setOf(ScopeApplication.SUPER_XIAOAI, ScopeApplication.SUPER_XIAOAI_IME)) { padding, scroll ->
+) = AppPage(tr("超级小爱与输入法", "超级小爱与输入法"), back, restartScopes = setOf(ScopeApplication.SUPER_XIAOAI, ScopeApplication.SUPER_XIAOAI_IME)) { padding, scroll ->
     val context = LocalContext.current
     val service by HookApplication.service.collectAsStateWithLifecycle()
     val onFloatingChanged = LocalXiaoAiSettingsChanged.current
@@ -5569,7 +5569,7 @@ private fun SuperXiaoAi(
     }
     AppList(padding, scroll, 28) {
         item {
-            Group(tr("xiaoaiFloatingInput", "悬浮输入框")) {
+            Group(tr("xiaoaiFloatingInput", "超级小爱悬浮输入框")) {
                 SwitchPreference(
                     title = tr("xiaoaiInputGlass", "为悬浮输入框添加柔光玻璃效果"),
                     checked = floating.enabled,
@@ -5579,14 +5579,14 @@ private fun SuperXiaoAi(
         }
         if (floating.enabled) {
             item {
-                Group(tr("xiaoaiInputParameters", "悬浮输入框柔光玻璃参数")) {
+                Group(tr("xiaoaiInputParameters", "超级小爱悬浮输入框柔光玻璃参数")) {
                     XiaoAiGlassSliders(floating.parameters) { value -> updateFloating { it.copy(parameters = value) } }
                 }
             }
         }
 
         item {
-            Group(tr("\u5916\u89c2", "\u5916\u89c2")) {
+            Group(tr("\u8f93\u5165\u6cd5\u5916\u89c2", "\u8f93\u5165\u6cd5\u5916\u89c2")) {
                 SwitchPreference(
                     title = tr("\u5168\u5c40\u4f7f\u7528\u641c\u7d22\u9875\u5916\u89c2", "\u5168\u5c40\u4f7f\u7528\u641c\u7d22\u9875\u5916\u89c2"),
                     checked = superXiaoAi.globalSearchAppearance,
@@ -5597,7 +5597,7 @@ private fun SuperXiaoAi(
             }
         }
         item {
-            Group(tr("superXiaoAiRestrictions", "\u529f\u80fd\u9650\u5236")) {
+            Group(tr("superXiaoAiRestrictions", "\u8f93\u5165\u6cd5\u529f\u80fd\u9650\u5236")) {
                 SwitchPreference(title = tr("superXiaoAiBlacklist", "\u53bb\u9664\u9ed1\u540d\u5355\u8bcd\u5e93\u9650\u5236"), checked = superXiaoAi.blacklistUnblocked, onCheckedChange = { value -> update { it.copy(blacklistUnblocked = value) } })
                 SwitchPreference(title = tr("superXiaoAiClipboard", "\u53bb\u9664\u526a\u5207\u677f\u9650\u5236"), checked = superXiaoAi.clipboardUnblocked, onCheckedChange = { value -> update { it.copy(clipboardUnblocked = value) } })
                 SwitchPreference(title = tr("superXiaoAiAiSafety", "\u53bb\u9664 AI \u5b89\u5168\u9650\u5236"), checked = superXiaoAi.aiSafetyUnblocked, onCheckedChange = { value -> update { it.copy(aiSafetyUnblocked = value) } })
