@@ -10,13 +10,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import io.github.libxposed.service.XposedService
 import top.yukonga.miuix.kmp.basic.Card
@@ -26,6 +26,8 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.ChevronForward
 import btm.m.liquidglass.AppColorMode
 import btm.m.liquidglass.LabelMode
 import btm.m.liquidglass.NavigationStyle
@@ -93,7 +95,23 @@ private fun AppNavigationCard(item: AppNavItem, prefs: android.content.SharedPre
                 Text(item.packageName, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(packageInfo?.let { "${it.versionName ?: "?"} (${it.longVersionCode})" } ?: tr("未安装", "未安装"), style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             }
-            Switch(checked = enabled, onCheckedChange = { prefs.edit().putBoolean(ScopedSettings.key(item.packageName, ScopedSettings.KEY_ENABLED), it).apply() })
+            Switch(
+                checked = enabled,
+                onCheckedChange = {
+                    prefs.edit()
+                        .putBoolean(
+                            ScopedSettings.key(item.packageName, ScopedSettings.KEY_ENABLED),
+                            it
+                        )
+                        .apply()
+                }
+            )
+            Image(
+                MiuixIcons.Regular.ChevronForward,
+                null,
+                Modifier.padding(start = 12.dp).size(22.dp),
+                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary)
+            )
         }
     }
 }
