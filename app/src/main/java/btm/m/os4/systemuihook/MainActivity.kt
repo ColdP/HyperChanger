@@ -5586,7 +5586,7 @@ private fun SuperXiaoAi(
         }
 
         item {
-            Group(tr("\u5916\u89c2", "\u5916\u89c2")) {
+            Group(tr("\u8f93\u5165\u6cd5\u5916\u89c2", "\u8f93\u5165\u6cd5\u5916\u89c2")) {
                 SwitchPreference(
                     title = tr("\u5168\u5c40\u4f7f\u7528\u641c\u7d22\u9875\u5916\u89c2", "\u5168\u5c40\u4f7f\u7528\u641c\u7d22\u9875\u5916\u89c2"),
                     checked = superXiaoAi.globalSearchAppearance,
