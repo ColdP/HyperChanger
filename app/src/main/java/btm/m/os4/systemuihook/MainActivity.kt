@@ -337,7 +337,7 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
         PageId.LOCK,
     ),
     CategorySearchItem(
-        tr("超级小爱和输入法", "超级小爱和输入法"),
+        tr("超级小爱与输入法", "超级小爱与输入法"),
         tr("category_search_xiaoai_description", "调整超级小爱悬浮窗口和输入法。"),
         setOf(ScopeApplication.SUPER_XIAOAI, ScopeApplication.SUPER_XIAOAI_IME),
         PageId.SUPER_XIAOAI,
@@ -1696,7 +1696,7 @@ private fun CategoryHome(
                         title = tr("系统功能", "系统功能"),
                         entries = listOf(
                             CategoryPageEntry(tr("系统框架", "系统框架"), PageId.SYSTEM_FRAMEWORK),
-                            CategoryPageEntry(tr("超级小爱和输入法", "超级小爱和输入法"), PageId.SUPER_XIAOAI),
+                            CategoryPageEntry(tr("超级小爱与输入法", "超级小爱与输入法"), PageId.SUPER_XIAOAI),
                             CategoryPageEntry(tr("相机与相册编辑", "相机与相册编辑"), PageId.CAMERA),
                             CategoryPageEntry(tr("系统更新", "系统更新"), PageId.SYSTEM_UPDATE),
                             CategoryPageEntry(tr("系统设置", "系统设置"), PageId.SYSTEM_SETTINGS),
@@ -5552,7 +5552,7 @@ private fun SuperXiaoAi(
     superXiaoAi: SuperXiaoAiPreferences,
     update: ((SuperXiaoAiPreferences) -> SuperXiaoAiPreferences) -> Unit,
     back: () -> Unit,
-) = AppPage(tr("超级小爱和输入法", "超级小爱和输入法"), back, restartScopes = setOf(ScopeApplication.SUPER_XIAOAI, ScopeApplication.SUPER_XIAOAI_IME)) { padding, scroll ->
+) = AppPage(tr("超级小爱与输入法", "超级小爱与输入法"), back, restartScopes = setOf(ScopeApplication.SUPER_XIAOAI, ScopeApplication.SUPER_XIAOAI_IME)) { padding, scroll ->
     val context = LocalContext.current
     val service by HookApplication.service.collectAsStateWithLifecycle()
     val onFloatingChanged = LocalXiaoAiSettingsChanged.current
