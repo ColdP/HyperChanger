@@ -5552,7 +5552,7 @@ private fun SuperXiaoAi(
     superXiaoAi: SuperXiaoAiPreferences,
     update: ((SuperXiaoAiPreferences) -> SuperXiaoAiPreferences) -> Unit,
     back: () -> Unit,
-) = AppPage(tr("超级小爱", "超级小爱"), back, restartScopes = setOf(ScopeApplication.SUPER_XIAOAI, ScopeApplication.SUPER_XIAOAI_IME)) { padding, scroll ->
+) = AppPage(tr("超级小爱和输入法", "超级小爱和输入法"), back, restartScopes = setOf(ScopeApplication.SUPER_XIAOAI, ScopeApplication.SUPER_XIAOAI_IME)) { padding, scroll ->
     val context = LocalContext.current
     val service by HookApplication.service.collectAsStateWithLifecycle()
     val onFloatingChanged = LocalXiaoAiSettingsChanged.current
