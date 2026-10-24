@@ -54,7 +54,7 @@ internal fun ModuleHotReloadPreferences(enabled: Boolean) {
     AnimatedVisibility(visible = checked,
         enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
         exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f)) {
-        ArrowPreference(title = tr("hotReloadNow", "立即重载进程"),
+        ArrowPreference(title = tr("hotReloadNow", "立即热重载进程"),
             summary = tr("hotReloadHint", "可能需要 LSPosed API 102 或更高版本"), enabled = enabled && !busy,
             onClick = {
                 busy = true
@@ -109,7 +109,8 @@ internal fun ModuleHotReloadPreferences(enabled: Boolean) {
 @Composable
 private fun ProcessReloadPicker(targets: List<HookedTarget>, dismiss: () -> Unit, reload: (List<HookedTarget>) -> Unit) {
     var selected by remember(targets) { mutableStateOf(emptySet<Int>()) }
-    WindowDialog(show = true, title = tr("hotReloadChoose", "选择重载进程"), onDismissRequest = dismiss) {
+    WindowDialog(show = true, title = tr("hotReloadChoose", "选择重载进程"),
+        titleTextAlign = TextAlign.Left, onDismissRequest = dismiss) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
                 targets.forEachIndexed { index, target ->

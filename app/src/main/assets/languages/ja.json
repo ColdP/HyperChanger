@@ -4,7 +4,7 @@
   "locale": "ja",
   "strings": {
     "hotReloadSwitch": "プロセスのホットリロード",
-    "hotReloadNow": "今すぐプロセスをリロード",
+    "hotReloadNow": "今すぐプロセスをホットリロード",
     "hotReloadHint": "LSPosed API 102 以降が必要な場合があります",
     "hotReloadNoTargets": "本モジュールが注入された実行中のプロセスはありません",
     "hotReloadWorking": "ホットリロードのリクエストを処理中…",
