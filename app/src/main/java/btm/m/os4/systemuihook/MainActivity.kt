@@ -337,7 +337,7 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
         PageId.LOCK,
     ),
     CategorySearchItem(
-        tr("超级小爱", "超级小爱"),
+        tr("超级小爱和输入法", "超级小爱和输入法"),
         tr("category_search_xiaoai_description", "调整超级小爱悬浮窗口和输入法。"),
         setOf(ScopeApplication.SUPER_XIAOAI, ScopeApplication.SUPER_XIAOAI_IME),
         PageId.SUPER_XIAOAI,
