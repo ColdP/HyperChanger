@@ -255,7 +255,8 @@ internal class OthersHooks(
         if (packageName != "com.xiaomi.shop" && packageName != "com.mipay.wallet" &&
             packageName != "com.mi.health" && packageName != "com.apple.android.music" &&
             packageName != "com.sina.weibo" && packageName != "com.xingin.xhs" &&
-            packageName != "com.lucky.luckyclient" && packageName != "com.tencent.wemeet.app"
+            packageName != "com.lucky.luckyclient" && packageName != "com.tencent.wemeet.app" &&
+            packageName != "cmb.pb"
         ) return
         if (!runCatching { android.app.Application.getProcessName() == packageName }.getOrDefault(false)) return
         runCatching {
@@ -291,6 +292,7 @@ internal class OthersHooks(
                 "com.sina.weibo" -> AppBottomNavHooks.installWeibo(module, param.defaultClassLoader, blur, label, style, advanced, color)
                 "com.xingin.xhs" -> AppBottomNavHooks.installXiaohongshu(module, param.defaultClassLoader, blur, label, style, advanced, color)
                 "com.tencent.wemeet.app" -> AppBottomNavHooks.installTencentMeeting(module, param.defaultClassLoader, blur, label, style, advanced, color)
+                "cmb.pb" -> AppBottomNavHooks.installCmbBank(module, blur, label, style, advanced, color)
                 "com.lucky.luckyclient" -> {
                     LuckinAntiDetectionHooks.install(module)
                     AppBottomNavHooks.installLuckinCoffee(module, param.defaultClassLoader, blur, label, style, advanced, color)

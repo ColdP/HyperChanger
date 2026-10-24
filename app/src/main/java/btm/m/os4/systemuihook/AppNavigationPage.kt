@@ -46,6 +46,7 @@ private val appNavItems = listOf(
     AppNavItem("小米运动健康", "com.mi.health"),
     AppNavItem("瑞幸咖啡", "com.lucky.luckyclient"),
     AppNavItem("腾讯会议", "com.tencent.wemeet.app"),
+    AppNavItem("招商银行", "cmb.pb"),
 )
 
 @Composable
@@ -69,7 +70,7 @@ internal fun AppNavigationPage(back: () -> Unit) {
         }
         return
     }
-    AppPage(tr("应用底部导航", "应用底部导航"), back, restartScopes = setOf(ScopeApplication.APPLE_MUSIC, ScopeApplication.WEIBO, ScopeApplication.XIAOHONGSHU, ScopeApplication.XIAOMI_STORE, ScopeApplication.XIAOMI_WALLET, ScopeApplication.XIAOMI_HEALTH, ScopeApplication.LUCKIN_COFFEE, ScopeApplication.TENCENT_MEETING), restartEnabled = service != null) { padding, scroll ->
+    AppPage(tr("应用底部导航", "应用底部导航"), back, restartScopes = setOf(ScopeApplication.APPLE_MUSIC, ScopeApplication.WEIBO, ScopeApplication.XIAOHONGSHU, ScopeApplication.XIAOMI_STORE, ScopeApplication.XIAOMI_WALLET, ScopeApplication.XIAOMI_HEALTH, ScopeApplication.LUCKIN_COFFEE, ScopeApplication.TENCENT_MEETING, ScopeApplication.CMB_BANK), restartEnabled = service != null) { padding, scroll ->
         AppList(padding, scroll, 28) {
             item { SmallTitle(tr("支持的应用", "支持的应用"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp)) }
             items(appNavItems, key = { it.packageName }) { item ->

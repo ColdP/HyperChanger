@@ -19,6 +19,7 @@ import android.view.MotionEvent;
 import android.view.ViewTreeObserver;
 import android.view.WindowInsets;
 import android.view.Gravity;
+import android.os.SystemClock;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -43,6 +44,8 @@ public final class IosNotificationCenterPresentation {
     private static float clockInfoOffset;
     private static float clockInfoBaseTranslation;
     private static long clockInfoRefreshMinute = -1L;
+    private static long clockMetadataSyncUptime;
+    private static ArrayList<View> hostedClockMinuteViews;
     private static ImageView depth;
     private static MirrorView status;
     private static View stack;
@@ -83,6 +86,13 @@ public final class IosNotificationCenterPresentation {
         syncClearButton();
         return true;
     };
+    private static final ViewTreeObserver.OnGlobalLayoutListener CLEAR_LAYOUT = () -> {
+        clearButtonScanNeeded = true;
+        // Clock plugins may populate or replace their minute subtree after initial inflation.
+        hostedClockMinuteViews = null;
+    };
+    private static boolean clearButtonScanNeeded = true;
+    private static long lastClearButtonScanUptime;
     private static Drawable lastDepthDrawable;
     private static ViewTreeObserver observer;
     private static ViewTreeObserver clearObserver;
@@ -90,6 +100,8 @@ public final class IosNotificationCenterPresentation {
     private static View wallpaperSheet;
     private static boolean hideClearButton;
     private static int notificationBottomOffsetDp;
+    private static int shortcutNotificationBottomOffsetDp;
+    private static boolean notificationShortcutsEnabled;
     private static View clearButton;
     private static int clearButtonVisibility = View.VISIBLE;
     private static float clearButtonAlpha = 1f;
@@ -141,9 +153,11 @@ public final class IosNotificationCenterPresentation {
         }
         release();
         window = root;
+        clearButtonScanNeeded = true;
         if (root != null) {
             clearObserver = root.getViewTreeObserver();
             clearObserver.addOnPreDrawListener(CLEAR_SYNC);
+            clearObserver.addOnGlobalLayoutListener(CLEAR_LAYOUT);
         }
         clockUnavailable = false;
         syncClearButton();
@@ -162,6 +176,7 @@ public final class IosNotificationCenterPresentation {
         IosNotificationExitState.updateProgress(previousProgress, progress);
         wallpaperSheet = sheet;
         if (progress <= 0f) {
+            IosNotificationShortcutHost.restore();
             if (host != null) host.setAlpha(0f);
             // The native window hide is deferred until this endpoint. Restoring alpha here
             // would expose the list for a frame before that hide reaches the view pipeline.
@@ -208,6 +223,7 @@ public final class IosNotificationCenterPresentation {
         }
         if (clearObserver != null && clearObserver.isAlive()) {
             clearObserver.removeOnPreDrawListener(CLEAR_SYNC);
+            clearObserver.removeOnGlobalLayoutListener(CLEAR_LAYOUT);
         }
         clearObserver = null;
         releasePresentation();
@@ -351,7 +367,9 @@ public final class IosNotificationCenterPresentation {
     }
 
     public static void setHideClearButton(boolean hide) {
+        if (hideClearButton == hide) return;
         hideClearButton = hide;
+        clearButtonScanNeeded = true;
         syncClearButton();
     }
 
@@ -383,6 +401,7 @@ public final class IosNotificationCenterPresentation {
         notificationHeaderIconScale = Math.max(-60, Math.min(200, iconScale));
         notificationHeaderTextScale = Math.max(-60, Math.min(200, textScale));
         notificationHeaderIconTextSpacing = Math.max(0, Math.min(48, iconTextSpacing));
+        clearButtonScanNeeded = true;
         if (notificationHeaderBar != null) {
             if (!enabled) removeNotificationHeader();
             else {
@@ -399,6 +418,7 @@ public final class IosNotificationCenterPresentation {
             if (!(candidate instanceof View)) return;
             View view = (View) candidate;
             captureNativeClearAction(view);
+            clearButtonScanNeeded = true;
             syncClearButton();
         } catch (Throwable error) {
             Xp.log(TAG + "native clear action capture unavailable: " + error);
@@ -406,7 +426,10 @@ public final class IosNotificationCenterPresentation {
     }
 
     static void onKeyguardStateChanged(boolean locked) {
+        if (keyguardLockedOverride != null && keyguardLockedOverride == locked) return;
         keyguardLockedOverride = locked;
+        if (locked) IosNotificationShortcutHost.restore();
+        clearButtonScanNeeded = true;
         syncClearButton();
     }
 
@@ -431,6 +454,17 @@ public final class IosNotificationCenterPresentation {
         notificationBottomOffsetDp = bounded;
         restingNotificationY = Float.NaN;
         lastNotificationY = Float.NaN;
+        requestStackUpdate(stack);
+    }
+
+    public static void setNotificationShortcuts(boolean enabled, int offsetDp) {
+        int bounded = Math.max(-40, Math.min(120, offsetDp));
+        if (notificationShortcutsEnabled == enabled && shortcutNotificationBottomOffsetDp == bounded) return;
+        notificationShortcutsEnabled = enabled;
+        shortcutNotificationBottomOffsetDp = bounded;
+        restingNotificationY = Float.NaN;
+        lastNotificationY = Float.NaN;
+        syncShortcuts();
         requestStackUpdate(stack);
     }
 
@@ -476,7 +510,9 @@ public final class IosNotificationCenterPresentation {
                 insets.getInsetsIgnoringVisibility(WindowInsets.Type.navigationBars()).bottom);
         // Shift the resting boundary as well as the origin so the OEM stacking calculator
         // and special media/focus rows use the same bottom, instead of cancelling the offset.
-        float offset = notificationBottomOffsetDp * view.getResources().getDisplayMetrics().density;
+        int offsetDp = notificationShortcutsEnabled
+                ? shortcutNotificationBottomOffsetDp : notificationBottomOffsetDp;
+        float offset = offsetDp * view.getResources().getDisplayMetrics().density;
         return Math.max(0f, view.getHeight() - inset - offset);
     }
 
@@ -614,9 +650,6 @@ public final class IosNotificationCenterPresentation {
 
     private static final ViewTreeObserver.OnPreDrawListener FRAME = () -> {
         sync();
-        IosNotificationStackHooks.enforceUnstackedRows(stack);
-        IosNotificationExitState.apply(stack);
-        IosNotificationStackHooks.clipStackedRows(stack, ownsStack(stack));
         return true;
     };
 
@@ -652,6 +685,7 @@ public final class IosNotificationCenterPresentation {
         syncDepth();
         syncStatus();
         syncClearButton();
+        syncShortcuts();
         syncEmptyText();
         // The OEM clock's depth layout may hide minute_view when its clockDepthType is a
         // lockscreen-only region. This hosted copy has no depth foreground layer, so that state
@@ -664,6 +698,9 @@ public final class IosNotificationCenterPresentation {
         float clockVisual = progress * progress * (3f - 2f * progress);
         int blur = Math.round(28f * panel.getResources().getDisplayMetrics().density
                 * (1f - clockVisual));
+        // RenderEffect changes rebuild a RenderNode. Two-pixel buckets avoid doing that for
+        // subpixel finger deltas while keeping the transition visually smooth.
+        blur = (blur + 1) / 2 * 2;
         if (blur != lastBlur) {
             host.setRenderEffect(blur == 0 ? null : RenderEffect.createBlurEffect(
                     blur, blur, Shader.TileMode.CLAMP));
@@ -675,6 +712,7 @@ public final class IosNotificationCenterPresentation {
             lastStackBlur = blur;
         }
         int statusBlur = Math.round(12f * panel.getResources().getDisplayMetrics().density * (1f - progress));
+        statusBlur = (statusBlur + 1) / 2 * 2;
         if (status != null && statusBlur != lastStatusBlur) {
             status.setRenderEffect(statusBlur == 0 ? null : RenderEffect.createBlurEffect(
                     statusBlur, statusBlur, Shader.TileMode.CLAMP));
@@ -791,27 +829,39 @@ public final class IosNotificationCenterPresentation {
         if (window == null) return;
         boolean keyguardLocked = isKeyguardLocked();
         if (!notificationHeaderEnabled && !hideClearButton && !keyguardLocked) {
-            restoreNativeClearButtons();
+            if (!clearButtonStates.isEmpty()) restoreNativeClearButtons();
+            clearButtonScanNeeded = false;
             return;
         }
         if (notificationHeaderBar != null) notificationHeaderBar.setClearEnabled(true);
-        ArrayList<View> candidates = new ArrayList<>();
-        collectClearButtons(window, candidates);
-        if (nativeDismissView != null && nativeDismissView.getRootView() == window.getRootView()
-                && !candidates.contains(nativeDismissView)) candidates.add(nativeDismissView);
-        if (clearButton != null && clearButton.getRootView() == window.getRootView()
-                && !candidates.contains(clearButton)) candidates.add(clearButton);
-        if (candidates.isEmpty()) return;
-        clearButton = candidates.get(0);
-        for (View candidate : candidates) {
-            int[] state = clearButtonStates.get(candidate);
-            if (state == null) {
-                state = new int[]{candidate.getVisibility(), Float.floatToIntBits(candidate.getAlpha())};
-                clearButtonStates.put(candidate, state);
+        long now = SystemClock.uptimeMillis();
+        boolean retryMissing = clearButtonStates.isEmpty()
+                && now - lastClearButtonScanUptime >= 1000L;
+        if (clearButtonScanNeeded || retryMissing) {
+            lastClearButtonScanUptime = now;
+            ArrayList<View> candidates = new ArrayList<>();
+            collectClearButtons(window, candidates);
+            if (nativeDismissView != null && nativeDismissView.getRootView() == window.getRootView()
+                    && !candidates.contains(nativeDismissView)) candidates.add(nativeDismissView);
+            if (clearButton != null && clearButton.getRootView() == window.getRootView()
+                    && !candidates.contains(clearButton)) candidates.add(clearButton);
+            if (!candidates.isEmpty()) clearButton = candidates.get(0);
+            for (View candidate : candidates) {
+                int[] state = clearButtonStates.get(candidate);
+                if (state == null) {
+                    state = new int[]{candidate.getVisibility(), Float.floatToIntBits(candidate.getAlpha())};
+                    clearButtonStates.put(candidate, state);
+                }
+                captureNativeClearAction(candidate);
             }
+            clearButtonScanNeeded = false;
+        }
+        for (java.util.Map.Entry<View, int[]> entry : clearButtonStates.entrySet()) {
+            View candidate = entry.getKey();
+            int[] state = entry.getValue();
+            if (candidate == null || state == null || candidate.getRootView() != window.getRootView()) continue;
             candidate.setVisibility(View.GONE);
             candidate.setAlpha(Float.intBitsToFloat(state[1]));
-            captureNativeClearAction(candidate);
         }
     }
 
@@ -1052,7 +1102,11 @@ public final class IosNotificationCenterPresentation {
                 clockAnimation = findClockAnimation(clockInfo);
             }
         }
-        syncClockMetadata();
+        long now = SystemClock.uptimeMillis();
+        if (clockMetadataSyncUptime == 0L || now - clockMetadataSyncUptime >= 250L) {
+            syncClockMetadata();
+            clockMetadataSyncUptime = now;
+        }
         if (clockInfo == null || clockInfo.getHeight() == 0) return;
         if (clockInfo instanceof TextView && ((TextView) clockInfo).length() == 0) {
             long minute = System.currentTimeMillis() / 60000L;
@@ -1128,12 +1182,19 @@ public final class IosNotificationCenterPresentation {
      */
     private static void ensureHostedClockMinuteVisible() {
         if (clock == null || host == null || progress <= 0f) return;
-        String[] names = {"minute_view", "minute1", "minute2", "time_minute",
-                "time_minute_right", "current_time_minute_style1", "time_below_view_minute1",
-                "time_below_view_minute2", "tv_minute"};
-        for (String name : names) {
-            View minute = findDescendantByEntryName(clock, name);
-            if (minute == null) continue;
+        if (hostedClockMinuteViews == null || hasDetachedClockMinuteView()) {
+            hostedClockMinuteViews = new ArrayList<>();
+            String[] names = {"minute_view", "minute1", "minute2", "time_minute",
+                    "time_minute_right", "current_time_minute_style1", "time_below_view_minute1",
+                    "time_below_view_minute2", "tv_minute"};
+            for (String name : names) {
+                View minute = findDescendantByEntryName(clock, name);
+                if (minute != null && !hostedClockMinuteViews.contains(minute)) {
+                    hostedClockMinuteViews.add(minute);
+                }
+            }
+        }
+        for (View minute : hostedClockMinuteViews) {
             for (View current = minute; current != null; ) {
                 if (current.getVisibility() != View.VISIBLE) current.setVisibility(View.VISIBLE);
                 if (current == clock) break;
@@ -1141,6 +1202,13 @@ public final class IosNotificationCenterPresentation {
                 current = parent instanceof View ? (View) parent : null;
             }
         }
+    }
+
+    private static boolean hasDetachedClockMinuteView() {
+        for (View minute : hostedClockMinuteViews) {
+            if (!isClockInfo(minute)) return true;
+        }
+        return false;
     }
 
     private static View findDescendantByEntryName(View root, String name) {
@@ -1525,6 +1593,7 @@ public final class IosNotificationCenterPresentation {
     }
 
     private static void releasePresentation() {
+        IosNotificationShortcutHost.restore();
         IosNotificationExitState.clear();
         restoreStackTransform();
         restoreLandscapeStackLayout();
@@ -1560,6 +1629,8 @@ public final class IosNotificationCenterPresentation {
         clockInfoOffset = 0f;
         clockInfoBaseTranslation = 0f;
         clockInfoRefreshMinute = -1L;
+        clockMetadataSyncUptime = 0L;
+        hostedClockMinuteViews = null;
         stack = null;
         stackOriginalLayoutParams = null;
         landscapeLayout = false;
@@ -1617,6 +1688,11 @@ public final class IosNotificationCenterPresentation {
         }
     }
 
+    static void syncShortcuts() {
+        IosNotificationShortcutHost.update(panel, wallpaperSheet, progress,
+                notificationShortcutsEnabled && isActive() && !isKeyguardLocked());
+    }
+
     private static View byId(View root, String name) {
         if (root == null) return null;
         int id = root.getResources().getIdentifier(name, "id", "com.android.systemui");
@@ -1644,7 +1720,9 @@ public final class IosNotificationCenterPresentation {
         @Override protected void onDraw(Canvas canvas) {
             if (source == null || source.getWidth() <= 0 || source.getHeight() <= 0) return;
             source.draw(canvas);
-            if (isAttachedToWindow()) postInvalidateDelayed(1000L);
+            // Status bar data changes slowly. A one-second self-redraw kept SystemUI busy even
+            // when the shade was idle; two seconds keeps the mirror current at a much lower cost.
+            if (isAttachedToWindow()) postInvalidateDelayed(2000L);
         }
     }
 
@@ -1988,4 +2066,5 @@ public final class IosNotificationCenterPresentation {
 
         @Override public boolean dispatchTouchEvent(MotionEvent event) { return false; }
     }
+
 }

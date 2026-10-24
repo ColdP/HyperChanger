@@ -1081,7 +1081,8 @@ class HyperSystemUiModule : XposedModule() {
         if (param.packageName == "com.xiaomi.shop" || param.packageName == "com.mipay.wallet" ||
             param.packageName == "com.mi.health" || param.packageName == "com.apple.android.music" ||
             param.packageName == "com.sina.weibo" || param.packageName == "com.xingin.xhs" ||
-            param.packageName == "com.lucky.luckyclient" || param.packageName == "com.tencent.wemeet.app"
+            param.packageName == "com.lucky.luckyclient" || param.packageName == "com.tencent.wemeet.app" ||
+            param.packageName == "cmb.pb"
         ) {
             othersHooks.installAppNavigation(param)
             return

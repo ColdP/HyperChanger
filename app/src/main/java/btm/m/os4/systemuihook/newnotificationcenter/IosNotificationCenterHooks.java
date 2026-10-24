@@ -6,6 +6,7 @@ import btm.m.os4.systemuihook.hypermusiccover.Xp;
 /** Hooks the OEM's raw shade gesture and notification/control-center ownership. */
 public final class IosNotificationCenterHooks {
     private static Object deferredHideController;
+    private static Object notificationExpandController;
     private static boolean finishingDeferredHide;
     private static float switchDownX;
     private static float switchDownY;
@@ -16,6 +17,41 @@ public final class IosNotificationCenterHooks {
 
     public static void install(ClassLoader loader) {
         IosNotificationStackHooks.install(loader);
+        try {
+            Class<?> shortcuts = Xp.findClass(
+                    "com.android.keyguard.shortcut.MiuiShortcutController", loader);
+            Xp.hookAll(shortcuts, "onShortcutPluginCallbackWrap", chain -> {
+                java.util.List<Object> args = chain.getArgs();
+                if (args.size() == 2 && args.get(1) instanceof String
+                        && IosNotificationShortcutLaunch.onCallback(chain.getThisObject(), (String) args.get(1))) {
+                    return null;
+                }
+                return chain.proceed();
+            });
+            Xp.hookAll(shortcuts, "addShortcutViews", chain -> {
+                IosNotificationShortcutHost.restore();
+                Object result = chain.proceed();
+                IosNotificationShortcutHost.capture(chain.getThisObject());
+                return result;
+            });
+            Xp.hookAll(shortcuts, "setMiuiShortcutPlugin", chain -> {
+                IosNotificationShortcutHost.clear();
+                Object result = chain.proceed();
+                IosNotificationShortcutHost.capture(chain.getThisObject());
+                return result;
+            });
+            Xp.hookAll(shortcuts, "onSystemUIAction$1", chain -> {
+                java.util.List<Object> args = chain.getArgs();
+                Object action = args.size() > 1 ? args.get(1) : null;
+                boolean rebuild = "onConfigChanged".equals(action) || "onThemeStateChange".equals(action);
+                if (rebuild) IosNotificationShortcutHost.restore();
+                Object result = chain.proceed();
+                if (rebuild) IosNotificationShortcutHost.capture(chain.getThisObject());
+                return result;
+            });
+        } catch (Throwable error) {
+            Xp.log("[IOSShade] native shortcut integration unavailable: " + error);
+        }
         try {
             Class<?> dismissController = Xp.findClass(
                     "com.android.systemui.shade.NotificationDismissViewController", loader);
@@ -60,6 +96,7 @@ public final class IosNotificationCenterHooks {
                     "com.android.systemui.shade.NotificationShadeWindowView", loader);
             Xp.hookAll(shadeWindow, "dispatchTouchEvent", chain -> {
                 android.view.MotionEvent event = (android.view.MotionEvent) chain.getArgs().get(0);
+                if (IosNotificationShortcutHost.dispatchWindowTouch(event)) return true;
                 trackSwitchGesture((android.view.View) chain.getThisObject(), event);
                 try {
                     return chain.proceed();
@@ -121,6 +158,7 @@ public final class IosNotificationCenterHooks {
         try {
             Class<?> expand = Xp.findClass("com.android.systemui.shade.NotificationPanelExpandController", loader);
             Xp.hookAll(expand, "notifyExpandHeightChanged", chain -> {
+                notificationExpandController = chain.getThisObject();
                 Object result = chain.proceed();
                 java.util.List<Object> args = chain.getArgs();
                 if (args.size() == 4 && ShadeLayer.iosEnabled()) {
@@ -178,6 +216,16 @@ public final class IosNotificationCenterHooks {
             Xp.log("[IOSShade] notification/control-centre ownership hooked");
         } catch (Throwable error) {
             Xp.log("[IOSShade] panel ownership hooks unavailable: " + error);
+        }
+    }
+
+    static void collapseForShortcut() {
+        Object controller = notificationExpandController;
+        if (controller == null) return;
+        try {
+            Xp.callMethod(controller, "hide", false);
+        } catch (Throwable error) {
+            Xp.log("[IOSShade] shortcut panel collapse unavailable: " + error);
         }
     }
 

@@ -3,6 +3,7 @@
 package btm.m.os4.systemuihook
 
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsStore
+import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationShortcutsSettingsStore
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationBottomOffsetSettingsStore
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsStore
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettings
@@ -456,6 +457,7 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
             ScopeApplication.XIAOMI_HEALTH,
             ScopeApplication.LUCKIN_COFFEE,
             ScopeApplication.TENCENT_MEETING,
+            ScopeApplication.CMB_BANK,
         ),
         PageId.APP_NAVIGATION,
     ),
@@ -2979,6 +2981,7 @@ private fun RestartScopesPage(
         ScopeApplication.XIAOMI_WALLET,
         ScopeApplication.XIAOMI_HEALTH,
         ScopeApplication.TENCENT_MEETING,
+        ScopeApplication.CMB_BANK,
     )
     val toggleTarget: (ScopeApplication) -> Unit = { target ->
         selectedTargets = if (target in selectedTargets) selectedTargets - target else selectedTargets + target
@@ -5769,16 +5772,22 @@ private fun IosNotificationCenterPage(
     var headerSettings by remember { mutableStateOf(headerStore.settings) }
     val offsetStore = remember(context) { IosNotificationBottomOffsetSettingsStore(context) }
     var offsetDp by remember { mutableStateOf(offsetStore.offsetDp) }
+    val shortcutStore = remember(context) { IosNotificationShortcutsSettingsStore(context) }
+    var showLockscreenShortcuts by remember { mutableStateOf(shortcutStore.enabled) }
+    var shortcutOffsetDp by remember { mutableIntStateOf(shortcutStore.bottomOffsetDp) }
     val layoutStore = remember(context) { IosNotificationLayoutSettingsStore(context) }
     var headerGapDp by remember { mutableIntStateOf(layoutStore.headerGapDp) }
     LaunchedEffect(service) {
         service?.let(iosStore::syncRemote)
         service?.let(headerStore::syncRemote)
         service?.let(offsetStore::syncRemote)
+        service?.let(shortcutStore::syncRemote)
         service?.let(layoutStore::syncRemote)
         iosSettings = iosStore.settings
         headerSettings = headerStore.settings
         offsetDp = offsetStore.offsetDp
+        showLockscreenShortcuts = shortcutStore.enabled
+        shortcutOffsetDp = shortcutStore.bottomOffsetDp
         headerGapDp = layoutStore.headerGapDp
     }
     AppPage(tr("iosNotificationCenter", "iOS 风格通知中心"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.AOD, ScopeApplication.THEME_MANAGER)) { p, scroll ->
@@ -5801,6 +5810,15 @@ private fun IosNotificationCenterPage(
                         onCheckedChange = { hidden ->
                             iosStore.update(service) { it.copy(hideClearButton = hidden) }
                             iosSettings = iosStore.settings
+                        },
+                    )
+                    SwitchPreference(
+                        title = tr("iosNotificationShortcuts", "在通知中心添加锁屏快捷按钮"),
+                        summary = tr("iosNotificationShortcutsSummary", "显示与锁屏相同的左右快捷按钮，并沿用原有操作"),
+                        checked = showLockscreenShortcuts,
+                        onCheckedChange = { enabled ->
+                            shortcutStore.updateEnabled(service, enabled)
+                            showLockscreenShortcuts = shortcutStore.enabled
                         },
                     )
                     if (iosSettings.enabled) {
@@ -5836,17 +5854,31 @@ private fun IosNotificationCenterPage(
                             onValueChange = { headerGapDp = it.roundToInt().coerceIn(-40, 64) },
                             onValueChangeFinished = { layoutStore.updateHeaderGap(service, headerGapDp) },
                         )
-                        EditableSliderPreference(
-                            title = tr("iosNotificationBottomOffset", "通知下沉底部偏移"),
-                            value = offsetDp.toFloat(),
-                            valueText = if (offsetDp > 0) "+$offsetDp dp" else "$offsetDp dp",
-                            valueRange = -40f..120f,
-                            steps = 159,
-                            defaultValue = 0f,
-                            centerValue = 0f,
-                            onValueChange = { offsetDp = it.roundToInt().coerceIn(-40, 120) },
-                            onValueChangeFinished = { offsetStore.update(service, offsetDp) },
-                        )
+                        if (!showLockscreenShortcuts) {
+                            EditableSliderPreference(
+                                title = tr("iosNotificationBottomOffset", "通知下沉底部偏移"),
+                                value = offsetDp.toFloat(),
+                                valueText = if (offsetDp > 0) "+$offsetDp dp" else "$offsetDp dp",
+                                valueRange = -40f..120f,
+                                steps = 159,
+                                defaultValue = 0f,
+                                centerValue = 0f,
+                                onValueChange = { offsetDp = it.roundToInt().coerceIn(-40, 120) },
+                                onValueChangeFinished = { offsetStore.update(service, offsetDp) },
+                            )
+                        } else {
+                            EditableSliderPreference(
+                                title = tr("iosNotificationShortcutsBottomOffset", "快捷按钮模式通知下沉底部偏移"),
+                                value = shortcutOffsetDp.toFloat(),
+                                valueText = if (shortcutOffsetDp > 0) "+$shortcutOffsetDp dp" else "$shortcutOffsetDp dp",
+                                valueRange = -40f..120f,
+                                steps = 159,
+                                defaultValue = 0f,
+                                centerValue = 0f,
+                                onValueChange = { shortcutOffsetDp = it.roundToInt().coerceIn(-40, 120) },
+                                onValueChangeFinished = { shortcutStore.updateBottomOffset(service, shortcutOffsetDp) },
+                            )
+                        }
                     }
                 }
             }

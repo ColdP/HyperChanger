@@ -311,6 +311,8 @@ public final class ShadeLayer {
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER_ICON_SCALE.equals(key)
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER_TEXT_SCALE.equals(key)
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER_ICON_TEXT_SPACING.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationShortcutsSettingsKt.KEY_IOS_NOTIFICATION_SHORTCUTS.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationShortcutsSettingsKt.KEY_IOS_NOTIFICATION_SHORTCUTS_BOTTOM_OFFSET.equals(key)
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationBottomOffsetSettingsKt.KEY_IOS_NOTIFICATION_BOTTOM_OFFSET.equals(key)
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationClockSettingsKt.KEY_IOS_NOTIFICATION_HEADER_GAP.equals(key)) {
                     UI.post(() -> readPreferences(prefs));
@@ -355,6 +357,9 @@ public final class ShadeLayer {
                 prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER_ICON_SCALE, 100),
                 prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER_TEXT_SCALE, 100),
                 prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER_ICON_TEXT_SPACING, 8));
+        IosNotificationCenterPresentation.setNotificationShortcuts(
+                prefs.getBoolean(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationShortcutsSettingsKt.KEY_IOS_NOTIFICATION_SHORTCUTS, false),
+                btm.m.os4.systemuihook.newnotificationcenter.IosNotificationShortcutsSettingsKt.readIosNotificationShortcutsBottomOffset(prefs));
         IosNotificationCenterPresentation.setNotificationBottomOffset(
                 btm.m.os4.systemuihook.newnotificationcenter.IosNotificationBottomOffsetSettingsKt
                         .readIosNotificationBottomOffset(prefs));

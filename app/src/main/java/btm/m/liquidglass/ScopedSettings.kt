@@ -35,7 +35,8 @@ object ScopedSettings {
         ScopeApp("小米钱包", "com.mipay.wallet"),
         ScopeApp("小米运动健康", "com.mi.health"),
         ScopeApp("瑞幸咖啡", "com.lucky.luckyclient"),
-        ScopeApp("腾讯会议", "com.tencent.wemeet.app")
+        ScopeApp("腾讯会议", "com.tencent.wemeet.app"),
+        ScopeApp("招商银行", "cmb.pb")
     )
 
     @JvmStatic

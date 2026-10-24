@@ -1,6 +1,7 @@
 package btm.m.liquidglass.hook
 
 import android.app.Activity
+import android.app.Instrumentation
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -245,6 +246,58 @@ object AppBottomNavHooks {
     )
 
     private val sessions = WeakHashMap<Activity, Session>()
+
+    private val cmbBank = AppConfig(
+        displayName = "CMB Bank",
+        packageName = CmbBankNavigation.PACKAGE,
+        activityName = CmbBankNavigation.ACTIVITY,
+        barResourceName = "tab",
+        anchorResourceName = null,
+        requiredTabs = emptySet(),
+        targetVersion = "14.4.6 (1447)"
+    )
+
+    @JvmStatic
+    fun installCmbBank(
+        module: XposedModule,
+        blurRadius: Int,
+        labelMode: String,
+        navigationStyle: String,
+        advancedMaterial: Boolean,
+        colorMode: String
+    ) {
+        ImmersiveNavigationHooks.install(module)
+        // The protected Activity is unavailable in the package callback's ClassLoader.
+        // Instrumentation supplies the actual instance after the shield has loaded it.
+        for (name in listOf("callActivityOnResume", "callActivityOnPause", "callActivityOnDestroy")) {
+            val method = Instrumentation::class.java.getDeclaredMethod(name, Activity::class.java)
+            module.hook(method)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .intercept { chain ->
+                    val activity = chain.getArg(0) as? Activity
+                    val matches = activity?.packageName == cmbBank.packageName &&
+                        activity.javaClass.name == cmbBank.activityName
+                    if (matches && name == "callActivityOnDestroy") {
+                        synchronized(sessions) { sessions.remove(activity) }?.destroy()
+                    }
+                    val result = chain.proceed()
+                    if (matches) {
+                        when (name) {
+                            "callActivityOnResume" -> synchronized(sessions) {
+                                sessions.getOrPut(activity) {
+                                    Session(module, activity, cmbBank, blurRadius.coerceIn(0, 40),
+                                        labelMode, navigationStyle, advancedMaterial, colorMode, null)
+                                }
+                            }.resume()
+                            "callActivityOnPause" -> synchronized(sessions) { sessions[activity] }?.pause()
+                        }
+                    }
+                    result
+                }
+        }
+        btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, TAG,
+            "Hooks installed for ${cmbBank.displayName} ${cmbBank.targetVersion}")
+    }
 
     @JvmStatic
     @Throws(ReflectiveOperationException::class)
@@ -683,6 +736,10 @@ object AppBottomNavHooks {
         private var navigationTabs by mutableStateOf(emptyList<DetectedTab>())
         private var navigationAction by mutableStateOf<DetectedTab?>(null)
         private val meetingNavigation = if (config === tencentMeeting) TencentMeetingNavigation() else null
+        private val cmbBankIcons = if (config === cmbBank) CmbBankNavIcons(activity) else null
+        private var cmbBankPage: ViewGroup? = null
+        private var cmbBankBackground: View? = null
+        private var cmbRootListener: View.OnAttachStateChangeListener? = null
         private var nav: ComposeView? = null
         private var lifecycleOwner: InjectedLifecycleOwner? = null
         private var guardRoot: ViewGroup? = null
@@ -759,9 +816,12 @@ object AppBottomNavHooks {
             resumed = false
             nav?.visibility = View.GONE
             resetMiniPlayerPosition()
+            if (config === cmbBank) destroy()
         }
 
         fun destroy() {
+            cmbRootListener?.let { guardRoot?.removeOnAttachStateChangeListener(it) }
+            cmbRootListener = null
             guard?.let { listener ->
                 guardRoot?.viewTreeObserver?.takeIf { it.isAlive }?.removeOnPreDrawListener(listener)
             }
@@ -778,6 +838,8 @@ object AppBottomNavHooks {
             restoreMiniPlayer()
             restoreHostContentSpace()
             restoreOriginalBar()
+            cmbBankPage = null
+            cmbBankBackground = null
             ImmersiveNavigationHooks.deactivate(activity)
             restoreSystemNavigationBar()
         }
@@ -809,6 +871,7 @@ object AppBottomNavHooks {
 
                 rememberOriginalNavigationLayers(content, detected.container)
                 config.navigationLayerResourceNames.forEach { rememberResourceView(content, it) }
+                if (config === cmbBank) cmbBankBackground?.let(::rememberOriginalView)
                 config.miniPlayerResourceName?.let { resourceName ->
                     miniPlayer = findResourceView(content, resourceName)?.also {
                         originalMiniPlayerTranslationY = it.translationY
@@ -819,7 +882,7 @@ object AppBottomNavHooks {
                 syncCloudMusicMiniPlayer(content)
                 syncAppleMusicMiniPlayer(content)
                 syncQQMusicMiniPlayer(content)
-                if (config !== tencentMeeting) selectedIndex.intValue = navigationTabs.indexOfFirst { tab ->
+                if (config !== tencentMeeting && config !== cmbBank) selectedIndex.intValue = navigationTabs.indexOfFirst { tab ->
                     tab.key != TabKey.PUBLISH && (
                         isSelectedRecursively(tab.view) ||
                             (config === xiaomiHealthWatchFaceMarket &&
@@ -870,7 +933,7 @@ object AppBottomNavHooks {
                                         className = tab.key.name,
                                         icon = extractedTabIcon(tab.key)
                                     ) {
-                                        if (tab.key != TabKey.PUBLISH) selectedIndex.intValue = index
+                                        if (tab.key != TabKey.PUBLISH && config !== cmbBank) selectedIndex.intValue = index
                                         openTab(tab)
                                     }
                                 },
@@ -892,7 +955,7 @@ object AppBottomNavHooks {
                                     config === xiaomiHealthWatchFaceMarket || config === appleMusic,
                                 adaptiveLiquidWidth = config === xiaomiHealth ||
                                     config === xiaomiHealthWatchFaceMarket || config === appleMusic ||
-                                    config === tencentMeeting,
+                                    config === tencentMeeting || config === cmbBank,
                                 softBackdropShadow = config === tencentMeeting,
                                 liquidBottomSpacingDp = if (config === xiaomiWallet) -8 else 8,
                                 concealHostBottomBar = config.concealHostBottomBar ||
@@ -916,6 +979,12 @@ object AppBottomNavHooks {
                                         val bitmap = tab.nativeIcon
                                         if (bitmap != null) {
                                             Image(bitmap, null, Modifier.size(24.dp), colorFilter = ColorFilter.tint(color))
+                                        }
+                                    }
+                                } else if (config === cmbBank) {
+                                    { index, color ->
+                                        currentNavigationTabs[index].nativeIcon?.let { bitmap ->
+                                            Image(bitmap, null, Modifier.size(25.dp), colorFilter = ColorFilter.tint(color))
                                         }
                                     }
                                 } else null,
@@ -1068,8 +1137,17 @@ object AppBottomNavHooks {
         private fun installGuard(content: ViewGroup) {
             if (guard != null) return
             guardRoot = content
+            if (config === cmbBank) {
+                cmbRootListener = object : View.OnAttachStateChangeListener {
+                    override fun onViewAttachedToWindow(view: View) = Unit
+                    override fun onViewDetachedFromWindow(view: View) {
+                        destroy()
+                        if (resumed) activity.window.decorView.postDelayed(::attachOrRetry, 300L)
+                    }
+                }.also(content::addOnAttachStateChangeListener)
+            }
             guard = ViewTreeObserver.OnPreDrawListener {
-                if (config === tencentMeeting) {
+                if (config === tencentMeeting || config === cmbBank) {
                     // Discovery must continue while the host hides or replaces its native bar.
                     syncHostState()
                     return@OnPreDrawListener true
@@ -1103,7 +1181,33 @@ object AppBottomNavHooks {
         }
 
         private fun syncHostState() {
+            if (config === cmbBank && (!resumed || nav == null)) return
             val content = activity.findViewById<ViewGroup>(android.R.id.content)
+            if (config === cmbBank) {
+                val previousPage = cmbBankPage
+                val detected = content?.let(::detectBottomBar)
+                if (detected == null) {
+                    nav?.visibility = View.GONE
+                    restoreHostContentSpace()
+                    restoreOriginalBar()
+                    cmbBankPage = null
+                    cmbBankBackground = null
+                    ImmersiveNavigationHooks.deactivate(activity)
+                    restoreSystemNavigationBar()
+                    return
+                }
+                if (detected.container !== originalBar || previousPage !== cmbBankPage) {
+                    restoreHostContentSpace()
+                    restoreOriginalBar()
+                    originalBar = detected.container
+                    rememberOriginalNavigationLayers(content, detected.container)
+                }
+                cmbBankBackground?.let(::rememberOriginalView)
+                detectedTabs = detected.tabs
+                if (navigationTabs != detected.tabs) navigationTabs = detected.tabs
+                nav?.visibility = View.VISIBLE
+                configureSystemNavigationBar()
+            }
             if (config === tencentMeeting) {
                 val detected = content?.let(::detectBottomBar)
                 if (detected == null) {
@@ -1141,7 +1245,7 @@ object AppBottomNavHooks {
             hideOriginalBar()
             adaptMiniPlayer()
             if (config !== xiaohongshu && config !== qqMusic && config !== weibo &&
-                config !== xiaomiHealthWatchFaceMarket && config !== tencentMeeting
+                config !== xiaomiHealthWatchFaceMarket && config !== tencentMeeting && config !== cmbBank
             ) {
                 navigationTabs.indexOfFirst {
                     it.key != TabKey.PUBLISH && isSelectedRecursively(it.view)
@@ -1162,7 +1266,7 @@ object AppBottomNavHooks {
         }
 
         private fun openTab(tab: DetectedTab) {
-            if (config === tencentMeeting) {
+            if (config === tencentMeeting || config === cmbBank) {
                 val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
                 val current = detectBottomBar(content)?.tabs?.firstOrNull { it.identity == tab.identity } ?: return
                 current.clickTarget.performClick()
@@ -1446,6 +1550,8 @@ object AppBottomNavHooks {
                 val home = findResourceView(content, "tabView") ?: return
                 val pager = findResourceView(home, "viewPager") as? ViewGroup ?: return
                 releaseTencentMeetingPageNavigationInset(pager)
+            } else if (config === cmbBank) {
+                cmbBankPage?.let(::releaseCmbBankPageNavigationInset)
             } else if (config === xiaohongshu) {
                 val pager = descendants(content).firstOrNull {
                     it.javaClass.simpleName == "ExploreScrollableViewPager"
@@ -1762,6 +1868,29 @@ object AppBottomNavHooks {
             descendants(pager).forEach { view ->
                 if (!view.isShown || view is ComposeView || view.height < inset * 4 ||
                     view.width < pager.width * 3 / 4
+                ) return@forEach
+                if (view.paddingBottom == inset) {
+                    originalContentPaddings.putIfAbsent(view, intArrayOf(
+                        view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom
+                    ))
+                    view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, 0)
+                }
+                val params = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return@forEach
+                if (params.bottomMargin == inset) {
+                    originalContentBottomMargins.putIfAbsent(view, params.bottomMargin)
+                    params.bottomMargin = 0
+                    view.layoutParams = params
+                }
+            }
+        }
+
+        private fun releaseCmbBankPageNavigationInset(page: ViewGroup) {
+            val inset = navigationBarInset()
+            if (inset <= 0) return
+            descendants(page).forEach { view ->
+                if (!view.isShown || view is ComposeView || view === originalBar ||
+                    view === cmbBankBackground || view.height < inset * 4 ||
+                    view.width < page.width * 3 / 4
                 ) return@forEach
                 if (view.paddingBottom == inset) {
                     originalContentPaddings.putIfAbsent(view, intArrayOf(
@@ -2957,6 +3086,18 @@ object AppBottomNavHooks {
         }
 
         private fun detectBottomBar(content: ViewGroup): DetectedBar? {
+            if (config === cmbBank) {
+                val native = CmbBankNavigation.detect(content) ?: return null
+                val tabs = native.items.mapIndexed { index, item ->
+                    val icon = cmbBankIcons?.icon(item) ?: return null
+                    DetectedTab(TabKey.NATIVE, tr(item.label, item.label), item.view,
+                        item.clickTarget, identity = "cmb:$index:${item.label}", nativeIcon = icon)
+                }
+                cmbBankPage = native.page
+                cmbBankBackground = native.background
+                selectedIndex.intValue = native.selectedIndex
+                return DetectedBar(native.view, tabs)
+            }
             if (config === tencentMeeting) {
                 val native = meetingNavigation?.detect(content) ?: return null
                 selectedIndex.intValue = native.selectedIndex
