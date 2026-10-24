@@ -200,8 +200,13 @@ private fun ModuleSafetyInformation() {
         Group(tr("safetyDeviceInformation", "设备信息")) {
             DeviceInfoItem(OsCompatibility.systemProperty("ro.product.marketname").ifBlank { Build.MODEL }, tr("safetyDeviceModel", "设备型号"))
             DeviceInfoItem(tr("safetyAndroidValue", "%s (SDK %d)").format(Build.VERSION.RELEASE, Build.VERSION.SDK_INT), tr("safetyAndroidVersion", "Android 版本"))
-            DeviceInfoItem(OsCompatibility.systemProperty("ro.mi.os.version.incremental").removePrefix("OS").ifBlank { unknown }, tr("safetyHyperOsVersion", "HyperOS 版本"))
+            DeviceInfoItem(OsCompatibility.systemProperty("ro.mi.os.version.incremental").removePrefix("OS").ifBlank { unknown }, tr("safetyHyperOsBuildVersion", "HyperOS 构建版本号"))
             DeviceInfoItem(Build.SUPPORTED_ABIS.joinToString(", "), tr("safetyArchitecture", "系统架构"))
+            DeviceInfoItem(OsCompatibility.systemProperty("ro.mi.os.version.code").ifBlank { unknown }, tr("safetyHyperOsVersion", "HyperOS 版本"))
+            DeviceInfoItem(OsCompatibility.systemProperty("ro.build.version.security_patch").ifBlank { unknown }, tr("safetySecurityPatchLevel", "安全补丁等级"))
+            DeviceInfoItem(runCatching { System.getProperty("os.version").orEmpty().trim() }.getOrDefault("").ifBlank { unknown }, tr("safetyKernelVersion", "内核版本"))
+            DeviceInfoItem(OsCompatibility.systemProperty("ro.build.fingerprint").ifBlank { unknown }, tr("safetyBuildFingerprint", "系统构建指纹"))
+            DeviceInfoItem(OsCompatibility.systemProperty("ro.soc.model").ifBlank { unknown }, tr("safetyProcessorModel", "处理器型号"))
         }
     }
 }
