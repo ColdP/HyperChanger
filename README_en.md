@@ -30,7 +30,7 @@
 
 HyperChanger is an LSPosed module for Xiaomi HyperOS 4. Its companion app configures the appearance and behavior of System UI, notifications, Control Center, the lock screen, the launcher, Settings, the rear screen, and supported apps. The module requires root and modifies existing components through hooks.
 
-The current source version is **1.2.1 RC2**, as defined by `versionName` in [app/build.gradle.kts](app/build.gradle.kts). See [Releases](https://github.com/ColdP/HyperChanger/releases) for downloads and release notes.
+The source version is defined by `versionName` in [app/build.gradle.kts](app/build.gradle.kts); the README does not duplicate the version string. See [Releases](https://github.com/ColdP/HyperChanger/releases) for downloads and release notes.
 
 The project is still in testing and primarily targets **HyperOS 4 (Android 17)**. Device, region, system build, and app version differences can affect features. Meeting the minimum installation version does not imply full feature support.
 

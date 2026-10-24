@@ -30,7 +30,7 @@
 
 HyperChanger は、Xiaomi HyperOS 4 向けの LSPosed モジュールです。付属の設定アプリから、システム UI、通知とコントロールセンター、ロック画面、ランチャー、システム設定、背面ディスプレイ、対応アプリの外観や動作を変更できます。Root 権限が必要で、既存のコンポーネントをフックして変更します。
 
-現在のソースコードのバージョンは **1.2.1 RC2** です。[app/build.gradle.kts](app/build.gradle.kts) の `versionName` を基準としています。ダウンロードと更新内容は [Releases](https://github.com/ColdP/HyperChanger/releases) を参照してください。
+ソースコードのバージョンは [app/build.gradle.kts](app/build.gradle.kts) の `versionName` を基準とし、README ではバージョン文字列を重複管理しません。ダウンロードと更新内容は [Releases](https://github.com/ColdP/HyperChanger/releases) を参照してください。
 
 本プロジェクトはテスト段階にあり、主な対応環境は **HyperOS 4（Android 17）** です。端末、地域、システムビルド、アプリのバージョンによって動作が異なります。インストール可能な最小バージョンを満たしていても、すべての機能が利用できるとは限りません。
 

@@ -30,7 +30,7 @@
 
 HyperChanger 是面向小米 HyperOS 4 的 LSPosed 模块，通过配套应用配置系统界面、通知与控制中心、锁屏、桌面、系统设置、背屏及受支持应用的外观和行为。模块需要 Root 权限，通过 Hook 修改现有组件。
 
-当前源码版本为 **1.2.1 RC2**，以 [app/build.gradle.kts](app/build.gradle.kts) 中的 `versionName` 为准。下载版本与更新说明请查看 [Releases](https://github.com/ColdP/HyperChanger/releases)。
+当前源码版本以 [app/build.gradle.kts](app/build.gradle.kts) 中的 `versionName` 为准，README 不重复维护版本号。下载版本与更新说明请查看 [Releases](https://github.com/ColdP/HyperChanger/releases)。
 
 项目仍处于测试阶段，主要适配 **HyperOS 4（Android 17）**。设备、地区、系统构建和应用版本的差异均可能影响功能；最低安装版本并不代表所有功能均受支持。
 
