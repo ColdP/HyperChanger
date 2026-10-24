@@ -99,6 +99,8 @@ fun WindowDialog(
     defaultWindowInsetsPadding: Boolean = true,
     includeImePadding: Boolean = true,
     imeBottomSafetyFraction: Float = 0f,
+    titleTextAlign: TextAlign = TextAlign.Center,
+    summaryTextAlign: TextAlign = TextAlign.Center,
     content: @Composable () -> Unit,
 ) {
     val backdrop = LocalDialogBackdrop.current
@@ -295,7 +297,7 @@ fun WindowDialog(
                         text = it,
                         fontSize = MiuixTheme.textStyles.title4.fontSize,
                         fontWeight = FontWeight.Medium,
-                        textAlign = TextAlign.Center,
+                        textAlign = titleTextAlign,
                         color = titleColor,
                     )
                 }
@@ -304,7 +306,7 @@ fun WindowDialog(
                         modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
                         text = it,
                         fontSize = MiuixTheme.textStyles.body1.fontSize,
-                        textAlign = TextAlign.Center,
+                        textAlign = summaryTextAlign,
                         color = summaryColor,
                     )
                 }

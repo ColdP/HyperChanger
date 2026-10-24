@@ -218,7 +218,7 @@ internal class ModuleLogRepository(private val context: Context) {
         cleanup()
         val dir = File(context.cacheDir, "log_exports").apply { mkdirs() }
         val file = File(dir, "HyperChanger-logs-${SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())}.zip")
-        ModuleLogArchive.write(file, environment + "\nlast_sync=${preferences.getLong("last_sync", 0)}\nsource_truncated=${preferences.getBoolean("truncated", false)}\n") { source ->
+        ModuleLogArchive.write(file, environment) { source ->
             read(source, limit = 8000)
         }
         return file

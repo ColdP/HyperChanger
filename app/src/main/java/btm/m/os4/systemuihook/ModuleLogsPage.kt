@@ -3,7 +3,6 @@ package btm.m.os4.systemuihook
 
 import android.content.ClipData
 import android.content.Intent
-import android.os.Build
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -18,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +42,7 @@ internal fun rememberModuleLogExporter(): ModuleLogExporter {
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
     var pending by remember { mutableStateOf<File?>(null) }
+    var savedDialog by remember { mutableStateOf(false) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         val file = pending
         pending = null
@@ -51,10 +52,17 @@ internal fun rememberModuleLogExporter(): ModuleLogExporter {
                 val result = withContext(Dispatchers.IO) { runCatching {
                     checkNotNull(context.contentResolver.openOutputStream(uri)).use { output -> file.inputStream().use { it.copyTo(output) } }
                 } }
-                status = if (result.isSuccess) tr("safetyLogSaved", "日志 ZIP 已保存") else tr("safetyLogSaveFailed", "日志保存失败，请重试")
+                if (result.isSuccess) savedDialog = true
+                else status = tr("safetyLogSaveFailed", "日志保存失败，请重试")
                 busy = false
             }
         } else busy = false
+    }
+    WindowDialog(show = savedDialog, title = tr("safetyLogSaved", "日志 ZIP 已保存"),
+        onDismissRequest = { savedDialog = false }) {
+        GlassDialogButton({ savedDialog = false }, Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColorsPrimary()) {
+            Text(tr("确认", "确认"))
+        }
     }
     return ModuleLogExporter(busy, status) { share ->
         if (!busy) {
@@ -64,7 +72,7 @@ internal fun rememberModuleLogExporter(): ModuleLogExporter {
                 val result = withContext(Dispatchers.IO) { runCatching {
                     val repo = ModuleLogRepository(context)
                     val refreshed = runCatching { repo.refresh() }.getOrDefault(false)
-                    val environment = "HyperChanger ${BuildConfig.VERSION_NAME}\nAndroid ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})\n${Build.MODEL}\n${Build.SUPPORTED_ABIS.joinToString()}\nLSPosed source refreshed=$refreshed"
+                    val environment = collectModuleLogEnvironment(context)
                     repo.exportZip(environment) to refreshed
                 } }
                 result.onSuccess { (file, refreshed) ->
@@ -185,7 +193,8 @@ private fun ModuleLogRow(entry: ModuleLogEntry) {
 @Composable
 internal fun ModuleLogClearDialog(dismiss: () -> Unit, confirm: () -> Unit) {
     WindowDialog(show = true, title = tr("safetyClearLogs", "清空日志"),
-        summary = tr("safetyClearConfirm", "确认清空已保存的日志？此操作无法撤销，框架原始日志不受影响。"), onDismissRequest = dismiss) {
+        summary = tr("safetyClearConfirm", "确认清空已保存的日志？此操作无法撤销，框架原始日志不受影响。"),
+        titleTextAlign = TextAlign.Left, summaryTextAlign = TextAlign.Left, onDismissRequest = dismiss) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             GlassDialogButton(dismiss, Modifier.weight(1f)) { Text(tr("取消", "取消")) }
             GlassDialogButton(confirm, Modifier.weight(1f), colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("确认", "确认")) }

@@ -18,6 +18,8 @@ class HookApplication : Application(), XposedServiceHelper.OnServiceListener {
     }
 
     override fun onServiceBind(service: XposedService) {
+        runCatching { ModuleHotReloadSettingsStore(this).syncRemote(service) }
+            .onFailure { ModuleLog.w("HotReload", "Could not sync hot reload setting", it) }
         runCatching { ModuleSafetySettingsStore(this).syncRemote(service) }
             .onFailure { ModuleLog.w("ModuleSafety", "Could not sync safety settings", it) }
         serviceState.value = service

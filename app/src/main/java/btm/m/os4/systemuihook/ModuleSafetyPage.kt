@@ -80,6 +80,7 @@ internal fun ModuleSafetyPage(openLogs: () -> Unit, back: () -> Unit) {
                         if (settings.partialSafe) ArrowPreference(tr("safetyChooseSections", "选择停用部分"),
                             summary = settings.sections.joinToString("、") { safetySectionTitle(it) },
                             enabled = !busy, onClick = { sectionsDialog = true })
+                        ModuleHotReloadPreferences(enabled = !busy)
                     }
                 }
                 item {
