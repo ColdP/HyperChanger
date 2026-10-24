@@ -3,7 +3,7 @@
 // Adapted for HyperChanger. See third_party/HyperIsland-LICENSE.
 package btm.m.os4.systemuihook
 
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 
@@ -12,6 +12,7 @@ internal class UnlockFocusAuthHook(private val module: XposedModule) {
     private var installed = false
 
     fun install(classLoader: ClassLoader, preferences: android.content.SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.ISLAND)) return
         if (installed || !preferences.getBoolean(KEY_UNLOCK_FOCUS_AUTH, false)) return
         installed = true
         runCatching {
@@ -30,8 +31,8 @@ internal class UnlockFocusAuthHook(private val module: XposedModule) {
                         success.invoke(chain.thisObject)
                     }.getOrElse { chain.proceed() }
                 }
-            module.log(Log.INFO, "HyperChanger", "Installed focus authentication bypass")
-        }.onFailure { module.log(Log.WARN, "HyperChanger", "Focus authentication bypass unavailable", it) }
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, "HyperChanger", "Installed focus authentication bypass")
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, "HyperChanger", "Focus authentication bypass unavailable", it) }
     }
 
     private fun findField(type: Class<*>, name: String): java.lang.reflect.Field? {

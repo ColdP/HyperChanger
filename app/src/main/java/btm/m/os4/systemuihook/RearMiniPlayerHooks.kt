@@ -11,7 +11,7 @@ import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.graphics.Insets
 import android.os.Build
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import android.view.DisplayCutout
 import android.view.View
 import android.view.WindowManager
@@ -45,7 +45,7 @@ internal class RearMiniPlayerHooks(private val module: XposedModule) {
                         if (intent.action != RearMiniPlayerLaunch.ACTION) return
                         val result = if (!preferences.isRearMiniPlayerEnabled()) RearMiniPlayerLaunch.DISABLED
                         else runCatching { RearMiniPlayerLaunch.request(context) }.getOrElse {
-                            module.log(Log.WARN, TAG, "Rear mini player launch rejected", it)
+                            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, TAG, "Rear mini player launch rejected", it)
                             RearMiniPlayerLaunch.REJECTED
                         }
                         if (isOrderedBroadcast) resultCode = result
@@ -53,7 +53,7 @@ internal class RearMiniPlayerHooks(private val module: XposedModule) {
                 }, IntentFilter(RearMiniPlayerLaunch.ACTION), RearMiniPlayerLaunch.PERMISSION, null,
                     Context.RECEIVER_EXPORTED)
                 receiverRegistered = true
-                module.log(Log.INFO, TAG, "Rear mini player launch receiver registered")
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, TAG, "Rear mini player launch receiver registered")
             }
         }
         rearLifecycleInstalled = true
@@ -68,7 +68,7 @@ internal class RearMiniPlayerHooks(private val module: XposedModule) {
                 // This APK's wrapper can intentionally return an empty Application.packageName.
                 if (app?.baseContext?.packageName == target && Application.getProcessName() == target) {
                     runCatching { install(app) }.onFailure {
-                        module.log(Log.ERROR, TAG, "Rear mini player initialization failed for $target", it)
+                        btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.ERROR, TAG, "Rear mini player initialization failed for $target", it)
                     }
                 }
                 chain.proceed()
@@ -128,11 +128,11 @@ internal class RearMiniPlayerHooks(private val module: XposedModule) {
                 val activity = chain.getArg(0) as? Activity
                 if (activity != null && activityClass.isInstance(activity) &&
                     activity.intent?.getBooleanExtra(RearMiniPlayerLaunch.EXTRA_MANAGED, false) == true) {
-                    module.log(Log.INFO, TAG, "Mini player resumed: display=${activity.display?.displayId}, task=${activity.taskId}")
+                    btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, TAG, "Mini player resumed: display=${activity.display?.displayId}, task=${activity.taskId}")
                 }
                 result
             }
-        module.log(Log.INFO, TAG, "NetEase 9.5.37 scoped mini player hooks installed")
+        btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, TAG, "NetEase 9.5.37 scoped mini player hooks installed")
     }
 
     private fun installRearWindowHooks(activityClass: Class<*>, preferences: SharedPreferences) {
@@ -195,7 +195,7 @@ internal class RearMiniPlayerHooks(private val module: XposedModule) {
         window.decorView.systemUiVisibility = window.decorView.systemUiVisibility or
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
             View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-        module.log(Log.DEBUG, TAG, "Rear mini window configured: display=${activity.display?.displayId}, " +
+        btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.DEBUG, TAG, "Rear mini window configured: display=${activity.display?.displayId}, " +
             "size=${window.decorView.width}x${window.decorView.height}")
     }
 

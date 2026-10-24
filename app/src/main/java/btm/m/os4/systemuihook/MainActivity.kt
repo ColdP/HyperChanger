@@ -34,7 +34,7 @@ import android.media.MediaMetadataRetriever
 import android.os.Bundle
 import android.os.Build
 import android.os.Environment
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import android.util.Base64
 import android.widget.Toast
 import android.widget.ImageView
@@ -280,6 +280,7 @@ private fun defaultModulePresetFileName(): String {
 }
 
 private enum class PageId {
+    MODULE_SAFETY, MODULE_LOGS,
     SHADE,
     SHADE_PRESETS,
     SOFT_GLASS_PARAMETERS,
@@ -2817,6 +2818,7 @@ private fun SettingsHome(
         item { ServiceCard(online) }
         item {
             Group(tr("模块设置", "模块设置")) {
+                ArrowPreference(title = tr("moduleSafety", "模块安全"), onClick = { open(PageId.MODULE_SAFETY) })
                 ArrowPreference(
                     title = tr("restart_scope_apps", tr("\u91cd\u542f\u4f5c\u7528\u57df\u5e94\u7528", "\u91cd\u542f\u4f5c\u7528\u57df\u5e94\u7528")),
                     onClick = { open(PageId.RESTART_SCOPES) },
@@ -4843,7 +4845,7 @@ private fun ServiceCard(online: Boolean) {
     }
 }
 
-private fun openLsposedManager(context: Context) {
+internal fun openLsposedManager(context: Context) {
     val standaloneIntent = runCatching {
         context.packageManager.getLaunchIntentForPackage("org.lsposed.manager")
     }.getOrNull() ?: Intent(Intent.ACTION_MAIN).setClassName(
@@ -4864,7 +4866,7 @@ private fun openLsposedManager(context: Context) {
 }
 
 @Composable
-private fun Group(
+internal fun Group(
     title: String,
     insideMargin: PaddingValues = PaddingValues(0.dp),
     content: @Composable ColumnScope.() -> Unit,
@@ -4944,6 +4946,8 @@ private fun Detail(
     back: () -> Unit
 ) {
     when (page) {
+        PageId.MODULE_SAFETY -> ModuleSafetyPage({ openPage(PageId.MODULE_LOGS) }, back)
+        PageId.MODULE_LOGS -> ModuleLogsPage(back)
         PageId.SHADE -> Shade(settings, update, presetActions, openPage, back)
         PageId.DESKTOP -> Desktop(dockSettings, updateDock, homeRecentsSettings, updateHomeRecents, homeFolderSettings, updateHomeFolder, homeMaterialSettings, updateHomeMaterial, openPage, back)
         PageId.DESKTOP_MATERIAL -> HomeMaterialPage(back)
@@ -12379,7 +12383,7 @@ private fun LegalDocument(page: PageId, back: () -> Unit) {
 }
 
 @Composable
-private fun DeviceInfoItem(title: String, summary: String) {
+internal fun DeviceInfoItem(title: String, summary: String) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
         Text(title, style = MiuixTheme.textStyles.body1)
         Text(
@@ -13222,7 +13226,7 @@ private fun GlassLyricFloatingToolbar(
 }
 
 @Composable
-private fun GlassToolbarIconButton(
+internal fun GlassToolbarIconButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     description: String,
     backdrop: LayerBackdrop? = LocalToolbarBackdrop.current,

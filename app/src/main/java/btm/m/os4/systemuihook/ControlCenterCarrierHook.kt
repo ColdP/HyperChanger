@@ -6,7 +6,7 @@ import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
 import android.telephony.SubscriptionManager
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import android.view.View
 import android.widget.TextView
 import io.github.libxposed.api.XposedInterface.ExceptionMode
@@ -61,7 +61,7 @@ internal class ControlCenterCarrierHook(private val module: XposedModule) {
             }
         }.onFailure {
             installed.remove(clazz)
-            module.log(Log.WARN, "HyperChanger", "Could not hook control-center carrier: ${clazz.name}", it)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, "HyperChanger", "Could not hook control-center carrier: ${clazz.name}", it)
         }
     }
 

@@ -17,7 +17,7 @@ import android.os.SystemClock;
 
 import java.io.File;
 import java.io.FileOutputStream;
-import android.util.Log;
+import btm.m.os4.systemuihook.ModuleLog;
 
 import java.lang.reflect.Method;
 
@@ -825,7 +825,7 @@ public class WallpaperProbe {
                 } catch (Throwable t) {
                     sGpuFadeBroken = true;
                     Xp.log(TAG + "gpu fade draw failed, using the CPU fade from now on: "
-                            + Log.getStackTraceString(t));
+                            + ModuleLog.getStackTraceString(t));
                     if (f != null) abortGpuFade(f);
                 }
                 return r;
@@ -1746,7 +1746,7 @@ public class WallpaperProbe {
                                 + " | bmp --es name <fqcn>");
                     }
                 } catch (Throwable t) {
-                    Xp.log(TAG + "op failed: " + Log.getStackTraceString(t));
+                    Xp.log(TAG + "op failed: " + ModuleLog.getStackTraceString(t));
                 }
             }
         };
@@ -2192,7 +2192,7 @@ public class WallpaperProbe {
         try {
             return mgr != null ? takeoverDepth(mgr, on) : takeoverPlain(eng, on);
         } catch (Throwable t) {
-            Xp.log(TAG + "vgl failed: " + Log.getStackTraceString(t));
+            Xp.log(TAG + "vgl failed: " + ModuleLog.getStackTraceString(t));
             return false;
         }
     }

@@ -3,7 +3,7 @@ package btm.m.os4.systemuihook.hypermusiccover;
 import android.media.session.MediaController;
 import android.media.session.PlaybackState;
 import android.os.SystemClock;
-import android.util.Log;
+import btm.m.os4.systemuihook.ModuleLog;
 import android.view.View;
 import android.view.ViewGroup;
 
@@ -244,7 +244,7 @@ final class LockLyrics {
             v.kick();
             startTick();
         } catch (Throwable t) {
-            Xp.log(TAG + "attach failed: " + Log.getStackTraceString(t));
+            Xp.log(TAG + "attach failed: " + ModuleLog.getStackTraceString(t));
         }
     }
 

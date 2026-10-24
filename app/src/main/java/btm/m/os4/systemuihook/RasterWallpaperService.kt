@@ -195,7 +195,7 @@ class RasterWallpaperService : WallpaperService() {
                 RasterSource(uriString, bitmap, null, 0L)
             }
         }.onFailure { error ->
-            android.util.Log.w(RASTER_TAG, "Unable to decode raster source: $uriString", error)
+            btm.m.os4.systemuihook.ModuleLog.w(RASTER_TAG, "Unable to decode raster source: $uriString", error)
         }.getOrNull()
 
         private fun refreshVideoFrames() {
@@ -212,7 +212,7 @@ class RasterWallpaperService : WallpaperService() {
                         source.bitmap = next
                     }
                 }.onFailure { error ->
-                    android.util.Log.w(RASTER_TAG, "Unable to refresh raster video frame", error)
+                    btm.m.os4.systemuihook.ModuleLog.w(RASTER_TAG, "Unable to refresh raster video frame", error)
                 }
             }
         }

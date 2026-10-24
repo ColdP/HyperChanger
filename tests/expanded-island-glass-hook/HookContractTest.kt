@@ -14,6 +14,16 @@ import miui.systemui.dynamicisland.window.DynamicIslandWindowView
 private const val KEY_EXPANDED_ISLAND_BACKGROUND_ENABLED = "expanded_island_background_enabled"
 private const val MI_BACKGROUND_STYLE_CLASS = "btm.m.os4.systemuihook.NativeStyle"
 private const val TAG = "test"
+// Test seams for the process policy and logging boundary; the installer below is production source.
+private enum class SafetySection { ISLAND }
+private object ModuleSafetyRuntime {
+    var allowed = true
+    fun allows(section: SafetySection) = allowed
+}
+private object HookModuleLogger {
+    fun log(api: Host, level: Int, tag: String, message: String, error: Throwable? = null) =
+        api.log(level, tag, message, error)
+}
 private class Prefs(val enabled: Boolean, val blur: Int) : SharedPreferences {
     override fun getBoolean(key: String, default: Boolean) = enabled
 }
@@ -50,6 +60,7 @@ private class Host {
     }
     // PRODUCTION_INSTALLER
     fun install(p: SharedPreferences) = installDynamicIslandGlassBlurHook(javaClass.classLoader, p)
+    fun hasHook() = this::callback.isInitialized
 }
 
 private class StaticCall(val executable: Method, val original: Array<Any?>) {
@@ -111,5 +122,9 @@ fun main() {
     val failure = runCatching { host.callback.intercept(StaticCall(host.executable, arrayOf(window, 87, 50, 500)).chain) }.exceptionOrNull()
     check(failure?.message == "native failure")
     check(NativeStyle.calls == 1 && host.expandedIslandMaterialApplying.get() == null)
-    println("Expanded island production hook passed: static null receiver, arguments/results, once-only original call, disabled/foreign bypass, zero samples and exception cleanup")
+    ModuleSafetyRuntime.allowed = false
+    val disabled = Host()
+    disabled.install(Prefs(true, 50))
+    check(!disabled.hasHook())
+    println("Expanded island production hook passed: static null receiver, arguments/results, once-only original call, disabled/foreign bypass, zero samples, exception cleanup and safety prevents registration")
 }

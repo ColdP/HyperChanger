@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 package btm.m.os4.systemuihook
 
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 import io.github.libxposed.api.XposedInterface.Invoker
 import io.github.libxposed.api.XposedModule
@@ -16,6 +16,7 @@ class RearScreenThemeApplyModule : XposedModule() {
     private var installed = false
 
     override fun onPackageLoaded(param: PackageLoadedParam) {
+        if (!HookModuleSafety.enter(this, param.packageName)) return
         if (param.packageName != PACKAGE || !OsCompatibility.areHooksAllowed() || installed) return
         val prefs = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
         if (!prefs.isRearScreenThemeApplyFixEnabled()) return
@@ -73,8 +74,8 @@ class RearScreenThemeApplyModule : XposedModule() {
                     }
                 }
             installed = true
-            log(Log.INFO, TAG, "Rear-screen rights acquisition compatibility installed")
-        }.onFailure { log(Log.ERROR, TAG, "Could not install rear-screen theme apply fix", it) }
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Rear-screen rights acquisition compatibility installed")
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install rear-screen theme apply fix", it) }
     }
 
     private fun invokeOriginal(method: Method, receiver: Any?, args: Array<Any?>): Any? = try {

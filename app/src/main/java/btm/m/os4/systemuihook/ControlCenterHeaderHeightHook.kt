@@ -5,7 +5,7 @@ package btm.m.os4.systemuihook
 import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import android.view.View
 import android.widget.FrameLayout
 import io.github.libxposed.api.XposedInterface.ExceptionMode
@@ -93,7 +93,7 @@ internal class ControlCenterHeaderHeightHook(private val module: XposedModule) {
             }
         }.onFailure {
             installed.remove(clazz)
-            module.log(Log.WARN, "HyperChanger", "Could not hook control-center header height: ${clazz.name}", it)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, "HyperChanger", "Could not hook control-center header height: ${clazz.name}", it)
         }
     }
 
@@ -111,7 +111,7 @@ internal class ControlCenterHeaderHeightHook(private val module: XposedModule) {
                                 controller.javaClass.getDeclaredMethod("updateResources")
                                     .apply { isAccessible = true }.invoke(controller)
                             }.onFailure {
-                                module.log(Log.WARN, "HyperChanger", "Could not refresh control-center header height", it)
+                                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, "HyperChanger", "Could not refresh control-center header height", it)
                             }
                         }
                     }

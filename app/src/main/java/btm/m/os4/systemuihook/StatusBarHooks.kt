@@ -26,7 +26,7 @@ import android.telephony.SubscriptionManager
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.RelativeSizeSpan
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -201,6 +201,7 @@ internal class StatusBarHooks(
     private val applicationContext: () -> Context?,
 ) {
     fun installAdjustmentHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.STATUS_BAR)) return
         if (statusBarAdjustmentHooksInstalled) return
         installClockSizeRefreshHook(classLoader, preferences)
         installStatusBarIconSizeHooks(classLoader, preferences)
@@ -229,7 +230,7 @@ internal class StatusBarHooks(
                         result
                     }
             }
-        }.onFailure { module.log(Log.WARN, logTag, "Could not install clock size refresh hook", it) }
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install clock size refresh hook", it) }
     }
 
     private fun installStatusBarIconSizeHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
@@ -245,7 +246,7 @@ internal class StatusBarHooks(
                         result
                     }
             }
-        }.onFailure { module.log(Log.WARN, logTag, "Could not install legacy status icon size hook", it) }
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install legacy status icon size hook", it) }
 
         runCatching {
             val modernClass = classLoader.loadClass(MODERN_STATUS_BAR_VIEW_CLASS)
@@ -260,7 +261,7 @@ internal class StatusBarHooks(
                         result
                     }
             }
-        }.onFailure { module.log(Log.WARN, logTag, "Could not install modern status icon size hook", it) }
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install modern status icon size hook", it) }
     }
 
     private fun statusBarIconSizeFactor(preferences: SharedPreferences): Float =
@@ -315,7 +316,7 @@ internal class StatusBarHooks(
                     if (view != null && sizedIconViews.containsKey(view)) applyIconSize(view, preferences)
                     result
                 }
-        }.onFailure { module.log(Log.WARN, logTag, "Could not install battery size layout hooks", it) }
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install battery size layout hooks", it) }
 
         runCatching {
             val type = classLoader.loadClass("com.android.systemui.statusbar.views.MiuiStatusBatteryContainer")
@@ -368,7 +369,7 @@ internal class StatusBarHooks(
                     }
                     result
                 }
-        }.onFailure { module.log(Log.WARN, logTag, "Could not install signal/battery boundary hook", it) }
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install signal/battery boundary hook", it) }
     }
 
     private fun installIconSpacingHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
@@ -399,7 +400,7 @@ internal class StatusBarHooks(
                             }
                         }
                 }
-        }.onFailure { module.log(Log.WARN, logTag, "Could not install status icon spacing hooks", it) }
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install status icon spacing hooks", it) }
     }
 
     private data class BatteryIconLayout(val nativeWidth: Int, val boundarySpacing: Int = 0)
@@ -463,7 +464,7 @@ internal class StatusBarHooks(
         val style = (readInheritedField(target, "mStoreRealStyle") as? Number)?.toInt() ?: return
         if (style < 0) return // The first controller callback has not arrived yet.
         runCatching { batteryStyleMethod?.invoke(target, style) }
-            .onFailure { module.log(Log.WARN, logTag, "Could not refresh battery percentage style", it) }
+            .onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not refresh battery percentage style", it) }
     }
 
     private fun installBatteryPercentageHook(classLoader: ClassLoader, preferences: SharedPreferences) {
@@ -526,7 +527,7 @@ internal class StatusBarHooks(
                         result
                     }
             }
-        }.onFailure { module.log(Log.WARN, logTag, "Could not install battery percentage hook", it) }
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install battery percentage hook", it) }
     }
 
     private fun batteryPercentMode(tag: Int?, preferences: SharedPreferences): Int = when (tag) {
@@ -544,6 +545,7 @@ internal class StatusBarHooks(
     private data class ImportedIcon(val bytes: ByteArray, val density: Int)
 
     fun installImportedIconHooks(preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.STATUS_BAR)) return
         if (importedIconHooksInstalled) return
         runCatching {
             listOf(
@@ -596,7 +598,7 @@ internal class StatusBarHooks(
                     result
                 }
             importedIconHooksInstalled = true
-        }.onFailure { module.log(Log.WARN, logTag, "Could not install imported status icon hooks", it) }
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install imported status icon hooks", it) }
     }
 
     private fun findImportedIcon(resources: Resources, id: Int, preferences: SharedPreferences): ImportedIcon? {
@@ -657,7 +659,7 @@ internal class StatusBarHooks(
                 }
             }
         }.getOrElse { error ->
-            module.log(Log.WARN, logTag, "Could not read imported status icon archive", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not read imported status icon archive", error)
             null
         }
     }
@@ -672,6 +674,7 @@ internal class StatusBarHooks(
         else -> 480
     }
     fun installStackedMobileSignalHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.STATUS_BAR)) return
         if (!stackedMobileSignalHookInstalled) {
             installStackedMobileSignalHook(classLoader, preferences)
             stackedMobileSignalHookInstalled = true
@@ -679,6 +682,7 @@ internal class StatusBarHooks(
     }
 
     fun installIconsLeftHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.STATUS_BAR)) return
         if (!statusBarIconsLeftHookInstalled) {
             installStatusBarIconsLeftHook(classLoader, preferences)
             statusBarIconsLeftHookInstalled = true
@@ -693,6 +697,7 @@ internal class StatusBarHooks(
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.STATUS_BAR)) return
         val keepTheme = { preferences.getBoolean(keepThemeKey, false) }
         runCatching {
             val batteryViewClass = classLoader.loadClass(BATTERY_METER_VIEW_CLASS)
@@ -738,9 +743,9 @@ internal class StatusBarHooks(
                         result
                     }
             }
-            module.log(Log.INFO, logTag, "Installed battery theme/text hooks (${refreshMethods.size} refresh methods)")
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed battery theme/text hooks (${refreshMethods.size} refresh methods)")
         }.onFailure { error ->
-            module.log(Log.WARN, logTag, "Could not install battery view theme/text hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install battery view theme/text hooks", error)
         }
 
         listOf(BATTERY_ICON_CLASS, BATTERY_INDICATOR_CLASS, BATTERY_HOLLOW_ICON_CLASS).forEach { className ->
@@ -763,7 +768,7 @@ internal class StatusBarHooks(
                             }
                     }
             }.onFailure { error ->
-                module.log(Log.DEBUG, logTag, "Optional battery theme hook unavailable: $className", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.DEBUG, logTag, "Optional battery theme hook unavailable: $className", error)
             }
         }
         installStatusBarIconThemeGuards(classLoader, preferences, keepTheme)
@@ -814,6 +819,7 @@ internal class StatusBarHooks(
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.STATUS_BAR)) return
         val hideText = { preferences.getBoolean(hideClockTextKey, false) }
 
         // The internal percentage is a TextView on the normal battery layout.  Keep this
@@ -838,7 +844,7 @@ internal class StatusBarHooks(
                         }
                 }
         }.onFailure { error ->
-            module.log(Log.DEBUG, logTag, "Could not install battery TextView guard", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.DEBUG, logTag, "Could not install battery TextView guard", error)
         }
 
         // Hollow battery themes draw the number directly on a Canvas instead of using the
@@ -880,7 +886,7 @@ internal class StatusBarHooks(
                         }
                 }
         }.onFailure { error ->
-            module.log(Log.DEBUG, logTag, "Optional hollow battery text hook unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.DEBUG, logTag, "Optional hollow battery text hook unavailable", error)
         }
     }
 
@@ -924,6 +930,7 @@ internal class StatusBarHooks(
     }
 
     fun installBatteryDrawableHistoryHook(preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.STATUS_BAR)) return
         runCatching {
             module.hook(ImageView::class.java.getMethod("setImageDrawable", Drawable::class.java))
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
@@ -940,7 +947,7 @@ internal class StatusBarHooks(
                     chain.proceed()
                 }
         }.onFailure { error ->
-            module.log(Log.DEBUG, logTag, "Could not install battery drawable history hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.DEBUG, logTag, "Could not install battery drawable history hook", error)
         }
     }
 
@@ -979,9 +986,9 @@ internal class StatusBarHooks(
                                 }
                         }
                 }
-                module.log(Log.INFO, logTag, "Installed status-bar icon theme guard: $className")
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed status-bar icon theme guard: $className")
             }.onFailure { error ->
-                module.log(Log.DEBUG, logTag, "Optional status-bar icon theme guard unavailable: $className", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.DEBUG, logTag, "Optional status-bar icon theme guard unavailable: $className", error)
             }
         }
     }
@@ -1120,8 +1127,8 @@ internal class StatusBarHooks(
                         }
                 }
             }
-            module.log(Log.INFO, logTag, "Installed status bar icon left-position hook")
-        }.onFailure { error -> module.log(Log.WARN, logTag, "Status bar icon left-position hook unavailable", error) }
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed status bar icon left-position hook")
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Status bar icon left-position hook unavailable", error) }
     }
 
     private fun applyStatusBarIconsLeft(
@@ -1287,7 +1294,7 @@ internal class StatusBarHooks(
                 }
             hookCount++
         }.onFailure { error ->
-            module.log(Log.WARN, logTag, "Stacked mobile controller hook unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Stacked mobile controller hook unavailable", error)
         }
 
         runCatching {
@@ -1311,7 +1318,7 @@ internal class StatusBarHooks(
                 }
             hookCount++
         }.onFailure { error ->
-            module.log(Log.WARN, logTag, "Stacked mobile subscription hook unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Stacked mobile subscription hook unavailable", error)
         }
 
         runCatching {
@@ -1336,7 +1343,7 @@ internal class StatusBarHooks(
                 }
             hookCount++
         }.onFailure { error ->
-            module.log(Log.WARN, logTag, "Stacked mobile binder hook unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Stacked mobile binder hook unavailable", error)
         }
 
         runCatching {
@@ -1366,7 +1373,7 @@ internal class StatusBarHooks(
             }
             hookCount += typeMethods.size
         }.onFailure { error ->
-            module.log(Log.DEBUG, logTag, "Mobile network type hook unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.DEBUG, logTag, "Mobile network type hook unavailable", error)
         }
 
         runCatching {
@@ -1409,7 +1416,7 @@ internal class StatusBarHooks(
                 }
             hookCount++
         }.onFailure { error ->
-            module.log(Log.DEBUG, logTag, "Stacked mobile construction hook unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.DEBUG, logTag, "Stacked mobile construction hook unavailable", error)
         }
 
         runCatching {
@@ -1495,7 +1502,7 @@ internal class StatusBarHooks(
                 }
             hookCount += 4
         }.onFailure { error ->
-            module.log(Log.WARN, logTag, "Stacked mobile drawable hooks unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Stacked mobile drawable hooks unavailable", error)
         }
 
         // The original mobile_type_single TextView is the most stable rendered network-type
@@ -1524,7 +1531,7 @@ internal class StatusBarHooks(
                 }
             hookCount++
         }.onFailure { error ->
-            module.log(Log.DEBUG, logTag, "Mobile network type text hook unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.DEBUG, logTag, "Mobile network type text hook unavailable", error)
         }
 
         // SystemUI may apply the resolved dark/light color directly to the independent
@@ -1561,7 +1568,7 @@ internal class StatusBarHooks(
                 }
             hookCount++
         }.onFailure { error ->
-            module.log(Log.DEBUG, logTag, "Independent mobile network type color hook unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.DEBUG, logTag, "Independent mobile network type color hook unavailable", error)
         }
 
         // The modern view assigns its subscription id after inflation. This also covers builds
@@ -1588,13 +1595,13 @@ internal class StatusBarHooks(
                 }
             hookCount++
         }.onFailure { error ->
-            module.log(Log.DEBUG, logTag, "Stacked mobile subId hook unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.DEBUG, logTag, "Stacked mobile subId hook unavailable", error)
         }
 
         if (hookCount > 0) {
-            module.log(Log.INFO, logTag, "Installed stacked mobile signal hooks ($hookCount)")
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed stacked mobile signal hooks ($hookCount)")
         } else {
-            module.log(Log.WARN, logTag, "No stacked mobile signal hooks could be installed")
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "No stacked mobile signal hooks could be installed")
         }
     }
 
@@ -2097,7 +2104,7 @@ internal class StatusBarHooks(
                 connectivity.registerDefaultNetworkCallback(callback)
                 stackedMobileNetworkCallbackRegistered = true
             }.onFailure { error ->
-                module.log(Log.DEBUG, logTag, "Mobile network state callback unavailable", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.DEBUG, logTag, "Mobile network state callback unavailable", error)
             }
         }
     }
@@ -2346,7 +2353,7 @@ internal class StatusBarHooks(
     private fun ensureDualMobileSignal(presentation: StackedMobilePresentation) {
         captureMobileSignalLayout(presentation)
         val signalContainer = presentation.mobileSignalContainer ?: run {
-            module.log(Log.DEBUG, logTag, "Dual mobile signal container unavailable for subId=${presentation.subscriptionId}")
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.DEBUG, logTag, "Dual mobile signal container unavailable for subId=${presentation.subscriptionId}")
             return
         }
         val existing = signalContainer.findViewById<FrameLayout>(stackedMobileDualContainerId)
@@ -2381,7 +2388,7 @@ internal class StatusBarHooks(
                     stackedMobilePreferences?.getBoolean(KEY_STACKED_MOBILE_SIGNAL_ENABLED, false) == true
                 }
             }
-            module.log(
+            btm.m.os4.systemuihook.HookModuleLogger.log(module,
                 Log.DEBUG,
                 logTag,
                 "Added dual mobile signal container for subId=${presentation.subscriptionId}, " +

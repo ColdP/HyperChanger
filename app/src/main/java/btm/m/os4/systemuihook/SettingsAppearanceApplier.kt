@@ -9,7 +9,7 @@ import android.content.res.Resources
 import android.graphics.Color
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.ColorDrawable
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup

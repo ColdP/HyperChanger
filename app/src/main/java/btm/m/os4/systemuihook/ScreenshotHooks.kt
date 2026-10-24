@@ -5,7 +5,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 import io.github.libxposed.api.XposedInterface.HookBuilder
 import io.github.libxposed.api.XposedModule
@@ -67,8 +67,8 @@ internal class ScreenshotHooks(
             }
 
             installed = true
-            module.log(Log.INFO, logTag, "Installed screenshot shell asset hooks")
-        }.onFailure { module.log(Log.WARN, logTag, "Could not install screenshot shell hooks", it) }
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed screenshot shell asset hooks")
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install screenshot shell hooks", it) }
     }
 
     private fun hasAnyCustom(prefs: android.content.SharedPreferences): Boolean =
@@ -134,7 +134,7 @@ internal class ScreenshotHooks(
             .newInstance(CUSTOM_RESOURCE_ID, mode, geometry, bitmap)
         classLoader.loadClass("com.miui.gallery.editor.photo.screen.shell.backscreen.ShellOutcome\$Ready")
             .getConstructor(assetClass).newInstance(asset)
-    }.onFailure { module.log(Log.WARN, logTag, "Could not load custom screenshot shell", it) }.getOrNull()
+    }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not load custom screenshot shell", it) }.getOrNull()
 
     private companion object {
         const val CUSTOM_RESOURCE_ID = -9_876_543_210L

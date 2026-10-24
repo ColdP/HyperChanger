@@ -7,7 +7,7 @@ import android.content.Context
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit

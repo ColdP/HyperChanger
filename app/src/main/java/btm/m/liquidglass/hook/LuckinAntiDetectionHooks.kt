@@ -2,7 +2,7 @@ package btm.m.liquidglass.hook
 
 import android.content.pm.PackageManager
 import android.os.Debug
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import java.io.File
@@ -43,7 +43,7 @@ object LuckinAntiDetectionHooks {
         hookPackageQueries(module)
         hookProcessCommands(module)
         hookStackTraces(module)
-        module.log(
+        btm.m.os4.systemuihook.HookModuleLogger.log(module,
             Log.INFO,
             TAG,
             "Luckin Java-level hook detection masking installed"

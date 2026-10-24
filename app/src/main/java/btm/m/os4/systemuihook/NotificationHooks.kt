@@ -11,7 +11,7 @@ import android.graphics.RenderEffect
 import android.graphics.Outline
 import android.graphics.Shader
 import android.os.Build
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
@@ -41,6 +41,7 @@ internal class NotificationHooks(
 ) {
     // Keep the original process-wide guard, call order and successful-install write point.
     fun installNotificationRestrictions(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.NOTIFICATIONS)) return
         if (!notificationRestrictionHooksInstalled) {
             installNotificationRestrictionHooks(classLoader, preferences)
             installNotificationMiniWindowBarHook(classLoader, preferences)
@@ -86,7 +87,7 @@ internal class NotificationHooks(
                     ) null else chain.proceed()
                 }
         }.onFailure { error ->
-            module.log(Log.WARN, logTag, "Could not install BLE unlock toast hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install BLE unlock toast hook", error)
         }
 
         runCatching {
@@ -112,7 +113,7 @@ internal class NotificationHooks(
                         }
                 }
         }.onFailure { error ->
-            module.log(Log.WARN, logTag, "Could not install keep-notifications hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install keep-notifications hook", error)
         }
 
         runCatching {
@@ -172,7 +173,7 @@ internal class NotificationHooks(
                         }
                 }
         }.onFailure { error ->
-            module.log(Log.WARN, logTag, "Could not install notification visibility hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install notification visibility hooks", error)
         }
 
         runCatching {
@@ -192,7 +193,7 @@ internal class NotificationHooks(
                         }
                 }
         }.onFailure { error ->
-            module.log(Log.WARN, logTag, "Could not install notification-importance icon hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install notification-importance icon hook", error)
         }
 
         runCatching {
@@ -225,9 +226,9 @@ internal class NotificationHooks(
                         }
                 }
         }.onFailure { error ->
-            module.log(Log.WARN, logTag, "Could not install notification-history folding hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install notification-history folding hooks", error)
         }
-        module.log(Log.INFO, logTag, "Installed notification restriction-removal hooks")
+        btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed notification restriction-removal hooks")
     }
 
     private fun installNotificationMiniWindowBarHook(
@@ -256,9 +257,9 @@ internal class NotificationHooks(
                         result
                     }
             }
-            module.log(Log.INFO, logTag, "Installed notification mini-window bar hide hook")
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed notification mini-window bar hide hook")
         }.onFailure { error ->
-            module.log(Log.WARN, logTag, "Could not install notification mini-window bar hide hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install notification mini-window bar hide hook", error)
         }
     }
 
@@ -358,6 +359,7 @@ internal class NotificationHooks(
     }
 
     fun installNotificationTextHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.NOTIFICATIONS)) return
         if (textHooksInstalled) return
         textHooksInstalled = true
         textPreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -412,7 +414,7 @@ internal class NotificationHooks(
                             result
                         }
                 }
-        }.onFailure { module.log(Log.WARN, logTag, "Could not install notification text lifecycle hooks", it) }
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install notification text lifecycle hooks", it) }
         runCatching {
             val dispatcher = classLoader.loadClass("com.android.systemui.statusbar.phone.DarkIconDispatcherImpl")
             val method = dispatcher.getDeclaredMethod("applyDarkIntensity", Float::class.javaPrimitiveType)
@@ -425,14 +427,16 @@ internal class NotificationHooks(
                     if (changed) refreshText(preferences)
                     result
                 }
-        }.onFailure { module.log(Log.WARN, logTag, "Could not observe status-bar text color", it) }
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not observe status-bar text color", it) }
     }
 
     fun installFlashlightMaterialHook(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.NOTIFICATIONS)) return
         runCatching { classLoader.loadClass(FLASHLIGHT_NOTIFICATION_CLASS) }.getOrNull()?.let { onClassLoaded(it, preferences) }
     }
 
     fun onClassLoaded(target: Class<*>, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.NOTIFICATIONS)) return
         if (target.name != FLASHLIGHT_NOTIFICATION_CLASS) return
         synchronized(flashlightClasses) {
             if (target in flashlightClasses) return
@@ -446,7 +450,7 @@ internal class NotificationHooks(
                         } else result
                     }
                 flashlightClasses.add(target)
-            }.onFailure { module.log(Log.WARN, logTag, "Could not unify flashlight notification material", it) }
+            }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not unify flashlight notification material", it) }
         }
     }
 
@@ -517,6 +521,7 @@ internal class NotificationHooks(
     }
 
     fun installNotificationStackBlurHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.NOTIFICATIONS)) return
         if (stackBlurHooksInstalled) return
         stackBlurHooksInstalled = true
         stackBlurPreferences = preferences
@@ -544,7 +549,7 @@ internal class NotificationHooks(
                             result
                         }
                 }
-        }.onFailure { module.log(Log.WARN, logTag, "Could not hook notification stacking view updates", it) }
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not hook notification stacking view updates", it) }
 
         runCatching {
             val interactor = classLoader.loadClass("com.miui.systemui.notification.domain.interactor.NotificationStackingInteractor")
@@ -561,7 +566,7 @@ internal class NotificationHooks(
             check(interactor.declaredMethods.any { it.name == "calculateStackingInfo" && it.parameterCount == 5 }) {
                 "NotificationStackingInteractor#calculateStackingInfo overloads not found"
             }
-        }.onFailure { module.log(Log.WARN, logTag, "Could not hook notification stacking calculations", it) }
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not hook notification stacking calculations", it) }
     }
 
     companion object {

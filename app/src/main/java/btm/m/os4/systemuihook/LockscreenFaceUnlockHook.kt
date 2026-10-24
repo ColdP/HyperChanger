@@ -7,7 +7,7 @@ import android.app.KeyguardManager
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.PowerManager
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 import io.github.libxposed.api.XposedModule
 
@@ -22,6 +22,7 @@ internal class LockscreenFaceUnlockHook(private val module: XposedModule) {
     private val discoveredClasses = java.util.Collections.newSetFromMap(java.util.WeakHashMap<Class<*>, Boolean>())
 
     fun install(loader: ClassLoader, prefs: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         if (installed) return
         installed = true
         preferences = prefs
@@ -46,6 +47,7 @@ internal class LockscreenFaceUnlockHook(private val module: XposedModule) {
     }
 
     fun onClassLoaded(clazz: Class<*>) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         val prefs = preferences ?: return
         val loader = clazz.classLoader ?: return
         val relevant = clazz.name.contains("FaceAuth") || clazz.name.endsWith("KeyguardUpdateMonitor") ||
@@ -77,7 +79,7 @@ internal class LockscreenFaceUnlockHook(private val module: XposedModule) {
         }
     }
 
-    private fun report(part: String, error: Throwable) = module.log(Log.WARN, "HyperChanger", "Unlock island $part unavailable", error)
+    private fun report(part: String, error: Throwable) = btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, "HyperChanger", "Unlock island $part unavailable", error)
 }
 
 internal object UnlockIslandRuntime {

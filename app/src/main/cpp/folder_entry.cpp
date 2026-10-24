@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <string_view>
+#include "module_safety.h"
 
 using Hook = int (*)(void *, void *, void **);
 using Unhook = int (*)(void *);
@@ -38,6 +39,7 @@ void start_in_child() {
     // differs from the pre-fork entry process. Also exclude the root spawner
     // that may temporarily use the launcher's process name.
     if (launcher() && (!spawner() || getpid() != entry_pid || getuid() >= 10000)) {
+        if (!hc_native_features_allowed()) return;
         start_folder_spacing();
     }
 }
@@ -56,7 +58,7 @@ void loaded(const char *name, void *) {
     // process-name hook ordering and lets native Dock hooks see the first AOT
     // image as soon as it is mapped.
     if (name != nullptr && std::string_view(name).ends_with("libapp.so") && launcher()
-        && getuid() >= 10000) {
+        && getuid() >= 10000 && hc_native_features_allowed()) {
         start_folder_spacing();
         refresh_home_effects_on_load();
     }

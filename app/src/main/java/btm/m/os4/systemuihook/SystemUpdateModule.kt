@@ -6,7 +6,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
@@ -14,6 +14,7 @@ import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 /** Hooks are constrained to the updater process so version values never escape to other apps. */
 class SystemUpdateModule : XposedModule() {
     override fun onPackageLoaded(param: PackageLoadedParam) {
+        if (!HookModuleSafety.enter(this, param.packageName)) return
         if (!OsCompatibility.areHooksAllowed()) return
         if (param.packageName != UPDATER_PACKAGE) return
         val preferences = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
@@ -21,9 +22,9 @@ class SystemUpdateModule : XposedModule() {
             installVersionSpoofHooks(param.defaultClassLoader, preferences)
             installUpdateDisableHooks(param.defaultClassLoader, preferences)
             installOtaValidationBypassHook(param.defaultClassLoader, preferences)
-            log(Log.INFO, TAG, "Installed System Updater hooks")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed System Updater hooks")
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install System Updater hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install System Updater hooks", error)
         }
     }
 
@@ -59,7 +60,7 @@ class SystemUpdateModule : XposedModule() {
                     chain.proceed()
                 }
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install updater Build.VERSION hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install updater Build.VERSION hook", error)
         }
     }
 
@@ -157,7 +158,7 @@ class SystemUpdateModule : XposedModule() {
                 .apply { isAccessible = true }
                 .set(null, version)
         }.onFailure { error ->
-            log(Log.DEBUG, TAG, "Build.VERSION.INCREMENTAL is read-only on this device", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Build.VERSION.INCREMENTAL is read-only on this device", error)
         }
     }
 

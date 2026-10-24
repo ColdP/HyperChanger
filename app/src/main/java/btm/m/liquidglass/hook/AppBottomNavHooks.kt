@@ -7,7 +7,7 @@ import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.os.Build
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
@@ -363,7 +363,7 @@ object AppBottomNavHooks {
         module.hook(bottomBarContent)
             .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
             .intercept { Unit }
-        module.log(Log.INFO, TAG, "Reddit native bottom navigation content hook installed")
+        btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, TAG, "Reddit native bottom navigation content hook installed")
     }
 
     @JvmStatic
@@ -437,14 +437,14 @@ object AppBottomNavHooks {
                                 )
                             }.onSuccess { installed = true }
                                 .onFailure { error ->
-                                    module.log(Log.WARN, TAG, "LuckinCoffee class loader not ready", error)
+                                    btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, TAG, "LuckinCoffee class loader not ready", error)
                                 }
                         }
                     }
                 }
                 result
             }
-        module.log(Log.INFO, TAG, "Waiting for LuckinCoffee protected activity class")
+        btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, TAG, "Waiting for LuckinCoffee protected activity class")
     }
 
     @JvmStatic
@@ -505,7 +505,7 @@ object AppBottomNavHooks {
         module.hook(renderMode)
             .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
             .intercept { chain -> chain.proceed(arrayOf(textureMode)) }
-        module.log(Log.INFO, TAG, "XiaomiWallet Flutter TextureView render hook installed")
+        btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, TAG, "XiaomiWallet Flutter TextureView render hook installed")
     }
 
     private fun installCloudMusicMiniPlayerHook(module: XposedModule) {
@@ -522,7 +522,7 @@ object AppBottomNavHooks {
                 }
                 result
             }
-        module.log(Log.INFO, TAG, "CloudMusic minPlayerBarContainer onLayout hook installed")
+        btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, TAG, "CloudMusic minPlayerBarContainer onLayout hook installed")
     }
 
     private fun isCloudMusicMiniPlayer(view: View): Boolean {
@@ -629,7 +629,7 @@ object AppBottomNavHooks {
                 chain.proceed()
             }
 
-        module.log(Log.INFO, TAG, "Hooks installed for ${config.displayName} ${config.targetVersion}")
+        btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, TAG, "Hooks installed for ${config.displayName} ${config.targetVersion}")
     }
 
     private fun matchesActivity(type: Class<*>, activity: Activity, config: AppConfig): Boolean {
@@ -788,7 +788,7 @@ object AppBottomNavHooks {
             val detected = detectBottomBar(content)
             if (detected == null) {
                 if (++attempts < 40) content.postDelayed(::attachOrRetry, 300L)
-                else module.log(Log.WARN, TAG, "No ${config.displayName} bottom navigation found")
+                else btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, TAG, "No ${config.displayName} bottom navigation found")
                 return
             }
 
@@ -1053,7 +1053,7 @@ object AppBottomNavHooks {
                 )
                 installGuard(content)
                 composeView.post(::syncHostState)
-                module.log(
+                btm.m.os4.systemuihook.HookModuleLogger.log(module,
                     Log.INFO,
                     TAG,
                     "Custom navigation attached to ${config.displayName} ($navigationStyle): " +
@@ -1061,7 +1061,7 @@ object AppBottomNavHooks {
                 )
             } catch (error: Throwable) {
                 destroy()
-                module.log(Log.ERROR, TAG, "Keeping ${config.displayName}'s original navigation", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.ERROR, TAG, "Keeping ${config.displayName}'s original navigation", error)
             }
         }
 
@@ -1213,7 +1213,7 @@ object AppBottomNavHooks {
             val viewResult = if (touchResult || clickResult) false else
                 currentTab.view.callOnClick() || currentTab.view.performClick()
             if (!touchResult && !clickResult && !viewResult) {
-                module.log(Log.WARN, TAG, "${config.displayName} rejected click for ${tab.displayLabel}")
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, TAG, "${config.displayName} rejected click for ${tab.displayLabel}")
             }
             currentTab.view.postDelayed(::syncHostState, 120L)
         }
@@ -1226,7 +1226,7 @@ object AppBottomNavHooks {
             val x = targetLocation[0] - contentLocation[0] + currentTab.clickTarget.width / 2f
             val y = targetLocation[1] - contentLocation[1] + currentTab.clickTarget.height / 2f
             if (!dispatchSyntheticTap(content, x, y)) {
-                module.log(Log.WARN, TAG, "${config.displayName} rejected click for ${tab.displayLabel}")
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, TAG, "${config.displayName} rejected click for ${tab.displayLabel}")
                 return
             }
             selectedIndex.intValue = navigationTabs.indexOfFirst { it.key == tab.key }
@@ -1242,7 +1242,7 @@ object AppBottomNavHooks {
             val tabStrip = tabLayout.getChildAt(0) as? ViewGroup
             val nativeTab = tabStrip?.getChildAt(index)
             if (nativeTab?.performClick() != true) {
-                module.log(Log.WARN, TAG, config.displayName + " rejected click for " + tab.displayLabel)
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, TAG, config.displayName + " rejected click for " + tab.displayLabel)
                 return
             }
             selectedIndex.intValue = navigationTabs.indexOfFirst { it.key == tab.key }
@@ -1304,7 +1304,7 @@ object AppBottomNavHooks {
                 ).invoke(proxy, activity, tabIndex)
                 true
             }).onFailure { error ->
-                module.log(Log.WARN, TAG, "Xiaohongshu rejected click for ${tab.displayLabel}", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, TAG, "Xiaohongshu rejected click for ${tab.displayLabel}", error)
             }.getOrDefault(false)
             if (!handled) {
                 val currentTab = detectedTabs.firstOrNull { it.key == tab.key } ?: tab
@@ -1340,7 +1340,7 @@ object AppBottomNavHooks {
                     Boolean::class.javaPrimitiveType
                 ).invoke(activity, tabValue, false)
             }.onFailure { error ->
-                module.log(Log.WARN, TAG, "Reddit rejected click for ${tab.displayLabel}", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, TAG, "Reddit rejected click for ${tab.displayLabel}", error)
             }
             originalBar?.postDelayed(::syncHostState, 120L)
         }
@@ -1353,7 +1353,7 @@ object AppBottomNavHooks {
             val x = (index + 0.5f) * surface.width / detectedTabs.size
             val y = surface.height - navigationBarInset() - 28f * density
             if (!dispatchSyntheticTap(surface, x, y)) {
-                module.log(Log.WARN, TAG, "${config.displayName} rejected click for ${tab.displayLabel}")
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, TAG, "${config.displayName} rejected click for ${tab.displayLabel}")
             } else {
                 selectedIndex.intValue = navigationTabs.indexOfFirst { it.key == tab.key }
                     .takeIf { it >= 0 } ?: selectedIndex.intValue
@@ -1370,7 +1370,7 @@ object AppBottomNavHooks {
             val x = (index + 0.5f) * flutterContainer.width / detectedTabs.size
             val y = flutterContainer.height - navigationInset - 24f * density
             if (!dispatchSyntheticTap(flutterContainer, x, y)) {
-                module.log(Log.WARN, TAG, "XiaomiWallet rejected click for ${tab.displayLabel}")
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, TAG, "XiaomiWallet rejected click for ${tab.displayLabel}")
             }
             flutterContainer.postDelayed(::syncHostState, 120L)
         }
@@ -2429,7 +2429,7 @@ object AppBottomNavHooks {
                     else -> null
                 }
                 if (mediaKey != null) dispatchMusicMediaKey(mediaKey, "CloudMusic")
-                else module.log(Log.WARN, TAG, "CloudMusic rejected ${resourceNames.joinToString()}")
+                else btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, TAG, "CloudMusic rejected ${resourceNames.joinToString()}")
             }
             content.postDelayed(::syncHostState, 100L)
         }
@@ -2506,7 +2506,7 @@ object AppBottomNavHooks {
                 ?: return
             val handled = target.callOnClick() || target.performClick() || dispatchSyntheticTap(target)
             if (!handled) {
-                module.log(Log.WARN, TAG, "QQ Music rejected ${resourceNames.joinToString()}")
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, TAG, "QQ Music rejected ${resourceNames.joinToString()}")
             }
             content.postDelayed(::syncHostState, 100L)
         }
@@ -2523,7 +2523,7 @@ object AppBottomNavHooks {
                     KeyEvent(eventTime, eventTime, KeyEvent.ACTION_UP, keyCode, 0)
                 )
             }.onFailure { error ->
-                module.log(Log.WARN, TAG, "$appName media key $keyCode failed", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, TAG, "$appName media key $keyCode failed", error)
             }
             activity.window.decorView.postDelayed(::syncHostState, 150L)
         }
@@ -2708,7 +2708,7 @@ object AppBottomNavHooks {
                 target.callOnClick() || target.performClick() || dispatchSyntheticTap(target)
             }
             if (!handled) {
-                module.log(Log.WARN, TAG, "Apple Music rejected $resourceName")
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, TAG, "Apple Music rejected $resourceName")
             }
             content.postDelayed(::syncHostState, 100L)
             if (resourceName == "mini_player_touch_panel") {
@@ -2720,7 +2720,7 @@ object AppBottomNavHooks {
                         applePlayerExpansionObserved = false
                         updateAppleMusicBottomChrome(content, showPlayer = false)
                         syncHostState()
-                        module.log(Log.WARN, TAG, "Apple Music player expansion timed out")
+                        btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, TAG, "Apple Music player expansion timed out")
                     }
                 }, 900L)
             }

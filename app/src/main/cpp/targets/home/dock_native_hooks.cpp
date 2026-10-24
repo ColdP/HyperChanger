@@ -8,6 +8,7 @@
 #include "nativehook/memory_io.h"
 
 #include <android/log.h>
+#include "module_safety.h"
 #include <algorithm>
 #include <array>
 #include <atomic>

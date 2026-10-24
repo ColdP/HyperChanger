@@ -10,6 +10,7 @@
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-feature
         android:name="android.software.live_wallpaper"
@@ -24,6 +25,13 @@
         android:roundIcon="@drawable/ic_hyperchanger"
         android:supportsRtl="true"
         android:theme="@style/Theme.HyperSystemUIHook">
+        <service android:name=".ModuleLogCleanupService" android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+        <provider android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.modulelogs" android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/module_log_paths" />
+        </provider>
         <meta-data
             android:name="xposeddescription"
             android:resource="@string/xposed_description" />

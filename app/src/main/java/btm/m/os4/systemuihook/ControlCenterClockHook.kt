@@ -11,7 +11,7 @@ import android.os.PowerManager
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import android.util.TypedValue
 import android.view.View
 import android.view.ViewGroup
@@ -64,7 +64,7 @@ internal class ControlCenterClockHook(private val module: XposedModule) {
             }
         }.onFailure {
             installed.remove(clazz)
-            module.log(Log.WARN, "HyperChanger", "Could not hook control-center big clock", it)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, "HyperChanger", "Could not hook control-center big clock", it)
         }
     }
 

@@ -45,7 +45,7 @@ import android.telephony.SubscriptionManager
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.RelativeSizeSpan
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -212,11 +212,12 @@ class HyperSystemUiModule : XposedModule() {
     internal fun installHook(member: java.lang.reflect.Executable) = hook(member)
 
     override fun onSystemServerStarting(param: SystemServerStartingParam) {
+        if (!HookModuleSafety.enter(this, "system")) return
         // system_server never goes through onPackageLoaded, so its hooks have to be installed here.
         runCatching {
             installFrameworkHooks(param.classLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install system framework hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install system framework hooks", error)
         }
     }
 
@@ -277,6 +278,7 @@ class HyperSystemUiModule : XposedModule() {
      * code already has the sensor registered its own handling wins and this stays out of the way.
      */
     private fun installLiftToWakeScheduleHook(loader: ClassLoader, prefs: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         val cls = loader.loadClass("com.android.keyguard.injector.KeyguardSensorInjector")
         val instance = AtomicReference<Any?>(null)
         cls.declaredConstructors.forEach { constructor ->
@@ -298,7 +300,7 @@ class HyperSystemUiModule : XposedModule() {
             }
         }
         main.post(tick)
-        log(Log.INFO, TAG, "Installed lift-to-wake schedule hook")
+        btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lift-to-wake schedule hook")
     }
 
     private fun applyLiftToWakeSchedule(
@@ -326,11 +328,11 @@ class HyperSystemUiModule : XposedModule() {
             val sensor = manager.getDefaultSensor(sensorType, true) ?: return
             manager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
             registered.set(true)
-            log(Log.INFO, TAG, "Lift-to-wake window opened, pickup sensor registered")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Lift-to-wake window opened, pickup sensor registered")
         } else if ((!active || nativeRegistered) && registered.get()) {
             manager.unregisterListener(listener)
             registered.set(false)
-            log(Log.INFO, TAG, "Lift-to-wake window closed, pickup sensor released")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Lift-to-wake window closed, pickup sensor released")
         }
     }
 
@@ -422,6 +424,7 @@ class HyperSystemUiModule : XposedModule() {
     private val rearActivityPolicyMethods = mutableSetOf<Method>()
 
     private fun installRearActivityPolicyHooks(loader: ClassLoader, prefs: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.FRAMEWORK)) return
         val miuiLoader = resolveMiuiServicesLoader(loader) ?: loader
         fun install(method: Method, onlyDisplayOne: Boolean = false) {
             if (method in rearActivityPolicyMethods) return
@@ -434,7 +437,7 @@ class HyperSystemUiModule : XposedModule() {
                         (!onlyDisplayOne || chain.getArg(2) == 1)) true else result
                 }
             rearActivityPolicyMethods += method
-            log(Log.INFO, TAG, "Installed rear Activity policy: ${method.toGenericString()}")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed rear Activity policy: ${method.toGenericString()}")
         }
         runCatching {
             val cls = loadFrameworkClass(loader, miuiLoader, "com.android.server.wm.ActivityStarterImpl")
@@ -450,7 +453,7 @@ class HyperSystemUiModule : XposedModule() {
             require(methods.any { it.name == "isShouldShowOnRearDisplay" }) { "Rear Activity eligibility method unavailable" }
             require(methods.any { it.name == "isAllowedToStartOnRearDisplay" }) { "Rear Activity start method unavailable" }
             methods.forEach { install(it) }
-        }.onFailure { log(Log.WARN, TAG, "Could not install rear Activity eligibility policy", it) }
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install rear Activity eligibility policy", it) }
         runCatching {
             val cls = loadFrameworkClass(loader, miuiLoader, "com.android.server.wm.ActivityTaskSupervisor")
                 ?: error("ActivityTaskSupervisor unavailable")
@@ -460,10 +463,11 @@ class HyperSystemUiModule : XposedModule() {
             }
             require(methods.isNotEmpty()) { "External display caller check unavailable" }
             methods.forEach { install(it, onlyDisplayOne = true) }
-        }.onFailure { log(Log.WARN, TAG, "Could not install rear display caller policy", it) }
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install rear display caller policy", it) }
     }
 
     private fun installFrameworkHooks(loader: ClassLoader, prefs: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.FRAMEWORK)) return
         val miuiLoader = resolveMiuiServicesLoader(loader) ?: loader
         fun on(block: (FrameworkPreferences) -> Boolean): Boolean {
             return runCatching { block(readFrameworkPreferences(prefs)) }.getOrDefault(false)
@@ -1017,49 +1021,50 @@ class HyperSystemUiModule : XposedModule() {
 
 
     override fun onPackageLoaded(param: PackageLoadedParam) {
+        if (!HookModuleSafety.enter(this, param.packageName)) return
         if (!OsCompatibility.areHooksAllowed()) return
         if (param.packageName == "com.android.systemui") {
             runCatching {
                 installLiftToWakeScheduleHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
-            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install lift-to-wake schedule hook", error) }
+            }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install lift-to-wake schedule hook", error) }
         }
         if (param.packageName == "com.miui.misound") {
             runCatching {
                 othersHooks.installSoundEffectHooks(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
-            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install sound effect hooks", error) }
+            }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install sound effect hooks", error) }
             return
         }
         if (param.packageName == "com.miui.screenshot") {
             runCatching {
                 othersHooks.installScreenshotHooks(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
-            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install screenshot shell hooks", error) }
+            }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install screenshot shell hooks", error) }
             return
         }
         if (param.packageName == "com.android.systemui") {
             runCatching {
                 controlCenterHooks.installOldControlCenterHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
-            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install old control center hook", error) }
+            }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install old control center hook", error) }
         }
         if (param.packageName == "com.xiaomi.misettings") {
             runCatching {
                 othersHooks.installMiSettingsHooks(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
-            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install Xiaomi Settings hooks", error) }
+            }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install Xiaomi Settings hooks", error) }
             return
         }
         if (param.packageName == "system") {
             runCatching {
                 installRearActivityPolicyHooks(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
-            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install rear Activity policies", error) }
+            }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install rear Activity policies", error) }
             // HyperCeiler hooks system_server through onPackageLoaded, so this path is known to work
             // even though onSystemServerStarting also fires. Either one installs the framework hooks.
             runCatching {
                 installFrameworkHooks(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
-            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install system framework hooks", error) }
+            }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install system framework hooks", error) }
             return
         }
         if (param.packageName == RearMiniPlayerLaunch.MUSIC_PACKAGE) {
             runCatching { othersHooks.installRearMiniPlayerMusicHooks(getRemotePreferences(REMOTE_PREFERENCE_GROUP)) }
-                .onFailure { error -> log(Log.ERROR, TAG, "Could not install NetEase rear mini player hooks", error) }
+                .onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install NetEase rear mini player hooks", error) }
             return
         }
         if (param.packageName == "com.miui.home") {
@@ -1069,7 +1074,7 @@ class HyperSystemUiModule : XposedModule() {
                     param, readHomeRecentsSettings(preferences), readHomeFolderSettings(preferences), readHomeMaterialSettings(preferences), readHomeNativeDockSettings(preferences), readHomeMultiSplitSettings(preferences), resolveHomeGlassNativeSettings(preferences),
                 )
             }.onFailure { error ->
-                log(Log.ERROR, TAG, "Could not sync native desktop recents config", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not sync native desktop recents config", error)
             }
             return
         }
@@ -1084,18 +1089,18 @@ class HyperSystemUiModule : XposedModule() {
         if (param.packageName == SETTINGS_PACKAGE) {
             runCatching {
                 othersHooks.installSettingsAppScopeHooks(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
-            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install Settings app scope hooks", error) }
+            }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install Settings app scope hooks", error) }
             runCatching {
                 othersHooks.installSettingsAppEntryHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
-            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install Settings app entry hook", error) }
+            }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install Settings app entry hook", error) }
             runCatching {
                 othersHooks.installSettingsEntryLabelHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
-            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install Settings entry label hook", error) }
+            }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install Settings entry label hook", error) }
             return
         }
         if (param.packageName == AIRDROP_PACKAGE) {
             runCatching { othersHooks.installAirDropForceEnableHooks(param) }
-                .onFailure { error -> log(Log.ERROR, TAG, "Could not install MiShare AirDrop hooks", error) }
+                .onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install MiShare AirDrop hooks", error) }
             return
         }
         if (param.packageName == LOCKSCREEN_WALLPAPER) {
@@ -1105,13 +1110,13 @@ class HyperSystemUiModule : XposedModule() {
         }
         if (param.packageName == XMSF_PACKAGE) {
             runCatching { unlockFocusAuthHook.install(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP)) }
-                .onFailure { error -> log(Log.WARN, TAG, "Could not install focus authentication hook", error) }
+                .onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install focus authentication hook", error) }
             return
         }
         if (param.packageName == "com.miui.voiceassist") {
             runCatching {
                 SuperXiaoAiWindowHook.install(this, param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
-            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install Super XiaoAI floating window hooks", error) }
+            }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install Super XiaoAI floating window hooks", error) }
             return
         }
         if (param.packageName !in SYSTEM_UI_TARGETS) return
@@ -1245,7 +1250,7 @@ class HyperSystemUiModule : XposedModule() {
                         runCatching {
                             installLockscreenFingerprintAnimationHook(param.defaultClassLoader, preferences)
                         }.onFailure { error ->
-                            log(Log.WARN, TAG, "Skipped unsupported lockscreen fingerprint animation hook", error)
+                            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Skipped unsupported lockscreen fingerprint animation hook", error)
                         }
                         fingerprintIconHookInstalled = true
                     }
@@ -1393,9 +1398,9 @@ class HyperSystemUiModule : XposedModule() {
                 }
                 else -> return
             }
-            log(Log.INFO, TAG, "Installed hooks for ${param.packageName}")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed hooks for ${param.packageName}")
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install hooks for ${param.packageName}", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install hooks for ${param.packageName}", error)
         }
     }
 
@@ -1409,6 +1414,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         if (hyperMusicCoverGestureBridgeInstalled) return
         hyperMusicCoverGestureBridgeInstalled = true
 
@@ -1452,7 +1458,7 @@ class HyperSystemUiModule : XposedModule() {
             preferences.registerOnSharedPreferenceChangeListener(preferenceListener)
             hyperMusicCoverPreferenceChangeListener = preferenceListener
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not observe HyperMusicCover setting changes", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not observe HyperMusicCover setting changes", error)
         }
 
         runCatching {
@@ -1479,9 +1485,9 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     result
                 }
-            log(Log.INFO, TAG, "Installed HyperMusicCover gesture bridge")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed HyperMusicCover gesture bridge")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install HyperMusicCover gesture bridge", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install HyperMusicCover gesture bridge", error)
         }
     }
 
@@ -1596,7 +1602,7 @@ class HyperSystemUiModule : XposedModule() {
                     .putExtra("centertext", centerText),
             )
         }.onFailure { error ->
-            log(Log.DEBUG, TAG, "Could not send HyperMusicCover mediacard command", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Could not send HyperMusicCover mediacard command", error)
         }
     }
 
@@ -1609,7 +1615,7 @@ class HyperSystemUiModule : XposedModule() {
                     .putExtra("on", on),
             )
         }.onFailure { error ->
-            log(Log.DEBUG, TAG, "Could not send HyperMusicCover $op command", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Could not send HyperMusicCover $op command", error)
         }
     }
 
@@ -1629,6 +1635,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.CONTROL_CENTER)) return
         if (controlCenterHookRetryScheduled) return
         controlCenterHookRetryScheduled = true
         val handler = Handler(Looper.getMainLooper())
@@ -1640,7 +1647,7 @@ class HyperSystemUiModule : XposedModule() {
                     controlCenterTopButtonsHookInstalled &&
                     controlCenterMainPanelHookInstalled
                 if (!complete) {
-                    log(Log.DEBUG, TAG, "Retrying control-center hooks after ${delay}ms")
+                    btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Retrying control-center hooks after ${delay}ms")
                     installControlCenterEditButtonHook(classLoader, preferences)
                 }
             }, delay)
@@ -1652,12 +1659,13 @@ class HyperSystemUiModule : XposedModule() {
         preferences: SharedPreferences,
         alreadyLoadedClass: Class<*>? = null,
     ): Boolean {
+        if (!ModuleSafetyRuntime.allows(SafetySection.CONTROL_CENTER)) return false
         return runCatching {
             var installed = false
             val controllerClass = (alreadyLoadedClass
                 ?.takeIf { it.name == CONTROL_CENTER_EDIT_BUTTON_CONTROLLER_CLASS }
                 ?: runCatching { classLoader.loadClass(CONTROL_CENTER_EDIT_BUTTON_CONTROLLER_CLASS) }.getOrNull())
-            log(
+            btm.m.os4.systemuihook.HookModuleLogger.log(this,
                 Log.DEBUG,
                 TAG,
                 "Control-center hook discovery: controller=${controllerClass != null}, " +
@@ -1701,7 +1709,7 @@ class HyperSystemUiModule : XposedModule() {
                     controlCenterEditButtonHookInstalled = true
                     installed = true
                 }
-                log(
+                btm.m.os4.systemuihook.HookModuleLogger.log(this,
                     Log.INFO,
                     TAG,
                     "Control-center edit methods discovered: available=${availabilityMethods.size}, " +
@@ -1738,7 +1746,7 @@ class HyperSystemUiModule : XposedModule() {
                     controlCenterTopButtonsHookInstalled = true
                     installed = true
                 }
-                log(
+                btm.m.os4.systemuihook.HookModuleLogger.log(this,
                     Log.INFO,
                     TAG,
                     "Control-center bind methods discovered: count=${bindMethods.size}, " +
@@ -1774,7 +1782,7 @@ class HyperSystemUiModule : XposedModule() {
                 installed = true
             }
             if (distributorClass != null) {
-                log(
+                btm.m.os4.systemuihook.HookModuleLogger.log(this,
                     Log.DEBUG,
                     TAG,
                     "Control-center distributor discovered: class=${distributorClass.name}, " +
@@ -1818,10 +1826,10 @@ class HyperSystemUiModule : XposedModule() {
                 controlCenterPreferenceListenerInstalled = true
             }
             check(installed) { "Control-center edit button methods were not found" }
-            log(Log.INFO, TAG, "Installed control-center edit button visibility hook")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed control-center edit button visibility hook")
             true
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install control-center edit button visibility hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install control-center edit button visibility hook", error)
         }.getOrDefault(false)
     }
 
@@ -1830,6 +1838,7 @@ class HyperSystemUiModule : XposedModule() {
         preferences: SharedPreferences,
         alreadyLoadedClass: Class<*>? = null,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.CONTROL_CENTER)) return
         if (controlCenterMainPanelHookInstalled) return
         if (alreadyLoadedClass == null && controlCenterClassDiscoveryInProgress.get() == true) return
         runCatching {
@@ -1857,17 +1866,17 @@ class HyperSystemUiModule : XposedModule() {
                                 installControlCenterTopButtonsIntoRoot(root, preferences)
                             }, 250L)
                         } else {
-                            log(Log.DEBUG, TAG, "Control-center main panel root unavailable after onCreate")
+                            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Control-center main panel root unavailable after onCreate")
                         }
                         result
                     }
             }
             if (methods.isNotEmpty()) {
                 controlCenterMainPanelHookInstalled = true
-                log(Log.INFO, TAG, "Installed control-center MainPanelController hook")
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed control-center MainPanelController hook")
             }
         }.onFailure { error ->
-            log(Log.DEBUG, TAG, "Control-center MainPanelController hook unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Control-center MainPanelController hook unavailable", error)
         }
     }
 
@@ -1876,6 +1885,7 @@ class HyperSystemUiModule : XposedModule() {
         preferences: SharedPreferences,
         alreadyLoadedClass: Class<*>? = null,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.CONTROL_CENTER)) return
         if (controlCenterHeaderLifecycleHookInstalled) return
         if (alreadyLoadedClass == null && controlCenterClassDiscoveryInProgress.get() == true) return
         runCatching {
@@ -1912,7 +1922,7 @@ class HyperSystemUiModule : XposedModule() {
                 count++
             }
             if (count > 0) controlCenterHeaderLifecycleHookInstalled = true
-        }.onFailure { error -> log(Log.DEBUG, TAG, "Control-center header lifecycle hook unavailable", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Control-center header lifecycle hook unavailable", error) }
     }
 
     private fun hideBoundControlCenterEditButton(controller: Any?, preferences: SharedPreferences) {
@@ -1924,11 +1934,12 @@ class HyperSystemUiModule : XposedModule() {
         }.getOrNull() ?: return
         if (target.visibility != View.GONE) {
             target.visibility = View.GONE
-            log(Log.INFO, TAG, "Hid bound control-center edit button for top-button replacement")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Hid bound control-center edit button for top-button replacement")
         }
     }
 
     private fun installControlCenterTouchHook(classLoader: ClassLoader, alreadyLoadedClass: Class<*>? = null) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.CONTROL_CENTER)) return
         if (controlCenterTouchHookInstalled) return
         if (controlCenterClassDiscoveryInProgress.get() == true && alreadyLoadedClass == null) return
         runCatching {
@@ -1978,10 +1989,11 @@ class HyperSystemUiModule : XposedModule() {
                     }
                 controlCenterTouchHookInstalled = true
             }
-        }.onFailure { error -> log(Log.DEBUG, TAG, "Control-center touch hook unavailable", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Control-center touch hook unavailable", error) }
     }
 
     private fun installControlCenterEventHandlerHook(classLoader: ClassLoader) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.CONTROL_CENTER)) return
         if (controlCenterEventHandlerHookInstalled) return
         runCatching {
             val handlerClass = classLoader.loadClass(CONTROL_CENTER_EVENT_HANDLER_CLASS)
@@ -2007,7 +2019,7 @@ class HyperSystemUiModule : XposedModule() {
                                     synchronized(controlCenterButtonsLock) {
                                         controlCenterActiveTouchButton = hit
                                     }
-                                    log(Log.DEBUG, TAG, "Control-center button DOWN via event handler: ${hit.tag}")
+                                    btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Control-center button DOWN via event handler: ${hit.tag}")
                                     true
                                 } else {
                                     chain.proceed()
@@ -2033,12 +2045,13 @@ class HyperSystemUiModule : XposedModule() {
             }
             if (methods.isNotEmpty()) {
                 controlCenterEventHandlerHookInstalled = true
-                log(Log.INFO, TAG, "Installed ControlCenterEventHandler touch hook")
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed ControlCenterEventHandler touch hook")
             }
-        }.onFailure { error -> log(Log.DEBUG, TAG, "ControlCenterEventHandler hook unavailable", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "ControlCenterEventHandler hook unavailable", error) }
     }
 
     private fun installControlCenterRootDispatchHook(root: ViewGroup) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.CONTROL_CENTER)) return
         // The vendor root invokes its own click listener when a tap in the empty collapse
         // area starts the close animation.  Observe that click instead of consuming the root
         // dispatch stream: consuming dispatch prevented the injected child views from ever
@@ -2047,6 +2060,7 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun installControlCenterRootClickHook() {
+        if (!ModuleSafetyRuntime.allows(SafetySection.CONTROL_CENTER)) return
         if (controlCenterRootClickHookInstalled) return
         runCatching {
             hook(View::class.java.getMethod("performClick"))
@@ -2062,9 +2076,9 @@ class HyperSystemUiModule : XposedModule() {
                     chain.proceed()
                 }
             controlCenterRootClickHookInstalled = true
-            log(Log.INFO, TAG, "Installed control-center root click hook")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed control-center root click hook")
         }.onFailure { error ->
-            log(Log.DEBUG, TAG, "Control-center root click hook unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Control-center root click hook unavailable", error)
         }
     }
 
@@ -2072,6 +2086,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         alreadyLoadedClass: Class<*>? = null,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.CONTROL_CENTER)) return
         if (controlCenterExpandLifecycleHookInstalled) return
         if (controlCenterClassDiscoveryInProgress.get() == true && alreadyLoadedClass == null) return
         runCatching {
@@ -2124,10 +2139,10 @@ class HyperSystemUiModule : XposedModule() {
             }
             if (count > 0) {
                 controlCenterExpandLifecycleHookInstalled = true
-                log(Log.INFO, TAG, "Installed control-center expand lifecycle hook")
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed control-center expand lifecycle hook")
             }
         }.onFailure { error ->
-            log(Log.DEBUG, TAG, "Control-center expand lifecycle hook unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Control-center expand lifecycle hook unavailable", error)
         }
     }
 
@@ -2275,7 +2290,7 @@ class HyperSystemUiModule : XposedModule() {
     private fun showControlCenterEdit(): Boolean {
         val controller = synchronized(controlCenterButtonsLock) { controlCenterEditController }
         val result = runCatching {
-            log(Log.DEBUG, TAG, "Control-center edit click: controller=${controller?.javaClass?.name ?: "null"}")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Control-center edit click: controller=${controller?.javaClass?.name ?: "null"}")
             val provider = controller?.let { readInstanceField(it, "qsListController") }
             // The plugin's dependency wrapper is obfuscated in production builds (F0.a on
             // this version), so its class name does not identify it as a Provider or Lazy.
@@ -2298,7 +2313,7 @@ class HyperSystemUiModule : XposedModule() {
                     )
                 }.getOrNull()
             }
-            log(
+            btm.m.os4.systemuihook.HookModuleLogger.log(this,
                 Log.DEBUG,
                 TAG,
                 "Control-center edit target: qsList=${qsListController?.javaClass?.name ?: "null"}, " +
@@ -2306,10 +2321,10 @@ class HyperSystemUiModule : XposedModule() {
             )
             if (qsListController != null && editMode != null && startQuery != null) {
                 startQuery.invoke(qsListController, editMode)
-                log(Log.INFO, TAG, "Opened control-center edit mode via QSListController.startQuery")
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Opened control-center edit mode via QSListController.startQuery")
                 true
             } else {
-                log(
+                btm.m.os4.systemuihook.HookModuleLogger.log(this,
                     Log.WARN,
                     TAG,
                     "Control-center edit reflection unavailable: controller=${controller?.javaClass?.name}, " +
@@ -2318,7 +2333,7 @@ class HyperSystemUiModule : XposedModule() {
                 false
             }
         }.getOrElse { error ->
-            log(Log.WARN, TAG, "Control-center edit reflection failed", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Control-center edit reflection failed", error)
             false
         }
         if (result) return true
@@ -2327,6 +2342,7 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun installControlCenterTopButtons(controller: Any?, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.CONTROL_CENTER)) return
         val controllerObject = controller ?: return
         synchronized(controlCenterButtonsLock) {
             controlCenterControllerClassLoader = controllerObject.javaClass.classLoader
@@ -2339,14 +2355,14 @@ class HyperSystemUiModule : XposedModule() {
         synchronized(controlCenterButtonsLock) {
             controlCenterEditTarget = editButton
         }
-        log(
+        btm.m.os4.systemuihook.HookModuleLogger.log(this,
             Log.DEBUG,
             TAG,
             "Control-center top buttons bind: controller=${controllerObject.javaClass.name}, " +
                 "editButton=${editButton?.javaClass?.name ?: "null"}",
         )
         val mainPanelRef: Any = readInstanceField(controllerObject, "mainPanelController") ?: run {
-            log(Log.DEBUG, TAG, "Control-center top buttons: mainPanelController unavailable")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Control-center top buttons: mainPanelController unavailable")
             val fallbackRoot = findControlCenterWindowRoot(editButton)
             if (fallbackRoot != null) {
                 installControlCenterTopButtonsIntoRoot(fallbackRoot, preferences)
@@ -2356,14 +2372,14 @@ class HyperSystemUiModule : XposedModule() {
         val mainPanel = runCatching {
             mainPanelRef.javaClass.methods.firstOrNull { it.name == "get" && it.parameterCount == 0 }?.invoke(mainPanelRef)
         }.getOrNull() ?: run {
-            log(Log.DEBUG, TAG, "Control-center top buttons: MainPanel instance unavailable")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Control-center top buttons: MainPanel instance unavailable")
             return
         }
-        log(Log.DEBUG, TAG, "Control-center top buttons: MainPanel=${mainPanel.javaClass.name}")
+        btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Control-center top buttons: MainPanel=${mainPanel.javaClass.name}")
         val root = runCatching {
             mainPanel.javaClass.methods.firstOrNull { it.name == "getView" && it.parameterCount == 0 }?.invoke(mainPanel)
         }.getOrNull() as? ViewGroup ?: run {
-            log(Log.DEBUG, TAG, "Control-center top buttons: panel root unavailable")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Control-center top buttons: panel root unavailable")
             findControlCenterWindowRoot(editButton)?.let { installControlCenterTopButtonsIntoRoot(it, preferences) }
             return
         }
@@ -2384,12 +2400,13 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun installControlCenterTopButtonsIntoRoot(root: ViewGroup, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.CONTROL_CENTER)) return
         synchronized(controlCenterButtonsLock) { controlCenterRoot = root }
         installControlCenterRootDispatchHook(root)
         val enabled = preferences.getBoolean(ADD_CONTROL_CENTER_TOP_BUTTONS_KEY, false) &&
             (root.resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE ||
                 preferences.getBoolean(KEY_SHOW_CONTROL_CENTER_TOP_BUTTONS_IN_LANDSCAPE, false))
-        log(
+        btm.m.os4.systemuihook.HookModuleLogger.log(this,
             Log.DEBUG,
             TAG,
             "Control-center top buttons root=${root.javaClass.name}, enabled=$enabled, " +
@@ -2533,7 +2550,7 @@ class HyperSystemUiModule : XposedModule() {
         } else if (expandController != null) {
             updateControlCenterTopButtonsProgress(controlCenterExpansionProgress(expandController))
         }
-        log(Log.INFO, TAG, "Control-center top buttons injected into ${root.javaClass.name}")
+        btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Control-center top buttons injected into ${root.javaClass.name}")
     }
 
     private fun applyControlCenterTopButtonBackground(
@@ -2660,7 +2677,7 @@ class HyperSystemUiModule : XposedModule() {
                         false,
                     ),
                 )
-            }.onFailure { error -> log(Log.DEBUG, TAG, "Top button advanced material unavailable", error) }
+            }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Top button advanced material unavailable", error) }
             CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_SOFT_GLASS -> {
                 applyControlCenterTopButtonSoftGlass(button, preferences, classLoader)
             }
@@ -2700,7 +2717,7 @@ class HyperSystemUiModule : XposedModule() {
                 DEFAULT_SOFT_GLASS_LUMINANCE,
             ),
         )
-    }.onFailure { error -> log(Log.DEBUG, TAG, "Top button soft-glass material unavailable", error) }
+    }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Top button soft-glass material unavailable", error) }
 
     private fun showCachedGlobalActions() {
         val (component, impl, queue, plugin, manager) = synchronized(globalActionsLock) {
@@ -2714,7 +2731,7 @@ class HyperSystemUiModule : XposedModule() {
         )
         for ((label, target, arg) in attempts) {
             if (target == null) {
-                log(Log.DEBUG, TAG, "Power button action unavailable: $label target=null")
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Power button action unavailable: $label target=null")
                 continue
             }
             val success = runCatching {
@@ -2734,18 +2751,19 @@ class HyperSystemUiModule : XposedModule() {
                 if (arg == null) method.invoke(target) else method.invoke(target, arg)
                 true
             }.getOrElse { error ->
-                log(Log.DEBUG, TAG, "Power button action failed: $label", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Power button action failed: $label", error)
                 false
             }
             if (success) {
-                log(Log.INFO, TAG, "Shown system global actions from control-center power button via $label")
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Shown system global actions from control-center power button via $label")
                 return
             }
         }
-        log(Log.WARN, TAG, "Could not show system global actions: no usable target")
+        btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not show system global actions: no usable target")
     }
 
     private fun installGlobalActionsHook(classLoader: ClassLoader, alreadyLoadedClass: Class<*>? = null) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.CONTROL_CENTER)) return
         val candidates = listOf(
             GLOBAL_ACTIONS_PLUGIN_CLASS,
             GLOBAL_ACTIONS_COMPONENT_CLASS,
@@ -2815,9 +2833,9 @@ class HyperSystemUiModule : XposedModule() {
                 if (hooked) {
                     globalActionsHookedClasses.add(className)
                     globalActionsHookInstalled = true
-                    log(Log.INFO, TAG, "Installed global-actions hook for $className")
+                    btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed global-actions hook for $className")
                 }
-            }.onFailure { error -> log(Log.DEBUG, TAG, "GlobalActions hook unavailable for $className", error) }
+            }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "GlobalActions hook unavailable for $className", error) }
         }
     }
 
@@ -2832,6 +2850,7 @@ class HyperSystemUiModule : XposedModule() {
 
     /** Keep the stock bionic/soft-glass pipeline active when a global theme is applied. */
     private fun scheduleSoftGlassThemeActivation(preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.GLASS)) return
         if (themeActivationScheduled) return
         themeActivationScheduled = true
         // The control-center plugin now creates its default-theme StateFlow while it is
@@ -2839,7 +2858,7 @@ class HyperSystemUiModule : XposedModule() {
         // until the next configuration change, so it must be available before the plugin.
         themeOverrideReady = true
         if (preferences.getBoolean(KEY_KEEP_SOFT_GLASS_AFTER_GLOBAL_THEME, false)) {
-            log(Log.INFO, TAG, "Soft-glass theme override enabled after startup")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Soft-glass theme override enabled after startup")
         }
     }
 
@@ -2847,6 +2866,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.GLASS)) return
         runCatching {
             val materialUtils = classLoader.loadClass(MIUI_MATERIAL_UTILS_CLASS)
             hook(materialUtils.getMethod("onDefaultThemeChanged", Boolean::class.javaPrimitiveType))
@@ -2861,9 +2881,9 @@ class HyperSystemUiModule : XposedModule() {
                         chain.proceed()
                     }
                 }
-            log(Log.INFO, TAG, "Installed soft-glass global-theme hook for SystemUI")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed soft-glass global-theme hook for SystemUI")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install soft-glass global-theme hook for SystemUI", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install soft-glass global-theme hook for SystemUI", error)
         }
     }
 
@@ -2871,6 +2891,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.GLASS)) return
         runCatching {
             val themeUtils = classLoader.loadClass(MIUI_THEME_UTILS_CLASS)
             listOf("getDefaultPluginTheme", "getDefaultSysUiTheme").forEach { methodName ->
@@ -2905,13 +2926,14 @@ class HyperSystemUiModule : XposedModule() {
             if (preferences.getBoolean(KEY_KEEP_SOFT_GLASS_AFTER_GLOBAL_THEME, false) && themeOverrideReady) {
                 forceThemeUtilsFlags(themeUtils)
             }
-            log(Log.INFO, TAG, "Installed soft-glass global-theme hook for plugin")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed soft-glass global-theme hook for plugin")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install soft-glass global-theme hook for plugin", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install soft-glass global-theme hook for plugin", error)
         }
     }
 
     private fun installSoftGlassThemeClassLoadGuard(preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.GLASS)) return
         runCatching {
             hook(ClassLoader::class.java.getMethod("loadClass", String::class.java))
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
@@ -2923,9 +2945,9 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     result
                 }
-            log(Log.INFO, TAG, "Installed plugin ThemeUtils class-load guard")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed plugin ThemeUtils class-load guard")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install plugin ThemeUtils class-load guard", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install plugin ThemeUtils class-load guard", error)
         }
     }
 
@@ -2933,6 +2955,7 @@ class HyperSystemUiModule : XposedModule() {
         themeUtils: Class<*>,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.GLASS)) return
         if (dynamicPluginThemeHookInstalled) return
         runCatching {
             listOf("getDefaultPluginTheme", "getDefaultSysUiTheme").forEach { methodName ->
@@ -2967,9 +2990,9 @@ class HyperSystemUiModule : XposedModule() {
                 forceThemeUtilsFlags(themeUtils)
             }
             dynamicPluginThemeHookInstalled = true
-            log(Log.INFO, TAG, "Installed soft-glass global-theme hook for dynamically loaded plugin")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed soft-glass global-theme hook for dynamically loaded plugin")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not hook dynamically loaded plugin ThemeUtils", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not hook dynamically loaded plugin ThemeUtils", error)
         }
     }
 
@@ -2977,6 +3000,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.GLASS)) return
         runCatching {
             val themeClass = classLoader.loadClass("com.miui.utils.MiuiThemeUtils")
             val field = themeClass.getDeclaredField("sDefaultSysUiTheme").apply { isAccessible = true }
@@ -2998,9 +3022,9 @@ class HyperSystemUiModule : XposedModule() {
             ) {
                 field.setBoolean(null, true)
             }
-            log(Log.INFO, TAG, "Installed default-theme state guard")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed default-theme state guard")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install default-theme state guard", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install default-theme state guard", error)
         }
     }
 
@@ -3020,6 +3044,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.GLASS)) return
         if (softGlassThemePluginMaterialHooksInstalled) return
         runCatching {
             val blurCompat = classLoader.loadClass(MI_BLUR_COMPAT_CLASS)
@@ -3054,9 +3079,9 @@ class HyperSystemUiModule : XposedModule() {
                 }
 
             softGlassThemePluginMaterialHooksInstalled = true
-            log(Log.INFO, TAG, "Installed soft-glass plugin material-state guards")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed soft-glass plugin material-state guards")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install soft-glass plugin material-state guards", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install soft-glass plugin material-state guards", error)
         }
     }
 
@@ -3064,6 +3089,10 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        val statusAllowed = ModuleSafetyRuntime.allows(SafetySection.STATUS_BAR)
+        val controlAllowed = ModuleSafetyRuntime.allows(SafetySection.CONTROL_CENTER)
+        val notificationsAllowed = ModuleSafetyRuntime.allows(SafetySection.NOTIFICATIONS)
+        if (!statusAllowed && !controlAllowed && !notificationsAllowed) return
         runCatching {
             hook(View::class.java.getMethod("setVisibility", Int::class.javaPrimitiveType))
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
@@ -3071,7 +3100,7 @@ class HyperSystemUiModule : XposedModule() {
                 .intercept { chain ->
                     val view = chain.thisObject as? View
                     val requestedVisibility = chain.getArg(0) as? Int
-                    if (preferences.getBoolean(KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON, false) &&
+                    if (controlAllowed && preferences.getBoolean(KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON, false) &&
                         isControlCenterEditButtonView(view) &&
                         requestedVisibility != View.GONE
                     ) {
@@ -3092,23 +3121,24 @@ class HyperSystemUiModule : XposedModule() {
                     val hideWifiStandard = preferences.getBoolean(KEY_HIDE_STATUS_BAR_WIFI_STANDARD, false)
                     val hideClockText = preferences.getBoolean(KEY_HIDE_STATUS_BAR_CLOCK_TEXT, false)
                     val hideNetworkActivity = preferences.getBoolean(KEY_HIDE_STATUS_BAR_NETWORK_ACTIVITY, false)
-                    val isIndependentMobileType = statusBarHooks.isIndependentMobileTypeView(view)
-                    val hideSecondaryMobileRoot = statusBarHooks.isStackedSecondaryMobileRoot(view)
+                    val isIndependentMobileType = statusAllowed && statusBarHooks.isIndependentMobileTypeView(view)
+                    val hideSecondaryMobileRoot = statusAllowed && statusBarHooks.isStackedSecondaryMobileRoot(view)
                     val hideOriginalDualSignal =
+                        statusAllowed &&
                         (resourceName == "mobile_signal" || resourceName == "mobile_signal_container") &&
                         statusBarHooks.shouldHideSystemMobileSignal(view, preferences.getInt(KEY_MOBILE_SIGNAL_HIDE_MODE, 0))
                     val forcedHidden =
                         hideSecondaryMobileRoot || hideOriginalDualSignal ||
-                        (resourceName == "mini_window_bar" &&
+                        (notificationsAllowed && resourceName == "mini_window_bar" &&
                             preferences.getBoolean(KEY_HIDE_NOTIFICATION_MINI_WINDOW_BAR, false)) ||
-                        ((resourceName == "mobile_type" || resourceName == "mobile_type_single" ||
+                        (statusAllowed && (((resourceName == "mobile_type" || resourceName == "mobile_type_single" ||
                             resourceName == "mobile_special_5G") &&
                             mobileNetworkTypeMode != 0 &&
                             !(resourceName == "mobile_type_single" &&
                                 isIndependentMobileType && mobileNetworkTypeMode == 1)) ||
                             (resourceName == "wifi_standard" && hideWifiStandard) ||
                             (resourceName in setOf("wifi_activity", "mobile_left_mobile_inout") && hideNetworkActivity) ||
-                            (resourceName == "battery_text_digit_view" && hideClockText)
+                            (resourceName == "battery_text_digit_view" && hideClockText)))
                     if (forcedHidden) {
                         chain.proceedWith(chain.thisObject, arrayOf(View.GONE))
                     } else {
@@ -3119,7 +3149,7 @@ class HyperSystemUiModule : XposedModule() {
             // Some SystemUI builds leave the customize button visible without calling
             // setVisibility after inflation. Apply the setting when the view enters a
             // window as a second, lifecycle-level guard.
-            hook(View::class.java.getDeclaredMethod("onAttachedToWindow"))
+            if (controlAllowed) hook(View::class.java.getDeclaredMethod("onAttachedToWindow"))
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("control-center:hide-edit-button-attach")
                 .intercept { chain ->
@@ -3140,9 +3170,9 @@ class HyperSystemUiModule : XposedModule() {
             statusBarHooks.installBatteryInternalTextHooks(classLoader, preferences)
             statusBarHooks.installBatteryDrawableHistoryHook(preferences)
 
-            log(Log.INFO, TAG, "Installed status-bar visibility hooks")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed status-bar visibility hooks")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install status-bar visibility hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install status-bar visibility hooks", error)
         }
     }
 
@@ -3157,7 +3187,7 @@ class HyperSystemUiModule : XposedModule() {
         val resourceName = runCatching {
             view?.resources?.getResourceEntryName(view.id)
         }.getOrNull() ?: "unknown"
-        log(Log.INFO, TAG, "Hid control-center edit button view ($source, id=$resourceName)")
+        btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Hid control-center edit button view ($source, id=$resourceName)")
     }
 
 
@@ -3177,6 +3207,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val utilityClass = classLoader.loadClass(CLOCK_UTILITY_CLASS)
             val applyMethod = utilityClass.declaredMethods.firstOrNull {
@@ -3210,14 +3241,14 @@ class HyperSystemUiModule : XposedModule() {
                             bean?.javaClass?.getMethod("setClockEffect", Int::class.javaPrimitiveType)
                                 ?.invoke(bean, originalEffect)
                         }.onFailure { error ->
-                            log(Log.WARN, TAG, "Could not restore clock material effect", error)
+                            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not restore clock material effect", error)
                         }
                     }
                     result
                 }
-            log(Log.INFO, TAG, "Installed clock material-limit bypass")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed clock material-limit bypass")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install clock material-limit bypass", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install clock material-limit bypass", error)
         }
     }
 
@@ -3225,6 +3256,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.ISLAND)) return
         installDynamicIslandBackgroundHooks(classLoader, preferences)
         systemUiHooks.installDynamicIslandLayoutHooks(classLoader, preferences)
         installDynamicIslandExpandedMaterialHook(classLoader, preferences)
@@ -3238,7 +3270,7 @@ class HyperSystemUiModule : XposedModule() {
             focusIslandWhitelistPluginHooksInstalled =
                 installFocusIslandWhitelistPluginHooks(classLoader, preferences)
         }
-        log(Log.INFO, TAG, "Installed dynamic-island hooks")
+        btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed dynamic-island hooks")
     }
 
 
@@ -3258,6 +3290,8 @@ class HyperSystemUiModule : XposedModule() {
                 KEY_MEDIA_ISLAND_INFO_VERTICAL_OFFSET,
             ),
         ).forEach { (className, sourceIconKey, verticalOffsetKey) ->
+            val section = if (sourceIconKey == KEY_HIDE_MEDIA_ISLAND_SOURCE_ICON) SafetySection.ISLAND else SafetySection.NOTIFICATIONS
+            if (!ModuleSafetyRuntime.allows(section)) return@forEach
             runCatching {
                 val targetClass = classLoader.loadClass(className)
                 val methods = targetClass.declaredMethods.filter {
@@ -3277,8 +3311,8 @@ class HyperSystemUiModule : XposedModule() {
                             result
                         }
                 }
-                log(Log.INFO, TAG, "Installed media source icon hook for $className")
-            }.onFailure { error -> log(Log.WARN, TAG, "Could not install media source icon hook for $className", error) }
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed media source icon hook for $className")
+            }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install media source icon hook for $className", error) }
         }
     }
 
@@ -3339,6 +3373,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ): Boolean {
+        if (!ModuleSafetyRuntime.allows(SafetySection.ISLAND)) return false
         runCatching {
             classLoader.loadClass("miui.systemui.notification.focus.SignatureChecker")
                 .declaredMethods.filter {
@@ -3351,7 +3386,7 @@ class HyperSystemUiModule : XposedModule() {
                             if (preferences.getBoolean(KEY_UNLOCK_ALL_FOCUS, false)) true else chain.proceed()
                         }
                 }
-        }.onFailure { log(Log.DEBUG, TAG, "Focus signature hook unavailable", it) }
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Focus signature hook unavailable", it) }
         return runCatching {
             val settingsClass = classLoader.loadClass(PLUGIN_NOTIFICATION_SETTINGS_MANAGER_CLASS)
             listOf("canCustomFocus", "mediaIslandSupportMiniWindow").forEach { name ->
@@ -3432,13 +3467,13 @@ class HyperSystemUiModule : XposedModule() {
                             if (!success) {
                                 chain.proceed()
                             } else {
-                                log(Log.INFO, TAG, "Allowed focus authorization for $packageName")
+                                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Allowed focus authorization for $packageName")
                                 null
                             }
                         }
                 }
             }.onFailure { error ->
-                log(Log.WARN, TAG, "Could not install FocusNotificationController auth hook", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install FocusNotificationController auth hook", error)
             }
 
             val coordinatorClass = classLoader.loadClass(DYNAMIC_ISLAND_EVENT_COORDINATOR_CLASS)
@@ -3466,10 +3501,10 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     chain.proceed()
                 }
-            log(Log.INFO, TAG, "Installed focus-notification and island whitelist hooks for plugin")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed focus-notification and island whitelist hooks for plugin")
             true
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install focus-notification and island whitelist plugin hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install focus-notification and island whitelist plugin hooks", error)
         }.getOrDefault(false)
     }
 
@@ -3497,7 +3532,7 @@ class HyperSystemUiModule : XposedModule() {
                 packagesField.set(controller, ArrayList(current.orEmpty()).apply { add(sourcePackage) })
             }
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not extend the island state-callback whitelist", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not extend the island state-callback whitelist", error)
         }
     }
 
@@ -3505,6 +3540,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ): Boolean {
+        if (!ModuleSafetyRuntime.allows(SafetySection.ISLAND)) return false
         return runCatching {
             val settingsClass = classLoader.loadClass(SYSTEM_UI_NOTIFICATION_SETTINGS_MANAGER_CLASS)
             listOf(
@@ -3551,14 +3587,14 @@ class HyperSystemUiModule : XposedModule() {
                             }
                         }
                     }
-                log(Log.INFO, TAG, "Installed focus permission hook for NotificationProviderPublic.call")
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed focus permission hook for NotificationProviderPublic.call")
             }.onFailure { error ->
-                log(Log.WARN, TAG, "Could not install NotificationProviderPublic.call focus hook", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install NotificationProviderPublic.call focus hook", error)
             }
-            log(Log.INFO, TAG, "Installed focus-notification whitelist hooks for SystemUI")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed focus-notification whitelist hooks for SystemUI")
             true
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install focus-notification whitelist SystemUI hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install focus-notification whitelist SystemUI hooks", error)
         }.getOrDefault(false)
     }
 
@@ -3637,7 +3673,7 @@ class HyperSystemUiModule : XposedModule() {
                             installDynamicIslandHooks(pluginClassLoader, preferences)
                         }.onFailure { error ->
                             dynamicIslandHooksInstalled = false
-                            log(Log.ERROR, TAG, "Could not initialize dynamic-island hooks from plugin loader", error)
+                            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not initialize dynamic-island hooks from plugin loader", error)
                         }
                     }
                 }
@@ -3685,9 +3721,9 @@ class HyperSystemUiModule : XposedModule() {
             runCatching { systemUiClassLoader.loadClass(CONTROL_CENTER_EXPAND_CONTROLLER_CLASS) }
                 .getOrNull()
                 ?.let(::handleLoadedClass)
-            log(Log.INFO, TAG, "Installed dynamic-island plugin class discovery hook")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed dynamic-island plugin class discovery hook")
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install dynamic-island plugin class discovery hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install dynamic-island plugin class discovery hook", error)
         }
     }
 
@@ -3695,6 +3731,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.ISLAND)) return
         runCatching {
             val backgroundClass = classLoader.loadClass(DYNAMIC_ISLAND_BACKGROUND_CLASS)
             listOf("setDrawable", "setActualHeight", "setActualWidth").forEach { name ->
@@ -3711,14 +3748,15 @@ class HyperSystemUiModule : XposedModule() {
                         result
                     }
             }
-            log(Log.INFO, TAG, "Installed DynamicIslandBackgroundView update hooks")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed DynamicIslandBackgroundView update hooks")
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install DynamicIslandBackgroundView update hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install DynamicIslandBackgroundView update hooks", error)
         }
     }
 
 
     private fun installDynamicIslandGlassBlurHook(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.ISLAND)) return
         runCatching {
             val style = classLoader.loadClass(MI_BACKGROUND_STYLE_CLASS)
             val method = style.getDeclaredMethod("setBackgroundBlurRadius", View::class.java,
@@ -3739,11 +3777,12 @@ class HyperSystemUiModule : XposedModule() {
                         expandedIslandMaterialApplying.remove()
                     }
                 }
-            log(Log.INFO, TAG, "Installed expanded-island glass blur hook")
-        }.onFailure { log(Log.WARN, TAG, "Could not install expanded-island glass blur hook", it) }
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed expanded-island glass blur hook")
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install expanded-island glass blur hook", it) }
     }
 
     private fun installDynamicIslandExpandedMaterialHook(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.ISLAND)) return
         runCatching {
             val baseClass = classLoader.loadClass(DYNAMIC_ISLAND_BASE_CONTENT_CLASS)
             val method = baseClass.getDeclaredMethod("updateBackgroundBg", View::class.java, Boolean::class.javaPrimitiveType).apply { isAccessible = true }
@@ -3762,11 +3801,11 @@ class HyperSystemUiModule : XposedModule() {
                     val opened = classLoader.loadClass(MI_BLUR_COMPAT_CLASS)
                         .getMethod("getBackgroundMaterialOpened", Context::class.java).invoke(null, window.context)
                     window.javaClass.getMethod("updateWindowBlur", Boolean::class.javaPrimitiveType).invoke(window, opened)
-                }.onFailure { log(Log.DEBUG, TAG, "Could not refresh expanded-island glass samples", it) }
+                }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Could not refresh expanded-island glass samples", it) }
                 result
             }
-            log(Log.INFO, TAG, "Installed 18.3 expanded-island material hook")
-        }.onFailure { log(Log.WARN, TAG, "Could not install 18.3 expanded-island material hook", it) }
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed 18.3 expanded-island material hook")
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install 18.3 expanded-island material hook", it) }
     }
 
     private val expandedIslandMaterialApplying = ThreadLocal<Boolean>()
@@ -3788,7 +3827,7 @@ class HyperSystemUiModule : XposedModule() {
                 view.javaClass.getMethod("setMiGlass", FloatArray::class.java)
                     .invoke(view, tuneExpandedIslandGlass(params, opacity, glass))
                 view.invalidate()
-            }.onFailure { log(Log.DEBUG, TAG, "Could not tune 18.3 expanded-island material", it) }
+            }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Could not tune 18.3 expanded-island material", it) }
         } finally {
             expandedIslandMaterialApplying.remove()
         }
@@ -3947,6 +3986,7 @@ class HyperSystemUiModule : XposedModule() {
         }
 
     private fun installShadeMaterialHooks(preferences: SharedPreferences, classLoader: ClassLoader) {
+        if (!ModuleSafetyRuntime.allowsSharedShade()) return
         softGlassRuntime = SoftGlassRuntimeSettings(preferences) {
             softGlassRefreshHandler.removeCallbacks(softGlassRefresh)
             softGlassRefreshHandler.postDelayed(softGlassRefresh, 16L)
@@ -4031,7 +4071,7 @@ class HyperSystemUiModule : XposedModule() {
                     updateStandaloneSoftGlass(view, standalone && hasSoftGlassRecipe(tuned))
                     result
                 }
-        }.onFailure { error -> log(Log.INFO, TAG, "Soft glass API unavailable: setMiGlass", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Soft glass API unavailable: setMiGlass", error) }
         runCatching {
             val method = View::class.java.getMethod("setMiGlassBlurRadius", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
             hookDeoptimized(method)
@@ -4054,7 +4094,7 @@ class HyperSystemUiModule : XposedModule() {
                     // Keep both native samples and their animation-zero values independent.
                     chain.proceedWith(view, arrayOf(softGlassBlur(chain.getArg(0) as Int, settings.refractionBlur), softGlassBlur(chain.getArg(1) as Int, settings.refractionBlur)))
                 }
-        }.onFailure { error -> log(Log.INFO, TAG, "Soft glass API unavailable: setMiGlassBlurRadius", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Soft glass API unavailable: setMiGlassBlurRadius", error) }
         runCatching {
             val method = View::class.java.getMethod("setMiBackgroundBlurRadius", Int::class.javaPrimitiveType)
             hookDeoptimized(method)
@@ -4072,7 +4112,7 @@ class HyperSystemUiModule : XposedModule() {
                     rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0)))
                     chain.proceedWith(view, arrayOf(softGlassBlur(chain.getArg(0) as Int, settings.backgroundBlur)))
                 }
-        }.onFailure { error -> log(Log.INFO, TAG, "Soft glass API unavailable: setMiBackgroundBlurRadius", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Soft glass API unavailable: setMiBackgroundBlurRadius", error) }
         runCatching {
             val method = View::class.java.getMethod("setMiBackgroundBlurScaleRatio", Float::class.javaPrimitiveType)
             hookDeoptimized(method)
@@ -4090,7 +4130,7 @@ class HyperSystemUiModule : XposedModule() {
                     rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0)))
                     chain.proceedWith(view, arrayOf(softGlassScale(chain.getArg(0) as Float, settings.backgroundScale)))
                 }
-        }.onFailure { error -> log(Log.INFO, TAG, "Soft glass API unavailable: setMiBackgroundBlurScaleRatio", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Soft glass API unavailable: setMiBackgroundBlurScaleRatio", error) }
         runCatching {
             val method = View::class.java.getMethod("setMiBackgroundBlendColors", ArrayList::class.java)
             hookDeoptimized(method)
@@ -4129,7 +4169,7 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     finally { softGlassBlendDispatching.remove() }
                 }
-        }.onFailure { error -> log(Log.INFO, TAG, "Soft glass API unavailable: setMiBackgroundBlendColors", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Soft glass API unavailable: setMiBackgroundBlendColors", error) }
         runCatching {
             val clear = View::class.java.getMethod("clearMiBackgroundBlendColor")
             val add = View::class.java.getMethod("addMiBackgroundBlendColor", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
@@ -4166,7 +4206,7 @@ class HyperSystemUiModule : XposedModule() {
                 val percent = if (usesStandaloneSoftGlass(view)) 100 else settings.backgroundOpacity
                 chain.proceedWith(view, arrayOf(softGlassColorAlpha(chain.getArg(0) as Int, percent), chain.getArg(1)))
             }
-        }.onFailure { error -> log(Log.INFO, TAG, "Legacy blend API unavailable", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Legacy blend API unavailable", error) }
         runCatching {
             val method = View::class.java.getMethod("setMiSelfBlur", Int::class.javaPrimitiveType, ArrayList::class.java)
             hookDeoptimized(method)
@@ -4185,7 +4225,7 @@ class HyperSystemUiModule : XposedModule() {
                     try { chain.proceedWith(view, arrayOf(softGlassBlur(chain.getArg(0) as Int, settings.backgroundBlur), softGlassBlendPoints(copy, percent))) }
                     finally { softGlassBlendDispatching.remove() }
                 }
-        }.onFailure { error -> log(Log.INFO, TAG, "Soft glass API unavailable: setMiSelfBlur", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Soft glass API unavailable: setMiSelfBlur", error) }
         runCatching {
             val method = View::class.java.getMethod("setBackgroundColor", Int::class.javaPrimitiveType)
             hookDeoptimized(method)
@@ -4203,7 +4243,7 @@ class HyperSystemUiModule : XposedModule() {
                     val percent = settings.backgroundOpacity
                     chain.proceedWith(view, arrayOf(softGlassColorAlpha(chain.getArg(0) as Int, percent)))
                 }
-        }.onFailure { error -> log(Log.INFO, TAG, "Soft glass API unavailable: setBackgroundColor", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Soft glass API unavailable: setBackgroundColor", error) }
     }
 
     private fun installLockscreenClockColonHook(
@@ -4211,6 +4251,7 @@ class HyperSystemUiModule : XposedModule() {
         preferences: SharedPreferences,
         scope: String,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val method = classLoader.loadClass(CLOCK_BEAN_CLASS)
                 .getDeclaredMethod(CLOCK_BEAN_IS_COLON_SHOW_METHOD)
@@ -4225,16 +4266,16 @@ class HyperSystemUiModule : XposedModule() {
                         chain.proceed()
                     }
                 }
-            log(Log.INFO, TAG, "Installed lockscreen clock colon hook for $scope")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lockscreen clock colon hook for $scope")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install lockscreen clock colon hook for $scope", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install lockscreen clock colon hook for $scope", error)
         }
     }
 
     private fun installLockscreenCarrierHideHook(
         classLoader: ClassLoader,
         preferences: SharedPreferences,
-    ): Boolean = runCatching {
+    ): Boolean = if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) false else runCatching {
         val carrierClass = classLoader.loadClass("com.android.systemui.controlcenter.shade.ControlCenterCarrierText")
         val method = carrierClass.getDeclaredMethod("shouldShow").apply { isAccessible = true }
         hookDeoptimized(method)
@@ -4315,10 +4356,10 @@ class HyperSystemUiModule : XposedModule() {
                     (layout as? View)?.requestLayout()
                 }
             }
-        log(Log.INFO, TAG, "Installed lockscreen carrier visibility hook")
+        btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lockscreen carrier visibility hook")
         true
     }.getOrElse { error ->
-        log(Log.WARN, TAG, "Could not install lockscreen carrier visibility hook", error)
+        btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install lockscreen carrier visibility hook", error)
         false
     }
 
@@ -4334,6 +4375,7 @@ class HyperSystemUiModule : XposedModule() {
         preferences: SharedPreferences,
         scope: String,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val allInOneUtilClass = classLoader.loadClass(ALL_IN_ONE_UTIL_CLASS)
             val computeMethods = allInOneUtilClass.declaredMethods.filter { method ->
@@ -4386,9 +4428,9 @@ class HyperSystemUiModule : XposedModule() {
                     val screenWidth = (chain.getArg(1) as? Int)?.coerceAtLeast(1) ?: original.width()
                     widenedClockRect(original, screenWidth)
                 }
-            log(Log.INFO, TAG, "Installed lockscreen big-clock width hook for $scope")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lockscreen big-clock width hook for $scope")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install lockscreen big-clock width hook for $scope", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install lockscreen big-clock width hook for $scope", error)
         }
     }
 
@@ -4397,6 +4439,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val method = classLoader.loadClass(ALL_IN_ONE_TEMPLATE_VIEW_CLASS)
                 .getDeclaredMethod("getMaxDragAllowedRect")
@@ -4415,9 +4458,9 @@ class HyperSystemUiModule : XposedModule() {
                         ?: original.width().coerceAtLeast(1)
                     widenedClockRect(original, screenWidth)
                 }
-            log(Log.INFO, TAG, "Installed lockscreen big-clock editor width hook")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lockscreen big-clock editor width hook")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install lockscreen big-clock editor width hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install lockscreen big-clock editor width hook", error)
         }
     }
 
@@ -4426,6 +4469,7 @@ class HyperSystemUiModule : XposedModule() {
         preferences: SharedPreferences,
         scope: String,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val baseClass = classLoader.loadClass("com.miui.clock.allInOne.AllInOneBase")
             val notificationField = baseClass.getDeclaredField("mInNotificationState").apply { isAccessible = true }
@@ -4466,9 +4510,9 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     chain.proceed()
                 }
-            log(Log.INFO, TAG, "Installed lockscreen clock horizontal rect hook for $scope")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lockscreen clock horizontal rect hook for $scope")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install lockscreen clock horizontal rect hook for $scope", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install lockscreen clock horizontal rect hook for $scope", error)
         }
     }
 
@@ -4476,6 +4520,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val wallpaperClass = classLoader.loadClass(
                 "com.miui.keyguard.editor.edit.wallpaper.CombinedWallpaperView",
@@ -4588,9 +4633,9 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     result
                 }
-            log(Log.INFO, TAG, "Installed lockscreen clock horizontal editor hook")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lockscreen clock horizontal editor hook")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install lockscreen clock horizontal editor hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install lockscreen clock horizontal editor hook", error)
         }
     }
 
@@ -4639,7 +4684,7 @@ class HyperSystemUiModule : XposedModule() {
                 applyEditorClockHorizontalOffset(editor, offset)
                 if (event.actionMasked == MotionEvent.ACTION_UP) {
                     if (!writeLockscreenClockHorizontalOffset(editor.context, offset)) {
-                        log(Log.WARN, TAG, "Could not save lockscreen clock horizontal position")
+                        btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not save lockscreen clock horizontal position")
                     }
                     clockHorizontalDrags.remove(editor)
                 }
@@ -4785,6 +4830,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val companionClass = classLoader.loadClass("com.miui.keyguard.editor.viewmodel.EditFragmentViewModel\$Companion")
             val method = companionClass.declaredMethods.firstOrNull {
@@ -4880,14 +4926,14 @@ class HyperSystemUiModule : XposedModule() {
                         runCatching {
                             clock?.javaClass?.getMethod("setClockEffect", Int::class.javaPrimitiveType)?.invoke(clock, effect)
                         }.onFailure { error ->
-                            log(Log.WARN, TAG, "Could not restore AOD depth-video clock material", error)
+                            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not restore AOD depth-video clock material", error)
                         }
                     }
                     result
                 }
-            log(Log.INFO, TAG, "Installed AOD editor clock material-limit bypass")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed AOD editor clock material-limit bypass")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install AOD editor clock material-limit bypass", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install AOD editor clock material-limit bypass", error)
         }
     }
 
@@ -4896,6 +4942,7 @@ class HyperSystemUiModule : XposedModule() {
         preferences: SharedPreferences,
         aliases: Set<String> = emptySet(),
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val config = classLoader.loadClass("com.miui.clock.utils.DeviceConfig")
             config.declaredMethods.filter {
@@ -4911,11 +4958,12 @@ class HyperSystemUiModule : XposedModule() {
                     }
             }
         }.onFailure { error ->
-            log(Log.DEBUG, TAG, "Clock material capability hook unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Clock material capability hook unavailable", error)
         }
     }
 
     private fun installThemeManagerEditorClockMaterialHook(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val companion = classLoader.loadClass("com.miui.keyguard.editor.viewmodel.EditFragmentViewModel\$Companion")
             val configClass = classLoader.loadClass("com.miui.keyguard.editor.data.bean.CommonConfig")
@@ -4949,7 +4997,7 @@ class HyperSystemUiModule : XposedModule() {
                 support?.set(CLOCK_EFFECT_OVERLAY, true)
             }
         }.onFailure { error ->
-            log(Log.DEBUG, TAG, "ThemeManager editor clock material hook unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "ThemeManager editor clock material hook unavailable", error)
         }
     }
 
@@ -4989,7 +5037,7 @@ class HyperSystemUiModule : XposedModule() {
             }
             result
         }.getOrElse { error ->
-            log(Log.WARN, TAG, "Could not restore requested lockscreen clock width", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not restore requested lockscreen clock width", error)
             result
         }
     }
@@ -5003,6 +5051,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val templateApi = classLoader.loadClass(THEME_MANAGER_TEMPLATE_API_CLASS)
             val applyWallpaperType = templateApi.declaredMethods.firstOrNull {
@@ -5032,14 +5081,14 @@ class HyperSystemUiModule : XposedModule() {
                                 Int::class.javaPrimitiveType,
                             )?.invoke(clockInfo, originalEffect)
                         }.onFailure { error ->
-                            log(Log.WARN, TAG, "Could not restore ThemeManager clock material effect", error)
+                            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not restore ThemeManager clock material effect", error)
                         }
                     }
                     result
                 }
-            log(Log.INFO, TAG, "Installed ThemeManager clock material-limit bypass")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed ThemeManager clock material-limit bypass")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install ThemeManager clock material-limit bypass", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install ThemeManager clock material-limit bypass", error)
         }
     }
 
@@ -5102,6 +5151,7 @@ class HyperSystemUiModule : XposedModule() {
         preferences: SharedPreferences,
         classLoader: ClassLoader,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.NOTIFICATIONS)) return
         var effectHookCount = 0
         FOCUS_NOTIFICATION_EFFECT_CLASSES.forEach { className ->
             runCatching {
@@ -5148,7 +5198,7 @@ class HyperSystemUiModule : XposedModule() {
                     }
                 effectHookCount++
             }.onFailure { error ->
-                log(Log.DEBUG, TAG, "Focus effect hook unavailable for $className", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Focus effect hook unavailable for $className", error)
             }
         }
 
@@ -5177,7 +5227,7 @@ class HyperSystemUiModule : XposedModule() {
                         }
                 }
         }.onFailure { error ->
-            log(Log.DEBUG, TAG, "Focus Full-AOD material hook unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Focus Full-AOD material hook unavailable", error)
         }
 
         // Media headers use a separate effect family. In particular, the keyguard variant
@@ -5224,11 +5274,11 @@ class HyperSystemUiModule : XposedModule() {
                         result
                     }
             }.onFailure { error ->
-                log(Log.DEBUG, TAG, "Media effect hook unavailable for $className", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Media effect hook unavailable for $className", error)
             }
         }
 
-        log(Log.INFO, TAG, "Installed focus notification normal-material enforcement ($effectHookCount effects)")
+        btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed focus notification normal-material enforcement ($effectHookCount effects)")
     }
 
     private fun applyNormalMediaNotificationEffect(
@@ -5252,10 +5302,10 @@ class HyperSystemUiModule : XposedModule() {
             apply.invoke(instance, header, context)
             val hit = "$source:${header.javaClass.name}"
             if (focusMaterialEnforcementHits.add("media:$hit")) {
-                log(Log.INFO, TAG, "Re-applied normal media notification glass ($source)")
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Re-applied normal media notification glass ($source)")
             }
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not re-apply normal media notification glass", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not re-apply normal media notification glass", error)
         }.also {
             mediaMaterialApplying.remove()
         }
@@ -5280,10 +5330,10 @@ class HyperSystemUiModule : XposedModule() {
             apply.invoke(instance, row, context)
             val hit = "$source:${row.javaClass.name}"
             if (focusMaterialEnforcementHits.add(hit)) {
-                log(Log.INFO, TAG, "Re-applied normal notification glass after focus effect ($source)")
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Re-applied normal notification glass after focus effect ($source)")
             }
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not re-apply normal notification glass after focus effect", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not re-apply normal notification glass after focus effect", error)
         }
     }
 
@@ -5309,6 +5359,7 @@ class HyperSystemUiModule : XposedModule() {
         preferences: SharedPreferences,
         classLoader: ClassLoader,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.NOTIFICATIONS)) return
         runCatching {
             val backgroundClass = classLoader.loadClass(NOTIFICATION_BACKGROUND_VIEW_CLASS)
             // The flashlight focus notification uses the custom-background path.  On some
@@ -5363,9 +5414,9 @@ class HyperSystemUiModule : XposedModule() {
                             }
                         }
                 }
-            log(Log.INFO, TAG, "Installed transparent custom-background guard for focus notifications")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed transparent custom-background guard for focus notifications")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install focus notification custom-background guard", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install focus notification custom-background guard", error)
         }
     }
 
@@ -5468,7 +5519,7 @@ class HyperSystemUiModule : XposedModule() {
             else -> "fallback"
         }
         if (controlCenterMaterialHits.add("$type:$method")) {
-            log(Log.INFO, TAG, "Control-center $type material matched $method on ${view?.javaClass?.name}")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Control-center $type material matched $method on ${view?.javaClass?.name}")
         }
     }
 
@@ -5786,6 +5837,7 @@ class HyperSystemUiModule : XposedModule() {
         (radius * tuning.blurPercent / 100f).toInt().coerceIn(0, MAX_GLASS_BLUR_RADIUS)
 
     private fun installDepthEffectHook(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             // Loading a class does not run its static initializer. Hook the constructor before
             // DepthAvoidEvaluator creates IMAGE_THRESHOLD in <clinit>.
@@ -5800,7 +5852,7 @@ class HyperSystemUiModule : XposedModule() {
                     if (preferences.getBoolean(KEY_REMOVE_DEPTH_IMAGE_LIMIT, false) &&
                         original == DEFAULT_DEPTH_IMAGE_THRESHOLD
                     ) {
-                        log(Log.INFO, TAG, "Replacing DepthAvoidEvaluator image threshold: 0.2 -> 1.0")
+                        btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Replacing DepthAvoidEvaluator image threshold: 0.2 -> 1.0")
                         chain.proceed(arrayOf(UNLIMITED_DEPTH_IMAGE_THRESHOLD))
                     } else {
                         chain.proceed()
@@ -5819,21 +5871,22 @@ class HyperSystemUiModule : XposedModule() {
                             thresholdClass
                                 .getDeclaredField(THRESHOLD_RATE_FIELD)
                                 .setDouble(threshold, UNLIMITED_DEPTH_IMAGE_THRESHOLD)
-                            log(Log.INFO, TAG, "Verified DepthAvoidEvaluator image threshold: 1.0")
+                            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Verified DepthAvoidEvaluator image threshold: 1.0")
                         }.onFailure { error ->
-                            log(Log.ERROR, TAG, "Could not verify depth image threshold", error)
+                            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not verify depth image threshold", error)
                         }
                     }
                     result
                 }
             installDepthAvoidanceBypass(classLoader, preferences)
-            log(Log.INFO, TAG, "Installed depth limitation hooks")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed depth limitation hooks")
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install depth image threshold hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install depth image threshold hook", error)
         }
     }
 
     private fun installDepthAvoidanceBypass(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         val controllerClass = classLoader.loadClass(HIERARCHY_AVOID_CONTROLLER_CLASS)
         hook(controllerClass.getMethod("isHierarchyEnable"))
             .setExceptionMode(ExceptionMode.PROTECTIVE)
@@ -5863,7 +5916,7 @@ class HyperSystemUiModule : XposedModule() {
                     chain.proceed()
                 }
             }
-        log(Log.INFO, TAG, "Installed time-overlap depth bypass")
+        btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed time-overlap depth bypass")
     }
 
     private fun isUserHierarchyEnabled(instance: Any?, controllerClass: Class<*>): Boolean = runCatching {
@@ -5876,6 +5929,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val controllerClass = classLoader.loadClass(MIUI_SHORTCUT_CONTROLLER_CLASS)
             val shortcutMethods = controllerClass.declaredMethods
@@ -5894,12 +5948,12 @@ class HyperSystemUiModule : XposedModule() {
                             // preserves geometry without adding a visible shortcut background.
                             installShortcutGlassBackgrounds(root, preferences, classLoader)
                         }.onFailure { error ->
-                            log(Log.ERROR, TAG, "Could not apply lockscreen shortcut glass", error)
+                            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not apply lockscreen shortcut glass", error)
                         }
                         runCatching {
                             applyLockscreenShortcutGeometry(root, preferences)
                         }.onFailure { error ->
-                            log(Log.ERROR, TAG, "Could not apply lockscreen shortcut geometry", error)
+                            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not apply lockscreen shortcut geometry", error)
                         }
                         scheduleLockscreenMiniPlayerInstallation(
                             root = root,
@@ -5916,15 +5970,16 @@ class HyperSystemUiModule : XposedModule() {
                         result
                     }
             }
-            log(Log.INFO, TAG, "Installed ${shortcutMethods.size} lockscreen shortcut glass hook(s)")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed ${shortcutMethods.size} lockscreen shortcut glass hook(s)")
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install lockscreen shortcut glass hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install lockscreen shortcut glass hook", error)
         }
     }
 
     // Package and plugin dispatch stay in the lifecycle owner. Gesture state belongs
     // to LockscreenHooks, including SystemUI-hosted AOD plugin instances.
     private fun installLockscreenShortcutPluginHook(loader: ClassLoader, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val pluginClass = loader.loadClass("com.android.systemui.shared.plugins.PluginInstance")
             hookDeoptimized(pluginClass.getDeclaredMethod("loadPlugin"))
@@ -5939,10 +5994,10 @@ class HyperSystemUiModule : XposedModule() {
                                 lockscreenHooks.installShortcutGestureHooks(it, preferences)
                             }
                         }
-                    }.onFailure { log(Log.WARN, TAG, "Could not bind AOD shortcut plugin", it) }
+                    }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not bind AOD shortcut plugin", it) }
                     result
                 }
-        }.onFailure { log(Log.WARN, TAG, "Could not install AOD shortcut plugin dispatch", it) }
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install AOD shortcut plugin dispatch", it) }
     }
 
     /**
@@ -5951,6 +6006,7 @@ class HyperSystemUiModule : XposedModule() {
      * injected content while the vendor scene is transitioning.
      */
     private fun installLockscreenWidgetSceneVisibilityHooks(classLoader: ClassLoader) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         // Fingerprint fast unlock calls the vendor mediator before KeyguardManager reports the
         // device unlocked. Hide in that first callback so the widget and its native-clock
         // avoidance transform cannot survive into launcher frames.
@@ -5973,9 +6029,9 @@ class HyperSystemUiModule : XposedModule() {
                         chain.proceed()
                     }
             }
-            log(Log.INFO, TAG, "Installed lockscreen-widget early keyguard-exit hook(s)")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lockscreen-widget early keyguard-exit hook(s)")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install lockscreen-widget early keyguard-exit hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install lockscreen-widget early keyguard-exit hooks", error)
         }
         runCatching {
             val updateMonitor = classLoader.loadClass("com.android.keyguard.KeyguardUpdateMonitor")
@@ -5997,9 +6053,9 @@ class HyperSystemUiModule : XposedModule() {
                         chain.proceed()
                     }
             }
-            log(Log.INFO, TAG, "Installed lockscreen-widget keyguard-exit state hook(s)")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lockscreen-widget keyguard-exit state hook(s)")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install lockscreen-widget keyguard-exit state hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install lockscreen-widget keyguard-exit state hooks", error)
         }
         runCatching {
             val stateController = classLoader.loadClass(
@@ -6023,9 +6079,9 @@ class HyperSystemUiModule : XposedModule() {
                         chain.proceed()
                     }
             }
-            log(Log.INFO, TAG, "Installed lockscreen-widget keyguard-showing state hook(s)")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lockscreen-widget keyguard-showing state hook(s)")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install lockscreen-widget keyguard-showing state hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install lockscreen-widget keyguard-showing state hooks", error)
         }
         runCatching {
             val statusBarStateClass = classLoader.loadClass(
@@ -6045,9 +6101,9 @@ class HyperSystemUiModule : XposedModule() {
                         chain.proceed()
                     }
             }
-            log(Log.INFO, TAG, "Installed lockscreen-widget AOD visibility hook(s)")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lockscreen-widget AOD visibility hook(s)")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install lockscreen-widget AOD visibility hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install lockscreen-widget AOD visibility hooks", error)
         }
         runCatching {
             val editorClass = classLoader.loadClass(KEYGUARD_EDITOR_HELPER_CLASS)
@@ -6071,9 +6127,9 @@ class HyperSystemUiModule : XposedModule() {
                         result
                     }
             }
-            log(Log.INFO, TAG, "Installed lockscreen-widget editor-scene visibility hook(s)")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lockscreen-widget editor-scene visibility hook(s)")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install lockscreen-widget editor-scene visibility hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install lockscreen-widget editor-scene visibility hooks", error)
         }
         runCatching {
             val chargeClass = classLoader.loadClass(MIUI_CHARGE_ANIMATION_VIEW_CLASS)
@@ -6108,9 +6164,9 @@ class HyperSystemUiModule : XposedModule() {
                         result
                     }
             }
-            log(Log.INFO, TAG, "Installed lockscreen-widget charging-scene visibility hook(s)")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lockscreen-widget charging-scene visibility hook(s)")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install lockscreen-widget charging-scene visibility hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install lockscreen-widget charging-scene visibility hooks", error)
         }
         runCatching {
             val listenerClass = classLoader.loadClass(CONTROL_CENTER_EXPAND_LISTENER_CLASS)
@@ -6134,9 +6190,9 @@ class HyperSystemUiModule : XposedModule() {
                         result
                     }
             }
-            log(Log.INFO, TAG, "Installed lockscreen-widget control-center visibility hook(s)")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lockscreen-widget control-center visibility hook(s)")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install lockscreen-widget control-center visibility hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install lockscreen-widget control-center visibility hooks", error)
         }
     }
 
@@ -6144,6 +6200,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val pinViewClass = classLoader.loadClass(KEYGUARD_PIN_VIEW_CLASS)
             val onFinishInflate = pinViewClass.getDeclaredMethod("onFinishInflate")
@@ -6160,9 +6217,9 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     result
                 }
-            log(Log.INFO, TAG, "Installed lockscreen PIN circle-background hook")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lockscreen PIN circle-background hook")
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install lockscreen PIN circle-background hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install lockscreen PIN circle-background hook", error)
         }
     }
 
@@ -6171,6 +6228,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         val keys = ArrayList<View>(10)
         fun visit(view: View) {
             if (view.idName() in LOCKSCREEN_PIN_KEY_IDS) keys += view
@@ -6250,12 +6308,12 @@ class HyperSystemUiModule : XposedModule() {
                         luminance = DEFAULT_SOFT_GLASS_LUMINANCE,
                     )
                 }.onFailure { error ->
-                    log(Log.ERROR, TAG, "Could not initialize PIN key material", error)
+                    btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not initialize PIN key material", error)
                 }
             }
         }
         applyLockscreenPinRowSpacing(root, preferences)
-        log(
+        btm.m.os4.systemuihook.HookModuleLogger.log(this,
             Log.INFO,
             TAG,
             "Applied PIN material to ${keys.size} key(s), rowSpacing=" +
@@ -6303,6 +6361,7 @@ class HyperSystemUiModule : XposedModule() {
         preferences: SharedPreferences,
         classLoader: ClassLoader,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         val shortcuts = findShortcutContainers(root)
         val legacyShortcuts = if (shortcuts.size >= 2) {
             val left = shortcuts.firstOrNull { it.idName() == "shortcut_view_left_layout" } ?: shortcuts[0]
@@ -6343,7 +6402,7 @@ class HyperSystemUiModule : XposedModule() {
                     runCatching {
                         applyMiniPlayerMaterial(view, appearance, classLoader)
                     }.onFailure { error ->
-                        log(Log.ERROR, TAG, "Could not initialize mini player material", error)
+                        btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not initialize mini player material", error)
                     }
                 },
                 onImmersiveRequest = {
@@ -6368,7 +6427,7 @@ class HyperSystemUiModule : XposedModule() {
             runCatching {
                 installLockscreenMiniPlayer(root, shortcutController, preferences, classLoader)
             }.onFailure { error ->
-                log(Log.ERROR, TAG, "Could not apply lockscreen mini player", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not apply lockscreen mini player", error)
             }
         }
         install()
@@ -6385,6 +6444,7 @@ class HyperSystemUiModule : XposedModule() {
         preferences: SharedPreferences,
         classLoader: ClassLoader,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         val shortcuts = findShortcutContainers(root)
         val legacyShortcuts = if (shortcuts.size >= 2) {
             val left = shortcuts.firstOrNull { it.idName() == "shortcut_view_left_layout" } ?: shortcuts[0]
@@ -6419,14 +6479,14 @@ class HyperSystemUiModule : XposedModule() {
                         runCatching {
                             applyLockscreenWidgetBatteryMaterial(view, preferences, classLoader)
                         }.onFailure { error ->
-                            log(Log.ERROR, TAG, "Could not initialize lockscreen battery material", error)
+                            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not initialize lockscreen battery material", error)
                         }
                     },
                     applyShortcutSurfaceMaterial = { view ->
                         runCatching {
                             applyLockscreenWidgetShortcutSurfaceMaterial(view, preferences, classLoader)
                         }.onFailure { error ->
-                            log(Log.ERROR, TAG, "Could not initialize lockscreen widget surface material", error)
+                            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not initialize lockscreen widget surface material", error)
                         }
                     },
                 )
@@ -6444,7 +6504,7 @@ class HyperSystemUiModule : XposedModule() {
             runCatching {
                 installLockscreenWidget(root, shortcutController, preferences, classLoader)
             }.onFailure { error ->
-                log(Log.ERROR, TAG, "Could not apply lockscreen widget", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not apply lockscreen widget", error)
             }
         }
         install()
@@ -6457,6 +6517,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val panelClass = classLoader.loadClass(KEYGUARD_PANEL_VIEW_CONTROLLER_CLASS)
             val foregroundLayer = panelClass.getDeclaredField("keyguardForegroundLayer")
@@ -6503,9 +6564,9 @@ class HyperSystemUiModule : XposedModule() {
                     }?.onKeyguardVisibilityChanged()
                     result
                 }
-            log(Log.INFO, TAG, "Installed ${bindMethods.size} music-lockscreen foreground hook(s)")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed ${bindMethods.size} music-lockscreen foreground hook(s)")
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install music-lockscreen foreground hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install music-lockscreen foreground hook", error)
         }
     }
 
@@ -6519,6 +6580,7 @@ class HyperSystemUiModule : XposedModule() {
         preferences: SharedPreferences,
         classLoader: ClassLoader,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         val old = synchronized(lockscreenMusicLockscreenControllers) {
             lockscreenMusicLockscreenControllers[host]
         }
@@ -6674,7 +6736,7 @@ class HyperSystemUiModule : XposedModule() {
                     )
                 }
             }
-        }.onFailure { log(Log.ERROR, TAG, "Could not refresh capsule material", it) }
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not refresh capsule material", it) }
     }
 
     private fun commonShortcutParent(first: View, second: View): ViewGroup? {
@@ -6702,7 +6764,7 @@ class HyperSystemUiModule : XposedModule() {
             if (root.isAttachedToWindow) runCatching {
                 installShortcutGlassBackgrounds(root, preferences, loader)
                 applyLockscreenShortcutGeometry(root, preferences)
-            }.onFailure { log(Log.WARN, TAG, "Could not refresh shortcut material", it) }
+            }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not refresh shortcut material", it) }
         }
         val capsules = synchronized(lockscreenMiniPlayerControllers) { lockscreenMiniPlayerControllers.values.toList() }
         capsules.forEach { it.onMaterialSettingsChanged() }
@@ -6827,7 +6889,7 @@ class HyperSystemUiModule : XposedModule() {
                             )
                         }
                     }
-                }.onFailure { log(Log.ERROR, TAG, "Could not initialize shortcut material", it) }
+                }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not initialize shortcut material", it) }
                 Unit
             }
             glassBackground.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
@@ -6843,7 +6905,7 @@ class HyperSystemUiModule : XposedModule() {
             if (glassBackground.isAttachedToWindow && glassBackground.width > 0 && glassBackground.height > 0) applyMaterial()
             applyShortcutIconColorMode(shortcutContainer, shortcutIconColorMode(preferences))
         }
-        log(
+        btm.m.os4.systemuihook.HookModuleLogger.log(this,
             Log.INFO,
             TAG,
             "Applied shortcut background to ${findShortcutContainers(root).size} container(s), mode=$backgroundMode, radius=${radius}dp",
@@ -7283,6 +7345,7 @@ class HyperSystemUiModule : XposedModule() {
      * feature or its enabled state.
      */
     private fun installLockscreenClockDateFollowHook(classLoader: ClassLoader) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val notificationTopChangeType = classLoader.loadClass(
                 "com.miui.systemui.notification.data.repository.NotificationTopChangeType",
@@ -7321,9 +7384,9 @@ class HyperSystemUiModule : XposedModule() {
                 }
             }
             check(hookCount > 0) { "Keyguard clock notification animation was not found" }
-            log(Log.INFO, TAG, "Installed $hookCount lockscreen clock date-follow hook(s)")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed $hookCount lockscreen clock date-follow hook(s)")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Lockscreen clock date-follow hook unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Lockscreen clock date-follow hook unavailable", error)
         }
     }
 
@@ -7467,6 +7530,7 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun installLockscreenNotificationHook(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.NOTIFICATIONS)) return
         val shelfSpaceHookInstalled = runCatching {
             val legacyFlowClass = classLoader.loadClass(FOD_SHELF_SPACE_FLOW_CLASS)
             hook(legacyFlowClass.getDeclaredMethod("invokeSuspend", Any::class.java))
@@ -7477,7 +7541,7 @@ class HyperSystemUiModule : XposedModule() {
                 }
             true
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install lockscreen notification shelf-space hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install lockscreen notification shelf-space hook", error)
         }.getOrDefault(false)
 
         val positionFlows = findFodNotificationPositionFlows(classLoader)
@@ -7501,7 +7565,7 @@ class HyperSystemUiModule : XposedModule() {
                                 preferences,
                             )
                         }.onFailure { error ->
-                            log(Log.ERROR, TAG, "Could not override lockscreen FOD position", error)
+                            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not override lockscreen FOD position", error)
                         }
                         val originalCollector = chain.getArg(0) ?: return@intercept chain.proceed()
                         val collectorType = collect.parameterTypes.firstOrNull()
@@ -7520,17 +7584,17 @@ class HyperSystemUiModule : XposedModule() {
                     }
                 positionHookCount += 1
             }.onFailure { error ->
-                log(Log.WARN, TAG, "Could not install FOD-position hook for ${positionFlowClass.name}", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install FOD-position hook for ${positionFlowClass.name}", error)
             }
         }
         if (shelfSpaceHookInstalled || positionHookCount > 0) {
-            log(
+            btm.m.os4.systemuihook.HookModuleLogger.log(this,
                 Log.INFO,
                 TAG,
                 "Installed lockscreen notification FOD hooks: shelf=$shelfSpaceHookInstalled, position=$positionHookCount",
             )
         } else {
-            log(Log.ERROR, TAG, "Could not locate lockscreen notification FOD-position flow")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not locate lockscreen notification FOD-position flow")
         }
     }
 
@@ -7681,6 +7745,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.NOTIFICATIONS)) return
         runCatching {
             installLockscreenMediaManagerBridgeHooks(classLoader)
             installLockscreenMediaControllerVisibilityHook(classLoader, preferences)
@@ -7689,7 +7754,7 @@ class HyperSystemUiModule : XposedModule() {
             runCatching {
                 installLockscreenLyricButtonStatusBarStateHook(classLoader, preferences)
             }.onFailure { error ->
-                log(Log.WARN, TAG, "Could not install lyric-button status-bar state hook", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install lyric-button status-bar state hook", error)
             }
             installLockscreenMediaEffectRefreshHook(classLoader)
             installLockscreenCustomizationMenuHook(classLoader)
@@ -7697,9 +7762,9 @@ class HyperSystemUiModule : XposedModule() {
             installLockscreenMediaPipelineHook(classLoader, preferences)
             installTinyLockscreenMediaHook(classLoader, preferences)
             installLockscreenMediaRowVisibilityHook(classLoader, preferences)
-            log(Log.INFO, TAG, "Installed lockscreen media-notification header/row/pipeline hooks")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lockscreen media-notification header/row/pipeline hooks")
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install lockscreen media-notification visibility hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install lockscreen media-notification visibility hook", error)
         }
     }
 
@@ -7716,6 +7781,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val rowClass = classLoader.loadClass(EXPANDABLE_NOTIFICATION_ROW_CLASS)
             val getEntry = rowClass.getMethod("getEntry")
@@ -7764,9 +7830,9 @@ class HyperSystemUiModule : XposedModule() {
                         chain.proceed()
                     }
                 }
-            log(Log.INFO, TAG, "Installed lockscreen media notification-row dynamic visibility hook")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lockscreen media notification-row dynamic visibility hook")
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install lockscreen media notification-row visibility hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install lockscreen media notification-row visibility hook", error)
         }
     }
 
@@ -7781,6 +7847,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val controllerClass = classLoader.loadClass(
                 "com.android.systemui.statusbar.notification.mediacontrol.MiuiMediaNotificationControllerImpl",
@@ -7812,13 +7879,14 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     chain.proceed(args)
                 }
-            log(Log.INFO, TAG, "Installed MiuiMediaNotificationController visibility hook")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed MiuiMediaNotificationController visibility hook")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install media-controller visibility hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install media-controller visibility hook", error)
         }
     }
 
     private fun installLockscreenMediaManagerBridgeHooks(classLoader: ClassLoader) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val managerClass = classLoader.loadClass("com.android.systemui.media.NotificationMediaManager")
             val methods = managerClass.declaredMethods.filter {
@@ -7860,9 +7928,9 @@ class HyperSystemUiModule : XposedModule() {
                         result
                     }
             }
-            log(Log.INFO, TAG, "Installed NotificationMediaManager controller bridge")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed NotificationMediaManager controller bridge")
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install NotificationMediaManager controller bridge", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install NotificationMediaManager controller bridge", error)
         }
     }
 
@@ -7876,6 +7944,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val headerClass = classLoader.loadClass(
                 MIUI_MEDIA_HEADER_VIEW_CLASS,
@@ -7928,9 +7997,9 @@ class HyperSystemUiModule : XposedModule() {
                             result
                         }
                 }
-                log(Log.INFO, TAG, "Installed media keyguard callback hook(s): ${stateMethods.size}")
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed media keyguard callback hook(s): ${stateMethods.size}")
             }.onFailure { error ->
-                log(Log.WARN, TAG, "Could not install media keyguard callback hook", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install media keyguard callback hook", error)
             }
             // The vendor controller writes the header's inherited View.visibility property
             // directly. Hook View.setVisibility and only apply a post-call correction when the
@@ -8057,7 +8126,7 @@ class HyperSystemUiModule : XposedModule() {
                         }
                 }
             }.onFailure { error ->
-                log(Log.DEBUG, TAG, "Could not install media update-layout presentation hook", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Could not install media update-layout presentation hook", error)
             }
             // `MiuiMediaViewControllerImpl` owns the drawable that the lockscreen island will
             // animate into albumImageView. Capture that source immediately after binding rather
@@ -8065,7 +8134,7 @@ class HyperSystemUiModule : XposedModule() {
             // restart this is the only point at which the first track's art is guaranteed to be
             // available before the custom music surface is shown.
             installLockscreenIslandArtworkBridge(classLoader, headerClass, preferences)
-            log(
+            btm.m.os4.systemuihook.HookModuleLogger.log(this,
                 Log.INFO,
                 TAG,
                 "Installed MiuiMediaHeaderView lockscreen hide hook " +
@@ -8073,7 +8142,7 @@ class HyperSystemUiModule : XposedModule() {
             )
             applyLockscreenMediaPresentation(preferences)
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install MiuiMediaHeaderView lockscreen hide hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install MiuiMediaHeaderView lockscreen hide hook", error)
         }
     }
 
@@ -8082,6 +8151,7 @@ class HyperSystemUiModule : XposedModule() {
         headerClass: Class<*>,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val controllerClass = classLoader.loadClass(
                 "com.android.systemui.statusbar.notification.mediacontrol.MiuiMediaViewControllerImpl",
@@ -8109,9 +8179,9 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     result
                 }
-            log(Log.INFO, TAG, "Installed lockscreen-island artwork source hook")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lockscreen-island artwork source hook")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install lockscreen-island artwork source hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install lockscreen-island artwork source hook", error)
         }
     }
 
@@ -8120,6 +8190,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val controllerClass = classLoader.loadClass(
                 "com.android.systemui.statusbar.notification.mediacontrol.MiuiMediaViewControllerImpl",
@@ -8157,7 +8228,7 @@ class HyperSystemUiModule : XposedModule() {
                         result
                     }
             }.onFailure { error ->
-                log(Log.DEBUG, TAG, "Could not bind lyric button from media attach", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Could not bind lyric button from media attach", error)
             }
 
             // access$setTopMediaData() adds holder.player to MiuiMediaHeaderView, attaches the
@@ -8183,7 +8254,7 @@ class HyperSystemUiModule : XposedModule() {
                         result
                     }
             }.onFailure { error ->
-                log(Log.WARN, TAG, "Could not bind lyric button after top-media update", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not bind lyric button after top-media update", error)
             }
 
             val mediaActionClass = classLoader.loadClass(
@@ -8207,7 +8278,7 @@ class HyperSystemUiModule : XposedModule() {
                         }
                     }
             }.onFailure { error ->
-                log(Log.DEBUG, TAG, "Could not guard lyric button bindButtonCommon", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Could not guard lyric button bindButtonCommon", error)
             }
 
             runCatching {
@@ -8231,11 +8302,11 @@ class HyperSystemUiModule : XposedModule() {
                         }
                     }
             }.onFailure { error ->
-                log(Log.DEBUG, TAG, "Could not guard lyric semantic button binding", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Could not guard lyric semantic button binding", error)
             }
-            log(Log.INFO, TAG, "Installed lockscreen media lyric-button hook")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lockscreen media lyric-button hook")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install lockscreen media lyric-button hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install lockscreen media lyric-button hook", error)
         }
     }
 
@@ -8418,6 +8489,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         val candidates = listOf(
             "com.android.systemui.statusbar.StatusBarStateControllerImpl",
             "com.android.systemui.statusbar.policy.StatusBarStateControllerImpl",
@@ -8425,7 +8497,7 @@ class HyperSystemUiModule : XposedModule() {
         val controllerClass = candidates.firstNotNullOfOrNull { name ->
             runCatching { classLoader.loadClass(name) }.getOrNull()
         } ?: run {
-            log(Log.WARN, TAG, "Could not find status-bar state controller for lyric button")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not find status-bar state controller for lyric button")
             return
         }
         val methods = generateSequence(controllerClass as Class<*>?) { it.superclass }
@@ -8448,7 +8520,7 @@ class HyperSystemUiModule : XposedModule() {
                     result
                 }
         }
-        log(Log.INFO, TAG, "Installed lyric-button status-bar state hook(s): ${methods.size}")
+        btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lyric-button status-bar state hook(s): ${methods.size}")
     }
 
     private fun shouldOwnLockscreenLyricSlot(
@@ -8506,7 +8578,7 @@ class HyperSystemUiModule : XposedModule() {
     }.onFailure { error ->
         if (!lockscreenLyricDrawableLoadFailureLogged) {
             lockscreenLyricDrawableLoadFailureLogged = true
-            log(Log.ERROR, TAG, "Could not load lockscreen lyric button drawable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not load lockscreen lyric button drawable", error)
         }
     }.getOrNull()
 
@@ -8537,6 +8609,7 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun installLockscreenCustomizationMenuHook(classLoader: ClassLoader) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val interactorClass = classLoader.loadClass(
                 "com.android.systemui.keyguard.domain.interactor.KeyguardTouchHandlingInteractor",
@@ -8559,9 +8632,9 @@ class HyperSystemUiModule : XposedModule() {
                     LockscreenCustomizationMenuBridge.setVisible(false)
                     result
                 }
-            log(Log.INFO, TAG, "Installed lockscreen customization-menu animation hooks")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lockscreen customization-menu animation hooks")
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install lockscreen customization-menu hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install lockscreen customization-menu hooks", error)
         }
     }
 
@@ -8569,6 +8642,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         val entryClass = classLoader.loadClass(
             "com.android.systemui.statusbar.notification.collection.NotificationEntry",
         )
@@ -8605,9 +8679,9 @@ class HyperSystemUiModule : XposedModule() {
                             }
                         }
                 }
-                log(Log.INFO, TAG, "Installed $className media visibility hook(s): ${methods.size}")
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed $className media visibility hook(s): ${methods.size}")
             }.onFailure { error ->
-                log(Log.WARN, TAG, "Could not install $className media visibility hook", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install $className media visibility hook", error)
             }
         }
     }
@@ -8621,6 +8695,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val filterClass = classLoader.loadClass(
                 "com.android.systemui.statusbar.notification.collection.coordinator.KeyguardCoordinator\$notifFilter\$1",
@@ -8644,9 +8719,9 @@ class HyperSystemUiModule : XposedModule() {
                         chain.proceed()
                     }
                 }
-            log(Log.INFO, TAG, "Installed lockscreen media-notification pipeline filter")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lockscreen media-notification pipeline filter")
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install lockscreen media-notification pipeline filter", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install lockscreen media-notification pipeline filter", error)
         }
     }
 
@@ -8688,9 +8763,9 @@ class HyperSystemUiModule : XposedModule() {
                         chain.proceed()
                     }
                 }
-            log(Log.INFO, TAG, "Installed tiny lockscreen media-notification hooks")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed tiny lockscreen media-notification hooks")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install tiny lockscreen media-notification hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install tiny lockscreen media-notification hooks", error)
         }
     }
 
@@ -8930,7 +9005,7 @@ class HyperSystemUiModule : XposedModule() {
             method.invoke(controller, visible)
             true
         }.getOrElse { error ->
-            log(Log.DEBUG, TAG, "Could not request native media-card visibility", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Could not request native media-card visibility", error)
             false
         }
     }
@@ -8951,6 +9026,7 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun installLockscreenNativeClockScalerHook(classLoader: ClassLoader) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val timeView = classLoader.loadClass("com.miui.clock.allInOne.TimeView")
             timeView.declaredMethods.filter { method ->
@@ -8971,9 +9047,9 @@ class HyperSystemUiModule : XposedModule() {
                         chain.proceed(args)
                     }
             }
-            log(Log.INFO, TAG, "Installed native TimeView size scaler")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed native TimeView size scaler")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Native TimeView size scaler unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Native TimeView size scaler unavailable", error)
         }
     }
 
@@ -8984,6 +9060,7 @@ class HyperSystemUiModule : XposedModule() {
      * same vendor effect whenever our presentation code makes the header visible.
      */
     private fun installLockscreenMediaEffectRefreshHook(classLoader: ClassLoader) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val binder = classLoader.loadClass(
                 "com.android.systemui.statusbar.notification.style.view.MediaViewBinder",
@@ -9011,9 +9088,9 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     result
                 }
-            log(Log.INFO, TAG, "Installed native media material-effect refresh hook")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed native media material-effect refresh hook")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install native media material-effect refresh hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install native media material-effect refresh hook", error)
         }
     }
 
@@ -9043,7 +9120,7 @@ class HyperSystemUiModule : XposedModule() {
                 ?: return
             apply.invoke(instance, header, header.context)
         }.onFailure { error ->
-            log(Log.DEBUG, TAG, "Native media material-effect refresh failed", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Native media material-effect refresh failed", error)
         }
     }
 
@@ -9064,6 +9141,7 @@ class HyperSystemUiModule : XposedModule() {
     /** Main.guardCard equivalent for the actual MiuiMediaHeaderView. It handles the initial
      * island frame, where no later media-data callback exists to correct vendor writes. */
     private fun installLockscreenMediaHeaderGuard(header: View, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         if (lockscreenMediaHeaderGuards.containsKey(header)) return
         val listener = ViewTreeObserver.OnPreDrawListener {
             if (!header.isAttachedToWindow) return@OnPreDrawListener true
@@ -9082,6 +9160,7 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun installLockscreenMediaArtworkClick(header: View, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         // The imported Java Main module owns the window-level artwork gesture, including the
         // long-press transition into MINI_PLAYER. Installing a second child listener here can
         // consume ACTION_DOWN/ACTION_UP before Main sees them; that race is especially visible
@@ -9222,6 +9301,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val iconClass = classLoader.loadClass(MIUI_GXZW_ICON_VIEW_CLASS)
             val dismissIcon = iconClass.getMethod(FOD_DISMISS_ICON_METHOD)
@@ -9247,13 +9327,14 @@ class HyperSystemUiModule : XposedModule() {
                         result
                     }
             }
-            log(Log.INFO, TAG, "Installed ${displayMethods.size} lockscreen FOD icon hook(s)")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed ${displayMethods.size} lockscreen FOD icon hook(s)")
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install lockscreen FOD icon hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install lockscreen FOD icon hook", error)
         }
     }
 
     private fun installSystemUiDepthHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val thresholdClass = classLoader.loadClass(DEPTH_THRESHOLD_CLASS)
             val evaluatorClass = classLoader.loadClass(DEPTH_EVALUATOR_CLASS)
@@ -9299,9 +9380,9 @@ class HyperSystemUiModule : XposedModule() {
             installDepthDisplayStateHook(classLoader, preferences)
             installThirdPartyWallpaperDepthHook(classLoader, preferences)
             forceDepthImageThreshold(evaluatorClass, thresholdClass, preferences)
-            log(Log.INFO, TAG, "Installed SystemUI lockscreen depth hooks")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed SystemUI lockscreen depth hooks")
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install SystemUI lockscreen depth hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install SystemUI lockscreen depth hooks", error)
         }
     }
 
@@ -9317,7 +9398,7 @@ class HyperSystemUiModule : XposedModule() {
                 .apply { isAccessible = true }
                 .setDouble(threshold, UNLIMITED_DEPTH_IMAGE_THRESHOLD)
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not set SystemUI depth image threshold", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not set SystemUI depth image threshold", error)
         }
     }
 
@@ -9360,7 +9441,7 @@ class HyperSystemUiModule : XposedModule() {
             } ?: error("StateFlow update method not found")
             update.invoke(state, null, false)
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not clear lockscreen depth avoid state", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not clear lockscreen depth avoid state", error)
         }
     }
 
@@ -9395,6 +9476,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val managerClass = classLoader.loadClass(MIUI_GXZW_ANIM_MANAGER_CLASS)
             val keyguardAuthen = managerClass.getDeclaredField(MIUI_GXZW_KEYGUARD_AUTHEN_FIELD)
@@ -9454,9 +9536,9 @@ class HyperSystemUiModule : XposedModule() {
                         }
                     }
             }
-            log(Log.INFO, TAG, "Installed HyperOS 4 lockscreen FOD animation hooks: icon=${iconResources.size}, recognizing=${recognizingItems.size}")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed HyperOS 4 lockscreen FOD animation hooks: icon=${iconResources.size}, recognizing=${recognizingItems.size}")
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install HyperOS 4 lockscreen FOD animation hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install HyperOS 4 lockscreen FOD animation hooks", error)
         }
     }
 
@@ -9471,6 +9553,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ): Boolean {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return false
         return runCatching {
             val navigationBarViewClass = classLoader.loadClass(NAVIGATION_BAR_VIEW_CLASS)
             val updateNavButtonIcons = navigationBarViewClass.getDeclaredMethod("updateNavButtonIcons")
@@ -9524,23 +9607,23 @@ class HyperSystemUiModule : XposedModule() {
                                 }
                             }
                         }.onFailure { error ->
-                            log(Log.DEBUG, TAG, "Could not restore lockscreen white-bar visibility", error)
+                            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Could not restore lockscreen white-bar visibility", error)
                         }
                     }
                     result
                 }
 
-            log(Log.INFO, TAG, "Installed lockscreen white-bar hook")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lockscreen white-bar hook")
             true
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install lockscreen white-bar hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install lockscreen white-bar hook", error)
         }.getOrDefault(false)
     }
 
     private fun installGlobalGestureHandleHook(
         classLoader: ClassLoader,
         preferences: SharedPreferences,
-    ): Boolean = runCatching {
+    ): Boolean = if (!ModuleSafetyRuntime.allows(SafetySection.GESTURE_HANDLE)) false else runCatching {
         val handleClass = classLoader.loadClass("com.android.systemui.navigationbar.gestural.NavigationHandle")
         val onDraw = handleClass.getDeclaredMethod("onDraw", Canvas::class.java)
         hook(onDraw)
@@ -9623,7 +9706,7 @@ class HyperSystemUiModule : XposedModule() {
         }
         true
     }.onFailure { error ->
-        log(Log.WARN, TAG, "Could not install global gesture-handle hook", error)
+        btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install global gesture-handle hook", error)
     }.getOrDefault(false)
 
     private fun isGlobalGestureHandle(view: View): Boolean {
@@ -9835,7 +9918,7 @@ class HyperSystemUiModule : XposedModule() {
                 )
             }
         }.onFailure { error ->
-            log(Log.DEBUG, TAG, "Could not apply gesture material overlay", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Could not apply gesture material overlay", error)
         }
         overlay.bringToFront()
         overlay.post {
@@ -9865,7 +9948,7 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     overlay.invalidate()
                 }.onFailure { error ->
-                    log(Log.DEBUG, TAG, "Could not reapply gesture material overlay", error)
+                    btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Could not reapply gesture material overlay", error)
                 }
             }
         }
@@ -9876,6 +9959,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.GESTURE_HANDLE)) return
         runCatching {
             val controllerClass = classLoader.loadClass(
                 "com.android.systemui.navigationbar.NavigationBarControllerImpl",
@@ -9910,7 +9994,7 @@ class HyperSystemUiModule : XposedModule() {
                     }
             }
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install global gesture controller hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install global gesture controller hook", error)
         }
     }
 
@@ -9967,6 +10051,7 @@ class HyperSystemUiModule : XposedModule() {
         preferences: SharedPreferences,
         classLoader: ClassLoader,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.NOTIFICATIONS)) return
         runCatching {
             val prefix = "com.android.systemui.statusbar.notification.style.vieweffect."
             val blur = classLoader.loadClass(prefix + "HeadsUpNotificationBlurEffect")
@@ -10001,7 +10086,7 @@ class HyperSystemUiModule : XposedModule() {
                         applyResourceGlass(row, if (clear) 0 else 1)
                     } finally { headsUpGlassDispatching.remove() }
                     true
-                }.onFailure { log(Log.DEBUG, TAG, "Heads-up platform glass dispatch unavailable", it) }.getOrDefault(false)
+                }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Heads-up platform glass dispatch unavailable", it) }.getOrDefault(false)
             }
             blur.declaredMethods.filter { it.name == "apply" && it.parameterCount == 2 }.forEach { method ->
                 hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
@@ -10056,7 +10141,7 @@ class HyperSystemUiModule : XposedModule() {
                             }
                     }
                 }
-        }.onFailure { log(Log.DEBUG, TAG, "Heads-up soft glass hooks unavailable", it) }
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Heads-up soft glass hooks unavailable", it) }
     }
 
     private fun installCornerRadiusHooks(preferences: SharedPreferences) {
@@ -10073,7 +10158,7 @@ class HyperSystemUiModule : XposedModule() {
                 loadedClass
             }
 
-        hook(View::class.java.getMethod("setBackground", Drawable::class.java))
+        if (ModuleSafetyRuntime.allows(SafetySection.CONTROL_CENTER)) hook(View::class.java.getMethod("setBackground", Drawable::class.java))
             .setExceptionMode(ExceptionMode.PROTECTIVE)
             .setId("slider-background-radius")
             .intercept { chain ->
@@ -10093,6 +10178,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.CONTROL_CENTER)) return
         listOf(
             TOP_BUTTONS_CLASS,
             MEDIA_PANEL_CLASS,
@@ -10110,7 +10196,7 @@ class HyperSystemUiModule : XposedModule() {
                     installLoadedCornerRadiusHook(targetClass, preferences)
                 }
             }.onFailure { error ->
-                log(Log.DEBUG, TAG, "Deferred corner-radius target unavailable: $className", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Deferred corner-radius target unavailable: $className", error)
             }
         }
     }
@@ -10148,9 +10234,9 @@ class HyperSystemUiModule : XposedModule() {
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("systemui-depth-wallpaper-hierarchy")
                 .intercept { chain -> forcedHierarchy }
-            log(Log.INFO, TAG, "Installed third-party wallpaper depth capability hooks")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed third-party wallpaper depth capability hooks")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install third-party wallpaper depth hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install third-party wallpaper depth hooks", error)
         }
     }
 
@@ -10163,6 +10249,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         if (!preferences.getBoolean(KEY_REMOVE_DEPTH_IMAGE_LIMIT, false)) return
         runCatching {
             val wallpaperInfoClass = classLoader.loadClass(AOD_WALLPAPER_INFO_CLASS)
@@ -10208,9 +10295,9 @@ class HyperSystemUiModule : XposedModule() {
                 .setId("aod-depth-wallpaper-reset")
                 .intercept { chain -> false }
 
-            log(Log.INFO, TAG, "Installed AOD third-party wallpaper depth hooks")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed AOD third-party wallpaper depth hooks")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install AOD third-party wallpaper depth hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install AOD third-party wallpaper depth hooks", error)
         }
     }
 
@@ -10221,6 +10308,7 @@ class HyperSystemUiModule : XposedModule() {
      * AOD editor and the ThemeManager copy of the editor.
      */
     private fun installVideoWallpaperGlassSupportHook(classLoader: ClassLoader) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val companionClass = classLoader.loadClass(
                 "com.miui.keyguard.editor.utils.Wallpaper\$Companion",
@@ -10241,9 +10329,9 @@ class HyperSystemUiModule : XposedModule() {
                     .setId("editor-video-wallpaper-glass-support-${method.name}")
                     .intercept { true }
             }
-            log(Log.INFO, TAG, "Installed video-wallpaper glass support hook")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed video-wallpaper glass support hook")
         }.onFailure { error ->
-            log(Log.DEBUG, TAG, "Video-wallpaper glass support hook unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Video-wallpaper glass support hook unavailable", error)
         }
     }
 
@@ -10251,6 +10339,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         val mode = preferences.getInt(
             KEY_LOCKSCREEN_TEMPLATE_LIMIT_MODE,
             LOCKSCREEN_TEMPLATE_LIMIT_SYSTEM_DEFAULT,
@@ -10309,14 +10398,14 @@ class HyperSystemUiModule : XposedModule() {
                         runCatching {
                             limitField.setInt(chain.thisObject, limit)
                         }.onFailure { error ->
-                            log(Log.WARN, TAG, "Could not set AOD lockscreen template limit", error)
+                            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not set AOD lockscreen template limit", error)
                         }
                         result
                     }
             }
-            log(Log.INFO, TAG, "Installed AOD lockscreen template limit hook: $limit")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed AOD lockscreen template limit hook: $limit")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not install AOD lockscreen template limit hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install AOD lockscreen template limit hook", error)
         }
     }
 
@@ -10324,6 +10413,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val activityClass = classLoader.loadClass("com.miui.keyguard.editor.EditorActivity")
             val init = activityClass.getDeclaredMethod("initContentView").apply { isAccessible = true }
@@ -10378,7 +10468,7 @@ class HyperSystemUiModule : XposedModule() {
                     }
             }
         }.onFailure { error ->
-            log(Log.DEBUG, TAG, "AOD editor background hook unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "AOD editor background hook unavailable", error)
         }
     }
 
@@ -10450,7 +10540,7 @@ class HyperSystemUiModule : XposedModule() {
             installLoadedVolumePanelHook(classLoader.loadClass(VOLUME_PANEL_CONTROLLER_CLASS), preferences)
             installLoadedVolumePanelHook(classLoader.loadClass(VOLUME_COLUMN_CLASS), preferences)
         }.onFailure { error ->
-            log(Log.DEBUG, TAG, "Volume panel classes are deferred until ClassLoader discovery", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Volume panel classes are deferred until ClassLoader discovery", error)
         }
         listOf("com.android.systemui.miui.volume.MiuiVolumeDialogView", "com.android.systemui.miui.volume.MiuiVolumeSeekBar").forEach { name ->
             runCatching { installLoadedVolumePanelHook(classLoader.loadClass(name), preferences) }
@@ -10501,9 +10591,9 @@ class HyperSystemUiModule : XposedModule() {
                         chain.proceed()
                     }
                 }
-            log(Log.INFO, TAG, "Installed background blur-radius dispatch hook")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed background blur-radius dispatch hook")
         }.onFailure { error ->
-            log(Log.DEBUG, TAG, "Background blur-radius dispatch hook unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Background blur-radius dispatch hook unavailable", error)
         }
     }
 
@@ -10601,17 +10691,17 @@ class HyperSystemUiModule : XposedModule() {
                         chain.proceed()
                     }
                 }
-            log(Log.INFO, TAG, "Installed volume native parameter hooks")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed volume native parameter hooks")
         }.onFailure { error ->
             volumeNativeParameterHooksInstalled = false
-            log(Log.ERROR, TAG, "Could not install volume native parameter hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install volume native parameter hooks", error)
         }
     }
 
     private fun logVolumeNativeParameterHit(name: String, view: View, value: Int) {
         val key = "$name:${view.javaClass.name}"
         if (volumeNativeParameterHookHits.add(key)) {
-            log(Log.INFO, TAG, "Volume parameter hit name=$name value=$value class=${view.javaClass.name}")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Volume parameter hit name=$name value=$value class=${view.javaClass.name}")
         }
     }
 
@@ -10670,7 +10760,7 @@ class HyperSystemUiModule : XposedModule() {
                                 }
                             }
                     }
-                }.onFailure { log(Log.DEBUG, TAG, "Volume native material dispatch unavailable", it) }
+                }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Volume native material dispatch unavailable", it) }
             }
             "com.android.systemui.miui.volume.Util" -> {
                 // HyperLight r71.q: enable only the volume material branch. No sizing,
@@ -10704,7 +10794,7 @@ class HyperSystemUiModule : XposedModule() {
                                 result
                             }
                     }
-                log(Log.INFO, TAG, "Installed physical volume-panel controller hooks")
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed physical volume-panel controller hooks")
             }
             "com.android.systemui.miui.volume.MiuiVolumeDialogView" -> {
                 val ringerStates = java.util.WeakHashMap<View, VolumePanelRingerVisibility>()
@@ -10762,9 +10852,9 @@ class HyperSystemUiModule : XposedModule() {
                             result
                         }
                 }
-            log(Log.INFO, TAG, "Installed AOSP Compose volume-panel fallback hook")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed AOSP Compose volume-panel fallback hook")
         }.onFailure { error ->
-            log(Log.DEBUG, TAG, "AOSP Compose volume dialog is unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "AOSP Compose volume dialog is unavailable", error)
         }
     }
 
@@ -10840,7 +10930,7 @@ class HyperSystemUiModule : XposedModule() {
                         .joinToString(",") { method ->
                             "${method.name}(${method.parameterTypes.joinToString("/") { it.simpleName }})"
                         }
-                    log(Log.INFO, TAG, "Volume native API class=$className methods=$api")
+                    btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Volume native API class=$className methods=$api")
                 }
                 invokeNumericSetter(view, "setBlurRadius", blurRadius.toFloat())
                 invokeNumericSetter(view, "setMiBackgroundBlurRadius", blurRadius.toFloat())
@@ -10967,6 +11057,7 @@ class HyperSystemUiModule : XposedModule() {
         targetClass: Class<*>,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.CONTROL_CENTER)) return
         if (!cornerTargetClasses.add(targetClass)) return
         when (targetClass.name) {
             TOP_BUTTONS_CLASS -> hookUnifiedRadiusSetter(targetClass, "setCornerRadius", 0, preferences)
@@ -11085,10 +11176,11 @@ class HyperSystemUiModule : XposedModule() {
                         }
                     }
                 }
-        }.onFailure { error -> log(Log.DEBUG, TAG, "Control-center radius hook unavailable: ${targetClass.name}#$methodName", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Control-center radius hook unavailable: ${targetClass.name}#$methodName", error) }
     }
 
     private fun applyControlCenterDrawableRadius(view: View, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.CONTROL_CENTER)) return
         val settings = controlRadiusSettings(preferences)
         if ((!settings.enabled || settings.sliders == 0 && settings.deviceCenter == 0) && controlDrawableBaselines.isEmpty()) return
         val device = view.javaClass.name == DEVICE_CENTER_ENTRY
@@ -11141,7 +11233,7 @@ class HyperSystemUiModule : XposedModule() {
                     applyControlCenterDrawableRadius(view, preferences)
                     result
                 }
-        }.onFailure { error -> log(Log.DEBUG, TAG, "Device center radius hook unavailable", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Device center radius hook unavailable", error) }
     }
 
     private fun replaceDimensionIfNeeded(
@@ -11163,6 +11255,14 @@ class HyperSystemUiModule : XposedModule() {
         ?: original
 
     private fun replacementDp(name: String?, originalDp: Float, preferences: SharedPreferences): Float? {
+        val section = when (name) {
+            "big_island_min_width", "small_island_width", "island_space" -> SafetySection.ISLAND
+            "notification_item_bg_radius" -> SafetySection.NOTIFICATIONS
+            "status_bar_clock_size_new", "status_bar_padding_end", "status_bar_padding_start",
+            "status_bar_height", "status_bar_padding_top" -> SafetySection.STATUS_BAR
+            else -> null
+        }
+        if (section != null && !ModuleSafetyRuntime.allows(section)) return null
         val layout = volumeGlassRuntime?.layout ?: VolumePanelLayoutPreferences.read(preferences)
         volumePanelLayoutDimensionDp(name, originalDp, layout)?.let { return it }
         if (!preferences.getBoolean(KEY_VOLUME_PANEL_MATERIAL_ENABLED, true) &&

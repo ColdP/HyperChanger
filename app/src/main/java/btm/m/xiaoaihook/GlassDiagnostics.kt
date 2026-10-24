@@ -2,7 +2,7 @@
 package btm.m.xiaoaihook
 
 import android.content.Context
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Collections

@@ -9,7 +9,7 @@ import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import io.github.libxposed.service.XposedService
 import java.io.File
 import java.io.FileOutputStream
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 
 internal const val KEY_HOME_RECENTS_CLEAR_MODE = "home_recents_clear_mode"
 
@@ -94,7 +94,10 @@ internal fun syncHomeRecentsNativeConfig(
 ) {
     val dataDir = param.applicationInfo.dataDir ?: return
     val target = File(dataDir, "files/hyperpatch.bin")
-    val blob = buildHomeLauncherBlob(settings.clearMode.value, folderSettings.effectiveColumns, folderSettings.rowSpacing, folderSettings.rowSpacingEnabled, materialSettings, nativeDock, multiSplitSettings.enabled, fullGlass)
+    val glassAllowed = ModuleSafetyRuntime.allows(SafetySection.GLASS)
+    val blob = buildHomeLauncherBlob(settings.clearMode.value, folderSettings.effectiveColumns, folderSettings.rowSpacing, folderSettings.rowSpacingEnabled,
+        if (glassAllowed) materialSettings else HomeMaterialSettings(), nativeDock, multiSplitSettings.enabled,
+        if (glassAllowed) fullGlass else HomeGlassNativeSettings())
     runCatching {
         target.parentFile?.mkdirs()
         val temp = File(target.parentFile, "${target.name}.tmp")
@@ -106,7 +109,7 @@ internal fun syncHomeRecentsNativeConfig(
         target.setReadable(true, false)
         target.parentFile?.setExecutable(true, false)
     }.onFailure { error ->
-        android.util.Log.w("HyperChangerHomeRecents", "Could not write native launcher config", error)
+        btm.m.os4.systemuihook.ModuleLog.w("HyperChangerHomeRecents", "Could not write native launcher config", error)
     }
 }
 
@@ -124,15 +127,21 @@ internal fun stageHomeRecentsNativeConfig(
     ),
     multiSplitSettings: HomeMultiSplitSettings = readLocalHomeMultiSplitSettings(context),
 ): Boolean = runCatching {
-    val blob = buildHomeLauncherBlob(settings.clearMode.value, folderSettings.effectiveColumns, folderSettings.rowSpacing, folderSettings.rowSpacingEnabled, materialSettings, nativeDock, multiSplitSettings.enabled,
-        resolveHomeGlassNativeSettings(context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE)))
+    val local = context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE)
+    val safety = readModuleSafety(local)
+    val desktopAllowed = safety.allows(SafetySection.DESKTOP)
+    val glassAllowed = safety.allows(SafetySection.GLASS)
+    val blob = if (!desktopAllowed) buildHomeLauncherBlob(0, 0, fullGlass = HomeGlassNativeSettings())
+    else buildHomeLauncherBlob(settings.clearMode.value, folderSettings.effectiveColumns, folderSettings.rowSpacing, folderSettings.rowSpacingEnabled,
+        if (glassAllowed) materialSettings else HomeMaterialSettings(), nativeDock, multiSplitSettings.enabled,
+        if (glassAllowed) resolveHomeGlassNativeSettings(local) else HomeGlassNativeSettings())
     // The Rust launcher cannot reliably read /data/adb, and its native startup
     // can precede Java package callbacks. Stage the complete config directly in
     // its own data directory with the launcher's UID and SELinux file context.
     val launcherDataDir = context.packageManager.getApplicationInfo(
         "com.miui.home", PackageManager.ApplicationInfoFlags.of(0),
     ).dataDir ?: error("Launcher data directory unavailable")
-    val command = buildHomeLauncherStageCommand(launcherDataDir, blob.size, if (multiSplitSettings.enabled) 6 else 3)
+    val command = buildHomeLauncherStageCommand(launcherDataDir, blob.size, if (desktopAllowed && multiSplitSettings.enabled) 6 else 3, moduleSafetyNativeFlags(local))
     // Android app-data isolation hides other apps' directories in our mount
     // namespace, even after gaining UID 0. Magisk/KernelSU -M uses the global one.
     val process = ProcessBuilder("su", "-M", "-c", command).redirectErrorStream(true).start()

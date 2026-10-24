@@ -27,14 +27,14 @@ internal class LockscreenFaceUnlockUiHook(private val module: XposedModule) {
         val viewClass = runCatching {
             classLoader.loadClass(TARGET_CLASS)
         }.getOrElse {
-            module.log(android.util.Log.WARN, TAG, "$TARGET_CLASS not found: ${it.message}")
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, android.util.Log.WARN, TAG, "$TARGET_CLASS not found: ${it.message}")
             return
         }
 
         val visibilityMethod = runCatching {
             viewClass.getDeclaredMethod("setVisibility", Int::class.javaPrimitiveType!!)
         }.getOrElse {
-            module.log(android.util.Log.WARN, TAG, "setVisibility(int) not found: ${it.message}")
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, android.util.Log.WARN, TAG, "setVisibility(int) not found: ${it.message}")
             return
         }
 
@@ -66,11 +66,11 @@ internal class LockscreenFaceUnlockUiHook(private val module: XposedModule) {
                 result
             }
         }.onFailure {
-            module.log(android.util.Log.WARN, TAG, "initial visibility fallback unavailable: ${it.message}")
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, android.util.Log.WARN, TAG, "initial visibility fallback unavailable: ${it.message}")
         }
 
         hooked = true
-        module.log(android.util.Log.DEBUG, TAG, "native lock-screen face UI hidden; authentication remains enabled")
+        btm.m.os4.systemuihook.HookModuleLogger.log(module, android.util.Log.DEBUG, TAG, "native lock-screen face UI hidden; authentication remains enabled")
     }
 
     private fun isMainLockscreenView(instance: Any?): Boolean {

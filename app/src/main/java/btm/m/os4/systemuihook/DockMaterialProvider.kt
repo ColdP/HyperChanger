@@ -71,7 +71,7 @@ class DockMaterialProvider : ContentProvider() {
         val result = CompletableFuture<Bundle>()
         main.post {
             runCatching { create(id, extras, result) }.onFailure { error ->
-                android.util.Log.w("HyperChangerDock", "Glass host creation failed", error)
+                btm.m.os4.systemuihook.ModuleLog.w("HyperChangerDock", "Glass host creation failed", error)
                 result.complete(Bundle().apply { putString("error", error.toString()) })
             }
         }

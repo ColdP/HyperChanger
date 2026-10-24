@@ -85,12 +85,13 @@ internal object DockWmsHook {
     private val nativePose = AtomicReference<DockNativePose?>()
     private val endpoint = DockNativeMotionEndpoint(
         { scheduleMotion() },
-        { android.util.Log.i("HyperChangerDockMotion", it) },
+        { btm.m.os4.systemuihook.ModuleLog.i("HyperChangerDockMotion", it) },
     )
 
     fun install(module: HyperSystemUiModule, param: PackageLoadedParam) = install(module, param.defaultClassLoader)
 
     fun install(module: HyperSystemUiModule, loader: ClassLoader) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.DESKTOP)) return
         val windowClass = runCatching { loader.loadClass("com.android.server.wm.WindowState") }.getOrNull() ?: return
         val prepare = windowClass.declaredMethods.firstOrNull {
             it.name == "prepareSurfaces" && it.parameterCount == 0
@@ -101,10 +102,10 @@ internal object DockWmsHook {
             .intercept { chain ->
                 val result = chain.proceed()
                 runCatching { update(chain.thisObject, module) }
-                    .onFailure { android.util.Log.e("HyperChangerDock", "Dock update failed", it) }
+                    .onFailure { btm.m.os4.systemuihook.ModuleLog.e("HyperChangerDock", "Dock update failed", it) }
                 result
             }
-        android.util.Log.i("HyperChangerDock", "WindowState.prepareSurfaces hook installed")
+        btm.m.os4.systemuihook.ModuleLog.i("HyperChangerDock", "WindowState.prepareSurfaces hook installed")
         windowClass.declaredMethods.firstOrNull {
             it.name == "removeImmediately" && it.parameterCount == 0
         }?.let { removeMethod ->
@@ -170,7 +171,7 @@ internal object DockWmsHook {
                 }
                 true
             }
-        android.util.Log.i("HyperChangerDockMotion", "Authenticated native motion endpoint installed")
+        btm.m.os4.systemuihook.ModuleLog.i("HyperChangerDockMotion", "Authenticated native motion endpoint installed")
     }
 
     private fun installWallpaperMotion(module: HyperSystemUiModule, loader: ClassLoader, windowClass: Class<*>) {
@@ -204,10 +205,10 @@ internal object DockWmsHook {
                                 }
                             }
                         }
-                    }.onFailure { android.util.Log.w("HyperChangerDockMotion", "Scene observer failed", it) }
+                    }.onFailure { btm.m.os4.systemuihook.ModuleLog.w("HyperChangerDockMotion", "Scene observer failed", it) }
                     chain.proceed()
                 }
-        }.onFailure { android.util.Log.w("HyperChangerDockMotion", "Scene endpoint unavailable; native following remains enabled", it) }
+        }.onFailure { btm.m.os4.systemuihook.ModuleLog.w("HyperChangerDockMotion", "Scene endpoint unavailable; native following remains enabled", it) }
     }
 
     private fun bindMotion(window: Any, layer: Layer) {
@@ -240,7 +241,7 @@ internal object DockWmsHook {
             val snapshot = synchronized(layers) { layers.values.toList() }
             snapshot.forEach { layer ->
                 if (!layer.closed) runCatching { if (drawMotion(layer)) running = true }
-                    .onFailure { android.util.Log.w("HyperChangerDockMotion", "Motion frame failed", it) }
+                    .onFailure { btm.m.os4.systemuihook.ModuleLog.w("HyperChangerDockMotion", "Motion frame failed", it) }
             }
             if (running) scheduleMotion()
         }, 8L)
@@ -256,13 +257,13 @@ internal object DockWmsHook {
                 .setId("hyperchanger:desktop-dock-reveal")
                 .intercept { chain ->
                     runCatching { beginReveal(module) }
-                        .onFailure { android.util.Log.w("HyperChangerDock", "Dock reveal failed", it) }
+                        .onFailure { btm.m.os4.systemuihook.ModuleLog.w("HyperChangerDock", "Dock reveal failed", it) }
                     chain.proceed()
                 }
-            android.util.Log.i("HyperChangerDock", "Dock reveal trigger installed on $name")
+            btm.m.os4.systemuihook.ModuleLog.i("HyperChangerDock", "Dock reveal trigger installed on $name")
             return
         }
-        android.util.Log.w("HyperChangerDock", "Dock reveal trigger unavailable")
+        btm.m.os4.systemuihook.ModuleLog.w("HyperChangerDock", "Dock reveal trigger unavailable")
     }
 
     private fun beginReveal(module: HyperSystemUiModule) {
@@ -355,7 +356,7 @@ internal object DockWmsHook {
         val parent = call(window, "getSurfaceControl") as? SurfaceControl ?: run {
             if (!missingSurfaceReported) {
                 missingSurfaceReported = true
-                android.util.Log.w("HyperChangerDock", "Launcher WindowState has no accessible SurfaceControl")
+                btm.m.os4.systemuihook.ModuleLog.w("HyperChangerDock", "Launcher WindowState has no accessible SurfaceControl")
             }
             return
         }
@@ -423,7 +424,7 @@ internal object DockWmsHook {
                     runCatching { invoke(tx, "setBackgroundBlurRadius", effect, blur) }
                         .onFailure {
                             backgroundBlurAvailable = false
-                            android.util.Log.w("HyperChangerDock", "Background blur unavailable", it)
+                            btm.m.os4.systemuihook.ModuleLog.w("HyperChangerDock", "Background blur unavailable", it)
                         }
                 }
                 invoke(tx, "show", effect)
@@ -539,7 +540,7 @@ internal object DockWmsHook {
                     if (layer.glassId == id) {
                         layer.pending = false
                         layer.lastFailure = android.os.SystemClock.uptimeMillis()
-                        android.util.Log.w("HyperChangerDock", "Glass host unavailable: ${result?.getString("error")}")
+                        btm.m.os4.systemuihook.ModuleLog.w("HyperChangerDock", "Glass host unavailable: ${result?.getString("error")}")
                     }
                     releaseRemote(context, id)
                     return@post
@@ -557,12 +558,12 @@ internal object DockWmsHook {
                     } finally { tx.close() }
                     layer.glassPackage = parcel
                     layer.glassSurface = surface
-                    android.util.Log.i("HyperChangerDock", "Dock glass host attached; waiting for background texture")
+                    btm.m.os4.systemuihook.ModuleLog.i("HyperChangerDock", "Dock glass host attached; waiting for background texture")
                     probeGlass(layer, context, id, 0)
                 }.onFailure {
                     parcel?.release()
                     layer.lastFailure = android.os.SystemClock.uptimeMillis()
-                    android.util.Log.w("HyperChangerDock", "Glass attach failed", it)
+                    btm.m.os4.systemuihook.ModuleLog.w("HyperChangerDock", "Glass attach failed", it)
                     releaseRemote(context, id)
                 }
                 layer.pending = false
@@ -605,7 +606,7 @@ internal object DockWmsHook {
             }.getOrDefault(false)
             if (!ready) {
                 if (attempt < 20) probeGlass(layer, context, id, attempt + 1)
-                else android.util.Log.w("HyperChangerDock", "Glass background texture never became ready")
+                else btm.m.os4.systemuihook.ModuleLog.w("HyperChangerDock", "Glass background texture never became ready")
                 return@postDelayed
             }
             synchronized(layer) {
@@ -620,8 +621,8 @@ internal object DockWmsHook {
                         invoke(tx, "apply")
                     } finally { tx.close() }
                     layer.glassReady = true
-                    android.util.Log.i("HyperChangerDock", "Native Dock glass ready")
-                }.onFailure { android.util.Log.w("HyperChangerDock", "Glass activation failed", it) }
+                    btm.m.os4.systemuihook.ModuleLog.i("HyperChangerDock", "Native Dock glass ready")
+                }.onFailure { btm.m.os4.systemuihook.ModuleLog.w("HyperChangerDock", "Glass activation failed", it) }
             }
         }, 100L)
     }

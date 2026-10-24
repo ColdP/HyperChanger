@@ -2,7 +2,7 @@
 package btm.m.os4.systemuihook
 
 import android.content.SharedPreferences
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
@@ -13,6 +13,7 @@ class RearScreenWallpaperLimitModule : XposedModule() {
     private var installed = false
 
     override fun onPackageLoaded(param: PackageLoadedParam) {
+        if (!HookModuleSafety.enter(this, param.packageName)) return
         if (param.packageName != PACKAGE || !OsCompatibility.areHooksAllowed() || installed) return
         val prefs = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
         if (!prefs.readRearScreenWallpaperLimitSettings().enabled) return
@@ -46,8 +47,8 @@ class RearScreenWallpaperLimitModule : XposedModule() {
                     count < settings.limit
                 }
             installed = true
-            log(Log.INFO, TAG, "Rear-screen wallpaper capacity check installed")
-        }.onFailure { log(Log.ERROR, TAG, "Could not install rear-screen wallpaper limit", it) }
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Rear-screen wallpaper capacity check installed")
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install rear-screen wallpaper limit", it) }
 
         if (installed) installAssistantGuard(loader, prefs)
     }
@@ -66,7 +67,7 @@ class RearScreenWallpaperLimitModule : XposedModule() {
                     if (!settings.enabled) chain.proceed()
                     else if ((chain.getArg(0) as Int) < settings.limit) pass else exceeded
                 }
-        }.onFailure { log(Log.WARN, TAG, "Rear-screen assistant capacity guard unavailable", it) }
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Rear-screen assistant capacity guard unavailable", it) }
     }
 
     private companion object {

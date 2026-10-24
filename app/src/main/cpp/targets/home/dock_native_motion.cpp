@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later */
 #include <android/log.h>
+#include "module_safety.h"
 #include <android/binder_ibinder.h>
 #include <android/binder_parcel.h>
 #include <android/binder_status.h>

@@ -103,7 +103,7 @@ internal class FaceUnlockStateHook(private val module: XposedModule) {
             )
             hookFaceRunningState(module, clazz)
             hookFaceAuthenticationCallbacks(module, clazz)
-            module.log(android.util.Log.DEBUG, TAG, "face monitor hooked: ${clazz.name}")
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, android.util.Log.DEBUG, TAG, "face monitor hooked: ${clazz.name}")
         }
     }
 
@@ -130,7 +130,7 @@ internal class FaceUnlockStateHook(private val module: XposedModule) {
                 FaceUnlockFocusController.FaceState.FAILED,
             )
             hookRepositoryErrorMethods(module, clazz)
-            module.log(android.util.Log.DEBUG, TAG, "face repository callback hooked: ${clazz.name}")
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, android.util.Log.DEBUG, TAG, "face repository callback hooked: ${clazz.name}")
             return true
         }
         return false
@@ -190,7 +190,7 @@ internal class FaceUnlockStateHook(private val module: XposedModule) {
                 authenticationActivity = true,
             )
             hookErrorMethods(module, callbackClass, setOf("onAuthenticationError"))
-            module.log(android.util.Log.DEBUG, TAG, "face callback hooked: ${callbackClass.name}")
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, android.util.Log.DEBUG, TAG, "face callback hooked: ${callbackClass.name}")
         }
     }
 
@@ -364,7 +364,7 @@ internal class FaceUnlockStateHook(private val module: XposedModule) {
         authenticationActivity: Boolean = false,
     ) {
         val context: Context = classLoader?.let(UnlockIslandRuntime::getContext) ?: return
-        module.log(android.util.Log.DEBUG, TAG, "face state=$state source=$source")
+        btm.m.os4.systemuihook.HookModuleLogger.log(module, android.util.Log.DEBUG, TAG, "face state=$state source=$source")
         if (authenticationActivity) {
             FaceUnlockFocusController.onFaceAuthenticationActivity(context)
         } else if (runningStopped) {

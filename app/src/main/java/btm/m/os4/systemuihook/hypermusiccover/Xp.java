@@ -1,6 +1,6 @@
 package btm.m.os4.systemuihook.hypermusiccover;
 
-import android.util.Log;
+import btm.m.os4.systemuihook.ModuleLog;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Executable;
@@ -51,9 +51,9 @@ public final class Xp {
     public static void log(String msg) {
         XposedInterface api = sApi;
         if (api != null) {
-            api.log(Log.INFO, "LSPosed-Bridge", msg);
+            btm.m.os4.systemuihook.HookModuleLogger.log(api, ModuleLog.INFO, "LSPosed-Bridge", msg);
         } else {
-            Log.i("LSPosed-Bridge", msg);
+            ModuleLog.i("LSPosed-Bridge", msg);
         }
     }
 

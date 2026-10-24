@@ -24,9 +24,10 @@ fun main(args: Array<String>) {
         ls() { printf 'u:object_r:privapp_data_file:s0:c123,c456 %s\n' "${'$'}2"; }
         chown() { printf 'owner %s %s\n' "${'$'}1" "${'$'}2" >> ${quote(shellPath(log))}; }
         chcon() { printf 'label %s %s\n' "${'$'}1" "${'$'}2" >> ${quote(shellPath(log))}; }
+        settings() { test "${'$'}*" = 'put secure miui_multiple_split_resolved_max_stages 3'; }
     """.trimIndent()
-    fun run(prefix: String, blob: ByteArray, expectedSize: Int = blob.size): Pair<Int, String> {
-        val command = buildHomeLauncherStageCommand(shellPath(launcher), expectedSize)
+    fun run(prefix: String, blob: ByteArray, expectedSize: Int = blob.size, safetyFlags: Int? = null): Pair<Int, String> {
+        val command = buildHomeLauncherStageCommand(shellPath(launcher), expectedSize, safetyFlags = safetyFlags)
         Files.writeString(root.resolve("command.sh"), prefix + "\n" + command)
         val process = ProcessBuilder(args[0], "--noprofile", "--norc", shellPath(root.resolve("command.sh")))
             .redirectErrorStream(true).start()
@@ -68,5 +69,21 @@ fun main(args: Array<String>) {
     check(contextFailure.first == 8 && contextFailure.second.contains("context failed"))
     val missingContext = run(mocks + "\nls() { printf '?\\n'; }", next)
     check(missingContext.first != 0 && missingContext.second.contains("missing SELinux context"))
-    println("Passed launcher staging: binary stdin, quoted paths, app SELinux categories, atomic updates, cleanup, truncation, and failure diagnostics")
+    val safety = target.parent.resolve("hyperchanger-safety")
+    repeat(8) { flags ->
+        check(run(mocks, updated, safetyFlags = flags) == (0 to ""))
+        check(Files.readString(safety) == flags.toString())
+        val permissions = Files.readString(log)
+        check(permissions.contains("owner 10123:10123 ${shellPath(safety)}."))
+        check(permissions.contains("label u:object_r:privapp_data_file:s0:c123,c456 ${shellPath(safety)}."))
+    }
+    val safetyFailure = run(mocks + """
+
+        chcon() { case "${'$'}2" in *hyperchanger-safety.*) return 12;; esac; }
+    """.trimIndent(), updated, safetyFlags = 0)
+    check(safetyFailure.first == 12 && safetyFailure.second.contains("safety-label failed"))
+    check(Files.readString(safety) == "7")
+    Files.list(target.parent).use { files -> check(files.count() == 2L) }
+    check(runCatching { buildHomeLauncherStageCommand("unused", 1, safetyFlags = 8) }.isFailure)
+    println("Passed launcher staging: binary stdin, quoted paths, SELinux/ownership, flags 0..7, atomic updates, failed-label cleanup, truncation, and diagnostics")
 }

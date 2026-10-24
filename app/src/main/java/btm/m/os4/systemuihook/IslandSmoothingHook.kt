@@ -15,7 +15,7 @@ import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
@@ -50,6 +50,7 @@ internal class IslandSmoothingHook(private val module: XposedModule) {
     private val drawableStroke = runCatching { GradientDrawable::class.java.getDeclaredField("mStrokePaint").apply { isAccessible = true } }.getOrNull()
 
     fun install(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.ISLAND)) return
         listOf(BACKGROUND, BASE_CONTENT).forEach { name ->
             runCatching { classLoader.loadClass(name) }.getOrNull()?.let { onClassLoaded(it, preferences) }
         }
@@ -57,6 +58,7 @@ internal class IslandSmoothingHook(private val module: XposedModule) {
 
     @Synchronized
     fun onClassLoaded(clazz: Class<*>, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.ISLAND)) return
         if (clazz.name !in setOf(BACKGROUND, BASE_CONTENT) || !installed.add(clazz)) return
         runCatching {
             settings = readIslandSmoothingSettings(preferences)
@@ -90,7 +92,7 @@ internal class IslandSmoothingHook(private val module: XposedModule) {
             }
         }.onFailure {
             installed.remove(clazz)
-            module.log(Log.WARN, "HyperChanger", "Could not hook collapsed-island smoothing: ${clazz.name}", it)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, "HyperChanger", "Could not hook collapsed-island smoothing: ${clazz.name}", it)
         }
     }
 
@@ -240,7 +242,7 @@ internal class IslandSmoothingHook(private val module: XposedModule) {
     }.getOrElse {
         if (!loggedDrawFallback) {
             loggedDrawFallback = true
-            module.log(Log.WARN, "HyperChanger", "Smooth island drawing fell back to OEM drawing", it)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, "HyperChanger", "Smooth island drawing fell back to OEM drawing", it)
         }
         false
     }

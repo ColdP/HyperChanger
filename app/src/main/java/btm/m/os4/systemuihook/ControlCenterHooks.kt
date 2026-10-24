@@ -32,12 +32,14 @@ internal class ControlCenterHooks(
     private var customTileRetryScheduled = false
 
     fun installHeaderHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.CONTROL_CENTER)) return
         controlCenterHeaderHeightHook.install(classLoader, preferences)
         controlCenterCarrierHook.install(classLoader, preferences)
         controlCenterClockHook.install(classLoader, preferences)
     }
 
     fun onHeaderClassLoaded(loadedClass: Class<*>, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.CONTROL_CENTER)) return
         controlCenterHeaderHeightHook.onClassLoaded(loadedClass, preferences)
         controlCenterCarrierHook.onClassLoaded(loadedClass, preferences)
         controlCenterClockHook.onClassLoaded(loadedClass, preferences)
@@ -45,6 +47,7 @@ internal class ControlCenterHooks(
 
     /** Clears the "force new control center" flag so the legacy shade comes back. */
     fun installOldControlCenterHook(loader: ClassLoader, prefs: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.CONTROL_CENTER)) return
         if (!readSettingsAppScopePreferences(prefs).oldControlCenter) return
         listOf(
             "com.miui.systemui.controlcenter.data.repository.ControlCenterSettingsRepositoryImpl" to "forceUseControlCenter",
@@ -82,6 +85,7 @@ internal class ControlCenterHooks(
     }
 
     fun installCustomTileHooks(loader: ClassLoader, prefs: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.CONTROL_CENTER)) return
         if (customTileHookInstalled) {
             installPluginTileHook(loader, prefs)
             return

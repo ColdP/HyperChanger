@@ -5,7 +5,7 @@ import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -50,7 +50,7 @@ internal class LockscreenShortcutGestureHooks(
                         handler.postDelayed({ launchInFlight.set(false) }, 800L)
                     }.onFailure {
                         launchInFlight.set(false)
-                        module.log(Log.WARN, logTag, "Could not launch lockscreen shortcut", it)
+                        btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not launch lockscreen shortcut", it)
                     }
                 }
             }
@@ -96,7 +96,7 @@ internal class LockscreenShortcutGestureHooks(
                         .intercept { chain ->
                             val result = chain.proceed()
                             runCatching { chain.thisObject?.let(bind) }.onFailure {
-                                module.log(Log.WARN, logTag, "Could not bind lockscreen shortcut icons", it)
+                                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not bind lockscreen shortcut icons", it)
                             }
                             result
                         }
@@ -113,9 +113,9 @@ internal class LockscreenShortcutGestureHooks(
                     }
                 installed += move
             }
-            module.log(Log.INFO, logTag, "Installed AOD shortcut gesture bindings with loader $loader")
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed AOD shortcut gesture bindings with loader $loader")
         }.onFailure {
-            module.log(Log.WARN, logTag, "Could not install AOD shortcut gesture bindings", it)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install AOD shortcut gesture bindings", it)
         }
     }
 

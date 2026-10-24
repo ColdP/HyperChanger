@@ -14,7 +14,7 @@ import android.graphics.drawable.Drawable
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import android.view.MotionEvent
 import android.widget.ImageView
 import android.widget.TextView
@@ -100,7 +100,7 @@ internal class OthersHooks(
                             add.invoke(manager, "${sbn.packageName}:${sbn.id}", sbn.packageName, sbn.id,
                                 sbn.key, business, descriptor.newInstance(business, 0, 500), extras, parse.invoke(null, extras), true)
                         }
-                    }.onFailure { error -> module.log(Log.WARN, logTag, "Could not forward simulator notification to rear screen", error) }
+                    }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not forward simulator notification to rear screen", error) }
                 }
             }
             // Resolve all signatures before registering. Each original callback runs exactly once.
@@ -126,11 +126,11 @@ internal class OthersHooks(
                     runCatching {
                         (chain.thisObject as? android.service.notification.NotificationListenerService)
                             ?.activeNotifications?.forEach { forward(it, false) }
-                    }.onFailure { error -> module.log(Log.WARN, logTag, "Could not restore simulator rear-screen notifications", error) }
+                    }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not restore simulator rear-screen notifications", error) }
                     result
                 }
-            module.log(Log.INFO, logTag, "Installed simulator-only rear-screen notification bridge")
-        }.onFailure { error -> module.log(Log.WARN, logTag, "Could not install simulator rear-screen bridge for this SubScreen version", error) }
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed simulator-only rear-screen notification bridge")
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install simulator rear-screen bridge for this SubScreen version", error) }
     }
 
     private class RearSwipeState {
@@ -229,7 +229,7 @@ internal class OthersHooks(
                                 setBlur(activity, state, .5f)
                                 activity.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                                 true
-                            }.onFailure { module.log(Log.WARN, logTag, "Rear-screen left-swipe launch failed", it) }.getOrDefault(false)
+                            }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Rear-screen left-swipe launch failed", it) }.getOrDefault(false)
                             if (!launched) reset(activity, state, true)
                         } else reset(activity, state, true)
                     }
@@ -245,11 +245,12 @@ internal class OthersHooks(
                     }
             }
             rearScreenLeftSwipeInstalled = true
-            module.log(Log.INFO, logTag, "Installed SubScreenLauncher left-swipe hooks")
-        }.onFailure { module.log(Log.WARN, logTag, "Rear-screen left-swipe hook unavailable on this build", it) }
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed SubScreenLauncher left-swipe hooks")
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Rear-screen left-swipe hook unavailable on this build", it) }
     }
 
     fun installAppNavigation(param: PackageLoadedParam) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.NAVIGATION)) return
         val packageName = param.packageName
         if (packageName != "com.xiaomi.shop" && packageName != "com.mipay.wallet" &&
             packageName != "com.mi.health" && packageName != "com.apple.android.music" &&
@@ -270,7 +271,7 @@ internal class OthersHooks(
                 runCatching {
                     installXiaomiHealthWatchFaceTrialBypass(param.defaultClassLoader)
                 }.onFailure { error ->
-                    module.log(Log.ERROR, logTag, "Could not install Xiaomi Health watch-face trial hook", error)
+                    btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.ERROR, logTag, "Could not install Xiaomi Health watch-face trial hook", error)
                 }
             }
             if (!ScopedSettings.getBoolean(prefs, packageName, ScopedSettings.KEY_ENABLED, true)) return
@@ -295,8 +296,8 @@ internal class OthersHooks(
                     AppBottomNavHooks.installLuckinCoffee(module, param.defaultClassLoader, blur, label, style, advanced, color)
                 }
             }
-            module.log(Log.INFO, logTag, "Installed app navigation hooks for $packageName")
-        }.onFailure { error -> module.log(Log.ERROR, logTag, "Could not install app navigation hooks for $packageName", error) }
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed app navigation hooks for $packageName")
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.ERROR, logTag, "Could not install app navigation hooks for $packageName", error) }
     }
 
     /** Override MiShare's app-side AirDrop availability checks when enabled for its scope. */
@@ -322,7 +323,7 @@ internal class OthersHooks(
             .setExceptionMode(ExceptionMode.PROTECTIVE)
             .setId("hyperchanger:airdrop-force-enable:cta")
             .intercept { true }
-        module.log(Log.INFO, logTag, "Installed MiShare AirDrop availability hooks in ${param.packageName}")
+        btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed MiShare AirDrop availability hooks in ${param.packageName}")
     }
 
     /** Keep the Xiaomi 18 Pro Max / madrid identity local to the Mi Share process. */
@@ -361,7 +362,7 @@ internal class OthersHooks(
                             }
                         }
                 }
-        }.onFailure { error -> module.log(Log.WARN, logTag, "Could not install Mi Share property spoof", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install Mi Share property spoof", error) }
 
         runCatching {
             mapOf(
@@ -376,7 +377,7 @@ internal class OthersHooks(
                     set(null, value)
                 }
             }
-        }.onFailure { error -> module.log(Log.WARN, logTag, "Could not update Mi Share Build identity", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not update Mi Share Build identity", error) }
     }
 
     private fun installXiaomiHealthWatchFaceTrialBypass(loader: ClassLoader) {
@@ -397,7 +398,7 @@ internal class OthersHooks(
                 resolve.invoke(promise, (System.currentTimeMillis() + oneHundredYearsMs).toDouble())
                 null
             }
-        module.log(Log.INFO, logTag, "Installed Xiaomi Health unlimited watch-face trial hook")
+        btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed Xiaomi Health unlimited watch-face trial hook")
     }
 
     private fun settingsField(target: Any, name: String): java.lang.reflect.Field? = generateSequence(target.javaClass) { it.superclass }
@@ -821,7 +822,7 @@ internal class OthersHooks(
                     mapField.set(null, replacement)
                 }
             }.onFailure { error ->
-                module.log(Log.WARN, logTag, "Could not replace rear music configuration map", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not replace rear music configuration map", error)
             }
 
             fun currentWhitelist(): Set<String> = preferences
@@ -899,9 +900,9 @@ internal class OthersHooks(
                         }
                     }
             }
-            module.log(Log.INFO, logTag, "Installed rear music whitelist hooks (${whitelist.size} app(s), ${configClass.name})")
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed rear music whitelist hooks (${whitelist.size} app(s), ${configClass.name})")
         }.onFailure { error ->
-            module.log(Log.WARN, logTag, "Could not update rear music control whitelist", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not update rear music control whitelist", error)
         }
     }
 
@@ -1123,9 +1124,9 @@ internal class OthersHooks(
                         else chain.proceed()
                     }
             }
-            module.log(Log.INFO, logTag, "Rear-screen app-widget gates enabled in this process")
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Rear-screen app-widget gates enabled in this process")
         }.onFailure { error ->
-            module.log(Log.WARN, logTag, "Could not enable rear-screen app-widget gates", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not enable rear-screen app-widget gates", error)
         }
     }
 
@@ -1431,9 +1432,9 @@ internal class OthersHooks(
                         }
                 }
             }
-            module.log(Log.INFO, logTag, "PersonalAssistant rear-screen app-card catalog filters bypassed")
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "PersonalAssistant rear-screen app-card catalog filters bypassed")
         }.onFailure { error ->
-            module.log(Log.WARN, logTag, "Could not unlock PersonalAssistant rear-screen app-card catalog", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not unlock PersonalAssistant rear-screen app-card catalog", error)
         }
     }
 
@@ -1511,9 +1512,9 @@ internal class OthersHooks(
                     }
                 }
             }
-            module.log(Log.INFO, logTag, "PersonalAssistant build profile applied: Xiaomi 18 Pro / hongkong (M610BB)")
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "PersonalAssistant build profile applied: Xiaomi 18 Pro / hongkong (M610BB)")
         }.onFailure { error ->
-            module.log(Log.WARN, logTag, "Could not apply PersonalAssistant hongkong build profile", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not apply PersonalAssistant hongkong build profile", error)
         }
     }
 
@@ -1527,9 +1528,9 @@ internal class OthersHooks(
             val config = classLoader.loadClass("o2.C0673j")
             setStaticFieldValue(config, "f10018p", 4)
             setStaticFieldValue(config, "f10019q", true)
-            module.log(Log.INFO, logTag, "SubScreenCenter app-card state forced: osVersion=4, appWidget=true")
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "SubScreenCenter app-card state forced: osVersion=4, appWidget=true")
         }.onFailure { error ->
-            module.log(Log.WARN, logTag, "Could not force SubScreenCenter app-card state", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not force SubScreenCenter app-card state", error)
         }
     }
 
@@ -1846,9 +1847,9 @@ internal class OthersHooks(
                         }
                 }
             }
-            module.log(Log.INFO, logTag, "ThemeManager rear-screen personalization guards bypassed")
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "ThemeManager rear-screen personalization guards bypassed")
         }.onFailure { error ->
-            module.log(Log.WARN, logTag, "Could not bypass ThemeManager rear-screen personalization guards", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not bypass ThemeManager rear-screen personalization guards", error)
         }
     }
 
@@ -1919,10 +1920,10 @@ internal class OthersHooks(
                     }
                     val widget = widgetFactory.invoke(null, productId, appName, 2, resource.absolutePath, icon.absolutePath, preview?.absolutePath ?: "", bundle)
                     val result = insert.invoke(subScreen, widget)
-                    android.util.Log.i(logTag, "Registered imported rear-screen AI widget $productId: $result")
+                    btm.m.os4.systemuihook.ModuleLog.i(logTag, "Registered imported rear-screen AI widget $productId: $result")
                 }
             }.onFailure { error ->
-                android.util.Log.w(logTag, "Could not register imported rear-screen AI widgets", error)
+                btm.m.os4.systemuihook.ModuleLog.w(logTag, "Could not register imported rear-screen AI widgets", error)
             }
         }, 2500L)
     }

@@ -3,7 +3,7 @@
 package btm.m.os4.systemuihook
 
 import android.content.SharedPreferences
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
@@ -19,11 +19,14 @@ internal class LockscreenHooks(
 ) {
     private val shortcutGestures = LockscreenShortcutGestureHooks(module, logTag)
 
-    fun installShortcutGestureHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
+    fun installShortcutGestureHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         shortcutGestures.install(classLoader, preferences)
+    }
 
     // Preserve the process-wide guard and its write point after both install attempts.
     fun installBottomTextHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         if (!lockscreenChargingHookInstalled) {
             installLockscreenChargingTextHook(classLoader, preferences)
             installLockscreenBottomTextViewHook(classLoader, preferences)
@@ -56,14 +59,14 @@ internal class LockscreenHooks(
                                 if ((hideDnd || hideNotifications) && type is Int) hide.invoke(controller, type)
                             }
                         }.onFailure { error ->
-                            module.log(Log.ERROR, logTag, "Could not hide lockscreen charging text", error)
+                            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.ERROR, logTag, "Could not hide lockscreen charging text", error)
                         }
                     }
                     result
                 }
-            module.log(Log.INFO, logTag, "Installed lockscreen charging-text hook")
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed lockscreen charging-text hook")
         }.onFailure { error ->
-            module.log(Log.ERROR, logTag, "Could not install lockscreen charging-text hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.ERROR, logTag, "Could not install lockscreen charging-text hook", error)
         }
     }
 
@@ -84,7 +87,7 @@ internal class LockscreenHooks(
                     it.name == "onFinishInflate"
             }
             if (refreshMethods.isEmpty()) {
-                module.log(Log.DEBUG, logTag, "NotificationNumStateView has no known refresh methods")
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.DEBUG, logTag, "NotificationNumStateView has no known refresh methods")
                 return@runCatching
             }
             refreshMethods.forEachIndexed { index, method ->
@@ -140,11 +143,11 @@ internal class LockscreenHooks(
                             }
                     }
             }.onFailure { error ->
-                module.log(Log.DEBUG, logTag, "Optional lockscreen bottom-text animation hook unavailable", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.DEBUG, logTag, "Optional lockscreen bottom-text animation hook unavailable", error)
             }
-            module.log(Log.INFO, logTag, "Installed lockscreen bottom-text view hooks (${refreshMethods.size} methods)")
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed lockscreen bottom-text view hooks (${refreshMethods.size} methods)")
         }.onFailure { error ->
-            module.log(Log.DEBUG, logTag, "Optional NotificationNumStateView hook unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.DEBUG, logTag, "Optional NotificationNumStateView hook unavailable", error)
         }
     }
 

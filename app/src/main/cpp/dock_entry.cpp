@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <string_view>
+#include "module_safety.h"
 
 using Hook = int (*)(void *, void *, void **);
 using Unhook = int (*)(void *);
@@ -38,6 +39,7 @@ void start_in_child() {
     if (spawner()) return; // Never create threads in the pre-fork runtime.
     if (process_kind.load(std::memory_order_acquire) == 2) return;
     if (launcher()) {
+        if (!hc_native_features_allowed()) return;
         process_kind.store(1, std::memory_order_release);
         start_dock_native_motion(hook, unhook);
     }

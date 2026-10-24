@@ -31,7 +31,7 @@ import android.widget.ImageView;
 import android.widget.TextView;
 
 import java.util.List;
-import android.util.Log;
+import btm.m.os4.systemuihook.ModuleLog;
 import android.view.Choreographer;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
@@ -731,6 +731,7 @@ public class Main extends XposedModule {
 
     @Override
     public void onModuleLoaded(ModuleLoadedParam param) {
+        btm.m.os4.systemuihook.HookModuleLogger.attach(this, getRemotePreferences("hyper_system_ui_hook"));
         Xp.attach(this);
     }
 
@@ -742,9 +743,11 @@ public class Main extends XposedModule {
      */
     @Override
     public void onPackageLoaded(PackageLoadedParam param) {
+        if (!btm.m.os4.systemuihook.HookModuleSafety.enter(this, param.getPackageName())) return;
         Xp.attach(this);
         String pkg = param.getPackageName();
         if ("com.autonavi.minimap".equals(pkg)) {
+            if (!btm.m.os4.systemuihook.ModuleSafetyRuntime.allows(btm.m.os4.systemuihook.SafetySection.ISLAND)) return;
             AmapCapsuleBridge.handle(param.getDefaultClassLoader());
             return;
         }
@@ -753,6 +756,8 @@ public class Main extends XposedModule {
             return;
         }
         if (!"com.android.systemui".equals(pkg)) return;
+        if (!btm.m.os4.systemuihook.ModuleSafetyRuntime.allows(btm.m.os4.systemuihook.SafetySection.LOCKSCREEN) ||
+                !btm.m.os4.systemuihook.ModuleSafetyRuntime.allows(btm.m.os4.systemuihook.SafetySection.NOTIFICATIONS)) return;
 
         IosShadeMaterial.install();
         try {
@@ -2152,7 +2157,7 @@ public class Main extends XposedModule {
                         drive(i.getFloatExtra("y", -1f), anim, type);
                     }
                 } catch (Throwable t) {
-                    Xp.log(TAG + "op failed: " + Log.getStackTraceString(t));
+                    Xp.log(TAG + "op failed: " + ModuleLog.getStackTraceString(t));
                 }
             }
         };
@@ -2596,7 +2601,7 @@ public class Main extends XposedModule {
             float p = coverProgress(y);
             if (!Float.isNaN(p)) setCardProgress(p);
         } catch (Throwable t) {
-            Xp.log(TAG + "applyY failed: " + Log.getStackTraceString(t));
+            Xp.log(TAG + "applyY failed: " + ModuleLog.getStackTraceString(t));
         }
     }
 
@@ -2630,7 +2635,7 @@ public class Main extends XposedModule {
                     sCurrentY = y;
                     Xp.log(TAG + "notifStateChange(" + y + ", " + anim + ", " + typeName + ") OK");
                 } catch (Throwable t) {
-                    Xp.log(TAG + "drive failed: " + Log.getStackTraceString(t));
+                    Xp.log(TAG + "drive failed: " + ModuleLog.getStackTraceString(t));
                 }
             }
         });
@@ -2676,7 +2681,7 @@ public class Main extends XposedModule {
                             + " textSizePx=" + Xp.getObjectField(t, "textSizePx")
                             + " -> glyphs " + Math.round(b.width()) + "x" + Math.round(b.height()));
                 } catch (Throwable e) {
-                    Xp.log(TAG + "setClockParams failed: " + Log.getStackTraceString(e));
+                    Xp.log(TAG + "setClockParams failed: " + ModuleLog.getStackTraceString(e));
                 }
             }
         });
@@ -2772,7 +2777,7 @@ public class Main extends XposedModule {
                 if (ms.length() > 0) Xp.log(TAG + "  " + c.getSimpleName() + " methods: " + ms);
             }
         } catch (Throwable t) {
-            Xp.log(TAG + "dumpClockStyleInfo failed: " + Log.getStackTraceString(t));
+            Xp.log(TAG + "dumpClockStyleInfo failed: " + ModuleLog.getStackTraceString(t));
         }
     }
 
@@ -6596,7 +6601,7 @@ public class Main extends XposedModule {
                     Xp.log(TAG + "video cover shown " + sScreenW + "x" + sScreenH
                             + " bias=" + sBias + ", draw " + draw + "ms");
                 } catch (Throwable t) {
-                    Xp.log(TAG + "video cover failed: " + Log.getStackTraceString(t));
+                    Xp.log(TAG + "video cover failed: " + ModuleLog.getStackTraceString(t));
                 }
             }
         });
@@ -7132,7 +7137,7 @@ public class Main extends XposedModule {
                     + "; the keyguard engine will be rebuilt");
             return true;
         } catch (Throwable t) {
-            Xp.log(TAG + "could not set a lock wallpaper: " + Log.getStackTraceString(t));
+            Xp.log(TAG + "could not set a lock wallpaper: " + ModuleLog.getStackTraceString(t));
             return false;
         }
     }
@@ -7261,7 +7266,7 @@ public class Main extends XposedModule {
                     + "x the screen) - re-fitted to " + sw + "x" + sh
                     + " so leaving cover mode can crossfade instead of cutting");
         } catch (Throwable t) {
-            Xp.log(TAG + "could not re-fit the lock wallpaper: " + Log.getStackTraceString(t));
+            Xp.log(TAG + "could not re-fit the lock wallpaper: " + ModuleLog.getStackTraceString(t));
         } finally {
             if (fitted != null && fitted != src) fitted.recycle();
             if (src != null) src.recycle();
@@ -10025,7 +10030,7 @@ public class Main extends XposedModule {
                     Xp.log(TAG + "cover attached, layer "
                             + layer.getWidth() + "x" + layer.getHeight());
                 } catch (Throwable t) {
-                    Xp.log(TAG + "attachCover failed: " + Log.getStackTraceString(t));
+                    Xp.log(TAG + "attachCover failed: " + ModuleLog.getStackTraceString(t));
                 }
             }
         });
@@ -10229,7 +10234,7 @@ public class Main extends XposedModule {
                 Xp.log(TAG + "active-session listener registered");
             }
         } catch (Throwable t) {
-            Xp.log(TAG + "session listener failed: " + Log.getStackTraceString(t));
+            Xp.log(TAG + "session listener failed: " + ModuleLog.getStackTraceString(t));
         }
         rebindSession();
     }
@@ -11287,7 +11292,7 @@ public class Main extends XposedModule {
                     }
                     if (n == 0) Xp.log(TAG + idName + " not found in either clock root");
                 } catch (Throwable e) {
-                    Xp.log(TAG + "groupScale failed: " + Log.getStackTraceString(e));
+                    Xp.log(TAG + "groupScale failed: " + ModuleLog.getStackTraceString(e));
                 }
             }
         });
@@ -11456,7 +11461,7 @@ public class Main extends XposedModule {
                 }
             }
         } catch (Throwable t) {
-            Xp.log(TAG + "dumpAnimConfigs failed: " + Log.getStackTraceString(t));
+            Xp.log(TAG + "dumpAnimConfigs failed: " + ModuleLog.getStackTraceString(t));
         }
     }
 

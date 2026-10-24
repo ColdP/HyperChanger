@@ -14,6 +14,9 @@ private const val KEY_SOFT_GLASS_APPLIED_PRESET = "soft_glass_applied_preset_v1"
 internal fun readSoftGlassSettings(p: SharedPreferences) = readSoftGlassSettings(p, "")
 
 internal fun readSoftGlassSettings(p: SharedPreferences, prefix: String): SoftGlassSettings {
+    // The runtime policy is initialized only inside hooked processes. App persistence
+    // continues to read the original settings, so safe mode never overwrites a preset.
+    if (!ModuleSafetyRuntime.allows(SafetySection.GLASS)) return SoftGlassSettings()
     val key = { suffix: String -> if (prefix.isEmpty()) "${PREFIX}${suffix}" else "${prefix}${suffix}" }
     return SoftGlassSettings(
     enabled = p.getBoolean(key("enabled"), false),

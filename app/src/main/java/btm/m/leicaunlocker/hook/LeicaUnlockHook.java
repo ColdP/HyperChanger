@@ -8,7 +8,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.Log;
+import btm.m.os4.systemuihook.ModuleLog;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.RequiresApi;
@@ -123,6 +123,7 @@ public final class LeicaUnlockHook extends XposedModule {
 
     @Override
     public void onModuleLoaded(@NonNull ModuleLoadedParam param) {
+        btm.m.os4.systemuihook.HookModuleLogger.attach(this, getRemotePreferences("hyper_system_ui_hook"));
         targetProcess = ModuleConfig.isSupportedProcess(param.getProcessName());
         if (!targetProcess) {
             detach();
@@ -132,15 +133,16 @@ public final class LeicaUnlockHook extends XposedModule {
         try {
             preferences = getRemotePreferences(ModuleConfig.PREFERENCE_GROUP);
             galleryProcess = isGalleryProcess(param.getProcessName());
-            log(Log.INFO, TAG, "Loaded in " + param.getProcessName() + " with API " + getApiVersion());
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Loaded in " + param.getProcessName() + " with API " + getApiVersion());
         } catch (RuntimeException error) {
-            log(Log.WARN, TAG, "Remote preferences are unavailable; using enabled defaults", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Remote preferences are unavailable; using enabled defaults", error);
         }
     }
 
     @Override
     @RequiresApi(Build.VERSION_CODES.Q)
     public void onPackageLoaded(@NonNull PackageLoadedParam param) {
+        if (!btm.m.os4.systemuihook.HookModuleSafety.enter(this, param.getPackageName())) return;
         if (!btm.m.os4.systemuihook.OsCompatibility.areHooksAllowed()) {
             return;
         }
@@ -274,9 +276,9 @@ public final class LeicaUnlockHook extends XposedModule {
                     systemProperties.getDeclaredMethod("get", String.class, String.class),
                     "system_property_get_default"
             );
-            log(Log.INFO, TAG, "System property profile hooks installed");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "System property profile hooks installed");
         } catch (ReflectiveOperationException | RuntimeException error) {
-            log(Log.ERROR, TAG, "Unable to install SystemProperties hooks", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.ERROR, TAG, "Unable to install SystemProperties hooks", error);
         }
     }
 
@@ -290,9 +292,9 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setId("camera_leica_ui_gate")
                     .intercept(chain -> !isEnabled() || !pref(ModuleConfig.KEY_LEICA_UI, true)
                             ? Boolean.FALSE : Boolean.TRUE);
-            log(Log.INFO, TAG, "Camera Leica UI gate hook installed");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Camera Leica UI gate hook installed");
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
-            log(Log.WARN, TAG, "Unable to hook Te.b.W Leica UI gate", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to hook Te.b.W Leica UI gate", error);
         }
     }
 
@@ -337,7 +339,7 @@ public final class LeicaUnlockHook extends XposedModule {
         for (Map.Entry<String, String> entry : values.entrySet()) {
             setStaticStringField(Build.class, entry.getKey(), entry.getValue());
         }
-        log(Log.INFO, TAG, "Gallery AI build profile applied: Xiaomi 18 Pro Max / madrid");
+        btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery AI build profile applied: Xiaomi 18 Pro Max / madrid");
     }
 
     /**
@@ -353,7 +355,7 @@ public final class LeicaUnlockHook extends XposedModule {
         restoreGalleryOriginalBuildValue("MODEL");
         restoreGalleryOriginalBuildValue("BRAND");
         restoreGalleryOriginalBuildValue("MANUFACTURER");
-        log(Log.INFO, TAG, "Gallery watermark build profile applied: lhasa");
+        btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery watermark build profile applied: lhasa");
     }
 
     private void captureGalleryOriginalBuildValues() {
@@ -400,9 +402,9 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setPriority(PRIORITY_HIGHEST)
                     .setId("motion_capture_support")
                     .intercept(chain -> isEnabled() || Boolean.TRUE.equals(chain.proceed()));
-            log(Log.INFO, TAG, "Camera motion-capture capability hook installed");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Camera motion-capture capability hook installed");
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
-            log(Log.WARN, TAG, "Unable to hook motion-capture capability", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to hook motion-capture capability", error);
         }
         try {
             // H() calls U() again from the slow-motion shutter path.  On 6.7
@@ -415,9 +417,9 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setPriority(PRIORITY_HIGHEST)
                     .setId("motion_capture_switch")
                     .intercept(chain -> isEnabled() || Boolean.TRUE.equals(chain.proceed()));
-            log(Log.INFO, TAG, "Camera motion-capture switch hook installed");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Camera motion-capture switch hook installed");
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
-            log(Log.WARN, TAG, "Unable to hook motion-capture switch", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to hook motion-capture switch", error);
         }
         try {
             // The request writer checks the camera-characteristics key map
@@ -432,9 +434,9 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setPriority(PRIORITY_HIGHEST)
                     .setId("motion_capture_vendor_capability")
                     .intercept(chain -> chain.proceed());
-            log(Log.INFO, TAG, "Camera motion-capture vendor capability hook installed");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Camera motion-capture vendor capability hook installed");
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
-            log(Log.WARN, TAG, "Unable to hook motion-capture vendor capability", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to hook motion-capture vendor capability", error);
         }
         try {
             Class<?> liveSupport = Class.forName("Wr.C2887n", false, classLoader);
@@ -444,9 +446,9 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setPriority(PRIORITY_HIGHEST)
                     .setId("live_photo_support")
                     .intercept(chain -> chain.proceed());
-            log(Log.INFO, TAG, "Camera Live Photo capability hook installed");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Camera Live Photo capability hook installed");
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
-            log(Log.WARN, TAG, "Unable to hook Live Photo capability", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to hook Live Photo capability", error);
         }
     }
 
@@ -462,7 +464,7 @@ public final class LeicaUnlockHook extends XposedModule {
         for (Map.Entry<String, String> entry : values.entrySet()) {
             setStaticStringField(Build.class, entry.getKey(), entry.getValue());
         }
-        log(Log.INFO, TAG, "Build profile applied: nezha / 25128PNA1C");
+        btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Build profile applied: nezha / 25128PNA1C");
     }
 
     private void captureNativeFocalLengthConfig(ClassLoader classLoader) {
@@ -474,11 +476,11 @@ public final class LeicaUnlockHook extends XposedModule {
             if (nativeCameraConfig != null) {
                 return;
             }
-            log(Log.INFO, TAG, "Legacy camera configuration capture produced no config; trying modern provider");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Legacy camera configuration capture produced no config; trying modern provider");
         } catch (ClassNotFoundException ignored) {
-            log(Log.INFO, TAG, "Legacy camera configuration factory is absent; trying modern provider");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Legacy camera configuration factory is absent; trying modern provider");
         } catch (LinkageError error) {
-            log(Log.INFO, TAG, "Legacy camera configuration factory is unavailable; trying modern provider", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Legacy camera configuration factory is unavailable; trying modern provider", error);
         }
 
         captureModernNativeFocalLengthConfig(classLoader);
@@ -514,14 +516,14 @@ public final class LeicaUnlockHook extends XposedModule {
             if (rounded >= 5 && rounded <= 200) {
                 nativeDefaultFocal = String.valueOf(rounded);
                 installNativeFocalPreferenceHook(classLoader);
-                log(Log.INFO, TAG, "Captured native default focal preference: " + nativeDefaultFocal);
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Captured native default focal preference: " + nativeDefaultFocal);
             } else {
-                log(Log.WARN, TAG, "Ignoring invalid native focal value: " + rounded);
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Ignoring invalid native focal value: " + rounded);
             }
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
             if (!nativeFocalCaptureFailureLogged) {
                 nativeFocalCaptureFailureLogged = true;
-                log(Log.INFO, TAG, "Native focal preference is not ready yet; deferred retry will continue");
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Native focal preference is not ready yet; deferred retry will continue");
             }
         }
     }
@@ -560,7 +562,7 @@ public final class LeicaUnlockHook extends XposedModule {
                 if (++attempts < 120) {
                     handler.postDelayed(task[0], 250L);
                 } else {
-                    log(Log.INFO, TAG, "Camera focal hook retry window expired");
+                    btm.m.os4.systemuihook.HookModuleLogger.log(LeicaUnlockHook.this, ModuleLog.INFO, TAG, "Camera focal hook retry window expired");
                 }
             }
         };
@@ -657,7 +659,7 @@ public final class LeicaUnlockHook extends XposedModule {
                         return nativeFocalZoomRatio(captured, result);
                     });
             nativeFocalDefaultHookInstalled = true;
-            log(Log.INFO, TAG, "Camera 6.7 native focal default hook installed");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Camera 6.7 native focal default hook installed");
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
             logFocalHookFailure("Unable to hook p785w2.v0.getDefaultValue", error);
         }
@@ -716,7 +718,7 @@ public final class LeicaUnlockHook extends XposedModule {
                                 return loaded;
                             });
                 } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
-                    log(Log.INFO, TAG, "BaseDexClassLoader.findClass hook unavailable for camera");
+                    btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "BaseDexClassLoader.findClass hook unavailable for camera");
                 }
                 // Camera 6.7 creates a split DexClassLoader after package callbacks;
                 // retain it so focal classes can be resolved even if they are
@@ -737,12 +739,12 @@ public final class LeicaUnlockHook extends XposedModule {
                                 });
                     }
                 } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
-                    log(Log.INFO, TAG, "BaseDexClassLoader constructor hook unavailable for camera", error);
+                    btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "BaseDexClassLoader constructor hook unavailable for camera", error);
                 }
                 cameraClassLoadHookInstalled = true;
-                log(Log.INFO, TAG, "Camera dynamic class load hook installed");
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Camera dynamic class load hook installed");
             } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
-                log(Log.WARN, TAG, "Unable to install camera dynamic class load hook", error);
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install camera dynamic class load hook", error);
             }
         }
     }
@@ -762,7 +764,7 @@ public final class LeicaUnlockHook extends XposedModule {
         }
         if (className.startsWith("p785w2") || className.startsWith("p827x6")
                 || className.contains("ComponentRunningSwitchZoom")) {
-            log(Log.INFO, TAG, "Camera class resolved: " + className + " via " + loaded.getClassLoader());
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Camera class resolved: " + className + " via " + loaded.getClassLoader());
         }
         if (!"p785w2.v0".equals(className)
                 && !"p827x6.e".equals(className)
@@ -771,7 +773,7 @@ public final class LeicaUnlockHook extends XposedModule {
         }
         ClassLoader loader = loaded.getClassLoader();
         rememberCameraClassLoader(loader);
-        log(Log.INFO, TAG, "Camera focal class loaded: " + className + " via " + loader);
+        btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Camera focal class loaded: " + className + " via " + loader);
         if ("p827x6.e".equals(className) || "p785w2.v0".equals(className)) {
             captureNativeFocalPreference(loader);
         }
@@ -803,7 +805,7 @@ public final class LeicaUnlockHook extends XposedModule {
                         return nativeFocal == null ? chain.proceed() : nativeFocal;
                     });
             nativeFocalComponentHookInstalled = true;
-            log(Log.INFO, TAG, "Camera 6.7 native focal component hook installed");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Camera 6.7 native focal component hook installed");
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
             logFocalHookFailure("Unable to hook p785w2.v0.p", error);
         }
@@ -812,7 +814,7 @@ public final class LeicaUnlockHook extends XposedModule {
     private void logFocalHookFailure(String message, Throwable error) {
         if (!nativeFocalHookFailureLogged) {
             nativeFocalHookFailureLogged = true;
-            log(Log.INFO, TAG, message + "; waiting for camera Dex loader");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, message + "; waiting for camera Dex loader");
         }
     }
 
@@ -884,7 +886,7 @@ public final class LeicaUnlockHook extends XposedModule {
             return focalMillimeters >= 5.0f && focalMillimeters <= 200.0f
                     ? (float) Math.round(focalMillimeters) : null;
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
-            log(Log.WARN, TAG, "Unable to read native focal length for camera " + cameraId, error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to read native focal length for camera " + cameraId, error);
             return null;
         }
     }
@@ -935,15 +937,15 @@ public final class LeicaUnlockHook extends XposedModule {
             deviceConfigValueField = valueField;
             nativeCameraConfig = localConfig;
             nativeFocalMethods.clear();
-            log(Log.INFO, TAG, "Captured native focal configuration " + localConfig.getClass().getName());
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Captured native focal configuration " + localConfig.getClass().getName());
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
             clearFactoryCache(cachedConfig);
             restoreMutableFields(lazy, lazyState);
             nativeCameraConfig = null;
             nezhaCameraConfig = null;
             nativeFocalMethods.clear();
-            log(
-                    Log.WARN,
+            btm.m.os4.systemuihook.HookModuleLogger.log(this,
+                    ModuleLog.WARN,
                     TAG,
                     "Unable to preserve native focal configuration; continuing with the Nezha profile",
                     error
@@ -982,7 +984,7 @@ public final class LeicaUnlockHook extends XposedModule {
             nezhaCameraConfig = null;
             nativeFocalMethods.clear();
             installModernDeviceSelectorHook(deviceSelector);
-            log(Log.INFO, TAG, "Captured native camera configuration via Ag.f: "
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Captured native camera configuration via Ag.f: "
                     + localConfig.getClass().getName()
                     + ", device=" + providerDevice.get(null));
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
@@ -990,7 +992,7 @@ public final class LeicaUnlockHook extends XposedModule {
             nativeCameraConfig = null;
             nezhaCameraConfig = null;
             nativeFocalMethods.clear();
-            log(Log.WARN, TAG, "Unable to capture the modern native focal configuration", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to capture the modern native focal configuration", error);
         }
     }
 
@@ -1067,7 +1069,7 @@ public final class LeicaUnlockHook extends XposedModule {
             try {
                 entry.getKey().set(owner, entry.getValue());
             } catch (IllegalAccessException | RuntimeException error) {
-                log(Log.WARN, TAG, "Unable to restore Camera device selector state", error);
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to restore Camera device selector state", error);
             }
         }
     }
@@ -1097,15 +1099,15 @@ public final class LeicaUnlockHook extends XposedModule {
                     replacementConfig.getClass().getMethod(methodName).setAccessible(true);
                     nativeFocalMethods.put(methodName, delegate);
                 } catch (ReflectiveOperationException | RuntimeException error) {
-                    log(Log.WARN, TAG, "Unable to map focal configuration method " + methodName, error);
+                    btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to map focal configuration method " + methodName, error);
                 }
             }
-            log(Log.INFO, TAG, "Activated Nezha configuration " + replacementConfig.getClass().getName());
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Activated Nezha configuration " + replacementConfig.getClass().getName());
             return true;
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
             nezhaCameraConfig = null;
             nativeFocalMethods.clear();
-            log(Log.WARN, TAG, "Unable to activate the Nezha camera configuration", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to activate the Nezha camera configuration", error);
             return false;
         }
     }
@@ -1138,15 +1140,15 @@ public final class LeicaUnlockHook extends XposedModule {
                     replacementConfig.getClass().getMethod(methodName).setAccessible(true);
                     nativeFocalMethods.put(methodName, delegate);
                 } catch (ReflectiveOperationException | RuntimeException error) {
-                    log(Log.WARN, TAG, "Unable to map modern focal configuration method " + methodName, error);
+                    btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to map modern focal configuration method " + methodName, error);
                 }
             }
-            log(Log.INFO, TAG, "Activated modern Nezha configuration " + replacementConfig.getClass().getName());
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Activated modern Nezha configuration " + replacementConfig.getClass().getName());
             return true;
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
             nezhaCameraConfig = null;
             nativeFocalMethods.clear();
-            log(Log.WARN, TAG, "Unable to activate the modern Nezha camera configuration", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to activate the modern Nezha camera configuration", error);
             return false;
         }
     }
@@ -1159,7 +1161,7 @@ public final class LeicaUnlockHook extends XposedModule {
                 clearFactoryCache(modernConfigCacheField);
                 return true;
             } catch (IllegalAccessException | RuntimeException error) {
-                log(Log.WARN, TAG, "Unable to reset the modern Camera configuration provider", error);
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to reset the modern Camera configuration provider", error);
                 return false;
             }
         }
@@ -1177,7 +1179,7 @@ public final class LeicaUnlockHook extends XposedModule {
             restoreMutableFields(deviceConfigLazy, nezhaState);
             return true;
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
-            log(Log.WARN, TAG, "Unable to reset the Camera configuration factory for Nezha", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to reset the Camera configuration factory for Nezha", error);
             return false;
         }
     }
@@ -1227,7 +1229,7 @@ public final class LeicaUnlockHook extends XposedModule {
         try {
             field.set(null, null);
         } catch (IllegalAccessException | RuntimeException error) {
-            log(Log.WARN, TAG, "Unable to clear Camera configuration cache", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to clear Camera configuration cache", error);
         }
     }
 
@@ -1259,8 +1261,8 @@ public final class LeicaUnlockHook extends XposedModule {
                                 return delegate.invoke(localConfig);
                             } catch (Throwable error) {
                                 nativeFocalMethods.remove(methodName);
-                                log(
-                                        Log.WARN,
+                                btm.m.os4.systemuihook.HookModuleLogger.log(this,
+                                        ModuleLog.WARN,
                                         TAG,
                                         "Native focal method failed; falling back to Nezha: " + methodName,
                                         error
@@ -1271,10 +1273,10 @@ public final class LeicaUnlockHook extends XposedModule {
                 installed++;
             } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
                 nativeFocalMethods.remove(methodName);
-                log(Log.WARN, TAG, "Unable to hook focal configuration method " + methodName, error);
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to hook focal configuration method " + methodName, error);
             }
         }
-        log(Log.INFO, TAG, "Native focal configuration hooks installed: " + installed);
+        btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Native focal configuration hooks installed: " + installed);
     }
 
     private void installNativeWatermarkLabelHook() {
@@ -1302,13 +1304,13 @@ public final class LeicaUnlockHook extends XposedModule {
                         try {
                             return delegate.invoke(nativeConfig);
                         } catch (Throwable error) {
-                            log(Log.WARN, TAG, "Native watermark label lookup failed", error);
+                            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Native watermark label lookup failed", error);
                             return chain.proceed();
                         }
                     });
-            log(Log.INFO, TAG, "Native watermark label hook installed");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Native watermark label hook installed");
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
-            log(Log.WARN, TAG, "Unable to hook native watermark label configuration", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to hook native watermark label configuration", error);
         }
     }
 
@@ -1347,7 +1349,7 @@ public final class LeicaUnlockHook extends XposedModule {
                                 }
                                 builder.set(vendorKey, LEGENDARY_MODE_M9);
                             } catch (RuntimeException | LinkageError error) {
-                                log(Log.WARN, TAG, "Unable to inject Legendary mode vendor tag", error);
+                                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to inject Legendary mode vendor tag", error);
                             }
                         }
 
@@ -1388,9 +1390,9 @@ public final class LeicaUnlockHook extends XposedModule {
                         }
                         return chain.proceed();
                     });
-            log(Log.INFO, TAG, "Legendary Camera2 compatibility hook installed");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Legendary Camera2 compatibility hook installed");
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
-            log(Log.WARN, TAG, "Unable to install Legendary Camera2 compatibility hook", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install Legendary Camera2 compatibility hook", error);
         }
     }
 
@@ -1428,9 +1430,9 @@ public final class LeicaUnlockHook extends XposedModule {
                         // unavailable instead of merely skipping restrictions.
                         return chain.proceed();
                     });
-            log(Log.INFO, TAG, "Camera watermark catalog limitation hook installed");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Camera watermark catalog limitation hook installed");
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
-            log(Log.WARN, TAG, "Unable to install Camera watermark catalog limitation hook", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install Camera watermark catalog limitation hook", error);
         }
 
         try {
@@ -1448,9 +1450,9 @@ public final class LeicaUnlockHook extends XposedModule {
                         }
                         return chain.proceed();
                     });
-            log(Log.INFO, TAG, "Camera watermark JSON limitation hook installed");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Camera watermark JSON limitation hook installed");
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
-            log(Log.WARN, TAG, "Unable to install Camera watermark JSON limitation hook", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install Camera watermark JSON limitation hook", error);
         }
     }
 
@@ -1473,10 +1475,10 @@ public final class LeicaUnlockHook extends XposedModule {
                         }
                         return chain.proceed();
                     });
-            log(Log.INFO, TAG, "Exclusive Leica watermark filter hook installed: " + filterClassName);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Exclusive Leica watermark filter hook installed: " + filterClassName);
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
-            log(
-                    Log.WARN,
+            btm.m.os4.systemuihook.HookModuleLogger.log(this,
+                    ModuleLog.WARN,
                     TAG,
                     "Unable to install exclusive Leica watermark filter hook: " + filterClassName,
                     error
@@ -1577,13 +1579,13 @@ public final class LeicaUnlockHook extends XposedModule {
                     installed++;
                 }
             }
-            log(Log.INFO, TAG, "Gallery watermark EXIF bypass installed: " + installed);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery watermark EXIF bypass installed: " + installed);
             return installed > 0;
         } catch (ClassNotFoundException ignored) {
             return false;
         } catch (RuntimeException | LinkageError error) {
             galleryWatermarkExifClasses.removeIf(type -> type.getClassLoader() == classLoader);
-            log(Log.WARN, TAG, "Unable to install Gallery watermark EXIF bypass", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install Gallery watermark EXIF bypass", error);
             return false;
         }
     }
@@ -1618,13 +1620,13 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setId("gallery_watermark_device_lhasa")
                     .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
                             ? Boolean.TRUE : chain.proceed());
-            log(Log.INFO, TAG, "Gallery watermark device capability bypass installed");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery watermark device capability bypass installed");
             return true;
         } catch (ClassNotFoundException ignored) {
             return false;
         } catch (RuntimeException | LinkageError error) {
             galleryWatermarkDeviceClasses.removeIf(type -> type.getClassLoader() == classLoader);
-            log(Log.WARN, TAG, "Unable to install Gallery watermark device bypass", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install Gallery watermark device bypass", error);
             return false;
         }
     }
@@ -1663,14 +1665,14 @@ public final class LeicaUnlockHook extends XposedModule {
                                 ? Boolean.TRUE : chain.proceed());
                 installed++;
             }
-            log(Log.INFO, TAG, "Gallery watermark brand capability hooks installed: " + installed);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery watermark brand capability hooks installed: " + installed);
             return installed > 0;
         } catch (ClassNotFoundException ignored) {
             return false;
         } catch (RuntimeException | LinkageError error) {
             galleryWatermarkBrandCapabilityClasses.removeIf(
                     type -> type.getClassLoader() == classLoader);
-            log(Log.WARN, TAG, "Unable to install Gallery watermark brand capability hooks", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install Gallery watermark brand capability hooks", error);
             return false;
         }
     }
@@ -1697,7 +1699,7 @@ public final class LeicaUnlockHook extends XposedModule {
             }
         }
         if (installed > 0) {
-            log(Log.INFO, TAG, "Gallery watermark item predicate hooks installed: " + installed);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery watermark item predicate hooks installed: " + installed);
         }
         return installed > 0;
     }
@@ -1735,7 +1737,7 @@ public final class LeicaUnlockHook extends XposedModule {
             return count > 0;
         } catch (RuntimeException | LinkageError error) {
             galleryWatermarkItemPredicateClasses.remove(type);
-            log(Log.WARN, TAG, "Unable to install watermark item predicate hook: " + type, error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install watermark item predicate hook: " + type, error);
             return false;
         }
     }
@@ -1823,11 +1825,11 @@ public final class LeicaUnlockHook extends XposedModule {
                 // Providers may be loaded from the feature dex later.
             } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
                 galleryAiProviderClasses.removeIf(type -> type.getClassLoader() == classLoader);
-                log(Log.WARN, TAG, "Unable to install Gallery AI provider hook: " + className, error);
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install Gallery AI provider hook: " + className, error);
             }
         }
         if (installed > 0) {
-            log(Log.INFO, TAG, "Gallery AI provider hooks installed: " + installed);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery AI provider hooks installed: " + installed);
         }
         return installed > 0;
     }
@@ -1911,11 +1913,11 @@ public final class LeicaUnlockHook extends XposedModule {
                 // Feature dex classes are loaded lazily.
             } catch (RuntimeException | LinkageError error) {
                 galleryAiUnlockClasses.removeIf(type -> type.getClassLoader() == classLoader);
-                log(Log.WARN, TAG, "Unable to install Gallery AI gate hook: " + className, error);
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install Gallery AI gate hook: " + className, error);
             }
         }
         if (installed > 0) {
-            log(Log.INFO, TAG, "Gallery AI gate hooks installed: " + installed);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery AI gate hooks installed: " + installed);
         }
         return installed > 0;
     }
@@ -1968,13 +1970,13 @@ public final class LeicaUnlockHook extends XposedModule {
             } catch (ClassNotFoundException ignored) {
                 // The watermark feature dex is loaded lazily.
             } catch (RuntimeException | LinkageError error) {
-                log(Log.WARN, TAG,
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG,
                         "Unable to install Gallery watermark config filter hook: " + className,
                         error);
             }
         }
         if (installed > 0) {
-            log(Log.INFO, TAG, "Gallery watermark config filter hook installed: " + installed);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery watermark config filter hook installed: " + installed);
         }
         return installed > 0;
     }
@@ -2015,7 +2017,7 @@ public final class LeicaUnlockHook extends XposedModule {
                 Object success = findSuccessResult(target.getReturnType(), classLoader);
                 if (success == null) {
                     galleryWatermarkSelectionRestrictionClasses.remove(checker);
-                    log(Log.WARN, TAG, "Watermark selection success result is unavailable");
+                    btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Watermark selection success result is unavailable");
                     continue;
                 }
                 target.setAccessible(true);
@@ -2025,13 +2027,13 @@ public final class LeicaUnlockHook extends XposedModule {
                                 + checker.getName().replace('.', '_'))
                         .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
                                 ? success : chain.proceed());
-                log(Log.INFO, TAG, "Gallery watermark selection restriction bypass installed: "
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery watermark selection restriction bypass installed: "
                         + checker.getName());
                 return true;
             } catch (ClassNotFoundException ignored) {
                 // Feature dex may be loaded after the editor starts.
             } catch (RuntimeException | LinkageError error) {
-                log(Log.WARN, TAG,
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG,
                         "Unable to install Gallery watermark selection restriction hook: "
                                 + className, error);
             }
@@ -2106,9 +2108,9 @@ public final class LeicaUnlockHook extends XposedModule {
                             return chain.proceed();
                         });
                 galleryWatermarkJsonHookInstalled = true;
-                log(Log.INFO, TAG, "Gallery watermark JSON limitation hook installed");
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery watermark JSON limitation hook installed");
             } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
-                log(Log.WARN, TAG, "Unable to install Gallery watermark JSON limitation hook", error);
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install Gallery watermark JSON limitation hook", error);
             }
         }
     }
@@ -2175,11 +2177,11 @@ public final class LeicaUnlockHook extends XposedModule {
             } catch (ClassNotFoundException ignored) {
                 // Feature classes are loaded lazily; retry from the class-load hook.
             } catch (RuntimeException | LinkageError error) {
-                log(Log.WARN, TAG, "Unable to install watermark device predicate hook: " + className, error);
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install watermark device predicate hook: " + className, error);
             }
         }
         if (installed > 0) {
-            log(Log.INFO, TAG, "Gallery watermark device predicate hooks installed: " + installed);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery watermark device predicate hooks installed: " + installed);
         }
         return installed > 0;
     }
@@ -2237,11 +2239,11 @@ public final class LeicaUnlockHook extends XposedModule {
                 // below will retry when each class is defined.
             } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
                 galleryPaletteUnlockClasses.removeIf(type -> type.getClassLoader() == classLoader);
-                log(Log.WARN, TAG, "Unable to install Adjust2 palette predicate hook: " + className, error);
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install Adjust2 palette predicate hook: " + className, error);
             }
         }
         if (installed > 0) {
-            log(Log.INFO, TAG, "Adjust2 palette unlock hooks installed: " + installed);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Adjust2 palette unlock hooks installed: " + installed);
         }
         return installed == predicateNames.length;
     }
@@ -2282,11 +2284,11 @@ public final class LeicaUnlockHook extends XposedModule {
                 // Watermark feature dex is loaded lazily; the class-load hook retries it.
             } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
                 galleryLimitationPredicateClasses.removeIf(type -> type.getClassLoader() == classLoader);
-                log(Log.WARN, TAG, "Unable to install watermark limitation hook: " + className, error);
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install watermark limitation hook: " + className, error);
             }
         }
         if (installed > 0) {
-            log(Log.INFO, TAG, "Gallery watermark limitation predicate hooks installed: " + installed);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery watermark limitation predicate hooks installed: " + installed);
         }
         return installed == 9;
     }
@@ -2316,13 +2318,13 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setPriority(PRIORITY_HIGHEST)
                     .setId("gallery_watermark_supported_list_passthrough")
                     .intercept(chain -> chain.proceed());
-            log(Log.INFO, TAG, "Gallery watermark supported-list bypass installed (kl0.k0.c)");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery watermark supported-list bypass installed (kl0.k0.c)");
             return true;
         } catch (ClassNotFoundException ignored) {
             return false;
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
             galleryWatermarkSupportedListClasses.removeIf(type -> type.getClassLoader() == classLoader);
-            log(Log.WARN, TAG, "Unable to install Gallery watermark supported-list bypass", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install Gallery watermark supported-list bypass", error);
             return false;
         }
     }
@@ -2380,13 +2382,13 @@ public final class LeicaUnlockHook extends XposedModule {
                         }
                         return null;
                     });
-            log(Log.INFO, TAG, "Gallery watermark lookup fallback installed (kl0.k0.e)");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery watermark lookup fallback installed (kl0.k0.e)");
             return true;
         } catch (ClassNotFoundException ignored) {
             return false;
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
             galleryWatermarkLookupClasses.removeIf(type -> type.getClassLoader() == classLoader);
-            log(Log.WARN, TAG, "Unable to install Gallery watermark lookup fallback", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install Gallery watermark lookup fallback", error);
             return false;
         }
     }
@@ -2426,13 +2428,13 @@ public final class LeicaUnlockHook extends XposedModule {
                         return chain.proceed();
                     });
             installCloudWatermarkItemVersionBypass(maker, classLoader);
-            log(Log.INFO, TAG, "CloudWatermarkMaker initialization bypass installed");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "CloudWatermarkMaker initialization bypass installed");
             return true;
         } catch (ClassNotFoundException ignored) {
             return false;
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
             galleryCloudWatermarkMakerClasses.removeIf(type -> type.getClassLoader() == classLoader);
-            log(Log.WARN, TAG, "Unable to install CloudWatermarkMaker initialization bypass", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install CloudWatermarkMaker initialization bypass", error);
             return false;
         }
     }
@@ -2559,13 +2561,13 @@ public final class LeicaUnlockHook extends XposedModule {
                         }
                         return chain.proceed();
                     });
-            log(Log.INFO, TAG, "Gallery watermark catalog filter bypass installed (kl0.k0.b)");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery watermark catalog filter bypass installed (kl0.k0.b)");
             return true;
         } catch (ClassNotFoundException ignored) {
             return false;
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
             galleryWatermarkFilterClasses.removeIf(type -> type.getClassLoader() == classLoader);
-            log(Log.WARN, TAG, "Unable to install Gallery watermark catalog filter bypass", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install Gallery watermark catalog filter bypass", error);
             return false;
         }
     }
@@ -2606,13 +2608,13 @@ public final class LeicaUnlockHook extends XposedModule {
                         }
                         return chain.proceed();
                     });
-            log(Log.INFO, TAG, "Gallery watermark init filter bypass installed (kl0.k0.g)");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery watermark init filter bypass installed (kl0.k0.g)");
             return true;
         } catch (ClassNotFoundException ignored) {
             return false;
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
             galleryWatermarkInitClasses.removeIf(type -> type.getClassLoader() == classLoader);
-            log(Log.WARN, TAG, "Unable to install Gallery watermark init filter bypass", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install Gallery watermark init filter bypass", error);
             return false;
         }
     }
@@ -2621,7 +2623,7 @@ public final class LeicaUnlockHook extends XposedModule {
         ClassLoader current = classLoader;
         int depth = 0;
         while (current != null && depth++ < 8) {
-            log(Log.INFO, TAG, "Trying Gallery watermark hooks in ClassLoader " + current);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Trying Gallery watermark hooks in ClassLoader " + current);
             installGalleryWatermarkHooks(current);
             current = current.getParent();
         }
@@ -2663,7 +2665,7 @@ public final class LeicaUnlockHook extends XposedModule {
                             () -> installGalleryWatermarkHooksForChain(classLoader), delay);
                 }
             } catch (RuntimeException | LinkageError error) {
-                log(Log.WARN, TAG, "Deferred Gallery watermark hooks failed", error);
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Deferred Gallery watermark hooks failed", error);
             }
         }, 1500L);
     }
@@ -2765,15 +2767,15 @@ public final class LeicaUnlockHook extends XposedModule {
                         return result;
                     });
 
-            log(Log.INFO, TAG, "Modern MediaEditor watermark hooks installed (xy.f0/xy.j0/xy.d/xy.i)");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Modern MediaEditor watermark hooks installed (xy.f0/xy.j0/xy.d/xy.i)");
             return true;
         } catch (ClassNotFoundException error) {
             galleryModernWatermarkClasses.removeIf(type -> type.getClassLoader() == classLoader);
-            log(Log.INFO, TAG, "Modern watermark classes not ready in " + classLoader + ": " + error.getMessage());
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Modern watermark classes not ready in " + classLoader + ": " + error.getMessage());
             return false;
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
             galleryModernWatermarkClasses.removeIf(type -> type.getClassLoader() == classLoader);
-            log(Log.WARN, TAG, "Unable to install modern MediaEditor watermark hooks", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install modern MediaEditor watermark hooks", error);
             return false;
         }
     }
@@ -2801,13 +2803,13 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setId("gallery_modern_watermark_capability_only")
                     .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
                             ? supported : chain.proceed());
-            log(Log.INFO, TAG, "Modern watermark capability-only hook installed (xy.j0.a)");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Modern watermark capability-only hook installed (xy.j0.a)");
             return true;
         } catch (ClassNotFoundException error) {
             return false;
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
             galleryModernCapabilityClasses.removeIf(type -> type.getClassLoader() == classLoader);
-            log(Log.WARN, TAG, "Unable to install capability-only watermark hook", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install capability-only watermark hook", error);
             return false;
         }
     }
@@ -2898,13 +2900,13 @@ public final class LeicaUnlockHook extends XposedModule {
                         }
                         return chain.proceed();
                     });
-            log(Log.INFO, TAG, "Gallery watermark fragment click hook installed");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery watermark fragment click hook installed");
             return true;
         } catch (ClassNotFoundException error) {
             return false;
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
             galleryWatermarkFragmentClasses.removeIf(type -> type.getClassLoader() == classLoader);
-            log(Log.WARN, TAG, "Unable to install Gallery watermark fragment click hook", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install Gallery watermark fragment click hook", error);
             return false;
         }
     }
@@ -2976,8 +2978,8 @@ public final class LeicaUnlockHook extends XposedModule {
                         });
                 installed++;
             }
-            log(
-                    Log.INFO,
+            btm.m.os4.systemuihook.HookModuleLogger.log(this,
+                    ModuleLog.INFO,
                     TAG,
                     "Gallery watermark capability hooks installed: " + installed + " (zn.a.g/h/i)"
             );
@@ -2988,7 +2990,7 @@ public final class LeicaUnlockHook extends XposedModule {
             galleryWatermarkCapabilityClasses.removeIf(
                     capabilityClass -> capabilityClass.getClassLoader() == classLoader
             );
-            log(Log.WARN, TAG, "Unable to install Gallery watermark capability hooks", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install Gallery watermark capability hooks", error);
             return false;
         }
     }
@@ -3030,7 +3032,7 @@ public final class LeicaUnlockHook extends XposedModule {
                         }
                         return chain.proceed();
                     });
-            log(Log.INFO, TAG, "Gallery watermark usage restriction hook installed (vy.m0.a)");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery watermark usage restriction hook installed (vy.m0.a)");
             return true;
         } catch (ClassNotFoundException error) {
             return false;
@@ -3038,7 +3040,7 @@ public final class LeicaUnlockHook extends XposedModule {
             galleryWatermarkUsageClasses.removeIf(
                     usageClass -> usageClass.getClassLoader() == classLoader
             );
-            log(Log.WARN, TAG, "Unable to install Gallery watermark usage restriction hook", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install Gallery watermark usage restriction hook", error);
             return false;
         }
     }
@@ -3084,7 +3086,7 @@ public final class LeicaUnlockHook extends XposedModule {
                         }
                         return chain.proceed();
                     });
-            log(Log.INFO, TAG, "Gallery watermark restriction hook installed (vg.t.a)");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery watermark restriction hook installed (vg.t.a)");
             return true;
         } catch (ClassNotFoundException error) {
             return false;
@@ -3092,7 +3094,7 @@ public final class LeicaUnlockHook extends XposedModule {
             galleryWatermarkRestrictionClasses.removeIf(
                     restrictionClass -> restrictionClass.getClassLoader() == classLoader
             );
-            log(Log.WARN, TAG, "Unable to install Gallery watermark restriction hook", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install Gallery watermark restriction hook", error);
             return false;
         }
     }
@@ -3117,13 +3119,13 @@ public final class LeicaUnlockHook extends XposedModule {
                         }
                         return chain.proceed();
                     });
-            log(Log.INFO, TAG, "Gallery all-watermark limitation hook installed");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery all-watermark limitation hook installed");
             return true;
         } catch (ClassNotFoundException error) {
             return false;
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
             galleryWatermarkManagers.removeIf(manager -> manager.getClassLoader() == classLoader);
-            log(Log.WARN, TAG, "Unable to install Gallery all-watermark limitation hook", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install Gallery all-watermark limitation hook", error);
             return false;
         }
     }
@@ -3172,12 +3174,12 @@ public final class LeicaUnlockHook extends XposedModule {
                                 return loadedClass;
                             });
                 } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
-                    log(Log.INFO, TAG, "BaseDexClassLoader.findClass hook unavailable");
+                    btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "BaseDexClassLoader.findClass hook unavailable");
                 }
                 galleryWatermarkClassLoadHookInstalled = true;
-                log(Log.INFO, TAG, "Gallery dynamic watermark manager hook installed");
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery dynamic watermark manager hook installed");
             } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
-                log(Log.WARN, TAG, "Unable to install Gallery dynamic watermark manager hook", error);
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install Gallery dynamic watermark manager hook", error);
             }
         }
     }
@@ -3189,7 +3191,7 @@ public final class LeicaUnlockHook extends XposedModule {
         ClassLoader loader = loaded.getClassLoader();
         if ("xy.f0".equals(className) || "xy.j0".equals(className)
                 || "xy.d".equals(className) || "xy.i".equals(className)) {
-            log(Log.INFO, TAG, "Watermark class loaded: " + className + " via " + loader);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Watermark class loaded: " + className + " via " + loader);
             installModernGalleryWatermarkHooks(loader);
             if ("xy.j0".equals(className)) {
                 installModernWatermarkCapabilityOnly(loader);
@@ -3338,10 +3340,10 @@ public final class LeicaUnlockHook extends XposedModule {
                             return chain.proceed();
                         });
             }
-            log(Log.INFO, TAG, "Generic Gallery watermark manager hook installed: " + type.getName());
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Generic Gallery watermark manager hook installed: " + type.getName());
         } catch (RuntimeException | LinkageError error) {
             galleryGenericWatermarkClasses.remove(type);
-            log(Log.WARN, TAG, "Unable to install generic Gallery watermark manager hook", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install generic Gallery watermark manager hook", error);
         }
     }
 
@@ -3387,12 +3389,12 @@ public final class LeicaUnlockHook extends XposedModule {
                 installed++;
             }
             if (installed > 0) {
-                log(Log.INFO, TAG, "Generic Gallery watermark EXIF hooks installed: "
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Generic Gallery watermark EXIF hooks installed: "
                         + type.getName() + " (" + installed + ")");
             }
         } catch (RuntimeException | LinkageError error) {
             galleryWatermarkExifClasses.remove(type);
-            log(Log.WARN, TAG, "Unable to install generic Gallery watermark EXIF hook", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install generic Gallery watermark EXIF hook", error);
         }
     }
 
@@ -3431,13 +3433,13 @@ public final class LeicaUnlockHook extends XposedModule {
                         return pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
                                 ? Boolean.TRUE : result;
                     });
-            log(Log.INFO, TAG, "Gallery watermark data-loader result hook installed");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery watermark data-loader result hook installed");
             return true;
         } catch (ClassNotFoundException ignored) {
             return false;
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
             galleryWatermarkDataLoaderClasses.removeIf(type -> type.getClassLoader() == classLoader);
-            log(Log.WARN, TAG, "Unable to install Gallery watermark data-loader hook", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install Gallery watermark data-loader hook", error);
             return false;
         }
     }
@@ -3476,13 +3478,13 @@ public final class LeicaUnlockHook extends XposedModule {
                         }
                         return result;
                     });
-            log(Log.INFO, TAG, "Gallery watermark availability hook installed");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery watermark availability hook installed");
             return true;
         } catch (ClassNotFoundException ignored) {
             return false;
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
             galleryWatermarkAvailabilityClasses.removeIf(type -> type.getClassLoader() == classLoader);
-            log(Log.WARN, TAG, "Unable to install Gallery watermark availability hook", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to install Gallery watermark availability hook", error);
             return false;
         }
     }
@@ -3664,7 +3666,7 @@ public final class LeicaUnlockHook extends XposedModule {
                             : CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT
             );
         } catch (RuntimeException | LinkageError error) {
-            log(Log.WARN, TAG, "Unable to apply Legendary Camera2 compatibility parameters", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to apply Legendary Camera2 compatibility parameters", error);
         }
     }
 
@@ -3694,9 +3696,9 @@ public final class LeicaUnlockHook extends XposedModule {
                 Object base = staticFieldBase.invoke(unsafe, field);
                 long offset = ((Number) staticFieldOffset.invoke(unsafe, field)).longValue();
                 putObject.invoke(unsafe, base, offset, value);
-                log(Log.INFO, TAG, "Set static final Build." + name + " via Unsafe");
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Set static final Build." + name + " via Unsafe");
             } catch (ReflectiveOperationException | RuntimeException | LinkageError fallback) {
-                log(Log.WARN, TAG, "Unable to set Build." + name, error);
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to set Build." + name, error);
             }
         }
     }
@@ -3718,9 +3720,9 @@ public final class LeicaUnlockHook extends XposedModule {
             hookBooleanResult(guard, "RitIeKoenwCSqcPf", true, "security_valid");
             hookBooleanResult(guard, "QiVkoLmEuZWFFHiA", false, "security_reject_a");
             hookBooleanResult(guard, "qkPDndbXdHyDtWXd", false, "security_reject_b");
-            log(Log.INFO, TAG, "Nezha security compatibility hooks installed");
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Nezha security compatibility hooks installed");
         } catch (ClassNotFoundException | RuntimeException error) {
-            log(Log.ERROR, TAG, "Camera security class was not found", error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.ERROR, TAG, "Camera security class was not found", error);
         }
     }
 
@@ -3738,7 +3740,7 @@ public final class LeicaUnlockHook extends XposedModule {
                         return result;
                     });
         } catch (NoSuchMethodException | RuntimeException error) {
-            log(Log.ERROR, TAG, "Camera security method was not found: " + methodName, error);
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.ERROR, TAG, "Camera security method was not found: " + methodName, error);
         }
     }
 

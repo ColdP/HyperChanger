@@ -27,7 +27,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.PersistableBundle
 import android.util.Base64
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
@@ -228,21 +228,21 @@ object HookTools {
     private const val TAG = "XiaoAiTypeUnblock"
 
     fun log(module: XposedInterface, msg: String) {
-        module.log(Log.INFO, TAG, msg)
+        btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, TAG, msg)
         Log.i(TAG, msg)
     }
 
     fun logWarn(module: XposedInterface, msg: String) {
-        module.log(Log.WARN, TAG, msg)
+        btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, TAG, msg)
         Log.w(TAG, msg)
     }
 
     fun logError(module: XposedInterface, msg: String, tr: Throwable? = null) {
         if (tr != null) {
-            module.log(Log.ERROR, TAG, msg, tr)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.ERROR, TAG, msg, tr)
             Log.e(TAG, msg, tr)
         } else {
-            module.log(Log.ERROR, TAG, msg)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.ERROR, TAG, msg)
             Log.e(TAG, msg)
         }
     }

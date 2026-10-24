@@ -2,7 +2,7 @@
 package btm.m.xiaoaihook
 
 import android.content.SharedPreferences
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import android.view.View
 import btm.m.os4.systemuihook.*
 import io.github.libxposed.api.XposedInterface
@@ -73,10 +73,10 @@ object SuperXiaoAiWindowHook {
 
     private fun report(module: XposedInterface, message: String, error: Throwable? = null) {
         if (error == null) {
-            module.log(Log.INFO, "SuperXiaoAiInputGlass", message)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, "SuperXiaoAiInputGlass", message)
             note(message)
         } else {
-            module.log(Log.WARN, "SuperXiaoAiInputGlass", message, error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, "SuperXiaoAiInputGlass", message, error)
             note("WARN " + message + " :: " + error)
         }
     }

@@ -5,7 +5,7 @@ package btm.m.os4.systemuihook
 import android.content.ContentValues
 import android.content.SharedPreferences
 import android.os.Environment
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
@@ -18,6 +18,7 @@ import java.lang.reflect.Method
 /** Hooks the versioned Xiaomi screen recorder without linking against its classes. */
 class ScreenRecorderModule : XposedModule() {
     override fun onPackageLoaded(param: PackageLoadedParam) {
+        if (!HookModuleSafety.enter(this, param.packageName)) return
         if (!OsCompatibility.areHooksAllowed() || param.packageName != PACKAGE) return
         val prefs = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
         runCatching {
@@ -28,7 +29,7 @@ class ScreenRecorderModule : XposedModule() {
             if (prefs.getString(SCREEN_RECORDER_SAVE_PATH, "").orEmpty().isNotBlank()) {
                 installSavePath(param.defaultClassLoader, prefs)
             }
-        }.onFailure { log(Log.ERROR, TAG, "Could not install screen recorder hooks", it) }
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install screen recorder hooks", it) }
     }
 
     private fun installExtendedOptions(param: PackageLoadedParam, prefs: SharedPreferences) {
@@ -73,8 +74,8 @@ class ScreenRecorderModule : XposedModule() {
                 }
         }
 
-        if (frameEnabled && frameMethod == null) log(Log.ERROR, TAG, "Could not find frame-rate config method")
-        if (bitRateEnabled && bitRateMethod == null) log(Log.ERROR, TAG, "Could not find bitrate config method")
+        if (frameEnabled && frameMethod == null) btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not find frame-rate config method")
+        if (bitRateEnabled && bitRateMethod == null) btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not find bitrate config method")
     }
 
     private fun findConfigMethods(param: PackageLoadedParam): Pair<Method?, Method?> {
@@ -97,7 +98,7 @@ class ScreenRecorderModule : XposedModule() {
             } finally {
                 bridge.close()
             }
-        }.onFailure { log(Log.WARN, TAG, "DexKit screen recorder lookup failed", it) }
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "DexKit screen recorder lookup failed", it) }
 
         if (frameMethod == null || bitRateMethod == null) {
             runCatching {
@@ -116,7 +117,7 @@ class ScreenRecorderModule : XposedModule() {
                         Int::class.javaPrimitiveType,
                     )
                 }
-            }.onFailure { log(Log.WARN, TAG, "Legacy screen recorder lookup failed", it) }
+            }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Legacy screen recorder lookup failed", it) }
         }
         return frameMethod to bitRateMethod
     }

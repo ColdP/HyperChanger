@@ -11,10 +11,15 @@ import kotlinx.coroutines.flow.asStateFlow
 class HookApplication : Application(), XposedServiceHelper.OnServiceListener {
     override fun onCreate() {
         super.onCreate()
+        ModuleLogger.attachApp(this)
+        ModuleLogRepository.scheduleCleanup(this)
+        Thread { runCatching { ModuleLogRepository(this).cleanup() } }.start()
         XposedServiceHelper.registerListener(this)
     }
 
     override fun onServiceBind(service: XposedService) {
+        runCatching { ModuleSafetySettingsStore(this).syncRemote(service) }
+            .onFailure { ModuleLog.w("ModuleSafety", "Could not sync safety settings", it) }
         serviceState.value = service
     }
 

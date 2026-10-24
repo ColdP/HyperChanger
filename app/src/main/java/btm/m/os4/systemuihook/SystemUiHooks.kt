@@ -5,7 +5,7 @@ package btm.m.os4.systemuihook
 import android.content.SharedPreferences
 import android.graphics.Outline
 import android.graphics.Rect
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import android.view.View
 import android.view.ViewOutlineProvider
 import io.github.libxposed.api.XposedInterface.ExceptionMode
@@ -32,6 +32,7 @@ internal class SystemUiHooks(
 
     /** The vendor's new island Bundle drops the big-island effect requested by our simulator. */
     fun installIslandSimulationGlowBridge(classLoader: ClassLoader) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.ISLAND)) return
         runCatching {
             val controller = classLoader.loadClass("miui.systemui.notification.focus.FocusNotificationController")
             synchronized(islandSimulationGlowBridgeClasses) {
@@ -57,8 +58,8 @@ internal class SystemUiHooks(
                     }
                 islandSimulationGlowBridgeClasses.add(controller)
             }
-            module.log(Log.INFO, logTag, "Installed simulator big-island glow extras bridge")
-        }.onFailure { error -> module.log(Log.WARN, logTag, "Could not install simulator big-island glow extras bridge", error) }
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed simulator big-island glow extras bridge")
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install simulator big-island glow extras bridge", error) }
     }
 
     /** Applies the optional island corner controls after the vendor has created its views. */
@@ -66,6 +67,7 @@ internal class SystemUiHooks(
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.ISLAND)) return
         runCatching {
             val baseContent = classLoader.loadClass(dynamicIslandBaseContentClass)
             baseContent.declaredMethods.filter {
@@ -96,7 +98,7 @@ internal class SystemUiHooks(
                         result
                     }
             }
-        }.onFailure { error -> module.log(Log.DEBUG, logTag, "Expanded island material corner hook unavailable", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.DEBUG, logTag, "Expanded island material corner hook unavailable", error) }
 
         runCatching {
             val holder = classLoader.loadClass("miui.systemui.dynamicisland.module.IslandIconViewHolder")
@@ -120,7 +122,7 @@ internal class SystemUiHooks(
                         result
                     }
             }
-        }.onFailure { error -> module.log(Log.DEBUG, logTag, "Small island media icon corner hook unavailable", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.DEBUG, logTag, "Small island media icon corner hook unavailable", error) }
     }
 
     private inner class ExpandedIslandCornerProvider(
@@ -184,6 +186,7 @@ internal class SystemUiHooks(
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.ISLAND)) return
         runCatching {
             val baseClass = classLoader.loadClass(dynamicIslandBaseContentClass)
             val updateMethods = baseClass.declaredMethods.filter { method ->
@@ -230,14 +233,14 @@ internal class SystemUiHooks(
                                 translate.invoke(target, content)
                             }
                         }.onFailure { error ->
-                            module.log(Log.WARN, logTag, "Could not update Dynamic Island mini-bar translation", error)
+                            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not update Dynamic Island mini-bar translation", error)
                         }
                         null
                     }
             }
-            module.log(Log.INFO, logTag, "Installed Dynamic Island mini-bar allowlist bypass")
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed Dynamic Island mini-bar allowlist bypass")
         }.onFailure { error ->
-            module.log(Log.WARN, logTag, "Could not install Dynamic Island mini-bar allowlist bypass", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install Dynamic Island mini-bar allowlist bypass", error)
         }
     }
 
@@ -262,6 +265,7 @@ internal class SystemUiHooks(
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.ISLAND)) return
         runCatching {
             val baseClass = classLoader.loadClass(dynamicIslandBaseContentClass)
             val reset = baseClass.getDeclaredMethod("reset").apply { isAccessible = true }
@@ -283,9 +287,9 @@ internal class SystemUiHooks(
                     }
                     result
                 }
-            module.log(Log.INFO, logTag, "Installed small-island width/height alignment hook")
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed small-island width/height alignment hook")
         }.onFailure { error ->
-            module.log(Log.WARN, logTag, "Could not install small-island width/height alignment hook", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install small-island width/height alignment hook", error)
         }
         DYNAMIC_ISLAND_LAYOUT_CLASSES.forEach { className ->
             runCatching {
@@ -304,14 +308,15 @@ internal class SystemUiHooks(
                             result
                         }
                 }
-                module.log(Log.INFO, logTag, "Installed ${methods.size} big-island layout hooks for $className")
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed ${methods.size} big-island layout hooks for $className")
             }.onFailure { error ->
-                module.log(Log.INFO, logTag, "Skipped dynamic-island layout class $className", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Skipped dynamic-island layout class $className", error)
             }
         }
     }
 
     fun installDynamicIslandBottomGlowHook(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.ISLAND)) return
         runCatching {
             val glowClass = classLoader.loadClass(DYNAMIC_ISLAND_GLOW_EFFECT_CLASS)
             glowClass.declaredMethods.filter { it.name == "startGlowEffect\$miui_dynamicisland_release" || it.name == "setAlphaOfGlowEffect\$miui_dynamicisland_release" }.forEachIndexed { index, method ->
@@ -323,7 +328,7 @@ internal class SystemUiHooks(
                     result
                 }
             }
-        }.onFailure { module.log(Log.WARN, logTag, "Could not install media-island bottom glow hooks", it) }
+        }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not install media-island bottom glow hooks", it) }
     }
 
     companion object {

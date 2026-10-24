@@ -12,7 +12,7 @@ import android.content.res.TypedArray
 import android.content.res.ColorStateList
 import android.os.Bundle
 import android.os.Build
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import android.view.View
 import android.view.ViewGroup
 import android.graphics.drawable.Drawable
@@ -43,6 +43,7 @@ class SettingsDeviceModule : XposedModule() {
     private val detailBasicCards = Collections.synchronizedMap(WeakHashMap<Any, Boolean>())
 
     override fun onPackageLoaded(param: PackageLoadedParam) {
+        if (!HookModuleSafety.enter(this, param.packageName)) return
         if (!OsCompatibility.areHooksAllowed()) return
         if (param.packageName != SETTINGS_PACKAGE) return
         settingsApplicationContext = currentApplicationContext()
@@ -91,9 +92,9 @@ class SettingsDeviceModule : XposedModule() {
                 installCardMaterialHooks()
             }
             if (forcedText) installPersistentTextColorHooks()
-            log(Log.INFO, TAG, "Installed Settings device-profile hooks")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed Settings device-profile hooks")
         }.onFailure { error ->
-            log(Log.ERROR, TAG, "Could not install Settings device-profile hooks", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install Settings device-profile hooks", error)
         }
     }
 
@@ -146,7 +147,7 @@ class SettingsDeviceModule : XposedModule() {
                             if (current == NEVER_SCREEN_TIMEOUT) null else chain.proceed()
                         }
                 }
-        }.onFailure { error -> log(Log.WARN, TAG, "Could not hook legacy screen timeout", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not hook legacy screen timeout", error) }
 
         runCatching {
             val type = classLoader.loadClass("com.android.settings.display.ScreenTimeoutDialogActivity")
@@ -165,7 +166,7 @@ class SettingsDeviceModule : XposedModule() {
                             result
                         }
                 }
-        }.onFailure { error -> log(Log.DEBUG, TAG, "Screen timeout dialog unavailable", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Screen timeout dialog unavailable", error) }
 
         runCatching {
             val type = classLoader.loadClass("com.android.settings.display.ScreenTimeoutSettings")
@@ -184,7 +185,7 @@ class SettingsDeviceModule : XposedModule() {
                             }
                         }
                 }
-        }.onFailure { error -> log(Log.DEBUG, TAG, "Screen timeout candidate list unavailable", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Screen timeout candidate list unavailable", error) }
 
         listOf(
             "com.android.settings.display.ScreenTimeoutSettings",
@@ -208,9 +209,9 @@ class SettingsDeviceModule : XposedModule() {
                                 } else result
                             }
                     }
-            }.onFailure { error -> log(Log.DEBUG, TAG, "Screen timeout class unavailable: $className", error) }
+            }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Screen timeout class unavailable: $className", error) }
         }
-        log(Log.INFO, TAG, "Installed extended screen timeout option hooks")
+        btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed extended screen timeout option hooks")
     }
 
     private fun installGoogleServiceEntryHook(classLoader: ClassLoader) {
@@ -235,13 +236,13 @@ class SettingsDeviceModule : XposedModule() {
                     val headers = chain.getArg(0) as? java.util.List<*> ?: return@intercept result
                     runCatching { addGoogleHeaders.invoke(chain.thisObject, headers) }
                         .onFailure { error ->
-                            log(Log.DEBUG, TAG, "Could not restore Google service entry", error)
+                            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Could not restore Google service entry", error)
                         }
                     result
                 }
-            log(Log.INFO, TAG, "Installed Google service entry hook")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed Google service entry hook")
         }.onFailure { error ->
-            log(Log.DEBUG, TAG, "Google service entry hook unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Google service entry hook unavailable", error)
         }
     }
 
@@ -269,7 +270,7 @@ class SettingsDeviceModule : XposedModule() {
                         }
                 }
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not expose notification importance preference", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not expose notification importance preference", error)
         }
 
         runCatching {
@@ -289,9 +290,9 @@ class SettingsDeviceModule : XposedModule() {
                         }
                 }
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not bind notification importance preference", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not bind notification importance preference", error)
         }
-        log(Log.INFO, TAG, "Installed notification importance setting hooks")
+        btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed notification importance setting hooks")
     }
 
     private fun bindNotificationImportancePreference(fragment: Any, classLoader: ClassLoader) {
@@ -347,7 +348,7 @@ class SettingsDeviceModule : XposedModule() {
                 it.name == "setOnPreferenceChangeListener" && it.parameterCount == 1
             }?.invoke(preference, listener)
         }.onFailure { error ->
-            log(Log.DEBUG, TAG, "Notification importance preference is unavailable", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Notification importance preference is unavailable", error)
         }
     }
 
@@ -457,7 +458,7 @@ class SettingsDeviceModule : XposedModule() {
                         .invoke(preference, NEVER_SCREEN_TIMEOUT.toString())
                 }
             }
-        }.onFailure { error -> log(Log.DEBUG, TAG, "Could not append screen timeout options", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Could not append screen timeout options", error) }
     }
 
     private fun appendDialogTimeoutOptions(activity: Any, context: Context) {
@@ -469,7 +470,7 @@ class SettingsDeviceModule : XposedModule() {
             val arrays = buildTimeoutArrays(entries, values, context) ?: return
             entriesField.set(activity, arrays.entries)
             valuesField.set(activity, arrays.values)
-        }.onFailure { error -> log(Log.DEBUG, TAG, "Could not append dialog screen timeout options", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Could not append dialog screen timeout options", error) }
     }
 
     private fun appendScreenTimeoutCandidates(result: Any?, classLoader: ClassLoader, context: Context): Any? {
@@ -546,9 +547,9 @@ class SettingsDeviceModule : XposedModule() {
                     else chain.proceedWith(chain.thisObject, arrayOf(replacement))
                 }
             }
-            log(Log.INFO, TAG, "Installed persistent Settings text-color hooks")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed persistent Settings text-color hooks")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not hook Settings text colors", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not hook Settings text colors", error)
         }
     }
 
@@ -597,9 +598,9 @@ class SettingsDeviceModule : XposedModule() {
                     }
                     chain.proceed()
                 }
-            log(Log.INFO, TAG, "Installed final Settings card background hooks")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed final Settings card background hooks")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not hook final Settings card backgrounds", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not hook final Settings card backgrounds", error)
         }
     }
 
@@ -624,8 +625,8 @@ class SettingsDeviceModule : XposedModule() {
                         null
                     }
                 }
-            log(Log.INFO, TAG, "Installed persistent Settings logo replacement hooks")
-        }.onFailure { error -> log(Log.WARN, TAG, "Could not hook Settings logo setters", error) }
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed persistent Settings logo replacement hooks")
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not hook Settings logo setters", error) }
     }
 
     private fun installLogoResourceHooks() {
@@ -680,8 +681,8 @@ class SettingsDeviceModule : XposedModule() {
                     SettingsAppearanceApplier.logoResourceReplacement(context, context.resources, resourceId)
                         ?: chain.proceed()
                 }
-            log(Log.INFO, TAG, "Installed Settings logo resource replacement hooks")
-        }.onFailure { error -> log(Log.WARN, TAG, "Could not hook Settings logo resource access", error) }
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed Settings logo resource replacement hooks")
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not hook Settings logo resource access", error) }
     }
 
     private fun installCardMaterialHooks() {
@@ -706,8 +707,8 @@ class SettingsDeviceModule : XposedModule() {
                         }
                 }
             }
-            log(Log.INFO, TAG, "Installed Settings card material opacity hooks")
-        }.onFailure { error -> log(Log.DEBUG, TAG, "Settings card material alpha unavailable", error) }
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed Settings card material opacity hooks")
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Settings card material alpha unavailable", error) }
     }
 
     private fun installCardColorResourceHooks() {
@@ -815,9 +816,9 @@ class SettingsDeviceModule : XposedModule() {
                     ) ?: original
                 }
 
-            log(Log.INFO, TAG, "Installed Settings card color resource replacement hooks")
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed Settings card color resource replacement hooks")
         }.onFailure { error ->
-            log(Log.WARN, TAG, "Could not hook Settings card color resources", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not hook Settings card color resources", error)
         }
     }
 
@@ -912,7 +913,7 @@ class SettingsDeviceModule : XposedModule() {
                                     }
                                 }
                             }
-                        }.onFailure { error -> log(Log.WARN, TAG, "Could not relabel saved Wi-Fi action", error) }
+                        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not relabel saved Wi-Fi action", error) }
                         result
                     }
             }
@@ -1015,8 +1016,8 @@ class SettingsDeviceModule : XposedModule() {
                         }
                     }
             }
-            log(Log.INFO, TAG, "Installed saved Wi-Fi password hooks")
-        }.onFailure { error -> log(Log.WARN, TAG, "Could not install saved Wi-Fi password hooks", error) }
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed saved Wi-Fi password hooks")
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install saved Wi-Fi password hooks", error) }
     }
 
     private fun readSavedWifiPassword(
@@ -1043,7 +1044,7 @@ class SettingsDeviceModule : XposedModule() {
             method.invoke(null, sharedKey) as? String
         } ?: sharedKey.removeSurrounding("\"")
         unquoted.takeIf { it.isNotBlank() }
-    }.onFailure { error -> log(Log.WARN, TAG, "Could not read saved Wi-Fi password", error) }.getOrNull()
+    }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not read saved Wi-Fi password", error) }.getOrNull()
 
     private fun copyLayoutParams(params: ViewGroup.LayoutParams): ViewGroup.LayoutParams = runCatching {
         params.javaClass.constructors
@@ -1098,7 +1099,7 @@ class SettingsDeviceModule : XposedModule() {
             }, stop = { target -> (target as? Activity)?.let(SettingsAppearanceApplier::stop) }, destroy = { target ->
                 (target as? Activity)?.let(SettingsAppearanceApplier::destroy)
             })
-        }.onFailure { error -> log(Log.WARN, TAG, "Could not hook Settings home appearance", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not hook Settings home appearance", error) }
 
         if (deviceEnabled) runCatching {
             val settingsFragment = classLoader.loadClass("com.android.settings.SettingsFragment")
@@ -1117,7 +1118,7 @@ class SettingsDeviceModule : XposedModule() {
                         result
                     }
             }
-        }.onFailure { error -> log(Log.WARN, TAG, "Could not hook Settings home fragment", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not hook Settings home fragment", error) }
 
         runCatching {
             val device = classLoader.loadClass(MY_DEVICE_SETTINGS)
@@ -1158,7 +1159,7 @@ class SettingsDeviceModule : XposedModule() {
                 SettingsAppearanceApplier.destroyDevice(target)
                 SettingsAppearanceApplier.destroyLogo(target)
             })
-        }.onFailure { error -> log(Log.WARN, TAG, "Could not hook My Device appearance", error) }
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not hook My Device appearance", error) }
     }
 
     private fun installActivityAppearanceHooks(classLoader: ClassLoader, homeEnabled: Boolean, deviceEnabled: Boolean) {
@@ -1202,7 +1203,7 @@ class SettingsDeviceModule : XposedModule() {
                         }
                 }
             }.onFailure { error ->
-                log(Log.WARN, TAG, "Could not hook Settings activity $className", error)
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not hook Settings activity $className", error)
             }
         }
     }
@@ -1336,8 +1337,8 @@ class SettingsDeviceModule : XposedModule() {
                         chain.proceed()
                     }
             }
-            log(Log.INFO, TAG, "Installed Settings detail basic card markers")
-        }.onFailure { error -> log(Log.WARN, TAG, "Could not mark Settings detail basic cards", error) }
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed Settings detail basic card markers")
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not mark Settings detail basic cards", error) }
     }
 
     /**
@@ -1367,8 +1368,8 @@ class SettingsDeviceModule : XposedModule() {
                         null
                     }
                 }
-            log(Log.INFO, TAG, "Installed Settings processor icon hooks")
-        }.onFailure { error -> log(Log.WARN, TAG, "Could not install processor icon hooks", error) }
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed Settings processor icon hooks")
+        }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install processor icon hooks", error) }
     }
 
     private fun processorIconDrawable(

@@ -8,7 +8,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.hardware.display.DisplayManager
 import android.os.UserManager
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import java.util.concurrent.TimeUnit
 
 /** Fixed protocol: callers cannot choose another component, user, display or flags. */

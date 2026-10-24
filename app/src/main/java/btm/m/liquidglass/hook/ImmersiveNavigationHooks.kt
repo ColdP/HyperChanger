@@ -6,7 +6,7 @@ import android.graphics.Color
 import android.graphics.Insets
 import android.graphics.drawable.ColorDrawable
 import android.os.Build
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import android.view.View
 import android.view.WindowInsets
 import android.view.Window
@@ -70,12 +70,12 @@ object ImmersiveNavigationHooks {
                 if (chain.getArg(0) == true) applyImmersiveNavigation(activity)
             }
         }
-        module.log(Log.INFO, TAG, "Transparent system navigation hooks installed")
+        btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, TAG, "Transparent system navigation hooks installed")
     }
 
     private fun safeInstall(module: XposedModule, feature: String, block: () -> Unit) {
         runCatching(block).onFailure { error ->
-            module.log(Log.WARN, TAG, "Unable to hook $feature", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, TAG, "Unable to hook $feature", error)
         }
     }
 
@@ -153,7 +153,7 @@ object ImmersiveNavigationHooks {
                 } else {
                     if (!contentInsetsLogWritten) {
                         contentInsetsLogWritten = true
-                        module.log(Log.INFO, TAG, "Navigation insets removed from host content")
+                        btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, TAG, "Navigation insets removed from host content")
                     }
                     chain.proceed(arrayOf(withoutNavigationInsets(insets)))
                 }

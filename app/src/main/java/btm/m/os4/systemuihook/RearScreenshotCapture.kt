@@ -8,7 +8,7 @@ import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 

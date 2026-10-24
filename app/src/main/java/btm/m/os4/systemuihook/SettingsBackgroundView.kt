@@ -17,7 +17,7 @@ import android.view.TextureView
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageView
-import android.util.Log
+import btm.m.os4.systemuihook.ModuleLog as Log
 import java.io.IOException
 
 class SettingsBackgroundView(
