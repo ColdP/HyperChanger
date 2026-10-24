@@ -40,8 +40,10 @@ The project is still in testing and primarily targets **HyperOS 4 (Android 17)**
 
 - Configure notification-shade and Control Center backgrounds independently, plus materials, blur, opacity, and corners for regular, media, and focus notifications.
 - iOS-style notification center with a rounded wallpaper panel, lock-screen clock, and depth effects. Choose lock-screen wallpaper or no wallpaper, hide the clear button, and adjust the bottom notification offset. Live wallpapers are currently unsupported.
+- Customize header icons, text, scale, and spacing, plus the clear button's style and material. Add the lock screen's left and right shortcuts to the notification center with their existing actions and drag gestures; shortcut mode saves its notification bottom offset separately.
 - Customize the Control Center large clock, date spacing, red “1”, carrier text, network indicators, and header height.
-- Adjust volume-panel blur, glass strength, background opacity, and corners.
+- Adjust icon scale, landscape visibility, and backgrounds under “Status bar & Control center → Control center top buttons”. Choose solid color, advanced material, or soft glass, with independent or global soft-glass parameters.
+- Adjust volume-panel blur, glass strength, background opacity, corners, and volume-slider width and height.
 - Use built-in or user presets and share notification-shade and Control Center settings through JSON or QR codes.
 
 ### Super Island, status bar, and gesture handle
@@ -65,40 +67,48 @@ The project is still in testing and primarily targets **HyperOS 4 (Android 17)**
 
 - Add a Dock to compatible HyperOS 4 Rust launchers, with solid-color, advanced-material, or soft-glass backgrounds and an entrance animation.
 - Adjust Dock height, horizontal and bottom margins, corners, colors, opacity, and blur.
+- Tune launcher materials and soft glass for folders, recent apps, and the Dock; customize folder columns, icon row spacing, and Dock icon vertical offset.
 - Hide the recent-apps clear button while either retaining or disabling its action.
 - The Dock requires both System Framework and launcher scopes, plus a manual device restart on first use.
 
 ### Settings and rear screen
 
 - Customize Settings home and device pages with backgrounds, device cards, logos, device images, and displayed specifications; add a module shortcut.
+- Customize Settings entry labels, unlock additional auto-lock and refresh-rate options, show Google services and saved Wi-Fi passwords, and configure BOSE audio effects and badges.
 - Unlock selected rear-screen AI features, manage imported rear-screen apps, and choose apps for the rear-screen music widget.
+- Swipe left from the rear screen's right edge to launch a selected app, and optionally allow all Activities to open on the rear screen. Apps may still need their own adaptations.
 - Customize the rear-screen wallpaper count limit and fix conflicts between theme modifications and rear-screen theme/wallpaper authorization. These options require the Themes scope.
 - Launch the native NetEase Cloud Music mini player on rear display 1 (supported baseline 9.5.37). Select both NetEase Cloud Music and Rear-screen scopes and unlock the device before casting.
-- Customize focus and full rear-screen screenshot shells in the Screenshot app, with image, archive, and attachment QR import/export.
+- Customize focus and full rear-screen screenshot shells in the Screenshot app. Import images or ZIP archives, preview, name, save, and apply styles, and export PNG images.
 
-### Camera, Gallery, and Super XiaoAi input method
+### Camera, Gallery, Super XiaoAi, and input method
 
 - Configure Leica LCC UI, preservation of native focal lengths, and instant modes in compatible Camera versions.
 - Unlock selected Gallery editing watermarks and Xiaomi 18-series editing features, subject to Gallery and media-editor version compatibility.
+- Add soft glass to the Super XiaoAi floating input box and adjust its material parameters independently.
 - Remove selected blacklist, clipboard, AI, and voice safety restrictions in Super XiaoAi input method.
 - Adjust keyboard glass appearance, colors, corners, opacity, and blur.
 
 ### Other apps and system updates
 
-- Customize bottom navigation styles, labels, and colors in Apple Music, Weibo, Xiaohongshu, Xiaomi Shop, Mi Wallet, Mi Fitness, and Luckin Coffee.
+- Customize bottom navigation styles, labels, and colors in Apple Music, Weibo, Xiaohongshu, Xiaomi Shop, Mi Wallet, Mi Fitness, Luckin Coffee, Tencent Meeting, and China Merchants Bank. The bank app adaptation is based on version 14.4.6; other versions need verification.
 - Remove the 10-minute watch-face trial limit in Mi Fitness.
 - Override MiShare's AirDrop availability checks. Actual transfers still depend on system components, hardware, and the receiving device.
 - Add screen-recording frame-rate and bitrate options and configure a custom output directory.
-- Add quick and anywhere-screenshot options and adapt Tencent Meeting bottom navigation.
+- Add quick and anywhere-screenshot options.
+- Configure System Framework options for multiple or forced freeform windows, remembered window state and position, background activity for edge-docked windows, immediate volume adjustment, removal of high-volume warnings, forced dark mode, the native installer, and disabling the mandatory PIN entry every 72 hours.
 - Disable system updates, remove selected OTA restrictions, and customize displayed system and SOTA versions.
 
 ### Module app, languages, and updates
 
 - MIUIX-based settings interface with light, dark, and system themes, multiple bottom navigation styles, and predictive back animations.
+- Search feature entries by setting name, description, or scope.
 - Built-in Simplified Chinese, English, and Japanese, with language-pack import, export, and editing.
 - Import and export module settings as JSON and manage scoped app restarts from the app.
 - Check for module updates through GitHub or Gitee, download them, and install manually or silently with root.
 - Provide a module master switch, per-section safety disable policy, and module log levels, filters, retention, and ZIP export.
+- Under Settings → Module safety, select running processes with the module injected, manually request hot reload, and view per-process results. Framework support is required; some settings still require a restart.
+- Log ZIP archives include `environment.txt` with device, system, module, and framework information and app versions for currently selected scopes.
 
 ## Compatibility and requirements
 
@@ -107,8 +117,8 @@ The project is still in testing and primarily targets **HyperOS 4 (Android 17)**
 | Primary target | Xiaomi HyperOS 4 (Android 17) |
 | Minimum installation version | Android 15 (API 35); does not imply full feature compatibility |
 | Compile / target SDK | API 37 |
-| Module framework | Root and LSPosed with modern libxposed API support; minimum API 101, target API 102 |
-| Native library architecture | The repository includes `arm64-v8a/libhyperpatch.so`; native launcher patches require ARM64 |
+| Module framework | Root and LSPosed with modern libxposed API support; minimum API 102, target API 102 |
+| Native library architecture | Builds target `arm64-v8a` only; prebuilt `libhyperpatch.so` is in `jniLibs`, while Dock and folder patches are built from `src/main/cpp` |
 | Optional components | Each feature requires a compatible target app or system component to be installed |
 
 The app checks `ro.mi.os.version.code`: it exits when HyperOS is not detected and shows a warning on non-HyperOS 4 versions. Passing this check does not guarantee hook compatibility with the current system.
@@ -120,7 +130,7 @@ Enable the module in LSPosed and select the scopes required by your features. Th
 | Scope | Package / identifier |
 | --- | --- |
 | System UI | `com.android.systemui` |
-| System Framework (Dock) | `system` |
+| System Framework | `system` |
 | System launcher | `com.miui.home` |
 | Wallpaper | `com.miui.miwallpaper` |
 | System UI plugin | `miui.systemui.plugin` |
@@ -153,6 +163,7 @@ Enable the module in LSPosed and select the scopes required by your features. Th
 | AMap | `com.autonavi.minimap` |
 | MiShare | `com.miui.mishare.connectivity` |
 | Tencent Meeting | `com.tencent.wemeet.app` |
+| China Merchants Bank | `cmb.pb` |
 
 Some packages are absent on certain devices. Select only the scopes you use. A declared scope does not guarantee support for every version of that app.
 
@@ -164,9 +175,12 @@ Some packages are absent on certain devices. Select only the scopes you use. A d
 4. Enable the features you need. Follow the app's prompts and manually use its scope restart controls to apply settings.
 5. When enabling the launcher Dock for the first time, confirm that System Framework and launcher scopes are selected, then manually restart the device.
 
+To request a manual hot reload, enable “Process hot reload” under Settings → Module safety, choose “Hot reload processes now”, select targets, and check the results. This requires LSPosed's API 102 hot-reload capability. Follow the displayed guidance for unsupported, failed, or timed-out requests, and avoid resubmitting after a timeout. Follow the original restart instructions for features that still require one.
+
 ## Presets and language packs
 
 - **Notification-shade and Control Center presets:** use built-in or user presets. Long-press to export JSON or a QR code; import from a file or QR-code image.
+- **Soft-glass presets:** use built-in or custom parameter presets and share them through JSON or QR codes. Surfaces configured to follow global parameters use the corresponding global soft-glass values.
 - **Module settings presets:** import and export multiple configuration groups as JSON from the app's Settings page. Imports validate format and version. Exports do not bundle image files and also skip selected image-reference fields; prepare assets separately when moving to another device.
 - **Language packs:** choose Chinese, English, Japanese, or the system language. Use [languages/example.json](languages/example.json) as a template and import, edit, or export packs in the app.
 
@@ -179,15 +193,16 @@ Use the matching import entry for each preset type. Review imported settings and
 | A change does not take effect | Check the feature toggle, required LSPosed scopes, and target app version; manually restart the affected app as prompted. |
 | Dock does not appear | Check System Framework and launcher scopes, confirm a compatible Rust launcher, and ensure you manually restarted the device after first enabling it. |
 | iOS-style notification center has no wallpaper | Check the wallpaper source setting; live wallpapers are currently unsupported. |
+| Hot reload is unavailable or unsuccessful | Check the LSPosed connection and API 102 hot-reload support, confirm the target process is still running with the module injected, and inspect its result. Avoid resubmitting after a timeout. |
 | System UI repeatedly crashes | Disable the module through LSPosed or recovery. After restoring normal operation, check individual settings and conflicts with other modules. |
 | A feature is unavailable | The system or app implementation may be incompatible. Report device, system, and target app versions. |
 | Preset import fails | Check that the preset type, import entry, and exporting version match, and that the file or QR code is intact. |
 
-When opening an issue, include the device model, Android / HyperOS versions, module and LSPosed versions, target app versions, scopes, reproduction steps, and relevant Logcat output with personal information removed.
+When opening an issue, include the device model, Android / HyperOS versions, module and LSPosed versions, target app versions, scopes, and reproduction steps. Export a log ZIP from Settings → Module safety and attach relevant Logcat output. Review logs and environment information and remove personal information before sharing.
 
 ## Build from source
 
-Requirements: JDK 21 (matching CI), Android SDK 37, and Android Studio with Android Gradle Plugin 9.2.1 support or the project Gradle Wrapper (9.6.1). [app/build.gradle.kts](app/build.gradle.kts) also configures a local NDK r28c path; confirm that it is available on your machine before building.
+Requirements: JDK 21 (matching CI), Android SDK 37, NDK r28c (28.2.13676358), CMake 3.22.1, and Android Studio with Android Gradle Plugin 9.2.1 support or the project Gradle Wrapper (9.6.1). [app/build.gradle.kts](app/build.gradle.kts) fixes the NDK path to `.build-tmp/android-ndk-r28c` inside the repository. Place the NDK there or create a directory link to an installed copy before building; see the [CI configuration](.github/workflows/android.yml).
 
 ```bash
 git clone https://github.com/ColdP/HyperChanger.git
@@ -212,11 +227,14 @@ HyperChanger/
 |-- app/
 |   |-- src/main/java/       Kotlin / Java module and UI sources
 |   |-- src/main/assets/     Language packs, legal documents, and third-party notices
-|   |-- src/main/jniLibs/    ARM64 native patch library
+|   |-- src/main/cpp/        ARM64 native sources for Dock, folder, and related patches
+|   |-- src/main/jniLibs/    Prebuilt ARM64 libhyperpatch.so
 |   |-- src/main/res/        Android resources
 |   `-- src/main/resources/  LSPosed entries, metadata, and scopes
 |-- languages/example.json   Language-pack template
 |-- gradle/                  Gradle Wrapper
+|-- docs/                    Feature implementation and verification notes
+|-- tests/                   Focused regression tests and runner scripts
 |-- README.md                Primary Chinese README
 |-- README_en.md             English README
 |-- README_ja.md             Japanese README
