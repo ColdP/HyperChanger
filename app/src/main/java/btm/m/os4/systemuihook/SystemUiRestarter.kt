@@ -109,6 +109,7 @@ enum class ScopeApplication(val title: String, val packageName: String) {
     SETTINGS("\u8bbe\u7f6e", "com.android.settings"),
     SYSTEM_UPDATE("\u7cfb\u7edf\u66f4\u65b0", "com.android.updater"),
     SCREEN_RECORDER("\u5c4f\u5e55\u5f55\u5236", "com.miui.screenrecorder"),
+    SCREENSHOT("\u622a\u5c4f", "com.miui.screenshot"),
     APPLE_MUSIC("Apple Music", "com.apple.android.music"),
     NETEASE_MUSIC("网易云音乐", "com.netease.cloudmusic"),
     WEIBO("微博", "com.sina.weibo"),

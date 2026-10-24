@@ -289,7 +289,7 @@ private enum class PageId {
     ISLAND, ISLAND_COLLAPSED, ISLAND_EXPANDED, ISLAND_EXPANDED_BACKGROUND, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_HEADER_SETTINGS, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_ADJUSTMENT, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LOCKSCREEN_SHORTCUT_BACKGROUND, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
-    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND,
+    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND,
 }
 
 private data class CategorySearchItem(
@@ -2132,6 +2132,11 @@ private fun RearScreen(
                     summary = tr("rear_mini_player_entry", "将网易云音乐原生迷你播放器投放到背屏。"),
                     onClick = { open(PageId.REAR_MINI_PLAYER) },
                 )
+                ArrowPreference(
+                    title = tr("rear_screenshot_shell_title", "自定义带壳截图外壳样式"),
+                    summary = tr("rear_screenshot_shell_entry", "在截屏应用中自定义背屏带壳截图的聚焦和完整样式。"),
+                    onClick = { open(PageId.REAR_SCREEN_SHELL) },
+                )
                 SwitchPreference(
                     title = tr("rear_allow_all_activities", "强制允许所有 Activity 可以在背屏上被打开"),
                     summary = tr("rear_allow_all_activities_hint", "需要勾选系统框架（system）作用域并手动重启设备。放宽背屏 Activity 白名单和显示屏 1 的启动限制；不保证所有应用布局适配。"),
@@ -2811,7 +2816,7 @@ private fun SettingsHome(
     AppList(padding, scroll) {
         item { ServiceCard(online) }
         item {
-            Group(tr("application_settings", tr("\u5e94\u7528\u8bbe\u7f6e", "\u5e94\u7528\u8bbe\u7f6e"))) {
+            Group(tr("模块设置", "模块设置")) {
                 ArrowPreference(
                     title = tr("restart_scope_apps", tr("\u91cd\u542f\u4f5c\u7528\u57df\u5e94\u7528", "\u91cd\u542f\u4f5c\u7528\u57df\u5e94\u7528")),
                     onClick = { open(PageId.RESTART_SCOPES) },
@@ -2835,7 +2840,7 @@ private fun SettingsHome(
                     },
                 )
                 OverlayDropdownPreference(
-                    title = tr("系统设置内模块应用入口", "系统设置内模块应用入口"),
+                    title = tr("系统设置内模块入口", "系统设置内模块入口"),
                     items = listOf(
                         tr("禁用", "禁用"),
                         tr("顶部", "顶部"),
@@ -2843,13 +2848,24 @@ private fun SettingsHome(
                         tr("底部", "底部"),
                     ),
                     selectedIndex = settingsApp.entryPosition.coerceIn(0, 3),
-                    onSelectedIndexChange = { index -> updateSettingsApp { it.copy(entryPosition = index) } },
+                    onSelectedIndexChange = { index ->
+                        if (index == 0) editingEntryTitle = false
+                        updateSettingsApp { it.copy(entryPosition = index) }
+                    },
                 )
-                ArrowPreference(
-                    title = tr("settingsAppEntryTitle", "模块应用入口文案"),
-                    summary = settingsApp.entryTitle.ifBlank { tr("settingsAppEntryTitleDefault", "默认（模块名称）") },
-                    onClick = { editingEntryTitle = true },
-                )
+                if (settingsApp.entryPosition != 0) {
+                    ArrowPreference(
+                        title = tr("settingsAppEntryTitle", "模块入口文案"),
+                        summary = settingsApp.entryTitle.ifBlank { tr("settingsAppEntryTitleDefault", "默认（模块名称）") },
+                        onClick = { editingEntryTitle = true },
+                    )
+                }
+                ArrowPreference(title = tr("导入预设", "导入预设"), onClick = onImportModulePreset)
+                ArrowPreference(title = tr("导出预设", "导出预设"), onClick = onExportModulePreset)
+            }
+        }
+        item {
+            Group(tr("外观", "外观")) {
                 OverlayDropdownPreference(
                     title = tr("theme_mode", tr("\u4e3b\u9898\u6a21\u5f0f", "\u4e3b\u9898\u6a21\u5f0f")),
                     items = listOf(tr("followSystem", tr("\u8ddf\u968f\u7cfb\u7edf", "\u8ddf\u968f\u7cfb\u7edf")), tr("light_mode", tr("\u6d45\u8272\u6a21\u5f0f", "\u6d45\u8272\u6a21\u5f0f")), tr("dark_mode", tr("\u6df1\u8272\u6a21\u5f0f", "\u6df1\u8272\u6a21\u5f0f"))),
@@ -2900,13 +2916,7 @@ private fun SettingsHome(
             }
         }
         item {
-            Group(tr("\u5e94\u7528\u9884\u8bbe", "\u5e94\u7528\u9884\u8bbe")) {
-                ArrowPreference(title = tr("\u5bfc\u5165\u9884\u8bbe", "\u5bfc\u5165\u9884\u8bbe"), onClick = onImportModulePreset)
-                ArrowPreference(title = tr("\u5bfc\u51fa\u9884\u8bbe", "\u5bfc\u51fa\u9884\u8bbe"), onClick = onExportModulePreset)
-            }
-        }
-        item {
-            Group(tr("\u5e94\u7528\u4fe1\u606f", "\u5e94\u7528\u4fe1\u606f")) {
+            Group(tr("模块信息", "模块信息")) {
                 ArrowPreference(title = tr("\u5173\u4e8e", "\u5173\u4e8e"), onClick = { open(PageId.ABOUT) })
                 ArrowPreference(title = tr("\u8f6f\u4ef6\u66f4\u65b0", "\u8f6f\u4ef6\u66f4\u65b0"), onClick = { open(PageId.SOFTWARE_UPDATE) })
                 ArrowPreference(title = tr("\u6350\u8d60", "\u6350\u8d60"), onClick = { open(PageId.DONATE) })
@@ -2915,7 +2925,7 @@ private fun SettingsHome(
     }
     if (editingEntryTitle) {
         DeviceProfileFieldDialog(
-            title = tr("settingsAppEntryTitle", "模块应用入口文案"),
+            title = tr("settingsAppEntryTitle", "模块入口文案"),
             current = settingsApp.entryTitle,
             inputLabel = tr("settingsAppEntryTitleHint", "留空则使用模块名称"),
             onDismiss = { editingEntryTitle = false },
@@ -2952,6 +2962,7 @@ private fun RestartScopesPage(
         ScopeApplication.SOUND_EFFECT,
         ScopeApplication.MI_SETTINGS,
         ScopeApplication.SCREEN_RECORDER,
+        ScopeApplication.SCREENSHOT,
         ScopeApplication.SUPER_XIAOAI,
         ScopeApplication.SUPER_XIAOAI_IME,
         ScopeApplication.GALLERY,
@@ -4816,13 +4827,40 @@ private fun DeviceProfileFieldDialog(
 
 @Composable
 private fun ServiceCard(online: Boolean) {
+    val context = LocalContext.current
     val color = if (online) ComposeColor(0xFF38A169) else ComposeColor(0xFFE05353)
-    Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, colors = CardDefaults.defaultColors(color.copy(alpha = .14f)), insideMargin = PaddingValues(16.dp)) {
+    Card(
+        Modifier.fillMaxWidth(),
+        cornerRadius = 22.5.dp,
+        colors = CardDefaults.defaultColors(color.copy(alpha = .14f)),
+        insideMargin = PaddingValues(16.dp),
+        onClick = { openLsposedManager(context) },
+    ) {
         Column(Modifier.fillMaxWidth()) {
             Text("LSPosed", style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold)
             Text(if (online) tr("\u5df2\u8fde\u63a5", "\u5df2\u8fde\u63a5") else tr("\u672a\u8fde\u63a5", "\u672a\u8fde\u63a5"), style = MiuixTheme.textStyles.body2, color = color, modifier = Modifier.padding(top = 4.dp))
         }
     }
+}
+
+private fun openLsposedManager(context: Context) {
+    val standaloneIntent = runCatching {
+        context.packageManager.getLaunchIntentForPackage("org.lsposed.manager")
+    }.getOrNull() ?: Intent(Intent.ACTION_MAIN).setClassName(
+        "org.lsposed.manager", "org.lsposed.manager.ui.activity.MainActivity",
+    )
+    // LSPosed's parasitic manager uses Shell's activity and this launch category.
+    val parasiticIntent = Intent(Intent.ACTION_MAIN).setClassName(
+        "com.android.shell", "com.android.shell.BugreportWarningActivity",
+    )
+    for (intent in listOf(standaloneIntent, parasiticIntent)) {
+        intent.categories?.toList()?.forEach(intent::removeCategory)
+        intent.addCategory("org.lsposed.manager.LAUNCH_MANAGER")
+        intent.setPackage(intent.component?.packageName)
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (runCatching { context.startActivity(intent) }.isSuccess) return
+    }
+    Toast.makeText(context, tr("lsposed_manager_open_failed", "无法打开 LSPosed 管理器，请确认已安装并启用。"), Toast.LENGTH_SHORT).show()
 }
 
 @Composable
@@ -4960,6 +4998,7 @@ private fun Detail(
         PageId.OPEN -> OpenSource(back)
         PageId.CONTRIBUTORS -> Contributors(back)
         PageId.REAR_SCREEN -> RearScreen(settings, update, musicWhitelist, updateMusicWhitelist, openPage, back)
+        PageId.REAR_SCREEN_SHELL -> RearScreenshotShellPage(back)
         PageId.REAR_MINI_PLAYER -> RearMiniPlayerPage(back)
         PageId.REAR_CUSTOM_CENTER -> CustomRearScreenCenter(back)
         PageId.REAR_MUSIC_APPS -> RearMusicApps(musicWhitelist, updateMusicWhitelist, back)
@@ -6230,7 +6269,7 @@ private fun Shade(
 }
 
 @Composable
-private fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, onSelected: (Int) -> Unit) {
+internal fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, onSelected: (Int) -> Unit) {
     val backdrop = LocalToolbarBackdrop.current
     val surface = MiuixTheme.colorScheme.surfaceContainer
     val shape = RoundedCornerShape(50.dp)

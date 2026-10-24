@@ -1029,6 +1029,12 @@ class HyperSystemUiModule : XposedModule() {
             }.onFailure { error -> log(Log.ERROR, TAG, "Could not install sound effect hooks", error) }
             return
         }
+        if (param.packageName == "com.miui.screenshot") {
+            runCatching {
+                othersHooks.installScreenshotHooks(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+            }.onFailure { error -> log(Log.ERROR, TAG, "Could not install screenshot shell hooks", error) }
+            return
+        }
         if (param.packageName == "com.android.systemui") {
             runCatching {
                 controlCenterHooks.installOldControlCenterHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))

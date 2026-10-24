@@ -50,6 +50,10 @@ internal class OthersHooks(
     private var rearScreenLeftSwipeInstalled = false
     private var islandSimulationRearScreenInstalled = false
     private val rearMiniPlayerHooks = RearMiniPlayerHooks(module)
+    private val screenshotHooks = ScreenshotHooks(module, hookDeoptimized, logTag)
+
+    fun installScreenshotHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
+        screenshotHooks.install(classLoader, preferences)
 
     fun installRearMiniPlayerMusicHooks(preferences: SharedPreferences) = rearMiniPlayerHooks.installMusic(preferences)
 

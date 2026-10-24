@@ -82,5 +82,10 @@
             android:name=".DockMaterialProvider"
             android:authorities="btm.m.os4.systemuihook.dockmaterial"
             android:exported="true" />
+        <provider
+            android:name=".RearScreenshotShellProvider"
+            android:authorities="btm.m.os4.systemuihook.rearscreenshot.shells"
+            android:grantUriPermissions="true"
+            android:exported="true" />
     </application>
 </manifest>
