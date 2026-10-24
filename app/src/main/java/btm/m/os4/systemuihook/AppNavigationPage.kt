@@ -32,6 +32,8 @@ import btm.m.liquidglass.NavigationStyle
 import btm.m.liquidglass.ScopedSettings
 import btm.m.liquidglass.rememberMomentumPredictiveBack
 import btm.m.liquidglass.momentumBackTransform
+import androidx.compose.ui.graphics.ColorFilter
+import top.yukonga.miuix.kmp.icon.MiuixIcons
 
 private data class AppNavItem(val name: String, val packageName: String)
 
@@ -99,6 +101,7 @@ private fun AppNavigationCard(item: AppNavItem, prefs: android.content.SharedPre
                 contentDescription = null,
                 modifier = Modifier.padding(start = 12.dp).size(22.dp),
                 colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary)
+            )
         }
     }
 }
