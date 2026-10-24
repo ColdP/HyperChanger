@@ -1,6 +1,7 @@
 package btm.m.os4.systemuihook.newnotificationcenter;
 
 import android.content.Context;
+import android.content.res.Configuration;
 import android.graphics.Canvas;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -494,6 +495,9 @@ public final class IosNotificationCenterPresentation {
 
     static float stackOffset(View view, float nativeStackY) {
         if (!isActive() || view != stack || panel == null || stack.getHeight() == 0) return 0f;
+        if (isLandscapePanel()) {
+            return Math.round(24f * view.getResources().getDisplayMetrics().density);
+        }
         float reserve = IosNotificationStackHooks.restingRowsExtent(view);
         if (reserve <= 0f) reserve = 160f * panel.getResources().getDisplayMetrics().density;
         // Anchor the first full card and the OEM stack peeks above the bottom safe area.
@@ -510,10 +514,19 @@ public final class IosNotificationCenterPresentation {
                 insets.getInsetsIgnoringVisibility(WindowInsets.Type.navigationBars()).bottom);
         // Shift the resting boundary as well as the origin so the OEM stacking calculator
         // and special media/focus rows use the same bottom, instead of cancelling the offset.
-        int offsetDp = notificationShortcutsEnabled
+        int offsetDp = notificationShortcutsEnabled && !isLandscapePanel()
                 ? shortcutNotificationBottomOffsetDp : notificationBottomOffsetDp;
         float offset = offsetDp * view.getResources().getDisplayMetrics().density;
+        if (isLandscapePanel()) {
+            // Landscape navigation bars are usually on the side. Reserve only a small
+            // rounded-card margin so the last card is not cut at the bottom edge.
+            inset = 8f * view.getResources().getDisplayMetrics().density;
+        }
         return Math.max(0f, view.getHeight() - inset - offset);
+    }
+
+    private static boolean isLandscapePanel() {
+        return panel != null && panel.getWidth() > panel.getHeight();
     }
 
     static float panelStackAlpha(View view, float nativeAlpha) {
@@ -1053,6 +1066,7 @@ public final class IosNotificationCenterPresentation {
         if (!landscapeLayout) {
             clock.setPivotY(clock.getHeight() / 2f);
             clock.setScaleY(1f);
+            clock.setScaleX(1f);
             return;
         }
         float contentBottom = 0f;
@@ -1066,8 +1080,14 @@ public final class IosNotificationCenterPresentation {
         float inset = dp(28);
         float available = Math.max(1f, panel.getHeight() - inset * 2f);
         float scale = contentBottom > available ? available / contentBottom : 1f;
+        float contentRight = largestVisibleContentRight(clock, clock);
+        if (contentRight <= 0f) contentRight = clock.getWidth();
+        float availableWidth = Math.max(1f, host == null ? clock.getWidth() : host.getWidth() - dp(16));
+        float widthScale = contentRight > availableWidth ? availableWidth / contentRight : 1f;
         clock.setPivotY(0f);
+        clock.setPivotX(0f);
         if (Math.abs(clock.getScaleY() - scale) > .001f) clock.setScaleY(scale);
+        if (Math.abs(clock.getScaleX() - widthScale) > .001f) clock.setScaleX(widthScale);
     }
 
     private static float largestVisibleContentBottom(View root, View view) {
@@ -1086,6 +1106,24 @@ public final class IosNotificationCenterPresentation {
             bottom = Math.max(bottom, largestVisibleContentBottom(root, group.getChildAt(i)));
         }
         return bottom;
+    }
+
+    private static float largestVisibleContentRight(View root, View view) {
+        if (root == null || view == null || view.getVisibility() != View.VISIBLE) return 0f;
+        if (!(view instanceof ViewGroup) || ((ViewGroup) view).getChildCount() == 0) {
+            if (view.getWidth() <= 0) return 0f;
+            int[] rootPoint = new int[2];
+            int[] viewPoint = new int[2];
+            root.getLocationInWindow(rootPoint);
+            view.getLocationInWindow(viewPoint);
+            return viewPoint[0] - rootPoint[0] + view.getWidth();
+        }
+        float right = 0f;
+        ViewGroup group = (ViewGroup) view;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            right = Math.max(right, largestVisibleContentRight(root, group.getChildAt(i)));
+        }
+        return right;
     }
 
     private static void syncClockInfo() {
@@ -1182,11 +1220,14 @@ public final class IosNotificationCenterPresentation {
      */
     private static void ensureHostedClockMinuteVisible() {
         if (clock == null || host == null || progress <= 0f) return;
+        if (clock.getVisibility() != View.VISIBLE) clock.setVisibility(View.VISIBLE);
         if (hostedClockMinuteViews == null || hasDetachedClockMinuteView()) {
             hostedClockMinuteViews = new ArrayList<>();
             String[] names = {"minute_view", "minute1", "minute2", "time_minute",
                     "time_minute_right", "current_time_minute_style1", "time_below_view_minute1",
-                    "time_below_view_minute2", "tv_minute"};
+                    "time_below_view_minute2", "tv_minute", "hour_view", "hour1", "hour2",
+                    "time_hour", "time_hour_left", "time_hour_right",
+                    "current_time_hour_style1", "tv_hour"};
             for (String name : names) {
                 View minute = findDescendantByEntryName(clock, name);
                 if (minute != null && !hostedClockMinuteViews.contains(minute)) {
@@ -1690,7 +1731,10 @@ public final class IosNotificationCenterPresentation {
 
     static void syncShortcuts() {
         IosNotificationShortcutHost.update(panel, wallpaperSheet, progress,
-                notificationShortcutsEnabled && isActive() && !isKeyguardLocked());
+                notificationShortcutsEnabled && panel != null
+                        && panel.getResources().getConfiguration().orientation
+                        != Configuration.ORIENTATION_LANDSCAPE
+                        && isActive() && !isKeyguardLocked());
     }
 
     private static View byId(View root, String name) {

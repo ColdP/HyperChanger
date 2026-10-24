@@ -1526,7 +1526,7 @@ internal class StatusBarHooks(
                             }
                         }
                         if (presentation != null) {
-                            refreshStackedMobilePresentationForView(presentation.signal, enabled)
+                            refreshStackedMobilePresentations(enabled)
                         }
                     }
                     result
@@ -1828,9 +1828,16 @@ internal class StatusBarHooks(
         val displayLogic = stackedMobilePreferences
             ?.getInt(KEY_MOBILE_NETWORK_TYPE_DISPLAY_LOGIC, 0)
             ?.coerceIn(0, 1) ?: 0
+        // The retained slot-0 root is only a display host. When mobile data controls
+        // visibility, both the connection state and the label must belong to the data SIM.
+        val typeSubscriptionId = if (useStacked && displayLogic == 1) {
+            mobileDataSubscriptionId() ?: presentation.subscriptionId
+        } else {
+            presentation.subscriptionId
+        }
         val shouldShow = mode == 1 &&
             (!useStacked || slotIndex == 0) &&
-            (displayLogic == 0 || isUsingMobileData(presentation))
+            (displayLogic == 0 || isUsingMobileData(presentation.root.context, typeSubscriptionId))
 
         if (mode == 1) {
             if (presentation.savedIndependentView !== textView) {
@@ -1901,12 +1908,23 @@ internal class StatusBarHooks(
 
         when (mode) {
             1 -> {
-                val sourceValue = readCurrentFlowValue(presentation.networkTypeSource)
+                val typePresentation = if (typeSubscriptionId == presentation.subscriptionId) {
+                    presentation
+                } else {
+                    synchronized(stackedMobileSignalLock) {
+                        stackedMobilePresentations.values.firstOrNull {
+                            it.subscriptionId == typeSubscriptionId && it.root.isAttachedToWindow
+                        }
+                    }
+                }
+                val sourceValue = readCurrentFlowValue(typePresentation?.networkTypeSource)
                 val realType = sourceValue?.toString().orEmpty().ifBlank {
                     synchronized(stackedMobileSignalLock) {
-                        stackedMobileNetworkTypes[presentation.subscriptionId].orEmpty()
+                        stackedMobileNetworkTypes[typeSubscriptionId].orEmpty()
                     }
-                }.ifBlank { presentation.networkTypeView?.text?.toString().orEmpty() }
+                }.ifBlank {
+                    typePresentation?.networkTypeView?.text?.toString().orEmpty()
+                }
                 val customText = stackedMobilePreferences
                     ?.getString(KEY_MOBILE_NETWORK_TYPE_CUSTOM_TEXT, "")
                     .orEmpty()
@@ -1955,15 +1973,14 @@ internal class StatusBarHooks(
     }
 
     /** Matches the mobile data state used by SystemUI's MobileState. */
-    private fun isUsingMobileData(presentation: StackedMobilePresentation): Boolean {
+    private fun isUsingMobileData(context: Context, subscriptionId: Int): Boolean {
         val cached = synchronized(stackedMobileSignalLock) {
-            stackedMobileSubscriptions[presentation.subscriptionId]
+            stackedMobileSubscriptions[subscriptionId]
         }
         if (cached?.dataSim != null && cached.dataConnected != null && cached.isDefault != null) {
             return cached.isDefault && cached.dataSim && cached.dataConnected
         }
 
-        val context = presentation.root.context
         val airplaneMode = runCatching {
             Settings.Global.getInt(
                 context.contentResolver,
@@ -1972,7 +1989,7 @@ internal class StatusBarHooks(
             ) != 0
         }.getOrDefault(false)
         if (airplaneMode) return false
-        if (presentation.subscriptionId != SubscriptionManager.getDefaultDataSubscriptionId()) {
+        if (subscriptionId != SubscriptionManager.getDefaultDataSubscriptionId()) {
             return false
         }
         val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE)
@@ -1980,6 +1997,24 @@ internal class StatusBarHooks(
         val network = connectivity.activeNetwork ?: return false
         val capabilities = connectivity.getNetworkCapabilities(network) ?: return false
         return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+    }
+
+    private fun mobileDataSubscriptionId(): Int? {
+        val cachedId = synchronized(stackedMobileSignalLock) {
+            stackedMobileSubscriptions.entries
+                .firstOrNull { (_, subscription) ->
+                    subscription.dataSim == true &&
+                        (subscription.isDefault == true || subscription.dataConnected == true)
+                }
+                ?.key
+        }
+        if (cachedId != null) return cachedId
+        val activeId = runCatching { SubscriptionManager.getActiveDataSubscriptionId() }.getOrNull()
+        if (activeId != null && SubscriptionManager.isValidSubscriptionId(activeId)) {
+            return activeId
+        }
+        val defaultId = runCatching { SubscriptionManager.getDefaultDataSubscriptionId() }.getOrNull()
+        return defaultId?.takeIf { SubscriptionManager.isValidSubscriptionId(it) }
     }
 
     private fun anchorSystemMobileTypeToDualSignal(presentation: StackedMobilePresentation) {
