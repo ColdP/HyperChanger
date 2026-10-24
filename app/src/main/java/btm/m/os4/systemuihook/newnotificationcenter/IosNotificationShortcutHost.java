@@ -120,6 +120,37 @@ final class IosNotificationShortcutHost extends FrameLayout {
         if (current.getTranslationY() != y) current.setTranslationY(y);
     }
 
+    /** Space occupied by the lowest visible native shortcut, measured in panel coordinates. */
+    static float bottomSpace(View panel) {
+        if (panel == null || overlay == null || overlay.getParent() != panel
+                || (left == null && right == null)) return 0f;
+        int[] panelPoint = new int[2];
+        panel.getLocationInWindow(panelPoint);
+        float panelBottom = panelPoint[1] + panel.getHeight();
+        float navigationInset = 0f;
+        android.view.WindowInsets insets = panel.getRootWindowInsets();
+        if (insets != null) {
+            navigationInset = insets.getInsetsIgnoringVisibility(
+                    android.view.WindowInsets.Type.navigationBars()).bottom;
+        }
+        float safeBottom = panelBottom - navigationInset;
+        float top = Float.POSITIVE_INFINITY;
+        if (left != null && left.isShown() && left.getHeight() > 0) {
+            int[] point = new int[2];
+            left.getLocationInWindow(point);
+            top = Math.min(top, point[1]);
+        }
+        if (right != null && right.isShown() && right.getHeight() > 0) {
+            int[] point = new int[2];
+            right.getLocationInWindow(point);
+            top = Math.min(top, point[1]);
+        }
+        if (top == Float.POSITIVE_INFINITY) return 0f;
+        // viewportBottom() already removes the navigation inset; reserve only the shortcut
+        // area above that boundary so the system bottom space is not subtracted twice.
+        return Math.max(0f, Math.min(panel.getHeight(), safeBottom - top));
+    }
+
     private static void revealBranch(View view) {
         if (view == null) return;
         for (View current = view; current != null; ) {

@@ -13,6 +13,7 @@ internal fun testPresetPersistence() {
     testExpandedIslandGlass()
     testLockscreenShortcutBackground()
     testControlCenterRadius()
+    testControlCenterTopButtons()
     testVolumePanelLayout()
     val disk = mutableMapOf<String, Any>()
     val local = memoryPreferences(disk)

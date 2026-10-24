@@ -1690,7 +1690,7 @@ class HyperSystemUiModule : XposedModule() {
                         .setId("control-center:hide-edit-button-$index")
                         .intercept { chain ->
                             if (preferences.getBoolean(KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON, false) &&
-                                !preferences.getBoolean(ADD_CONTROL_CENTER_TOP_BUTTONS_KEY, false)
+                                !readControlCenterTopButtonsGlassSettings(preferences).enabled
                             ) false
                             else chain.proceed()
                         }
@@ -1701,7 +1701,7 @@ class HyperSystemUiModule : XposedModule() {
                         .setId("control-center:hide-edit-button-items-$index")
                         .intercept { chain ->
                             if (preferences.getBoolean(KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON, false) &&
-                                !preferences.getBoolean(ADD_CONTROL_CENTER_TOP_BUTTONS_KEY, false)
+                                !readControlCenterTopButtonsGlassSettings(preferences).enabled
                             ) ArrayList<Any?>()
                             else chain.proceed()
                         }
@@ -1771,7 +1771,7 @@ class HyperSystemUiModule : XposedModule() {
                     .intercept { chain ->
                         val result = chain.proceed()
                         if (!preferences.getBoolean(KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON, false) ||
-                            preferences.getBoolean(ADD_CONTROL_CENTER_TOP_BUTTONS_KEY, false)
+                            readControlCenterTopButtonsGlassSettings(preferences).enabled
                         ) result
                         else (result as? List<*>)?.let { controllers ->
                             ArrayList(controllers.filterNot {
@@ -1793,7 +1793,10 @@ class HyperSystemUiModule : XposedModule() {
             installControlCenterTouchHook(classLoader)
             if (!controlCenterPreferenceListenerInstalled) {
                 val listener = SharedPreferences.OnSharedPreferenceChangeListener { changed, key ->
-                    if (key == ADD_CONTROL_CENTER_TOP_BUTTONS_KEY ||
+                    if (key?.startsWith(CONTROL_CENTER_TOP_BUTTONS_SETTINGS_PREFIX) == true ||
+                        key?.startsWith(CONTROL_CENTER_TOP_BUTTONS_GLASS_PREFIX) == true ||
+                        key?.startsWith("soft_glass_parameters_v3_") == true ||
+                        key == ADD_CONTROL_CENTER_TOP_BUTTONS_KEY ||
                         key == KEY_SHOW_CONTROL_CENTER_TOP_BUTTONS_IN_LANDSCAPE ||
                         key == KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON ||
                         key == KEY_CONTROL_CENTER_TOP_BUTTONS_ICON_SCALE ||
@@ -2402,11 +2405,12 @@ class HyperSystemUiModule : XposedModule() {
 
     private fun installControlCenterTopButtonsIntoRoot(root: ViewGroup, preferences: SharedPreferences) {
         if (!ModuleSafetyRuntime.allows(SafetySection.CONTROL_CENTER)) return
+        val topSettings = readControlCenterTopButtonsGlassSettings(preferences)
         synchronized(controlCenterButtonsLock) { controlCenterRoot = root }
         installControlCenterRootDispatchHook(root)
-        val enabled = preferences.getBoolean(ADD_CONTROL_CENTER_TOP_BUTTONS_KEY, false) &&
+        val enabled = topSettings.enabled &&
             (root.resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE ||
-                preferences.getBoolean(KEY_SHOW_CONTROL_CENTER_TOP_BUTTONS_IN_LANDSCAPE, false))
+                topSettings.showInLandscape)
         btm.m.os4.systemuihook.HookModuleLogger.log(this,
             Log.DEBUG,
             TAG,
@@ -2559,29 +2563,15 @@ class HyperSystemUiModule : XposedModule() {
         preferences: SharedPreferences,
         classLoader: ClassLoader,
     ) {
-        val mode = preferences.getInt(
-            KEY_CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_MODE,
-            CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_NONE,
-        ).coerceIn(
-            CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_NONE,
-            CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_SOFT_GLASS,
-        )
+        val topSettings = readControlCenterTopButtonsGlassSettings(preferences)
+        val mode = topSettings.backgroundMode
         val radiusDp = when (mode) {
-            CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_PURE -> preferences.getFloat(
-                KEY_CONTROL_CENTER_TOP_BUTTONS_PURE_BACKGROUND_RADIUS,
-                CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_RADIUS_DEFAULT_DP,
-            )
-            CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_ADVANCED -> preferences.getFloat(
-                KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_BACKGROUND_RADIUS,
-                CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_RADIUS_DEFAULT_DP,
-            )
-            CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_SOFT_GLASS -> preferences.getFloat(
-                KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_BACKGROUND_RADIUS,
-                CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_RADIUS_DEFAULT_DP,
-            )
+            CONTROL_CENTER_TOP_BUTTONS_MODE_PURE -> topSettings.pureRadius
+            CONTROL_CENTER_TOP_BUTTONS_MODE_ADVANCED -> topSettings.advancedRadius
+            CONTROL_CENTER_TOP_BUTTONS_MODE_SOFT_GLASS -> topSettings.softRadius
             else -> 0f
         }.coerceIn(0f, CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_RADIUS_MAX_DP)
-        val showBackground = mode != CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_NONE && radiusDp > 0f
+        val showBackground = mode != CONTROL_CENTER_TOP_BUTTONS_MODE_NONE && radiusDp > 0f
         val diameter = (radiusDp * button.resources.displayMetrics.density * 2f)
             .roundToInt()
             .coerceAtLeast(1)
@@ -2592,6 +2582,9 @@ class HyperSystemUiModule : XposedModule() {
         layoutParams.gravity = Gravity.CENTER
         button.layoutParams = layoutParams
         runCatching {
+            View::class.java.getMethod("setMiViewMaterialType", Int::class.javaPrimitiveType).invoke(button, 0)
+            View::class.java.getMethod("setMiBackgroundBlurMode", Int::class.javaPrimitiveType).invoke(button, 0)
+            View::class.java.getMethod("setMiViewBlurMode", Int::class.javaPrimitiveType).invoke(button, 0)
             View::class.java.getMethod("clearMiBackgroundBlendColor").invoke(button)
             View::class.java.getMethod("setPassWindowBlurEnabled", Boolean::class.javaPrimitiveType)
                 .invoke(button, false)
@@ -2602,13 +2595,9 @@ class HyperSystemUiModule : XposedModule() {
                 if (!showBackground) {
                     Color.TRANSPARENT
                 } else when (mode) {
-                    CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_PURE ->
-                        preferences.getInt(
-                            KEY_CONTROL_CENTER_TOP_BUTTONS_PURE_COLOR,
-                            SHORTCUT_PURE_COLOR,
-                        )
-                    CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_ADVANCED,
-                    CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_SOFT_GLASS ->
+                    CONTROL_CENTER_TOP_BUTTONS_MODE_PURE -> topSettings.pureColor
+                    CONTROL_CENTER_TOP_BUTTONS_MODE_ADVANCED,
+                    CONTROL_CENTER_TOP_BUTTONS_MODE_SOFT_GLASS ->
                         Color.argb(1, 255, 255, 255)
                     else -> Color.TRANSPARENT
                 },
@@ -2625,11 +2614,13 @@ class HyperSystemUiModule : XposedModule() {
         }
         if (showBackground) applyControlCenterTopButtonMaterial(button, preferences, classLoader, mode)
         button.invalidateOutline()
-        if (showBackground && mode == CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_SOFT_GLASS) {
+        if (showBackground && mode == CONTROL_CENTER_TOP_BUTTONS_MODE_SOFT_GLASS) {
             // Dynamic background layers need a second registration after their measured size
             // changes, otherwise some HyperOS builds retain only the legacy blend color.
             button.post {
-                if (button.isAttachedToWindow && button.visibility == View.VISIBLE) {
+                if (button.isAttachedToWindow && button.visibility == View.VISIBLE &&
+                    readControlCenterTopButtonsGlassSettings(preferences).backgroundMode == CONTROL_CENTER_TOP_BUTTONS_MODE_SOFT_GLASS
+                ) {
                     applyControlCenterTopButtonSoftGlass(button, preferences, classLoader)
                 }
             }
@@ -2640,8 +2631,7 @@ class HyperSystemUiModule : XposedModule() {
         val icon = (button as? ViewGroup)
             ?.findViewWithTag<View>("${button.tag}.icon")
             ?: return
-        val scale = preferences.getFloat(KEY_CONTROL_CENTER_TOP_BUTTONS_ICON_SCALE, 1f)
-            .coerceIn(CONTROL_CENTER_TOP_BUTTONS_ICON_SCALE_MIN, CONTROL_CENTER_TOP_BUTTONS_ICON_SCALE_MAX)
+        val scale = readControlCenterTopButtonsGlassSettings(preferences).iconScale
         icon.scaleX = scale
         icon.scaleY = scale
     }
@@ -2658,28 +2648,17 @@ class HyperSystemUiModule : XposedModule() {
         mode: Int,
     ) {
         when (mode) {
-            CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_ADVANCED -> runCatching {
+            CONTROL_CENTER_TOP_BUTTONS_MODE_ADVANCED -> runCatching {
+                val topSettings = readControlCenterTopButtonsGlassSettings(preferences)
                 applyLegacyBackdropMaterial(
                     view = button,
-                    opacity = preferences.getInt(
-                        KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_OPACITY,
-                        DEFAULT_ADVANCED_MATERIAL_OPACITY,
-                    ),
-                    blurRadius = preferences.getInt(
-                        KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_BLUR_RADIUS,
-                        DEFAULT_ADVANCED_MATERIAL_BLUR_RADIUS,
-                    ),
-                    color = preferences.getInt(
-                        KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_COLOR,
-                        DEFAULT_ADVANCED_MATERIAL_COLOR,
-                    ),
-                    showHighlight = preferences.getBoolean(
-                        KEY_CONTROL_CENTER_TOP_BUTTONS_ADVANCED_MATERIAL_HIGHLIGHT,
-                        false,
-                    ),
+                    opacity = topSettings.advancedOpacity,
+                    blurRadius = topSettings.advancedBlur,
+                    color = topSettings.advancedColor,
+                    showHighlight = topSettings.advancedHighlight,
                 )
             }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Top button advanced material unavailable", error) }
-            CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_SOFT_GLASS -> {
+            CONTROL_CENTER_TOP_BUTTONS_MODE_SOFT_GLASS -> {
                 applyControlCenterTopButtonSoftGlass(button, preferences, classLoader)
             }
         }
@@ -2690,33 +2669,22 @@ class HyperSystemUiModule : XposedModule() {
         preferences: SharedPreferences,
         classLoader: ClassLoader,
     ) = runCatching {
+        val glass = resolveControlCenterTopButtonsGlass(preferences)
         applyLegacyBackdropMaterial(
             view = button,
-            opacity = preferences.getInt(
-                KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_OPACITY,
-                DEFAULT_SOFT_GLASS_OPACITY,
-            ),
-            blurRadius = preferences.getInt(
-                KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_BACKDROP_BLUR_RADIUS,
-                DEFAULT_SOFT_GLASS_BACKDROP_BLUR_RADIUS,
-            ),
-            color = preferences.getInt(
-                KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_COLOR,
-                DEFAULT_SOFT_GLASS_COLOR,
-            ),
+            opacity = softGlassBlur(10, glass.backgroundOpacity),
+            blurRadius = softGlassBlur(40, glass.backgroundBlur),
+            color = Color.WHITE,
             showHighlight = false,
         )
+        View::class.java.getMethod("setMiBackgroundBlurScaleRatio", Float::class.javaPrimitiveType)
+            .invoke(button, softGlassScale(1f, glass.backgroundScale))
         applySystemGlassMaterial(
             view = button,
             classLoader = classLoader,
-            blurRadius = preferences.getInt(
-                KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_BLUR_RADIUS,
-                DEFAULT_SOFT_GLASS_BLUR_RADIUS,
-            ),
-            luminance = preferences.getFloat(
-                KEY_CONTROL_CENTER_TOP_BUTTONS_SOFT_GLASS_LUMINANCE,
-                DEFAULT_SOFT_GLASS_LUMINANCE,
-            ),
+            blurRadius = softGlassBlur(36, glass.refractionBlur),
+            luminance = DEFAULT_SOFT_GLASS_LUMINANCE,
+            parameters = tuneSoftGlass(SHORTCUT_GLASS_PARAMETERS, glass, standaloneBackground = true),
         )
     }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Top button soft-glass material unavailable", error) }
 
@@ -3940,8 +3908,13 @@ class HyperSystemUiModule : XposedModule() {
         else selected.glass.copy(enabled = true)
     }
 
+    // These module-owned layers already resolve and apply their complete recipe.
+    // Exclude them from the global setter hooks even inside a vendor control-center call.
+    private fun isControlCenterTopButtonBackground(view: View): Boolean =
+        view.tag == "$CONTROL_CENTER_PLUS_TAG.background" || view.tag == "$CONTROL_CENTER_POWER_TAG.background"
+
     private fun isSoftGlassSurface(view: View): Boolean {
-        if (expandedIslandMaterialApplying.get() == true || expandedIslandGlassSurfaces.contains(view)) return false
+        if (isControlCenterTopButtonBackground(view) || expandedIslandMaterialApplying.get() == true || expandedIslandGlassSurfaces.contains(view)) return false
         if (view.tag == SHORTCUT_GLASS_TAG || view.tag == LOCKSCREEN_CAPSULE_MATERIAL_TAG) return false
         if (isVolumePanelSurface(view) || stackContainsClass("com.android.systemui.miui.volume.")) {
             // Some anonymous volume views receive their first recipe before attachment.
@@ -3953,13 +3926,13 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun isSoftGlassPanelLayer(view: View): Boolean =
-        expandedIslandMaterialApplying.get() != true && !expandedIslandGlassSurfaces.contains(view) && view.tag != SHORTCUT_GLASS_TAG && view.tag != LOCKSCREEN_CAPSULE_MATERIAL_TAG && (
+        !isControlCenterTopButtonBackground(view) && expandedIslandMaterialApplying.get() != true && !expandedIslandGlassSurfaces.contains(view) && view.tag != SHORTCUT_GLASS_TAG && view.tag != LOCKSCREEN_CAPSULE_MATERIAL_TAG && (
             (volumeGlobalGlassSelected() && (isVolumePanelSurface(view) || stackContainsClass("com.android.systemui.miui.volume."))) ||
             isShadeBackgroundView(view) || stackContainsClass("ShadeBlendBlurController") ||
             stackContainsClass("ShadeWindowBlurController") || stackContainsClass("ShadeSolidBackgroundController"))
 
     private fun isSoftGlassBlendSurface(view: View): Boolean {
-        if (expandedIslandMaterialApplying.get() == true || expandedIslandGlassSurfaces.contains(view)) return false
+        if (isControlCenterTopButtonBackground(view) || expandedIslandMaterialApplying.get() == true || expandedIslandGlassSurfaces.contains(view)) return false
         if (view.tag == SHORTCUT_GLASS_TAG || view.tag == LOCKSCREEN_CAPSULE_MATERIAL_TAG) return false
         if (isVolumePanelSurface(view)) return volumeGlobalGlassSelected()
         return (isNotificationRowBackground(view) && isHeadsUpNotificationSurface(view)) ||

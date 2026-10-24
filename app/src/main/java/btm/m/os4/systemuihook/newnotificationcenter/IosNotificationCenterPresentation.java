@@ -517,6 +517,11 @@ public final class IosNotificationCenterPresentation {
         int offsetDp = notificationShortcutsEnabled && !isLandscapePanel()
                 ? shortcutNotificationBottomOffsetDp : notificationBottomOffsetDp;
         float offset = offsetDp * view.getResources().getDisplayMetrics().density;
+        if (notificationShortcutsEnabled && !isLandscapePanel()) {
+            // The shortcut slider is an adjustment around the native shortcut area. Keep that
+            // area reserved, then apply the signed user offset on top of it.
+            offset += IosNotificationShortcutHost.bottomSpace(panel);
+        }
         if (isLandscapePanel()) {
             // Landscape navigation bars are usually on the side. Reserve only a small
             // rounded-card margin so the last card is not cut at the bottom edge.
@@ -682,6 +687,7 @@ public final class IosNotificationCenterPresentation {
         if (oldHeader == null) findHeader();
         syncStackTransform();
         syncLandscapeLayout();
+        ensureHostedClockMinuteVisible();
         syncLandscapeClockHeight();
         if (sheet != null && sheet.isAttachedToWindow()) {
             ViewOutlineProvider provider = landscapeLayout
@@ -704,7 +710,6 @@ public final class IosNotificationCenterPresentation {
         // lockscreen-only region. This hosted copy has no depth foreground layer, so that state
         // would make the minute half disappear until the next clock rebuild. Re-assert the
         // minute subtree after every layout/pre-draw pass while the iOS clock owns the surface.
-        ensureHostedClockMinuteVisible();
         // Ease the clock from a soft, blurred entrance to a crisp resting state. Using the
         // same smooth-step curve as the sheet alpha avoids a sharp focus jump near the end of
         // an upward swipe when native expansion reports uneven frame deltas.
@@ -1077,17 +1082,23 @@ public final class IosNotificationCenterPresentation {
         if (contentBottom <= 0f || Float.isNaN(contentBottom) || Float.isInfinite(contentBottom))
             contentBottom = largestVisibleContentBottom(clock, clock);
         if (contentBottom <= 0f) contentBottom = clock.getHeight();
-        float inset = dp(28);
+        // Leave a real safety margin: the clock can report its nominal bounds before the
+        // child text has finished measuring, so fitting exactly to the column still clips a
+        // glyph or its shadow on the next frame.
+        float inset = dp(16);
         float available = Math.max(1f, panel.getHeight() - inset * 2f);
-        float scale = contentBottom > available ? available / contentBottom : 1f;
         float contentRight = largestVisibleContentRight(clock, clock);
         if (contentRight <= 0f) contentRight = clock.getWidth();
-        float availableWidth = Math.max(1f, host == null ? clock.getWidth() : host.getWidth() - dp(16));
-        float widthScale = contentRight > availableWidth ? availableWidth / contentRight : 1f;
+        float availableWidth = Math.max(1f, host == null
+                ? clock.getWidth() - inset * 2f : host.getWidth() - inset * 2f);
+        // Keep the aspect ratio intact. Independent X/Y fitting makes large clock glyphs look
+        // compressed and still leaves the other axis vulnerable when the layout settles.
+        float fitScale = Math.min(1f, Math.min(available / contentBottom,
+                availableWidth / contentRight));
         clock.setPivotY(0f);
         clock.setPivotX(0f);
-        if (Math.abs(clock.getScaleY() - scale) > .001f) clock.setScaleY(scale);
-        if (Math.abs(clock.getScaleX() - widthScale) > .001f) clock.setScaleX(widthScale);
+        if (Math.abs(clock.getScaleY() - fitScale) > .001f) clock.setScaleY(fitScale);
+        if (Math.abs(clock.getScaleX() - fitScale) > .001f) clock.setScaleX(fitScale);
     }
 
     private static float largestVisibleContentBottom(View root, View view) {

@@ -3,6 +3,9 @@
   "creator": "btm_m",
   "locale": "en",
   "strings": {
+    "控制中心顶部按钮": "Control center top buttons",
+    "控制中心添加顶部控制按钮": "Add top control buttons to Control center",
+    "材质设置": "Material settings",
     "hotReloadSwitch": "Process hot reload",
     "hotReloadNow": "Hot reload processes now",
     "hotReloadHint": "May require LSPosed API 102 or later",

@@ -24,7 +24,7 @@ internal object VolumePanelLayoutPreferences {
     private val integers = listOf("width", "height", "corner")
     fun read(p: SharedPreferences) = VolumePanelLayoutSettings(
         p.getBoolean(PREFIX + "size_enabled", false),
-        p.getInt(PREFIX + "width", 0).coerceIn(-30, 60),
+        p.getInt(PREFIX + "width", 0).coerceIn(-50, 72),
         p.getInt(PREFIX + "height", 0).coerceIn(-64, 96),
         p.getBoolean(PREFIX + "hide_ringer", false),
         p.getBoolean(PREFIX + "hide_expand", false),
@@ -34,7 +34,7 @@ internal object VolumePanelLayoutPreferences {
     )
     fun write(p: SharedPreferences, s: VolumePanelLayoutSettings) {
         p.edit().putBoolean(PREFIX + "size_enabled", s.sizeEnabled)
-            .putInt(PREFIX + "width", s.width.coerceIn(-30, 60))
+            .putInt(PREFIX + "width", s.width.coerceIn(-50, 72))
             .putInt(PREFIX + "height", s.height.coerceIn(-64, 96))
             .putBoolean(PREFIX + "hide_ringer", s.hideRinger)
             .putBoolean(PREFIX + "hide_expand", s.hideExpand)

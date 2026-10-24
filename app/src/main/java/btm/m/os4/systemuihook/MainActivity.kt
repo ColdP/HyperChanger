@@ -286,7 +286,7 @@ private enum class PageId {
     SHADE_PRESETS,
     SOFT_GLASS_PARAMETERS,
     SOFT_GLASS_PRESETS,
-    IOS_NOTIFICATION_CLOCK_GLASS,
+    IOS_NOTIFICATION_CLOCK_GLASS, CONTROL_CENTER_TOP_BUTTONS,
     GESTURE_HANDLE_STYLE, DESKTOP, DESKTOP_MATERIAL,
     ISLAND, ISLAND_COLLAPSED, ISLAND_EXPANDED, ISLAND_EXPANDED_BACKGROUND, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_HEADER_SETTINGS, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_ADJUSTMENT, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LOCKSCREEN_SHORTCUT_BACKGROUND, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
@@ -877,6 +877,7 @@ private fun Root(
                 VolumePanelLayoutSettingsStore(context).syncRemote(it)
                 NotificationTextColorSettingsStore(context).syncRemote(it)
                 ControlCenterRadiusSettingsStore(context).syncRemote(it)
+                ControlCenterTopButtonsGlassSettingsStore(context).syncRemote(it)
                 SuperXiaoAiInputGlassSettingsStore(context).syncRemote(it)
                 RearScreenGestureSettingsStore(context).syncRemote(it)
                 RearMiniPlayerSettingsStore(context).syncRemote(it)
@@ -4968,6 +4969,7 @@ private fun Detail(
         PageId.UNLOCK_ISLAND -> UnlockIslandPage(back)
         PageId.NOTIFICATION_RESTRICTIONS -> NotificationRestrictions(back)
         PageId.NOTIFICATION_MEDIA_CARD -> NotificationMediaCard(back)
+        PageId.CONTROL_CENTER_TOP_BUTTONS -> ControlCenterTopButtonsPage(back)
         PageId.STATUS -> Status(settings, update, openPage, back)
         PageId.STATUS_ADJUSTMENT -> StatusAdjustment(settings, update, back)
         PageId.STATUS_SIGNAL_CUSTOMIZATION -> StatusSignalCustomization(settings, update, openPage, back)
@@ -6791,7 +6793,7 @@ private fun VolumePanelLayoutControls() {
         exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
     ) {
         Column {
-            ParameterIntSlide(tr("自定义音量条宽度", "自定义音量条宽度"), layout.width, -30..60, " dp", defaultValue = 0) { save(layout.copy(width = it)) }
+            ParameterIntSlide(tr("自定义音量条宽度", "自定义音量条宽度"), layout.width, -50..72, " dp", defaultValue = 0) { save(layout.copy(width = it)) }
             ParameterIntSlide(tr("自定义音量条高度", "自定义音量条高度"), layout.height, -64..96, " dp", defaultValue = 0) { save(layout.copy(height = it)) }
         }
     }
@@ -8225,145 +8227,10 @@ private fun Status(
                     checked = s.hideControlCenterEditButton,
                     onCheckedChange = { enabled -> update { it.copy(hideControlCenterEditButton = enabled) } },
                 )
-                SwitchPreference(
-                    title = tr("\u63a7\u5236\u4e2d\u5fc3\u9876\u90e8\u6dfb\u52a0\u63a7\u5236\u6309\u94ae", "\u63a7\u5236\u4e2d\u5fc3\u9876\u90e8\u6dfb\u52a0\u63a7\u5236\u6309\u94ae"),
-                    checked = s.addControlCenterTopButtons,
-                    onCheckedChange = { enabled -> update { it.copy(addControlCenterTopButtons = enabled) } },
+                ArrowPreference(
+                    title = tr("控制中心顶部按钮", "控制中心顶部按钮"),
+                    onClick = { open(PageId.CONTROL_CENTER_TOP_BUTTONS) },
                 )
-                AnimatedVisibility(
-                    visible = s.addControlCenterTopButtons,
-                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
-                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
-                ) {
-                    SwitchPreference(
-                        title = tr("\u6a2a\u5c4f\u663e\u793a\u63a7\u5236\u4e2d\u5fc3\u9876\u90e8\u63a7\u5236\u6309\u94ae", "\u6a2a\u5c4f\u663e\u793a\u63a7\u5236\u4e2d\u5fc3\u9876\u90e8\u63a7\u5236\u6309\u94ae"),
-                        checked = s.showControlCenterTopButtonsInLandscape,
-                        onCheckedChange = { enabled ->
-                            update { it.copy(showControlCenterTopButtonsInLandscape = enabled) }
-                        },
-                    )
-                }
-                AnimatedVisibility(
-                    visible = s.addControlCenterTopButtons,
-                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
-                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
-                ) {
-                    ParameterFloatSlide(
-                        title = tr("\u9876\u90e8\u6309\u94ae\u56fe\u6807\u7f29\u653e", "\u9876\u90e8\u6309\u94ae\u56fe\u6807\u7f29\u653e"),
-                        value = s.controlCenterTopButtonsIconScale,
-                        range = 0.5f..2f,
-                        defaultValue = 1f,
-                    ) { value -> update { it.copy(controlCenterTopButtonsIconScale = value) } }
-                }
-                OverlayDropdownPreference(
-                    title = tr("\u9876\u90e8\u6309\u94ae\u80cc\u666f\u6750\u8d28", "\u9876\u90e8\u6309\u94ae\u80cc\u666f\u6750\u8d28"),
-                    items = listOf(
-                        tr("\u4e0d\u663e\u793a", "\u4e0d\u663e\u793a"),
-                        tr("\u7eaf\u8272", "\u7eaf\u8272"),
-                        tr("\u9ad8\u7ea7\u6750\u8d28", "\u9ad8\u7ea7\u6750\u8d28"),
-                        tr("\u67d4\u5149\u73bb\u7483", "\u67d4\u5149\u73bb\u7483"),
-                    ),
-                    selectedIndex = s.controlCenterTopButtonsBackgroundMode.coerceIn(0, 3),
-                    enabled = s.addControlCenterTopButtons,
-                    onSelectedIndexChange = { value ->
-                        update { it.copy(controlCenterTopButtonsBackgroundMode = value) }
-                    },
-                )
-                AnimatedVisibility(
-                    visible = s.addControlCenterTopButtons &&
-                        s.controlCenterTopButtonsBackgroundMode != CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_NONE,
-                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
-                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
-                ) {
-                    Column(Modifier.fillMaxWidth()) {
-                        when (s.controlCenterTopButtonsBackgroundMode.coerceIn(0, 3)) {
-                        CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_PURE -> {
-                            ShortcutBackgroundColorPreference(
-                                color = s.controlCenterTopButtonsPureColor,
-                                onColorChange = { value -> update { it.copy(controlCenterTopButtonsPureColor = value) } },
-                            )
-                            ParameterDpSlide(
-                                title = tr("\u9876\u90e8\u6309\u94ae\u80cc\u666f\u5706\u5f62\u534a\u5f84", "\u9876\u90e8\u6309\u94ae\u80cc\u666f\u5706\u5f62\u534a\u5f84"),
-                                value = s.controlCenterTopButtonsPureBackgroundRadius,
-                                range = 0f..22f,
-                                defaultValue = 22f,
-                            ) { value -> update { it.copy(controlCenterTopButtonsPureBackgroundRadius = value) } }
-                        }
-                        CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_ADVANCED -> {
-                            ShortcutBackgroundColorPreference(
-                                title = tr("\u6df7\u8272\u989c\u8272", "\u6df7\u8272\u989c\u8272"),
-                                color = s.controlCenterTopButtonsAdvancedMaterialColor,
-                                onColorChange = { value -> update { it.copy(controlCenterTopButtonsAdvancedMaterialColor = value) } },
-                            )
-                            ParameterDpSlide(
-                                title = tr("\u9876\u90e8\u6309\u94ae\u80cc\u666f\u5706\u5f62\u534a\u5f84", "\u9876\u90e8\u6309\u94ae\u80cc\u666f\u5706\u5f62\u534a\u5f84"),
-                                value = s.controlCenterTopButtonsAdvancedMaterialBackgroundRadius,
-                                range = 0f..22f,
-                                defaultValue = 22f,
-                            ) { value -> update { it.copy(controlCenterTopButtonsAdvancedMaterialBackgroundRadius = value) } }
-                            ParameterIntSlide(
-                                title = tr("\u4e0d\u900f\u660e\u5ea6", "\u4e0d\u900f\u660e\u5ea6"),
-                                value = s.controlCenterTopButtonsAdvancedMaterialOpacity,
-                                range = 0..100,
-                                suffix = "%",
-                                defaultValue = 14,
-                            ) { value -> update { it.copy(controlCenterTopButtonsAdvancedMaterialOpacity = value) } }
-                            ParameterIntSlide(
-                                title = tr("\u80cc\u666f\u6a21\u7cca\u5ea6", "\u80cc\u666f\u6a21\u7cca\u5ea6"),
-                                value = s.controlCenterTopButtonsAdvancedMaterialBlurRadius,
-                                range = 0..40,
-                                suffix = " px",
-                                defaultValue = 40,
-                            ) { value -> update { it.copy(controlCenterTopButtonsAdvancedMaterialBlurRadius = value) } }
-                            SwitchPreference(
-                                title = tr("\u663e\u793a\u9ad8\u5149", "\u663e\u793a\u9ad8\u5149"),
-                                checked = s.controlCenterTopButtonsAdvancedMaterialHighlight,
-                                onCheckedChange = { value -> update { it.copy(controlCenterTopButtonsAdvancedMaterialHighlight = value) } },
-                            )
-                        }
-                        CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_SOFT_GLASS -> {
-                            ShortcutBackgroundColorPreference(
-                                title = tr("\u6df7\u8272\u989c\u8272", "\u6df7\u8272\u989c\u8272"),
-                                color = s.controlCenterTopButtonsSoftGlassColor,
-                                onColorChange = { value -> update { it.copy(controlCenterTopButtonsSoftGlassColor = value) } },
-                            )
-                            ParameterDpSlide(
-                                title = tr("\u9876\u90e8\u6309\u94ae\u80cc\u666f\u5706\u5f62\u534a\u5f84", "\u9876\u90e8\u6309\u94ae\u80cc\u666f\u5706\u5f62\u534a\u5f84"),
-                                value = s.controlCenterTopButtonsSoftGlassBackgroundRadius,
-                                range = 0f..22f,
-                                defaultValue = 22f,
-                            ) { value -> update { it.copy(controlCenterTopButtonsSoftGlassBackgroundRadius = value) } }
-                            ParameterIntSlide(
-                                title = tr("\u4e0d\u900f\u660e\u5ea6", "\u4e0d\u900f\u660e\u5ea6"),
-                                value = s.controlCenterTopButtonsSoftGlassOpacity,
-                                range = 0..100,
-                                suffix = "%",
-                                defaultValue = 10,
-                            ) { value -> update { it.copy(controlCenterTopButtonsSoftGlassOpacity = value) } }
-                            ParameterIntSlide(
-                                title = tr("\u80cc\u666f\u6a21\u7cca\u5ea6", "\u80cc\u666f\u6a21\u7cca\u5ea6"),
-                                value = s.controlCenterTopButtonsSoftGlassBackdropBlurRadius,
-                                range = 0..40,
-                                suffix = " px",
-                                defaultValue = 40,
-                            ) { value -> update { it.copy(controlCenterTopButtonsSoftGlassBackdropBlurRadius = value) } }
-                            ParameterIntSlide(
-                                title = tr("Glass \u6a21\u7cca\u5ea6", "Glass \u6a21\u7cca\u5ea6"),
-                                value = s.controlCenterTopButtonsSoftGlassBlurRadius,
-                                range = 0..40,
-                                suffix = " px",
-                                defaultValue = 36,
-                            ) { value -> update { it.copy(controlCenterTopButtonsSoftGlassBlurRadius = value) } }
-                            ParameterFloatSlide(
-                                title = tr("\u67d4\u5149\u5f3a\u5ea6", "\u67d4\u5149\u5f3a\u5ea6"),
-                                value = s.controlCenterTopButtonsSoftGlassLuminance,
-                                range = 0f..0.4f,
-                                defaultValue = .14f,
-                            ) { value -> update { it.copy(controlCenterTopButtonsSoftGlassLuminance = value) } }
-                        }
-                        }
-                    }
-                }
             }
         }
     }
@@ -8392,6 +8259,117 @@ private fun Status(
                 showCarrierTextDialog = false
             },
         )
+    }
+}
+
+@Composable
+private fun ControlCenterTopButtonsPage(back: () -> Unit) {
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    val store = remember(context) { ControlCenterTopButtonsGlassSettingsStore(context) }
+    var state by remember { mutableStateOf(store.settings) }
+    LaunchedEffect(service) {
+        service?.let(store::syncRemote)
+        state = store.settings
+    }
+    fun update(transform: (ControlCenterTopButtonsGlassSettings) -> ControlCenterTopButtonsGlassSettings) {
+        store.update(service, transform)
+        state = store.settings
+    }
+    AppPage(tr("控制中心顶部按钮", "控制中心顶部按钮"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI)) { p, scroll ->
+        AppList(p, scroll) {
+            item {
+                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                    SwitchPreference(
+                        title = tr("控制中心添加顶部控制按钮", "控制中心添加顶部控制按钮"),
+                        checked = state.enabled,
+                        onCheckedChange = { value -> update { it.copy(enabled = value) } },
+                    )
+                    AnimatedVisibility(
+                        visible = state.enabled,
+                        enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                        exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                    ) {
+                        SwitchPreference(
+                            title = tr("横屏显示控制中心顶部控制按钮", "横屏显示控制中心顶部控制按钮"),
+                            checked = state.showInLandscape,
+                            onCheckedChange = { value -> update { it.copy(showInLandscape = value) } },
+                        )
+                    }
+                }
+            }
+            item {
+                AnimatedVisibility(
+                    visible = state.enabled,
+                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                ) {
+                    Group(tr("材质设置", "材质设置")) {
+                        ParameterFloatSlide(
+                            title = tr("顶部按钮图标缩放", "顶部按钮图标缩放"),
+                            value = state.iconScale,
+                            range = .5f..2f,
+                            defaultValue = 1f,
+                        ) { value -> update { it.copy(iconScale = value) } }
+                        OverlayDropdownPreference(
+                            title = tr("顶部按钮背景材质", "顶部按钮背景材质"),
+                            items = listOf(tr("不显示", "不显示"), tr("纯色", "纯色"), tr("高级材质", "高级材质"), tr("柔光玻璃", "柔光玻璃")),
+                            selectedIndex = state.backgroundMode,
+                            onSelectedIndexChange = { value -> update { it.copy(backgroundMode = value) } },
+                        )
+                        AnimatedVisibility(
+                            visible = state.backgroundMode != CONTROL_CENTER_TOP_BUTTONS_MODE_NONE,
+                            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                        ) {
+                            Column(Modifier.fillMaxWidth()) {
+                                when (state.backgroundMode) {
+                                    CONTROL_CENTER_TOP_BUTTONS_MODE_PURE -> {
+                                        ShortcutBackgroundColorPreference(
+                                            color = state.pureColor,
+                                            onColorChange = { value -> update { it.copy(pureColor = value) } },
+                                        )
+                                        ParameterDpSlide(tr("顶部按钮背景圆形半径", "顶部按钮背景圆形半径"), state.pureRadius, 0f..22f, 22f) { value -> update { it.copy(pureRadius = value) } }
+                                    }
+                                    CONTROL_CENTER_TOP_BUTTONS_MODE_ADVANCED -> {
+                                        ShortcutBackgroundColorPreference(
+                                            title = tr("混色颜色", "混色颜色"),
+                                            color = state.advancedColor,
+                                            onColorChange = { value -> update { it.copy(advancedColor = value) } },
+                                        )
+                                        ParameterDpSlide(tr("顶部按钮背景圆形半径", "顶部按钮背景圆形半径"), state.advancedRadius, 0f..22f, 22f) { value -> update { it.copy(advancedRadius = value) } }
+                                        ParameterIntSlide(tr("不透明度", "不透明度"), state.advancedOpacity, 0..100, "%", 14) { value -> update { it.copy(advancedOpacity = value) } }
+                                        ParameterIntSlide(tr("背景模糊度", "背景模糊度"), state.advancedBlur, 0..40, " px", 40) { value -> update { it.copy(advancedBlur = value) } }
+                                        SwitchPreference(
+                                            title = tr("显示高光", "显示高光"),
+                                            checked = state.advancedHighlight,
+                                            onCheckedChange = { value -> update { it.copy(advancedHighlight = value) } },
+                                        )
+                                    }
+                                    CONTROL_CENTER_TOP_BUTTONS_MODE_SOFT_GLASS -> {
+                                        ParameterDpSlide(tr("顶部按钮背景圆形半径", "顶部按钮背景圆形半径"), state.softRadius, 0f..22f, 22f) { value -> update { it.copy(softRadius = value) } }
+                                        SwitchPreference(
+                                            title = tr("使用全局柔光玻璃参数", "使用全局柔光玻璃参数"),
+                                            checked = state.useGlobal,
+                                            onCheckedChange = { value -> update { it.copy(useGlobal = value) } },
+                                        )
+                                        AnimatedVisibility(
+                                            visible = !state.useGlobal,
+                                            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                                            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                                        ) {
+                                            SoftGlassMaterialSliders(state.glass, includeBackdrop = true) { transform ->
+                                                update { it.copy(glass = transform(it.glass)) }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
