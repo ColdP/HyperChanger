@@ -5,6 +5,8 @@ import btm.m.os4.systemuihook.hypermusiccover.Xp;
 
 /** Hooks the OEM's raw shade gesture and notification/control-center ownership. */
 public final class IosNotificationCenterHooks {
+    private static Object deferredHideController;
+    private static boolean finishingDeferredHide;
     private static float switchDownX;
     private static float switchDownY;
     private static boolean switchFromEmptyArea;
@@ -130,6 +132,13 @@ public final class IosNotificationCenterHooks {
                 return result;
             });
             Xp.hookAll(expand, "setVisible$2", chain -> {
+                boolean visible = Boolean.TRUE.equals(chain.getArgs().get(0));
+                if (!visible && !finishingDeferredHide && ShadeLayer.shouldDeferNotificationHide()) {
+                    // Keep the native window alive until our longer gesture/release finishes.
+                    deferredHideController = chain.getThisObject();
+                    return null;
+                }
+                deferredHideController = null;
                 Object result = chain.proceed();
                 if (Boolean.FALSE.equals(chain.getArgs().get(0))) ShadeLayer.onNotificationHidden();
                 return result;
@@ -173,9 +182,18 @@ public final class IosNotificationCenterHooks {
     }
 
     public static void finishDeferredHide() {
-        // Kept as a lifecycle-compatible no-op for callers that finish the custom layer.
-        // Native visibility now follows NotificationPanelExpandController immediately, so
-        // stale notification rows cannot outlive the panel's own instantCollapse() cleanup.
+        Object controller = deferredHideController;
+        deferredHideController = null;
+        if (controller != null) {
+            finishingDeferredHide = true;
+            try {
+                Xp.callMethod(controller, "setVisible$2", false);
+            } catch (Throwable error) {
+                Xp.log("[IOSShade] deferred panel hide unavailable: " + error);
+            } finally {
+                finishingDeferredHide = false;
+            }
+        }
     }
 
     private static void trackSwitchGesture(android.view.View view, android.view.MotionEvent event) {

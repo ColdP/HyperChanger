@@ -165,8 +165,9 @@ public final class IosNotificationCenterPresentation {
             if (host != null) host.setAlpha(0f);
             // The native window hide is deferred until this endpoint. Restoring alpha here
             // would expose the list for a frame before that hide reaches the view pipeline.
-            if (transformedStack != null &&
-                    btm.m.os4.systemuihook.hypermusiccover.ShadeLayer.iosNotificationPanelEnabled()) {
+            // Ownership lasts until restoreStackTransform(), including progress == 0.
+            // The live panel predicate is already false at this endpoint.
+            if (transformedStack != null) {
                 transformedStack.setAlpha(0f);
             } else {
                 restoreStackTransform();
@@ -480,8 +481,9 @@ public final class IosNotificationCenterPresentation {
     }
 
     static float panelStackAlpha(View view, float nativeAlpha) {
-        if (view != transformedStack || host == null ||
-                !btm.m.os4.systemuihook.hypermusiccover.ShadeLayer.iosNotificationPanelEnabled()) {
+        // Native collapse/blur updates can write alpha after the sheet has reached zero.
+        // Keep those writes hidden until the transform is actually handed back.
+        if (view != transformedStack || host == null) {
             return nativeAlpha;
         }
         return host.getAlpha();
