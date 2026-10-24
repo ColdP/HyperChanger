@@ -5597,7 +5597,7 @@ private fun SuperXiaoAi(
             }
         }
         item {
-            Group(tr("superXiaoAiRestrictions", "\u529f\u80fd\u9650\u5236")) {
+            Group(tr("superXiaoAiRestrictions", "\u8f93\u5165\u6cd5\u529f\u80fd\u9650\u5236")) {
                 SwitchPreference(title = tr("superXiaoAiBlacklist", "\u53bb\u9664\u9ed1\u540d\u5355\u8bcd\u5e93\u9650\u5236"), checked = superXiaoAi.blacklistUnblocked, onCheckedChange = { value -> update { it.copy(blacklistUnblocked = value) } })
                 SwitchPreference(title = tr("superXiaoAiClipboard", "\u53bb\u9664\u526a\u5207\u677f\u9650\u5236"), checked = superXiaoAi.clipboardUnblocked, onCheckedChange = { value -> update { it.copy(clipboardUnblocked = value) } })
                 SwitchPreference(title = tr("superXiaoAiAiSafety", "\u53bb\u9664 AI \u5b89\u5168\u9650\u5236"), checked = superXiaoAi.aiSafetyUnblocked, onCheckedChange = { value -> update { it.copy(aiSafetyUnblocked = value) } })
