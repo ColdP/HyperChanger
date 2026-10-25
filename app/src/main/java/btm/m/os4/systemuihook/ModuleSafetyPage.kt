@@ -191,6 +191,9 @@ private fun ModuleSafetyInformation() {
                 DeviceInfoItem(if (service != null) tr("safetyLsposedConnected", "LSPosed 已连接") else tr("safetyLsposedDisconnected", "LSPosed 未连接"),
                     tr("safetyApi", "API %s").format(runCatching { service?.apiVersion?.toString() }.getOrNull() ?: unknown))
                 var lsposedVersion by remember { mutableStateOf<String?>(null) }
+                DeviceInfoItem(
+        lsposedVersion ?: unknown,
+        tr("LSPosed 版本", "LSPosed 版本")
             }
             DeviceInfoItem(when (root) {
                 true -> tr("safetyRootGranted", "超级用户 已授权")
