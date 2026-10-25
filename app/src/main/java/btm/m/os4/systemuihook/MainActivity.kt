@@ -516,12 +516,8 @@ private fun suggestedScopesForHookChange(before: HookSettings, after: HookSettin
     return scopes
 }
 
-private const val STANDALONE_HMC_PACKAGE = "com.github.zyl6932.HyperMusicCover"
-
-private fun isStandaloneHyperMusicCoverInstalled(context: Context): Boolean = runCatching {
-    context.packageManager.getPackageInfo(STANDALONE_HMC_PACKAGE, 0)
-    true
-}.getOrDefault(false)
+private fun isStandaloneHyperMusicCoverInstalled(context: Context): Boolean =
+    HmcConflictDetector.isHmcVariantInstalled(context)
 
 @Composable
 private fun Root(

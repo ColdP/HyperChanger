@@ -1589,10 +1589,8 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
-    private fun isStandaloneHyperMusicCoverInstalled(context: Context): Boolean = runCatching {
-        context.packageManager.getPackageInfo("com.github.zyl6932.HyperMusicCover", 0)
-        true
-    }.getOrDefault(false)
+    private fun isStandaloneHyperMusicCoverInstalled(context: Context): Boolean =
+        HmcConflictDetector.isHmcVariantInstalled(context)
 
     private fun sendHyperMusicCoverMediaCardCommand(
         context: Context,
