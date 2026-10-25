@@ -516,6 +516,13 @@ private fun suggestedScopesForHookChange(before: HookSettings, after: HookSettin
     return scopes
 }
 
+private const val STANDALONE_HMC_PACKAGE = "com.github.zyl6932.HyperMusicCover"
+
+private fun isStandaloneHyperMusicCoverInstalled(context: Context): Boolean = runCatching {
+    context.packageManager.getPackageInfo(STANDALONE_HMC_PACKAGE, 0)
+    true
+}.getOrDefault(false)
+
 @Composable
 private fun Root(
     hooks: HookSettingsStore,
@@ -8721,6 +8728,14 @@ private fun Lock(
     ),
 ) { p, scroll ->
     val context = LocalContext.current
+    val standaloneHmcInstalled = remember(context) { isStandaloneHyperMusicCoverInstalled(context) }
+    LaunchedEffect(standaloneHmcInstalled, s.lockscreenMusicLockscreenEnabled) {
+        if (standaloneHmcInstalled && s.lockscreenMusicLockscreenEnabled) {
+            // HMC and HC both hook SystemUI. Disable HC's stored toggle when the standalone
+            // module is installed so it cannot silently reactivate after a later restart.
+            update { it.copy(lockscreenMusicLockscreenEnabled = false) }
+        }
+    }
     val shortcutGestureStore = remember(context) { LockscreenShortcutBackgroundSettingsStore(context) }
     val shortcutGestureService by HookApplication.service.collectAsStateWithLifecycle()
     var shortcutGestureMode by remember { mutableIntStateOf(shortcutGestureStore.settings.gestureMode) }
@@ -9088,9 +9103,17 @@ OverlayDropdownPreference(
                 "\u9700\u8981\u540c\u65f6\u91cd\u542f\u201c\u7cfb\u7edf\u754c\u9762\u201d\u548c\u201c\u58c1\u7eb8\u201d\u5e94\u7528",
                 "\u9700\u8981\u540c\u65f6\u91cd\u542f\u201c\u7cfb\u7edf\u754c\u9762\u201d\u548c\u201c\u58c1\u7eb8\u201d\u5e94\u7528",
             ),
-            checked = s.lockscreenMusicLockscreenEnabled,
+            checked = s.lockscreenMusicLockscreenEnabled && !isStandaloneHyperMusicCoverInstalled(context),
             onCheckedChange = { value ->
-                update { it.copy(lockscreenMusicLockscreenEnabled = value) }
+                if (value && isStandaloneHyperMusicCoverInstalled(context)) {
+                    Toast.makeText(
+                        context,
+                        "检测到独立版 HyperMusicCover 已安装。为避免两个模块同时 Hook SystemUI，请先在 LSPosed 中停用 HMC，再开启 HC 音乐锁屏。",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                } else {
+                    update { it.copy(lockscreenMusicLockscreenEnabled = value) }
+                }
             },
         )
         AnimatedVisibility(
