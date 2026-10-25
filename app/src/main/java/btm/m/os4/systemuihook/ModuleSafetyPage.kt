@@ -190,6 +190,7 @@ private fun ModuleSafetyInformation() {
             Column(Modifier.fillMaxWidth().clickable { openLsposedManager(context) }) {
                 DeviceInfoItem(if (service != null) tr("safetyLsposedConnected", "LSPosed 已连接") else tr("safetyLsposedDisconnected", "LSPosed 未连接"),
                     tr("safetyApi", "API %s").format(runCatching { service?.apiVersion?.toString() }.getOrNull() ?: unknown))
+                var lsposedVersion by remember { mutableStateOf<String?>(null) }
             }
             DeviceInfoItem(when (root) {
                 true -> tr("safetyRootGranted", "超级用户 已授权")
@@ -199,6 +200,7 @@ private fun ModuleSafetyInformation() {
         }
         Group(tr("safetyDeviceInformation", "设备信息")) {
             DeviceInfoItem(OsCompatibility.systemProperty("ro.product.marketname").ifBlank { Build.MODEL }, tr("safetyDeviceModel", "设备型号"))
+            DeviceInfoItem(OsCompatibility.systemProperty("ro.product.device").ifBlank { Build.DEVICE },tr("设备代号", "设备代号"))
             DeviceInfoItem(tr("safetyAndroidValue", "%s (SDK %d)").format(Build.VERSION.RELEASE, Build.VERSION.SDK_INT), tr("safetyAndroidVersion", "Android 版本"))
             DeviceInfoItem(OsCompatibility.systemProperty("ro.mi.os.version.incremental").removePrefix("OS").ifBlank { unknown }, tr("safetyHyperOsBuildVersion", "HyperOS 构建版本号"))
             DeviceInfoItem(Build.SUPPORTED_ABIS.joinToString(", "), tr("safetyArchitecture", "系统架构"))
