@@ -1761,6 +1761,13 @@ public class Main extends XposedModule {
                     } else if ("pushart".equals(op)) {
                         boolean on = i.getBooleanExtra("on", true);
                         if (i.hasExtra("bias")) sBias = clamp01(i.getFloatExtra("bias", sBias));
+                        if (!on) {
+                            // An explicit OFF from the app must also stop automatic card-following.
+                            // Otherwise the next metadata/card update reaches onMediaUpdate() while
+                            // sAuto is still true and immediately enters cover mode again, making the
+                            // user's OFF switch appear ineffective (especially with HMC also active).
+                            setAuto(false);
+                        }
                         sTrackKey = on ? trackKey(pickController(c)) : "";
                         setCoverEnabled(on, anim, false);
                     } else if ("wphello".equals(op)) {
