@@ -1530,10 +1530,6 @@ class HyperSystemUiModule : XposedModule() {
             // treatment (hidden artwork/centred text).
             sendHyperMusicCoverMediaCardCommand(context, hideArtwork = false, centerText = false)
             sendHyperMusicCoverCommand(context, "style2", false)
-            // The lyrics presentation is an overlay on the stock media card, not the
-            // music-cover wallpaper mode. Explicitly turn the latter off when switching
-            // from the music lockscreen so its cover cannot remain active underneath.
-            sendHyperMusicCoverCommand(context, "pushart", false)
             // Enable the lyric renderer and its cover background in one receiver transaction.
             sendHyperMusicCoverCommand(context, "lyricsmode", true)
             syncedHyperMusicLyricsEnabled = true
@@ -1543,16 +1539,11 @@ class HyperSystemUiModule : XposedModule() {
                 syncedHyperMusicLyricsEnabled = false
             }
             sendHyperMusicCoverMediaCardCommand(context, hideArtwork = true, centerText = true)
-            // Style 2 is a separate presentation; do not leave style-1 pushart active.
-            sendHyperMusicCoverCommand(context, "pushart", false)
             sendHyperMusicCoverCommand(context, "style2", true)
         } else {
             // Keep Main's hide/centre targets alive while its exit spring runs. Clearing them
             // first would make the notification snap back before the wallpaper/clock settle.
             sendHyperMusicCoverCommand(context, "style2", false)
-            // Explicitly leave style-1 cover mode as well. Previously this branch only
-            // disabled style 2 and lyrics, so a prior pushart=true could survive the toggle-off.
-            sendHyperMusicCoverCommand(context, "pushart", false)
             // Disable the lyric renderer and leave cover mode in the same receiver transaction so
             // a second press reliably restores the stock lockscreen and media notification.
             sendHyperMusicCoverCommand(context, "lyricsmode", false)
@@ -1598,11 +1589,23 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
+    private fun isStandaloneHyperMusicCoverInstalled(context: Context): Boolean = runCatching {
+        context.packageManager.getPackageInfo("com.github.zyl6932.HyperMusicCover", 0)
+        true
+    }.getOrDefault(false)
+
     private fun sendHyperMusicCoverMediaCardCommand(
         context: Context,
         hideArtwork: Boolean,
         centerText: Boolean,
     ) {
+        if (isStandaloneHyperMusicCoverInstalled(context)) {
+            btm.m.os4.systemuihook.HookModuleLogger.log(
+                this, Log.INFO, TAG,
+                "Standalone HyperMusicCover detected; skipping HyperChanger media-card command",
+            )
+            return
+        }
         runCatching {
             context.sendBroadcast(
                 Intent(HYPER_MUSIC_COVER_ACTION)
@@ -1617,6 +1620,13 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun sendHyperMusicCoverCommand(context: Context, op: String, on: Boolean) {
+        if (isStandaloneHyperMusicCoverInstalled(context)) {
+            btm.m.os4.systemuihook.HookModuleLogger.log(
+                this, Log.INFO, TAG,
+                "Standalone HyperMusicCover detected; skipping HyperChanger command op=$op on=$on",
+            )
+            return
+        }
         runCatching {
             context.sendBroadcast(
                 Intent(HYPER_MUSIC_COVER_ACTION)
