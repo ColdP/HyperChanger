@@ -12,17 +12,22 @@ internal const val KEY_EXPANDED_ISLAND_CORNER_RADIUS = "expanded_island_corner_r
 private const val KEY_EXPANDED_ISLAND_CORNER_RADIUS_OFFSET_DP = "expanded_island_corner_radius_offset_dp"
 internal const val KEY_SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS_ENABLED = "small_island_media_icon_corner_radius_enabled"
 internal const val KEY_SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS = "small_island_media_icon_corner_radius"
+internal const val KEY_SMALL_ISLAND_MEDIA_ICON_SCALE_ENABLED = "small_island_media_icon_scale_enabled"
+internal const val KEY_SMALL_ISLAND_MEDIA_ICON_SCALE = "small_island_media_icon_scale"
 
 internal const val EXPANDED_ISLAND_CORNER_RADIUS_DEFAULT = 0f
 internal const val EXPANDED_ISLAND_CORNER_RADIUS_MIN = -10f
 internal const val EXPANDED_ISLAND_CORNER_RADIUS_MAX = 20f
 internal const val SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS_DEFAULT = 0
+internal const val SMALL_ISLAND_MEDIA_ICON_SCALE_DEFAULT = 0
 
 data class DynamicIslandAppearanceSettings(
     val expandedCornerRadiusEnabled: Boolean = false,
     val expandedCornerRadius: Float = EXPANDED_ISLAND_CORNER_RADIUS_DEFAULT,
     val smallMediaIconCornerRadiusEnabled: Boolean = false,
     val smallMediaIconCornerRadius: Int = SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS_DEFAULT,
+    val smallMediaIconScaleEnabled: Boolean = false,
+    val smallMediaIconScale: Int = SMALL_ISLAND_MEDIA_ICON_SCALE_DEFAULT,
 )
 
 private fun Float.normalizeExpandedIslandCornerRadius(): Float =
@@ -46,7 +51,9 @@ internal fun SharedPreferences.toDynamicIslandAppearanceSettings() = DynamicIsla
     expandedCornerRadiusEnabled = getBoolean(KEY_EXPANDED_ISLAND_CORNER_RADIUS_ENABLED, false),
     expandedCornerRadius = readExpandedIslandCornerRadius(),
     smallMediaIconCornerRadiusEnabled = getBoolean(KEY_SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS_ENABLED, false),
-    smallMediaIconCornerRadius = getInt(KEY_SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS, SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS_DEFAULT).coerceIn(-64, 96),
+    smallMediaIconCornerRadius = getInt(KEY_SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS, SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS_DEFAULT).coerceIn(-64, 72),
+    smallMediaIconScaleEnabled = getBoolean(KEY_SMALL_ISLAND_MEDIA_ICON_SCALE_ENABLED, false),
+    smallMediaIconScale = getInt(KEY_SMALL_ISLAND_MEDIA_ICON_SCALE, SMALL_ISLAND_MEDIA_ICON_SCALE_DEFAULT).coerceIn(-100, 100),
 )
 
 class DynamicIslandAppearanceSettingsStore(context: Context) {
@@ -58,7 +65,10 @@ class DynamicIslandAppearanceSettingsStore(context: Context) {
 
     fun syncRemote(service: XposedService) {
         val remote = service.getRemotePreferences(REMOTE_PREFERENCE_GROUP)
-        settings = (if (remote.contains(KEY_EXPANDED_ISLAND_CORNER_RADIUS_ENABLED)) remote else local)
+        val hasRemoteAppearanceSettings = remote.contains(KEY_EXPANDED_ISLAND_CORNER_RADIUS_ENABLED) ||
+            remote.contains(KEY_SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS_ENABLED) ||
+            remote.contains(KEY_SMALL_ISLAND_MEDIA_ICON_SCALE_ENABLED)
+        settings = (if (hasRemoteAppearanceSettings) remote else local)
             .toDynamicIslandAppearanceSettings()
         write(local)
         write(remote)
@@ -76,12 +86,15 @@ class DynamicIslandAppearanceSettingsStore(context: Context) {
             .putFloat(KEY_EXPANDED_ISLAND_CORNER_RADIUS_OFFSET_DP, settings.expandedCornerRadius.normalizeExpandedIslandCornerRadius())
             .remove(KEY_EXPANDED_ISLAND_CORNER_RADIUS)
             .putBoolean(KEY_SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS_ENABLED, settings.smallMediaIconCornerRadiusEnabled)
-            .putInt(KEY_SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS, settings.smallMediaIconCornerRadius.coerceIn(-64, 96))
+            .putInt(KEY_SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS, settings.smallMediaIconCornerRadius.coerceIn(-64, 72))
+            .putBoolean(KEY_SMALL_ISLAND_MEDIA_ICON_SCALE_ENABLED, settings.smallMediaIconScaleEnabled)
+            .putInt(KEY_SMALL_ISLAND_MEDIA_ICON_SCALE, settings.smallMediaIconScale.coerceIn(-100, 100))
             .apply()
     }
 
     private fun DynamicIslandAppearanceSettings.coerceToRange() = copy(
         expandedCornerRadius = expandedCornerRadius.normalizeExpandedIslandCornerRadius(),
-        smallMediaIconCornerRadius = smallMediaIconCornerRadius.coerceIn(-64, 96),
+        smallMediaIconCornerRadius = smallMediaIconCornerRadius.coerceIn(-64, 72),
+        smallMediaIconScale = smallMediaIconScale.coerceIn(-100, 100),
     )
 }

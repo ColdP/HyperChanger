@@ -22,7 +22,7 @@ import top.yukonga.miuix.kmp.preference.*
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun ModuleSafetyPage(openLogs: () -> Unit, back: () -> Unit) {
+internal fun ModuleSafetyPage(openLogs: () -> Unit, onEnterOobe: () -> Unit, back: () -> Unit) {
     val context = LocalContext.current
     val service by HookApplication.service.collectAsStateWithLifecycle()
     val store = remember { ModuleSafetySettingsStore(context) }
@@ -69,7 +69,7 @@ internal fun ModuleSafetyPage(openLogs: () -> Unit, back: () -> Unit) {
         AppList(padding, scroll) {
             if (selectedTab == 0) {
                 item {
-                    Group(tr("safetySwitches", "模块开关")) {
+                    Group(tr("safetySwitches", "模块选项")) {
                         SwitchPreference(
                             title = tr("safetyMaster", "模块总开关"),
                             summary = tr("safetyMasterHint", "关闭以后禁用所有 Hook，至少软重启设备以生效"),
@@ -102,6 +102,7 @@ internal fun ModuleSafetyPage(openLogs: () -> Unit, back: () -> Unit) {
                             )
                         }
                         ModuleHotReloadPreferences(enabled = !busy)
+                        ArrowPreference(tr("进入 OOBE", "进入 OOBE"), onClick = onEnterOobe)
                     }
                 }
                 item {

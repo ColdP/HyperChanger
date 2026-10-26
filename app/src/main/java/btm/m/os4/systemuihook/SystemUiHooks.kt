@@ -102,21 +102,31 @@ internal class SystemUiHooks(
 
         runCatching {
             val holder = classLoader.loadClass("miui.systemui.dynamicisland.module.IslandIconViewHolder")
-            holder.declaredMethods.filter { it.name == "setSmallIcon" && it.parameterCount == 1 }.forEachIndexed { index, method ->
+            holder.declaredMethods.filter {
+                it.name == "setSmallIcon" || it.name == "setFixIcon"
+            }.filter { it.parameterCount == 1 }.forEachIndexed { index, method ->
                 method.isAccessible = true
                 hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
-                    .setId("dynamic-island-small-media-icon-corner:$index")
+                    .setId("dynamic-island-small-media-icon-corner:${method.name}:$index")
                     .intercept { chain ->
                         val result = chain.proceed()
-                        if (preferences.getBoolean(KEY_SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS_ENABLED, false)) {
-                            val picInfo = runCatching {
-                                holder.getMethod("getPicInfo").invoke(chain.thisObject)
-                            }.getOrNull()
-                            val picture = runCatching {
-                                picInfo?.javaClass?.getMethod("getPic")?.invoke(picInfo) as? String
-                            }.getOrNull()
-                            if (picture != "miui_media_album_icon") return@intercept result
-                            val icon = findDynamicIslandField(chain.thisObject, "smallIcon")?.get(chain.thisObject) as? View
+                        val cornerEnabled = preferences.getBoolean(KEY_SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS_ENABLED, false)
+                        val scaleEnabled = preferences.getBoolean(KEY_SMALL_ISLAND_MEDIA_ICON_SCALE_ENABLED, false)
+                        val picInfo = runCatching {
+                            holder.getMethod("getPicInfo").invoke(chain.thisObject)
+                        }.getOrNull()
+                        val picture = runCatching {
+                            picInfo?.javaClass?.getMethod("getPic")?.invoke(picInfo) as? String
+                        }.getOrNull()
+                        if (picture != "miui_media_album_icon") return@intercept result
+                        // The media template uses PicInfo.type=1, which is rendered by
+                        // setFixIcon().  setSmallIcon() remains covered for other vendor
+                        // templates that use the small-icon slot.
+                        val fieldName = if (method.name == "setFixIcon") "fixIcon" else "smallIcon"
+                        val icon = findDynamicIslandField(chain.thisObject, fieldName)?.get(chain.thisObject) as? View
+                        val hasCustomCorner = icon?.outlineProvider is SmallMediaIconCornerProvider
+                        val hasCustomScale = icon?.let { it.scaleX != 1f || it.scaleY != 1f } == true
+                        if (cornerEnabled || scaleEnabled || hasCustomCorner || hasCustomScale) {
                             icon?.let { applySmallMediaIconCorner(it, preferences) }
                         }
                         result
@@ -160,20 +170,52 @@ internal class SystemUiHooks(
     }
 
     private fun applySmallMediaIconCorner(view: View, preferences: SharedPreferences) {
+        val cornerEnabled = preferences.getBoolean(KEY_SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS_ENABLED, false)
+        val scaleEnabled = preferences.getBoolean(KEY_SMALL_ISLAND_MEDIA_ICON_SCALE_ENABLED, false)
         val offsetDp = preferences.getInt(KEY_SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS, SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS_DEFAULT)
-            .coerceIn(-64, 96)
-        val baseId = view.resources.getIdentifier("island_icon_radius", "dimen", systemUiPluginPackageName)
-        val base = if (baseId != 0) view.resources.getDimension(baseId) else 4.56f * view.resources.displayMetrics.density
-        if (offsetDp == 0) return
-        val radius = (base + offsetDp * view.resources.displayMetrics.density).coerceAtLeast(0f)
-        view.outlineProvider = object : ViewOutlineProvider() {
-            override fun getOutline(target: View, outline: Outline) {
-                val max = minOf(target.width, target.height) / 2f
-                outline.setRoundRect(0, 0, target.width, target.height, radius.coerceAtMost(max))
+            .coerceIn(-64, 72)
+        val scaleOffset = preferences.getInt(KEY_SMALL_ISLAND_MEDIA_ICON_SCALE, SMALL_ISLAND_MEDIA_ICON_SCALE_DEFAULT)
+            .coerceIn(-100, 100)
+        val currentProvider = view.outlineProvider
+        if (cornerEnabled && offsetDp != 0) {
+            val baseId = view.resources.getIdentifier("island_icon_radius", "dimen", systemUiPluginPackageName)
+            val base = if (baseId != 0) view.resources.getDimension(baseId) else 4.56f * view.resources.displayMetrics.density
+            val radius = (base + offsetDp * view.resources.displayMetrics.density).coerceAtLeast(0f)
+            if (currentProvider !is SmallMediaIconCornerProvider || currentProvider.radius != radius) {
+                val originalProvider = (currentProvider as? SmallMediaIconCornerProvider)?.original ?: currentProvider
+                val originalClipToOutline = (currentProvider as? SmallMediaIconCornerProvider)?.originalClipToOutline
+                    ?: view.clipToOutline
+                view.outlineProvider = SmallMediaIconCornerProvider(
+                    original = originalProvider,
+                    originalClipToOutline = originalClipToOutline,
+                    radius = radius,
+                )
+                view.clipToOutline = true
             }
+            view.clipToOutline = true
+            view.invalidateOutline()
+        } else if (currentProvider is SmallMediaIconCornerProvider) {
+            view.outlineProvider = currentProvider.original
+            view.clipToOutline = currentProvider.originalClipToOutline
+            view.invalidateOutline()
         }
-        view.clipToOutline = true
-        view.invalidateOutline()
+        // The slider is relative: 0 keeps the vendor size, while +/-100% maps to
+        // 0x/2x.  Keep both axes equal so the album cover remains square.
+        val scale = if (scaleEnabled) 1f + scaleOffset / 100f else 1f
+        view.scaleX = scale
+        view.scaleY = scale
+    }
+
+    private class SmallMediaIconCornerProvider(
+        internal val original: ViewOutlineProvider?,
+        internal val originalClipToOutline: Boolean,
+        internal val radius: Float,
+    ) : ViewOutlineProvider() {
+        override fun getOutline(view: View, outline: Outline) {
+            original?.getOutline(view, outline)
+            val max = minOf(view.width, view.height) / 2f
+            outline.setRoundRect(0, 0, view.width, view.height, radius.coerceAtMost(max))
+        }
     }
 
     /**
