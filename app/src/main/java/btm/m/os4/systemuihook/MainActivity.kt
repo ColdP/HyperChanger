@@ -12457,8 +12457,8 @@ private fun About(back: () -> Unit, openPage: (PageId) -> Unit, onDebugMode: () 
         }
         item {
             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, colors = aboutCardColors()) {
-                val officialWebsite = tr("officialWebsiteUrl", "https://coldp.github.io/OfficialWeb/")
-                Row(Modifier.fillMaxWidth().clickable { openUrl(context, officialWebsite) }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                val officialWebsite = tr("officialWebsiteUrl", "coldp.github.io/OfficialSite")
+                Row(Modifier.fillMaxWidth().clickable { openUrl(context, "https://$officialWebsite") }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                     Image(painterResource(R.drawable.btm_m_avatar), "btm_m", Modifier.size(52.dp).clip(androidx.compose.foundation.shape.CircleShape), contentScale = ContentScale.Crop)
                     Column(Modifier.padding(start = 14.dp).weight(1f)) {
                         Text("btm_m", style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold)
