@@ -524,7 +524,8 @@ private fun CaptchaDialog(show: Boolean, captcha: String, dismiss: () -> Unit, c
     ) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(tr("动态验证码", "动态验证码"), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
-            Text(tr("请输入动态验证码以确认你已阅读并理解协议。", "请输入动态验证码以确认你已阅读并理解协议。"), style = MiuixTheme.textStyles.body1)
+            Text(tr("请输入动态验证码以确认你已阅读、理解并同意协议。", "请输入动态验证码以确认你已阅读、理解并同意协议。"), style = MiuixTheme.textStyles.body1)
+            Text(tr("动态验证码可以在协议页获取", "动态验证码可以在协议页获取"), style = MiuixTheme.textStyles.body1)
             TextField(
                 value = input,
                 onValueChange = { value ->
