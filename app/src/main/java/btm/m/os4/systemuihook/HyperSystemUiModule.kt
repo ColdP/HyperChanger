@@ -1589,11 +1589,21 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
+    private fun isStandaloneHyperMusicCoverInstalled(context: Context): Boolean =
+        HmcConflictDetector.isHmcVariantInstalled(context)
+
     private fun sendHyperMusicCoverMediaCardCommand(
         context: Context,
         hideArtwork: Boolean,
         centerText: Boolean,
     ) {
+        if (isStandaloneHyperMusicCoverInstalled(context)) {
+            btm.m.os4.systemuihook.HookModuleLogger.log(
+                this, Log.INFO, TAG,
+                "Standalone HyperMusicCover detected; skipping HyperChanger media-card command",
+            )
+            return
+        }
         runCatching {
             context.sendBroadcast(
                 Intent(HYPER_MUSIC_COVER_ACTION)
@@ -1608,6 +1618,13 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun sendHyperMusicCoverCommand(context: Context, op: String, on: Boolean) {
+        if (isStandaloneHyperMusicCoverInstalled(context)) {
+            btm.m.os4.systemuihook.HookModuleLogger.log(
+                this, Log.INFO, TAG,
+                "Standalone HyperMusicCover detected; skipping HyperChanger command op=$op on=$on",
+            )
+            return
+        }
         runCatching {
             context.sendBroadcast(
                 Intent(HYPER_MUSIC_COVER_ACTION)
