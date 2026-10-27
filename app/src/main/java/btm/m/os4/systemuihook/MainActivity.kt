@@ -2,6 +2,9 @@
 // Copyright 2026 btm_m
 package btm.m.os4.systemuihook
 
+import btm.m.os4.systemuihook.mitrustservice.KEY_TRUSTSERVICE_DIAGNOSTICS
+import btm.m.os4.systemuihook.mitrustservice.TrustServiceSettingsPreference
+
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsStore
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationShortcutsSettingsStore
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationBottomOffsetSettingsStore
@@ -516,8 +519,12 @@ private fun suggestedScopesForHookChange(before: HookSettings, after: HookSettin
     return scopes
 }
 
-private fun isStandaloneHyperMusicCoverInstalled(context: Context): Boolean =
-    HmcConflictDetector.isHmcVariantInstalled(context)
+private const val STANDALONE_HMC_PACKAGE = "com.github.zyl6932.HyperMusicCover"
+
+private fun isStandaloneHyperMusicCoverInstalled(context: Context): Boolean = runCatching {
+    context.packageManager.getPackageInfo(STANDALONE_HMC_PACKAGE, 0)
+    true
+}.getOrDefault(false)
 
 @Composable
 private fun Root(
@@ -892,7 +899,6 @@ private fun Root(
                 airDrop.syncRemote(it)
                 IslandWidthSettingsStore(context).syncRemote(it)
                 StatusBarAdjustmentSettingsStore(context).syncRemote(it)
-                StatusBarSecondsSettingsStore(context).syncRemote(it)
                 StatusBarIconSpacingSettingsStore(context).syncRemote(it)
                 StatusBarIconImportStore(context).syncRemote(it)
                 NotificationIslandSettingsStore(context).syncRemote(it)
@@ -1283,6 +1289,8 @@ private fun Shell(
     val osCode = remember { OsCompatibility.versionCode() }
     var showOsWarning by remember { mutableStateOf(false) }
     var showOsMissing by remember { mutableStateOf(false) }
+    var showDebug by remember { mutableStateOf(false) }
+    var debugPreview by remember { mutableStateOf<String?>(null) }
     var disclaimerRead by remember { mutableStateOf(false) }
     // Module self-update prompt. Seeded from the process-level result so a rebuilt composition does
     // not lose an already resolved update.
@@ -1356,7 +1364,7 @@ private fun Shell(
         } else {
             pageStack.clear()
         }
-        if (leavingDisclaimer && osCode.isNotBlank() && osCode != "4") {
+        if (leavingDisclaimer && (debugPreview == "non4" || (osCode.isNotBlank() && osCode != "4"))) {
             showOsWarning = true
         }
         Unit
@@ -1402,7 +1410,7 @@ private fun Shell(
                 updateDeviceProfile, updateAppearance, updateMusicWhitelist, presetActions, updateAirDrop,
                 settingsApp = settingsApp, updateSettingsApp = updateSettingsApp, superXiaoAi = superXiaoAi, updateSuperXiaoAi = updateSuperXiaoAi, systemUpdate = systemUpdate, updateSystemUpdate = updateSystemUpdate,
                 openPage = openNestedPage, back = dismissPage,
-                onEnterOobe = onEnterOobe, captcha = captcha,
+                onDebugMode = { showDebug = true }, captcha = captcha,
                 onPickRasterImages = onPickRasterImages, onApplyRasterWallpaper = onApplyRasterWallpaper,
                 onPickAppearanceHome = onPickAppearanceHome, onPickAppearanceDevice = onPickAppearanceDevice,
                 onClearAppearanceHome = onClearAppearanceHome, onClearAppearanceDevice = onClearAppearanceDevice,
@@ -1543,26 +1551,26 @@ private fun Shell(
             }
         }
         OsWarningDialog(
-            show = page != PageId.DISCLAIMER && showOsWarning,
-            version = osCode,
+            show = page != PageId.DISCLAIMER && (showOsWarning || debugPreview == "non4"),
+            version = if (debugPreview == "non4") "3" else osCode,
             captcha = captcha,
             captchaInput = captchaInput,
             disclaimerRead = disclaimerRead,
-            preview = false,
+            preview = debugPreview == "non4",
             onCaptchaInput = { captchaInput = it.filter(Char::isDigit).take(6) },
             onDisclaimer = { showOsWarning = false; openNestedPage(PageId.DISCLAIMER) },
-            onConfirm = { if (disclaimerRead && captchaInput == captcha) { showOsWarning = false } },
+            onConfirm = { if (disclaimerRead && captchaInput == captcha) { showOsWarning = false; debugPreview = null } },
             onExit = { (context as? Activity)?.finishAndRemoveTask() },
         )
         OsMissingDialog(
-            show = showOsMissing,
-            seconds = exitSeconds,
-            preview = false,
-            onExit = { (context as? Activity)?.finishAndRemoveTask() },
+            show = showOsMissing || debugPreview == "empty",
+            seconds = if (debugPreview == "empty") 10 else exitSeconds,
+            preview = debugPreview == "empty",
+            onExit = { if (debugPreview == "empty") debugPreview = null else (context as? Activity)?.finishAndRemoveTask() },
         )
         UpdateAvailableDialog(
-            // Never stack on top of the compatibility gates.
-            show = pendingUpdate != null && !showOsWarning && !showOsMissing,
+            // Never stack on top of the compatibility gates or a preview.
+            show = pendingUpdate != null && !showOsWarning && !showOsMissing && debugPreview == null,
             currentVersion = BuildConfig.VERSION_NAME,
             latestVersion = pendingUpdate?.versionName.orEmpty(),
             onDismiss = {
@@ -1575,6 +1583,14 @@ private fun Shell(
                 openRootPage(PageId.SOFTWARE_UPDATE)
             },
         )
+        if (showDebug) {
+            DebugModeDialog(
+                onDismiss = { showDebug = false },
+                onNonHyperOs4 = { showDebug = false; debugPreview = "non4" },
+                onNonHyperOs = { showDebug = false; debugPreview = "empty" },
+                onEnterOobe = { showDebug = false; onEnterOobe() },
+            )
+        }
     }
     }
     }
@@ -1901,6 +1917,13 @@ private fun OtherPage(
                 insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp),
             )
             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                // MiTrustService feature entry is intentionally grouped under Other → System app optimization.
+                TrustServiceSettingsPreference(
+                    checked = scopedPrefs.getBoolean(KEY_TRUSTSERVICE_DIAGNOSTICS, false),
+                    onCheckedChange = { enabled ->
+                        scopedPrefs.edit().putBoolean(KEY_TRUSTSERVICE_DIAGNOSTICS, enabled).apply()
+                    },
+                )
                 ArrowPreference(
                     title = tr("应用底部导航", "应用底部导航"),
                     onClick = { open(PageId.APP_NAVIGATION) },
@@ -4912,7 +4935,7 @@ private fun Detail(
     updateSettingsApp: ((SettingsAppPreferences) -> SettingsAppPreferences) -> Unit,
     updateSuperXiaoAi: ((SuperXiaoAiPreferences) -> SuperXiaoAiPreferences) -> Unit,
     updateSystemUpdate: ((SystemUpdatePreferences) -> SystemUpdatePreferences) -> Unit,
-    onEnterOobe: () -> Unit,
+    onDebugMode: () -> Unit,
     captcha: String,
     onPickRasterImages: () -> Unit,
     onApplyRasterWallpaper: () -> Unit,
@@ -4944,7 +4967,7 @@ private fun Detail(
     back: () -> Unit
 ) {
     when (page) {
-        PageId.MODULE_SAFETY -> ModuleSafetyPage(openLogs = { openPage(PageId.MODULE_LOGS) }, onEnterOobe = onEnterOobe, back = back)
+        PageId.MODULE_SAFETY -> ModuleSafetyPage({ openPage(PageId.MODULE_LOGS) }, back)
         PageId.MODULE_LOGS -> ModuleLogsPage(back)
         PageId.SHADE -> Shade(settings, update, presetActions, openPage, back)
         PageId.DESKTOP -> Desktop(dockSettings, updateDock, homeRecentsSettings, updateHomeRecents, homeFolderSettings, updateHomeFolder, homeMaterialSettings, updateHomeMaterial, openPage, back)
@@ -4988,7 +5011,7 @@ private fun Detail(
         PageId.SETTINGS_APPEARANCE_HOME -> SettingsAppearancePage(APPEARANCE_SLOT_HOME, appearance, updateAppearance, onPickAppearanceHome, onClearAppearanceHome, back)
         PageId.SETTINGS_APPEARANCE_DEVICE -> SettingsAppearancePage(APPEARANCE_SLOT_DEVICE, appearance, updateAppearance, onPickAppearanceDevice, onClearAppearanceDevice, back)
             PageId.TUTORIAL_DEVICE_CARD -> TutorialDeviceCardSettings(appearance, updateAppearance, onPickAppearanceLogo, onClearAppearanceLogo, onPickTutorialDeviceImage, onClearTutorialDeviceImage, onPickCustomDeviceLogo, onClearCustomDeviceLogo, onPickStyle1UpdateBackground, onClearStyle1UpdateBackground, onPickStyle2DeviceImage, onClearStyle2DeviceImage, onPickStyle2DeviceLogo, onClearStyle2DeviceLogo, onPickStyle2UpdateBackground, onClearStyle2UpdateBackground, onColorModeAssetAction, back)
-        PageId.ABOUT -> About(back, openPage)
+        PageId.ABOUT -> About(back, openPage, onDebugMode)
         PageId.LEGAL_DISCLAIMER -> LegalDocument(PageId.LEGAL_DISCLAIMER, back)
         PageId.LEGAL_PRIVACY -> LegalDocument(PageId.LEGAL_PRIVACY, back)
         PageId.LEGAL_USER_AGREEMENT -> LegalDocument(PageId.LEGAL_USER_AGREEMENT, back)
@@ -7680,10 +7703,6 @@ private fun IslandCollapsedPage(back: () -> Unit) = AppPage(
                         range = 0..100,
                         suffix = "%",
                         defaultValue = ISLAND_SMOOTHING_DEFAULT_PERCENT,
-                        keyPoints = listOf(60f),
-                        valueText = { percent ->
-                            if (percent == 60) tr("islandCollapsedSmoothingIos", "iOS") else "$percent%"
-                        },
                     ) { percent -> updateSmoothing { it.copy(percent = percent) } }
                 }
             }
@@ -7714,32 +7733,17 @@ private fun IslandCollapsedPage(back: () -> Unit) = AppPage(
         item {
             Group(tr("islandMediaIconGroup", "媒体图标")) {
                 SwitchPreference(
-                    title = tr("small_island_media_icon_corner_radius", "收起态的媒体封面圆角"),
+                    title = tr("small_island_media_icon_corner_radius", "收起时的媒体图标圆角"),
                     checked = appearanceSettings.smallMediaIconCornerRadiusEnabled,
                     onCheckedChange = { enabled -> updateAppearance { it.copy(smallMediaIconCornerRadiusEnabled = enabled) } },
                 )
                 AnimatedVisibility(visible = appearanceSettings.smallMediaIconCornerRadiusEnabled) {
-                    ParameterIntSlide(
-                        tr("small_island_media_icon_corner_radius", "收起态的媒体封面圆角"),
+                    IntSlide(
+                        tr("small_island_media_icon_corner_radius", "收起时的媒体图标圆角"),
                         appearanceSettings.smallMediaIconCornerRadius,
-                        -64..72,
-                        suffix = " dp",
+                        -64..96,
                         defaultValue = SMALL_ISLAND_MEDIA_ICON_CORNER_RADIUS_DEFAULT,
                     ) { value -> updateAppearance { it.copy(smallMediaIconCornerRadius = value) } }
-                }
-                SwitchPreference(
-                    title = tr("small_island_media_icon_scale", "收起态的媒体封面缩放"),
-                    checked = appearanceSettings.smallMediaIconScaleEnabled,
-                    onCheckedChange = { enabled -> updateAppearance { it.copy(smallMediaIconScaleEnabled = enabled) } },
-                )
-                AnimatedVisibility(visible = appearanceSettings.smallMediaIconScaleEnabled) {
-                    ParameterIntSlide(
-                        tr("small_island_media_icon_scale", "收起态的媒体封面缩放"),
-                        appearanceSettings.smallMediaIconScale,
-                        -100..100,
-                        suffix = "%",
-                        defaultValue = SMALL_ISLAND_MEDIA_ICON_SCALE_DEFAULT,
-                    ) { value -> updateAppearance { it.copy(smallMediaIconScale = value) } }
                 }
             }
         }
@@ -8078,8 +8082,6 @@ private fun Status(
     var controlCenterClockSettings by remember { mutableStateOf(controlCenterClockStore.settings) }
     val adjustmentStore = remember(context) { StatusBarAdjustmentSettingsStore(context) }
     var adjustmentSettings by remember { mutableStateOf(adjustmentStore.settings) }
-    val secondsStore = remember(context) { StatusBarSecondsSettingsStore(context) }
-    var secondsSettings by remember { mutableStateOf(secondsStore.settings) }
     var showControlCenterClockFormatDialog by remember { mutableStateOf(false) }
     fun updateControlCenterClock(transform: (ControlCenterClockSettings) -> ControlCenterClockSettings) {
         controlCenterClockStore.update(service, transform)
@@ -8093,10 +8095,6 @@ private fun Status(
         adjustmentStore.update(service, transform)
         adjustmentSettings = adjustmentStore.settings
     }
-    fun updateSeconds(transform: (StatusBarSecondsSettings) -> StatusBarSecondsSettings) {
-        secondsStore.update(service, transform)
-        secondsSettings = secondsStore.settings
-    }
     LaunchedEffect(service) {
         service?.let(headerHeightStore::syncRemote)
         headerHeightOffset = headerHeightStore.offsetDp
@@ -8106,8 +8104,6 @@ private fun Status(
         controlCenterClockSettings = controlCenterClockStore.settings
         service?.let(adjustmentStore::syncRemote)
         adjustmentSettings = adjustmentStore.settings
-        service?.let(secondsStore::syncRemote)
-        secondsSettings = secondsStore.settings
     }
     AppList(p, scroll, 28) {
         item { Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
@@ -8116,39 +8112,6 @@ private fun Status(
         } }
         item {
             Group(tr("\u72b6\u6001\u680f\u663e\u793a", "\u72b6\u6001\u680f\u663e\u793a")) {
-                OverlayDropdownPreference(
-                    title = tr("statusBarSeconds", "状态栏显秒"),
-                    items = listOf(
-                        tr("statusBarSecondsHidden", "不显示"),
-                        tr("statusBarSecondsAlways", "始终显示"),
-                        tr("statusBarSecondsLongPress", "长按显示"),
-                    ),
-                    selectedIndex = secondsSettings.mode,
-                    onSelectedIndexChange = { mode -> updateSeconds { it.copy(mode = mode) } },
-                )
-                AnimatedVisibility(
-                    visible = secondsSettings.mode == STATUS_BAR_SECONDS_MODE_LONG_PRESS,
-                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
-                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
-                ) {
-                    val durations = listOf(30, 60, 180, 300, 600, 900, 1200, 1800, 3600)
-                    OverlayDropdownPreference(
-                        title = tr("statusBarSecondsDuration", "显示时间"),
-                        items = listOf(
-                            tr("statusBarSeconds30Seconds", "30秒"),
-                            tr("statusBarSeconds1Minute", "1分钟"),
-                            tr("statusBarSeconds3Minutes", "3分钟"),
-                            tr("statusBarSeconds5Minutes", "5分钟"),
-                            tr("statusBarSeconds10Minutes", "10分钟"),
-                            tr("statusBarSeconds15Minutes", "15分钟"),
-                            tr("statusBarSeconds20Minutes", "20分钟"),
-                            tr("statusBarSeconds30Minutes", "30分钟"),
-                            tr("statusBarSeconds60Minutes", "60分钟"),
-                        ),
-                        selectedIndex = durations.indexOf(secondsSettings.durationSeconds).coerceAtLeast(0),
-                        onSelectedIndexChange = { index -> updateSeconds { it.copy(durationSeconds = durations[index]) } },
-                    )
-                }
                 SwitchPreference(
                     title = tr("\u9690\u85cf\u72b6\u6001\u680f\u7535\u6c60\u5185\u6587\u672c", "\u9690\u85cf\u72b6\u6001\u680f\u7535\u6c60\u5185\u6587\u672c"),
                     checked = s.hideStatusBarClockText,
@@ -11683,8 +11646,6 @@ private fun EditableSliderPreference(
     enabled: Boolean = true,
     modifier: Modifier = Modifier,
     centerValue: Float? = null,
-    keyPoints: List<Float> = emptyList(),
-    magnetThreshold: Float = 0.02f,
 ) {
     var showValueDialog by remember { mutableStateOf(false) }
     // Asymmetric signed ranges still place their neutral value at the physical midpoint.
@@ -11709,9 +11670,6 @@ private fun EditableSliderPreference(
         valueText = valueText,
         valueRange = if (center == null) valueRange else 0f..1f,
         steps = if (center == null) steps else 0,
-        showKeyPoints = keyPoints.isNotEmpty(),
-        keyPoints = keyPoints,
-        magnetThreshold = magnetThreshold,
         enabled = enabled,
         modifier = modifier,
         onClick = if (enabled) ({ showValueDialog = true }) else null,
@@ -11921,8 +11879,6 @@ private fun ParameterIntSlide(
     suffix: String = "",
     defaultValue: Int = range.first,
     enabled: Boolean = true,
-    keyPoints: List<Float> = emptyList(),
-    valueText: ((Int) -> String)? = null,
     save: (Int) -> Unit,
 ) {
     var current by remember(value) { mutableFloatStateOf(value.toFloat()) }
@@ -11931,12 +11887,11 @@ private fun ParameterIntSlide(
         onValueChange = { current = it },
         onValueChangeFinished = { save(current.toInt().coerceIn(range.first, range.last)) },
         title = title,
-        valueText = valueText?.invoke(current.toInt()) ?: "${current.toInt()}$suffix",
+        valueText = "${current.toInt()}$suffix",
         valueRange = range.first.toFloat()..range.last.toFloat(),
         steps = (range.last - range.first - 1).coerceAtLeast(0),
         defaultValue = defaultValue.toFloat(),
         enabled = enabled,
-        keyPoints = keyPoints,
     )
 }
 
@@ -12484,7 +12439,7 @@ internal fun DeviceInfoItem(title: String, summary: String) {
 }
 
 @Composable
-private fun About(back: () -> Unit, openPage: (PageId) -> Unit) = AppPage(tr("\u5173\u4e8e", "\u5173\u4e8e"), back, showLargeTitle = false, pageBackground = { AboutMaterialBackground(Modifier.matchParentSize()) }) { padding, scroll ->
+private fun About(back: () -> Unit, openPage: (PageId) -> Unit, onDebugMode: () -> Unit) = AppPage(tr("\u5173\u4e8e", "\u5173\u4e8e"), back, showLargeTitle = false, pageBackground = { AboutMaterialBackground(Modifier.matchParentSize()) }) { padding, scroll ->
     val context = LocalContext.current
     val unavailable = tr("未检测到", "未检测到")
     val marketName = remember { OsCompatibility.systemProperty("ro.product.marketname").ifBlank { unavailable } }
@@ -12494,6 +12449,7 @@ private fun About(back: () -> Unit, openPage: (PageId) -> Unit) = AppPage(tr("\u
             .ifBlank { unavailable }
     }
     val androidVersion = remember { "${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})" }
+    var iconTaps by remember { mutableIntStateOf(0) }
     var versionTaps by remember { mutableIntStateOf(0) }
     var confettiKey by remember { mutableIntStateOf(0) }
     val listState = rememberLazyListState()
@@ -12503,6 +12459,7 @@ private fun About(back: () -> Unit, openPage: (PageId) -> Unit) = AppPage(tr("\u
     LazyColumn(Modifier.fillMaxSize().nestedScroll(scroll.nestedScrollConnection), state = listState, contentPadding = PaddingValues(16.dp, padding.calculateTopPadding() + 4.dp, 16.dp, padding.calculateBottomPadding() + 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             AboutAdvancedMaterialHeader(
+                onLogoClick = { iconTaps++; if (iconTaps >= 10) { iconTaps = 0; onDebugMode() } },
                 onVersionClick = {
                     versionTaps++
                     if (versionTaps >= 5) {
@@ -12514,12 +12471,11 @@ private fun About(back: () -> Unit, openPage: (PageId) -> Unit) = AppPage(tr("\u
         }
         item {
             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, colors = aboutCardColors()) {
-                val officialWebsite = tr("officialWebsiteUrl", "coldp.github.io/OfficialSite")
-                Row(Modifier.fillMaxWidth().clickable { openUrl(context, "https://$officialWebsite") }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().clickable { openUrl(context, "https://btm-m.site") }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                     Image(painterResource(R.drawable.btm_m_avatar), "btm_m", Modifier.size(52.dp).clip(androidx.compose.foundation.shape.CircleShape), contentScale = ContentScale.Crop)
                     Column(Modifier.padding(start = 14.dp).weight(1f)) {
                         Text("btm_m", style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold)
-                        Text(officialWebsite, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 3.dp))
+                        Text("https://btm-m.site", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 3.dp))
                     }
                     Image(MiuixIcons.Regular.ChevronForward, null, Modifier.size(22.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary))
                 }
@@ -12590,6 +12546,24 @@ private fun OsMissingDialog(show: Boolean, seconds: Int, preview: Boolean, onExi
             Text("检测到当前系统并非 HyperOS", style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
             Text("未读取到 ro.mi.os.version.code，系统环境可能存在重大差异。为避免不可预期的问题，HyperChanger 将退出。", style = MiuixTheme.textStyles.body1)
             GlassDialogButton(onClick = onExit, modifier = Modifier.fillMaxWidth()) { Text(if (preview) "退出" else "退出（${seconds.coerceAtLeast(0)}s）", color = ComposeColor(0xFFD32F2F)) }
+        }
+    }
+}
+
+@Composable
+private fun DebugModeDialog(
+    onDismiss: () -> Unit,
+    onNonHyperOs4: () -> Unit,
+    onNonHyperOs: () -> Unit,
+    onEnterOobe: () -> Unit,
+) {
+    WindowDialog(show = true, onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("调试模式", style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
+            GlassDialogButton(onClick = onEnterOobe, modifier = Modifier.fillMaxWidth()) { Text(tr("进入 OOBE", "进入 OOBE")) }
+            GlassDialogButton(onClick = onNonHyperOs4, modifier = Modifier.fillMaxWidth()) { Text("非 HyperOS 4 弹窗") }
+            GlassDialogButton(onClick = onNonHyperOs, modifier = Modifier.fillMaxWidth()) { Text("非 HyperOS 弹窗") }
+            GlassDialogButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("取消") }
         }
     }
 }
@@ -12960,7 +12934,7 @@ internal fun AppPage(
 }
 
 @Composable
-private fun AboutAdvancedMaterialHeader(onVersionClick: () -> Unit) {
+private fun AboutAdvancedMaterialHeader(onLogoClick: () -> Unit, onVersionClick: () -> Unit) {
     val density = LocalDensity.current
     val dark = MiuixTheme.colorScheme.surface.luminance() < .5f
     val versionColor = MiuixTheme.colorScheme.onSurface.copy(alpha = .78f).toArgb()
@@ -12969,7 +12943,7 @@ private fun AboutAdvancedMaterialHeader(onVersionClick: () -> Unit) {
         val logoSize = width * (.94f / 3.91f) * 2.78f * .8f * .95f
         val textWidth = width * (2.97f / 3.91f)
         AndroidView(factory = { HyperCeilerBrandView(it) }, update = { view ->
-            view.configure(with(density) { logoSize.roundToPx() }, with(density) { textWidth.roundToPx() }, "${tr("Aikotoba", "Aikotoba")} | ${BuildConfig.VERSION_NAME}-${BuildConfig.BUILD_DATE}", versionColor, dark, {}, onVersionClick)
+            view.configure(with(density) { logoSize.roundToPx() }, with(density) { textWidth.roundToPx() }, "${tr("Aikotoba", "Aikotoba")} | ${BuildConfig.VERSION_NAME}-${BuildConfig.BUILD_DATE}", versionColor, dark, onLogoClick, onVersionClick)
         }, modifier = Modifier.fillMaxSize())
     }
 }
