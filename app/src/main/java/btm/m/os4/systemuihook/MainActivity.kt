@@ -4970,6 +4970,7 @@ private fun Detail(
         PageId.MODULE_SAFETY -> ModuleSafetyPage(
             openLogs = { openPage(PageId.MODULE_LOGS) },
             back = back,
+            onEnterOobe = {},
         )
         PageId.MODULE_LOGS -> ModuleLogsPage(back)
         PageId.SHADE -> Shade(settings, update, presetActions, openPage, back)
