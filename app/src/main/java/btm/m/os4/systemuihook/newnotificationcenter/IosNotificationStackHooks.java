@@ -533,7 +533,7 @@ final class IosNotificationStackHooks {
                     // second RenderNode and redraws heads-up rows separately during collapse.
                     foregroundBlur.set("mBlurEffect", null);
                     canvas.clipRect(0f, 0f, view.getWidth(),
-                            IosNotificationCenterPresentation.viewportBottom(view));
+                            IosNotificationCenterPresentation.viewportBottomForDraw(view));
                     return chain.proceed();
                 } finally { canvas.restoreToCount(save); }
             });

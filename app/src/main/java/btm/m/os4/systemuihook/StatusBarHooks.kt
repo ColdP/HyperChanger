@@ -200,9 +200,12 @@ internal class StatusBarHooks(
     private val logTag: String,
     private val applicationContext: () -> Context?,
 ) {
+    private val secondsHook = StatusBarSecondsHook(module, hookDeoptimized)
+
     fun installAdjustmentHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
         if (!ModuleSafetyRuntime.allows(SafetySection.STATUS_BAR)) return
         if (statusBarAdjustmentHooksInstalled) return
+        secondsHook.install(classLoader, preferences)
         installClockSizeRefreshHook(classLoader, preferences)
         installStatusBarIconSizeHooks(classLoader, preferences)
         installIconSpacingHooks(classLoader, preferences)

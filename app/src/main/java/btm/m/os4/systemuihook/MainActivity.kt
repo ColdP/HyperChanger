@@ -892,6 +892,7 @@ private fun Root(
                 airDrop.syncRemote(it)
                 IslandWidthSettingsStore(context).syncRemote(it)
                 StatusBarAdjustmentSettingsStore(context).syncRemote(it)
+                StatusBarSecondsSettingsStore(context).syncRemote(it)
                 StatusBarIconSpacingSettingsStore(context).syncRemote(it)
                 StatusBarIconImportStore(context).syncRemote(it)
                 NotificationIslandSettingsStore(context).syncRemote(it)
@@ -8077,6 +8078,8 @@ private fun Status(
     var controlCenterClockSettings by remember { mutableStateOf(controlCenterClockStore.settings) }
     val adjustmentStore = remember(context) { StatusBarAdjustmentSettingsStore(context) }
     var adjustmentSettings by remember { mutableStateOf(adjustmentStore.settings) }
+    val secondsStore = remember(context) { StatusBarSecondsSettingsStore(context) }
+    var secondsSettings by remember { mutableStateOf(secondsStore.settings) }
     var showControlCenterClockFormatDialog by remember { mutableStateOf(false) }
     fun updateControlCenterClock(transform: (ControlCenterClockSettings) -> ControlCenterClockSettings) {
         controlCenterClockStore.update(service, transform)
@@ -8090,6 +8093,10 @@ private fun Status(
         adjustmentStore.update(service, transform)
         adjustmentSettings = adjustmentStore.settings
     }
+    fun updateSeconds(transform: (StatusBarSecondsSettings) -> StatusBarSecondsSettings) {
+        secondsStore.update(service, transform)
+        secondsSettings = secondsStore.settings
+    }
     LaunchedEffect(service) {
         service?.let(headerHeightStore::syncRemote)
         headerHeightOffset = headerHeightStore.offsetDp
@@ -8099,6 +8106,8 @@ private fun Status(
         controlCenterClockSettings = controlCenterClockStore.settings
         service?.let(adjustmentStore::syncRemote)
         adjustmentSettings = adjustmentStore.settings
+        service?.let(secondsStore::syncRemote)
+        secondsSettings = secondsStore.settings
     }
     AppList(p, scroll, 28) {
         item { Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
@@ -8107,6 +8116,39 @@ private fun Status(
         } }
         item {
             Group(tr("\u72b6\u6001\u680f\u663e\u793a", "\u72b6\u6001\u680f\u663e\u793a")) {
+                OverlayDropdownPreference(
+                    title = tr("statusBarSeconds", "状态栏显秒"),
+                    items = listOf(
+                        tr("statusBarSecondsHidden", "不显示"),
+                        tr("statusBarSecondsAlways", "始终显示"),
+                        tr("statusBarSecondsLongPress", "长按显示"),
+                    ),
+                    selectedIndex = secondsSettings.mode,
+                    onSelectedIndexChange = { mode -> updateSeconds { it.copy(mode = mode) } },
+                )
+                AnimatedVisibility(
+                    visible = secondsSettings.mode == STATUS_BAR_SECONDS_MODE_LONG_PRESS,
+                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                ) {
+                    val durations = listOf(30, 60, 180, 300, 600, 900, 1200, 1800, 3600)
+                    OverlayDropdownPreference(
+                        title = tr("statusBarSecondsDuration", "显示时间"),
+                        items = listOf(
+                            tr("statusBarSeconds30Seconds", "30秒"),
+                            tr("statusBarSeconds1Minute", "1分钟"),
+                            tr("statusBarSeconds3Minutes", "3分钟"),
+                            tr("statusBarSeconds5Minutes", "5分钟"),
+                            tr("statusBarSeconds10Minutes", "10分钟"),
+                            tr("statusBarSeconds15Minutes", "15分钟"),
+                            tr("statusBarSeconds20Minutes", "20分钟"),
+                            tr("statusBarSeconds30Minutes", "30分钟"),
+                            tr("statusBarSeconds60Minutes", "60分钟"),
+                        ),
+                        selectedIndex = durations.indexOf(secondsSettings.durationSeconds).coerceAtLeast(0),
+                        onSelectedIndexChange = { index -> updateSeconds { it.copy(durationSeconds = durations[index]) } },
+                    )
+                }
                 SwitchPreference(
                     title = tr("\u9690\u85cf\u72b6\u6001\u680f\u7535\u6c60\u5185\u6587\u672c", "\u9690\u85cf\u72b6\u6001\u680f\u7535\u6c60\u5185\u6587\u672c"),
                     checked = s.hideStatusBarClockText,
