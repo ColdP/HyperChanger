@@ -51,8 +51,6 @@ public final class IosNotificationCenterPresentation {
     private static MirrorView status;
     private static View stack;
     private static View transformedStack;
-    private static View depthSource;
-    private static View statusSource;
     private static float stackBaseTranslationY;
     private static float stackBaseTranslationX;
     private static float stackBaseAlpha;
@@ -114,12 +112,6 @@ public final class IosNotificationCenterPresentation {
     private static Boolean keyguardLockedOverride;
     private static int lastBlur = -1;
     private static int lastStatusBlur = -1;
-    private static int lastNotificationHeaderBlur = -1;
-    private static long lastIdleSyncUptime;
-    private static int lastIdleStackScroll = Integer.MIN_VALUE;
-    private static Method notificationStateChangeMethod;
-    private static Object notificationStateChangeType;
-    private static Class<?> notificationStateChangeClockClass;
     private static boolean switching;
     private static boolean gestureActive;
     private static boolean wallpaperEnabled = true;
@@ -212,17 +204,10 @@ public final class IosNotificationCenterPresentation {
             headerExitAnimator = null;
             previousExit.cancel();
         }
-        boolean created = false;
-        if (host == null) {
-            if (clockUnavailable || !create()) return;
-            created = true;
-        }
+        if (host == null && (clockUnavailable || !create())) return;
         host.setAlpha(progress);
         if (status != null) status.setAlpha(progress * progress * (3f - 2f * progress));
-        // FRAME already runs once immediately before drawing. Keeping the eager sync only for
-        // the first attachment removes a second full notification-tree walk from every touch
-        // frame while preserving the first visible frame of a newly created presentation.
-        if (created) sync();
+        sync();
         if (!IosNotificationExitState.isHolding()
                 && (layoutProgress != previousLayout || wasHoldingRows)) {
             requestStackUpdate(stack);
@@ -545,14 +530,12 @@ public final class IosNotificationCenterPresentation {
         return Math.max(0f, view.getHeight() - inset - offset);
     }
 
-    /**
-     * The list follows the hosted sheet with a parent translation, but its safe-area boundary is
-     * anchored to the panel. Convert that stable boundary back into the list's local canvas
-     * coordinates before dispatchDraw applies the extra clip.
-     */
+    /** Converts the panel-fixed bottom edge into the translated list's local coordinates. */
     static float viewportBottomForDraw(View view) {
         float bottom = viewportBottom(view);
-        if (view == transformedStack && host != null) bottom -= host.getTranslationY();
+        if (view == transformedStack) {
+            bottom -= view.getTranslationY() - stackBaseTranslationY;
+        }
         return Math.max(0f, bottom);
     }
 
@@ -699,18 +682,6 @@ public final class IosNotificationCenterPresentation {
 
     private static void sync() {
         if (host == null || panel == null || progress <= 0f) return;
-        if (!gestureActive && !switching && progress >= .999f && layoutProgress >= .999f) {
-            int scroll = 0;
-            if (stack != null) {
-                try {
-                    scroll = ((Number) Xp.callMethod(stack, "getOwnScrollY")).intValue();
-                } catch (Throwable ignored) {}
-            }
-            long now = SystemClock.uptimeMillis();
-            if (scroll == lastIdleStackScroll && now - lastIdleSyncUptime < 250L) return;
-            lastIdleStackScroll = scroll;
-            lastIdleSyncUptime = now;
-        }
         View sheet = wallpaperSheet;
         if (sheet != null && sheet.isAttachedToWindow()) {
             int[] sheetPoint = new int[2];
@@ -859,11 +830,7 @@ public final class IosNotificationCenterPresentation {
             lastDepthDrawable = null;
             return;
         }
-        View source = depthSource;
-        if (source == null || source.getRootView() != window.getRootView()) {
-            source = byId(window, "deducted_image_view");
-            depthSource = source;
-        }
+        View source = byId(window, "deducted_image_view");
         if (!(source instanceof ImageView)) return;
         Drawable drawable = ((ImageView) source).getDrawable();
         if (drawable == lastDepthDrawable) return;
@@ -876,11 +843,7 @@ public final class IosNotificationCenterPresentation {
     }
 
     private static void syncStatus() {
-        View source = statusSource;
-        if (source == null || source.getRootView() != window.getRootView()) {
-            source = byId(window, "keyguard_status_bar");
-            statusSource = source;
-        }
+        View source = byId(window, "keyguard_status_bar");
         if (source != null && source != status && source.getWidth() > 0 && source.getHeight() > 0) {
             if (status.source != source) {
                 status.source = source;
@@ -1013,7 +976,6 @@ public final class IosNotificationCenterPresentation {
         }
         notificationHeaderBar = null;
         notificationHeaderHasContent = false;
-        lastNotificationHeaderBlur = -1;
     }
 
     private static void syncNotificationHeader() {
@@ -1050,16 +1012,9 @@ public final class IosNotificationCenterPresentation {
         notificationHeaderBar.setTranslationY(y);
         animateNotificationHeader(true, progress * progress * (3f - 2f * progress));
         float visual = progress * progress * (3f - 2f * progress);
-        int blur = Math.round(28f * panel.getResources().getDisplayMetrics().density * (1f - visual));
-        // RenderEffect writes rebuild the header RenderNode. Quantize the radius and only write
-        // when the bucket changes; finger deltas smaller than two pixels no longer trigger a
-        // complete blur graph rebuild.
-        blur = (blur + 1) / 2 * 2;
-        if (blur != lastNotificationHeaderBlur) {
-            notificationHeaderBar.setRenderEffect(blur == 0 ? null
-                    : RenderEffect.createBlurEffect(blur, blur, Shader.TileMode.CLAMP));
-            lastNotificationHeaderBlur = blur;
-        }
+        float blur = 28f * panel.getResources().getDisplayMetrics().density * (1f - visual);
+        notificationHeaderBar.setRenderEffect(blur <= 0f ? null
+                : RenderEffect.createBlurEffect(blur, blur, Shader.TileMode.CLAMP));
     }
 
     private static void animateNotificationHeader(boolean show, float targetAlpha) {
@@ -1645,21 +1600,14 @@ public final class IosNotificationCenterPresentation {
         }
         if (Float.isNaN(lastNotificationY) || Math.abs(notificationY - lastNotificationY) > 1f) {
             try {
-                Class<?> clockClass = clock.getClass();
-                if (notificationStateChangeMethod == null
-                        || notificationStateChangeClockClass != clockClass) {
-                    Class<?> kind = Class.forName(
-                            "com.miui.systemui.notification.data.repository.NotificationTopChangeType",
-                            false, clockClass.getClassLoader());
-                    notificationStateChangeType = kind.getField("NOTIFS_CHANGED").get(null);
-                    notificationStateChangeMethod = clockClass.getMethod(
-                            "notifStateChange", float.class, boolean.class, kind);
-                    notificationStateChangeClockClass = clockClass;
-                }
+                Class<?> kind = Class.forName(
+                        "com.miui.systemui.notification.data.repository.NotificationTopChangeType",
+                        false, clock.getClass().getClassLoader());
+                Object changed = kind.getField("NOTIFS_CHANGED").get(null);
+                Method method = clock.getClass().getMethod("notifStateChange", float.class, boolean.class, kind);
                 DRIVING_HOSTED_CLOCK.set(true);
                 try {
-                    notificationStateChangeMethod.invoke(clock, notificationY, true,
-                            notificationStateChangeType);
+                    method.invoke(clock, notificationY, true, changed);
                     lastNotificationY = notificationY;
                 } finally {
                     DRIVING_HOSTED_CLOCK.remove();
@@ -1745,11 +1693,6 @@ public final class IosNotificationCenterPresentation {
         clockMetadataSyncUptime = 0L;
         hostedClockMinuteViews = null;
         stack = null;
-        depthSource = null;
-        statusSource = null;
-        notificationStateChangeMethod = null;
-        notificationStateChangeType = null;
-        notificationStateChangeClockClass = null;
         stackOriginalLayoutParams = null;
         landscapeLayout = false;
         layoutProgress = 0f;
@@ -1786,9 +1729,6 @@ public final class IosNotificationCenterPresentation {
         wallpaperSheet = null;
         lastBlur = -1;
         lastStatusBlur = -1;
-        lastNotificationHeaderBlur = -1;
-        lastIdleSyncUptime = 0L;
-        lastIdleStackScroll = Integer.MIN_VALUE;
     }
 
     private static void allowBackdropSampling(View view) {
