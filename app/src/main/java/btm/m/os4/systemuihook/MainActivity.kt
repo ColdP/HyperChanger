@@ -4967,7 +4967,10 @@ private fun Detail(
     back: () -> Unit
 ) {
     when (page) {
-        PageId.MODULE_SAFETY -> ModuleSafetyPage({ openPage(PageId.MODULE_LOGS) }, back)
+        PageId.MODULE_SAFETY -> ModuleSafetyPage(
+            openLogs = { openPage(PageId.MODULE_LOGS) },
+            back = back,
+        )
         PageId.MODULE_LOGS -> ModuleLogsPage(back)
         PageId.SHADE -> Shade(settings, update, presetActions, openPage, back)
         PageId.DESKTOP -> Desktop(dockSettings, updateDock, homeRecentsSettings, updateHomeRecents, homeFolderSettings, updateHomeFolder, homeMaterialSettings, updateHomeMaterial, openPage, back)
