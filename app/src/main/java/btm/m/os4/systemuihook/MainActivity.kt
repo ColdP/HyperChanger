@@ -289,6 +289,7 @@ private enum class PageId {
     IOS_NOTIFICATION_CLOCK_GLASS, CONTROL_CENTER_TOP_BUTTONS,
     GESTURE_HANDLE_STYLE, DESKTOP, DESKTOP_MATERIAL,
     ISLAND, ISLAND_COLLAPSED, ISLAND_EXPANDED, ISLAND_EXPANDED_BACKGROUND, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_HEADER_SETTINGS, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_ADJUSTMENT, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LOCKSCREEN_SHORTCUT_BACKGROUND, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
+    DEVICE_PROFILE_PRESETS, DEVICE_PROFILE_CLOUD_PRESETS,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
     SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND,
@@ -4087,6 +4088,7 @@ private fun SettingsEntryLabelsPage(
 private fun DeviceProfileEditor(
     profile: DeviceProfileSettings,
     update: ((DeviceProfileSettings) -> DeviceProfileSettings) -> Unit,
+    openPresets: () -> Unit,
     back: () -> Unit,
 ) = AppPage(tr("我的设备与全部参数", "我的设备与全部参数"), back) { padding, scroll ->
     var editingField by remember { mutableStateOf<ProfileField?>(null) }
@@ -4114,6 +4116,11 @@ private fun DeviceProfileEditor(
         tr("前摄", "前摄") to profile.cameraFront,
     )
     AppList(padding, scroll) {
+        item {
+            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
+                ArrowPreference(title = tr("预设库", "预设库"), onClick = openPresets)
+            }
+        }
         item {
             Group(tr("基础参数", "基础参数")) {
                 basicFields.forEach { (label, value) ->
@@ -4983,7 +4990,9 @@ private fun Detail(
         PageId.SYSTEM_UPDATE -> SystemUpdate(systemUpdate, updateSystemUpdate, back)
         PageId.SYSTEM_FRAMEWORK -> FrameworkPage(back)
     PageId.SYSTEM_SETTINGS -> SystemSettings(settingsApp, updateSettingsApp, deviceProfile, updateDeviceProfile, appearance, updateAppearance, openPage, onPickAppearanceLogo, onClearAppearanceLogo, back)
-        PageId.DEVICE_PROFILE -> DeviceProfileEditor(deviceProfile, updateDeviceProfile, back)
+        PageId.DEVICE_PROFILE -> DeviceProfileEditor(deviceProfile, updateDeviceProfile, { openPage(PageId.DEVICE_PROFILE_PRESETS) }, back)
+        PageId.DEVICE_PROFILE_PRESETS -> DeviceProfilePresetsPage(deviceProfile, updateDeviceProfile, { openPage(PageId.DEVICE_PROFILE_CLOUD_PRESETS) }, back)
+        PageId.DEVICE_PROFILE_CLOUD_PRESETS -> CloudDeviceProfilePresetsPage(updateDeviceProfile, back)
         PageId.SETTINGS_ENTRY_LABELS -> SettingsEntryLabelsPage(settingsApp, updateSettingsApp, back)
         PageId.SETTINGS_APPEARANCE_HOME -> SettingsAppearancePage(APPEARANCE_SLOT_HOME, appearance, updateAppearance, onPickAppearanceHome, onClearAppearanceHome, back)
         PageId.SETTINGS_APPEARANCE_DEVICE -> SettingsAppearancePage(APPEARANCE_SLOT_DEVICE, appearance, updateAppearance, onPickAppearanceDevice, onClearAppearanceDevice, back)

@@ -32,6 +32,11 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/module_log_paths" />
         </provider>
+        <provider android:name=".DevicePresetFileProvider"
+            android:authorities="${applicationId}.devicepresets" android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/device_preset_paths" />
+        </provider>
         <meta-data
             android:name="xposeddescription"
             android:resource="@string/xposed_description" />
