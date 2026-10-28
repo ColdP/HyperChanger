@@ -4,6 +4,10 @@ package btm.m.os4.systemuihook
 
 import btm.m.os4.systemuihook.trustservice.KEY_TRUSTSERVICE_DIAGNOSTICS
 import btm.m.os4.systemuihook.trustservice.TrustServiceSettingsPreference
+import btm.m.os4.systemuihook.securitycenter.KEY_SECURITYCENTER_ROOTED_DIAGNOSTICS
+import btm.m.os4.systemuihook.securitycenter.KEY_SECURITYCENTER_ROOT_DIAGNOSTICS
+import btm.m.os4.systemuihook.securitycenter.SecurityCenterRootedCheckDiagnosticsPreference
+import btm.m.os4.systemuihook.securitycenter.SecurityCenterRootCheckDiagnosticsPreference
 
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsStore
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationShortcutsSettingsStore
@@ -1923,6 +1927,22 @@ private fun OtherPage(
                     checked = scopedPrefs.getBoolean(KEY_TRUSTSERVICE_DIAGNOSTICS, false),
                     onCheckedChange = { enabled ->
                         scopedPrefs.edit().putBoolean(KEY_TRUSTSERVICE_DIAGNOSTICS, enabled).apply()
+                    },
+                )
+                SecurityCenterRootedCheckDiagnosticsPreference(
+                    checked = scopedPrefs.getBoolean(KEY_SECURITYCENTER_ROOTED_DIAGNOSTICS, false),
+                    onCheckedChange = { enabled ->
+                        scopedPrefs.edit()
+                            .putBoolean(KEY_SECURITYCENTER_ROOTED_DIAGNOSTICS, enabled)
+                            .apply()
+                    },
+                )
+                SecurityCenterRootCheckDiagnosticsPreference(
+                    checked = scopedPrefs.getBoolean(KEY_SECURITYCENTER_ROOT_DIAGNOSTICS, false),
+                    onCheckedChange = { enabled ->
+                        scopedPrefs.edit()
+                            .putBoolean(KEY_SECURITYCENTER_ROOT_DIAGNOSTICS, enabled)
+                            .apply()
                     },
                 )
                 ArrowPreference(
