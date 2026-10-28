@@ -25,6 +25,7 @@ internal fun restartRecommendationSnapshot(group: String, preferences: SharedPre
     readControlCenterCarrierSettings(p)
     readControlCenterClockSettings(p)
     readControlCenterHeaderHeightOffset(p)
+    ContactsDialerSettings.read(p)
     readDockSettings(p)
     readHomeDockIconSettings(p)
     readHomeFolderSettings(p)

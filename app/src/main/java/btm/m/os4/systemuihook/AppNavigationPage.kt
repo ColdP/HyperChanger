@@ -38,12 +38,15 @@ import btm.m.liquidglass.LabelMode
 import btm.m.liquidglass.NavigationStyle
 import btm.m.liquidglass.ScopedSettings
 import btm.m.liquidglass.NavigationAccentSettings
+import btm.m.liquidglass.NavigationBadgeSettings
+import btm.m.liquidglass.hook.WeChatAvatarRadiusSettings
 import btm.m.liquidglass.rememberMomentumPredictiveBack
 import btm.m.liquidglass.momentumBackTransform
 
 private data class AppNavItem(val name: String, val packageName: String)
 
 private val appNavItems = listOf(
+    AppNavItem("QQ", "com.tencent.mobileqq"),
     AppNavItem("Apple Music", "com.apple.android.music"),
     AppNavItem("微博", "com.sina.weibo"),
     AppNavItem("小红书", "com.xingin.xhs"),
@@ -78,7 +81,7 @@ internal fun AppNavigationPage(back: () -> Unit) {
         }
         return
     }
-    AppPage(tr("应用底部导航", "应用底部导航"), back, restartScopes = setOf(ScopeApplication.APPLE_MUSIC, ScopeApplication.WEIBO, ScopeApplication.XIAOHONGSHU, ScopeApplication.XIAOMI_STORE, ScopeApplication.XIAOMI_WALLET, ScopeApplication.XIAOMI_HEALTH, ScopeApplication.LUCKIN_COFFEE, ScopeApplication.TENCENT_MEETING, ScopeApplication.CMB_BANK, ScopeApplication.WECHAT, ScopeApplication.PINDUODUO), restartEnabled = service != null) { padding, scroll ->
+    AppPage(tr("应用底部导航", "应用底部导航"), back, restartScopes = setOf(ScopeApplication.QQ, ScopeApplication.APPLE_MUSIC, ScopeApplication.WEIBO, ScopeApplication.XIAOHONGSHU, ScopeApplication.XIAOMI_STORE, ScopeApplication.XIAOMI_WALLET, ScopeApplication.XIAOMI_HEALTH, ScopeApplication.LUCKIN_COFFEE, ScopeApplication.TENCENT_MEETING, ScopeApplication.CMB_BANK, ScopeApplication.WECHAT, ScopeApplication.PINDUODUO), restartEnabled = service != null) { padding, scroll ->
         AppList(padding, scroll, 28) {
             item { SmallTitle(tr("支持的应用", "支持的应用"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp)) }
             items(appNavItems, key = { it.packageName }) { item ->
@@ -127,18 +130,21 @@ private fun AppNavigationCard(item: AppNavItem, prefs: android.content.SharedPre
 
 @Composable
 private fun AppNavigationSettings(appItem: AppNavItem, prefs: android.content.SharedPreferences, onChanged: () -> Unit, back: () -> Unit) {
+    val context = LocalContext.current
     val enabledKey = ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_ENABLED)
     var enabled by remember(appItem.packageName) { mutableStateOf(ScopedSettings.getBoolean(prefs, appItem.packageName, ScopedSettings.KEY_ENABLED, true)) }
     var styleIndex by remember(appItem.packageName) { mutableIntStateOf(NavigationStyle.fromPreference(ScopedSettings.getString(prefs, appItem.packageName, NavigationStyle.PREFERENCE_KEY, NavigationStyle.DEFAULT_VALUE)).ordinal) }
     var labelIndex by remember(appItem.packageName) { mutableIntStateOf(LabelMode.fromPreference(ScopedSettings.getLabelMode(prefs, appItem.packageName)).ordinal) }
     var colorIndex by remember(appItem.packageName) { mutableIntStateOf(AppColorMode.fromPreference(ScopedSettings.getString(prefs, appItem.packageName, ScopedSettings.KEY_COLOR_MODE, AppColorMode.DEFAULT_VALUE)).ordinal) }
     var accentColor by remember(appItem.packageName) { mutableIntStateOf(NavigationAccentSettings.getColor(prefs, appItem.packageName)) }
+    var showBadges by remember(appItem.packageName) { mutableStateOf(NavigationBadgeSettings.getShowBadges(prefs, appItem.packageName)) }
     var showAccentDialog by remember { mutableStateOf(false) }
     val accentEnabled = enabled && NavigationStyle.entries.getOrNull(styleIndex) in setOf(
         NavigationStyle.LIQUID_GLASS,
         NavigationStyle.HARMONY_OS_FLOATING,
     )
     var walletTabs by remember(appItem.packageName) { mutableStateOf(ScopedSettings.getWalletVisibleTabs(prefs)) }
+    var avatarRadius by remember(appItem.packageName) { mutableFloatStateOf(WeChatAvatarRadiusSettings.getOffset(prefs, appItem.packageName).toFloat()) }
     AppPage(tr(appItem.name, appItem.name), back) { padding, scroll ->
         AppList(padding, scroll, 28) {
             item {
@@ -147,6 +153,19 @@ private fun AppNavigationSettings(appItem: AppNavItem, prefs: android.content.Sh
                     OverlayDropdownPreference(title = tr("导航栏样式", "导航栏样式"), items = NavigationStyle.entries.map { tr(it.displayName, it.displayName) }, selectedIndex = styleIndex, enabled = enabled) { value -> styleIndex = value; prefs.edit().putString(ScopedSettings.key(appItem.packageName, NavigationStyle.PREFERENCE_KEY), NavigationStyle.entries[value].preferenceValue).apply(); onChanged() }
                     OverlayDropdownPreference(title = tr("标签显示方式", "标签显示方式"), items = LabelMode.entries.map { tr(it.displayName, it.displayName) }, selectedIndex = labelIndex, enabled = enabled) { value -> labelIndex = value; prefs.edit().putString(ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_LABEL_MODE), LabelMode.entries[value].preferenceValue).apply(); onChanged() }
                     OverlayDropdownPreference(title = tr("颜色模式", "颜色模式"), items = AppColorMode.entries.map { tr(it.displayName, it.displayName) }, selectedIndex = colorIndex, enabled = enabled) { value -> colorIndex = value; prefs.edit().putString(ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_COLOR_MODE), AppColorMode.entries[value].preferenceValue).apply(); onChanged() }
+                    if (appItem.packageName == "com.tencent.mobileqq" || appItem.packageName == "com.tencent.mm") {
+                        SwitchPreference(
+                            title = tr("显示小红点", "显示小红点"),
+                            summary = tr("在自定义底栏图标旁显示未读提示", "在自定义底栏图标旁显示未读提示"),
+                            checked = showBadges,
+                            enabled = enabled,
+                            onCheckedChange = { value ->
+                                showBadges = value
+                                NavigationBadgeSettings.save(context, prefs, appItem.packageName, value)
+                                onChanged()
+                            },
+                        )
+                    }
                     NavigationAccentPreference(
                         color = accentColor,
                         enabled = accentEnabled,
@@ -164,6 +183,25 @@ private fun AppNavigationSettings(appItem: AppNavItem, prefs: android.content.Sh
                             prefs.edit().putStringSet(ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_VISIBLE_TABS), walletTabs).apply(); onChanged()
                         })
                     }
+                }
+            }
+            if (appItem.packageName == "com.tencent.mm") item {
+                SmallTitle(tr("微信头像圆角", "微信头像圆角"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp))
+                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                    EditableSliderPreference(
+                        title = tr("头像圆角半径", "头像圆角半径"),
+                        value = avatarRadius,
+                        valueText = if (avatarRadius == 0f) tr("微信默认", "微信默认") else avatarRadius.toInt().toString(),
+                        valueRange = WeChatAvatarRadiusSettings.MIN.toFloat()..WeChatAvatarRadiusSettings.MAX.toFloat(),
+                        steps = 159,
+                        defaultValue = 0f,
+                        enabled = enabled,
+                        onValueChange = { avatarRadius = it },
+                        onValueChangeFinished = {
+                            WeChatAvatarRadiusSettings.saveOffset(prefs, appItem.packageName, avatarRadius.toInt())
+                            onChanged()
+                        },
+                    )
                 }
             }
         }

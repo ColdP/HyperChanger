@@ -80,6 +80,19 @@ object AppBottomNavHooks {
         fallbackTabOrder = listOf(TabKey.MESSAGES, TabKey.CONTACTS, TabKey.DISCOVER, TabKey.DYNAMIC)
     )
 
+    private val qq = AppConfig(
+        displayName = "QQ",
+        packageName = QQNavigation.PACKAGE,
+        activityName = QQNavigation.ACTIVITY,
+        barResourceName = null,
+        anchorResourceName = null,
+        requiredTabs = emptySet(),
+        targetVersion = "9.3.75 (16580)",
+        // QQ keeps the tab scroller and a full-width background plate as
+        // separate siblings; hiding only TabBarView leaves the plate visible.
+        navigationLayerResourceNames = setOf("1s8", "37i", "kmr", "adk"),
+    )
+
     private val cloudMusic = AppConfig(
         displayName = "CloudMusic",
         packageName = "com.netease.cloudmusic",
@@ -352,6 +365,53 @@ object AppBottomNavHooks {
 
     @JvmStatic
     @Throws(ReflectiveOperationException::class)
+    fun installQQ(
+        module: XposedModule,
+        loader: ClassLoader,
+        blurRadius: Int,
+        labelMode: String,
+        navigationStyle: String,
+        advancedMaterial: Boolean,
+        colorMode: String,
+        accentColor: Int = 0,
+        showBadges: Boolean = true
+    ) {
+        // QQ's qfix/alias activity path can bypass the app ClassLoader hook even
+        // when SplashActivity resolves successfully. Instrumentation receives the
+        // actual resumed Activity instance and is the stable lifecycle boundary.
+        for (name in listOf("callActivityOnResume", "callActivityOnPause", "callActivityOnDestroy")) {
+            val method = Instrumentation::class.java.getDeclaredMethod(name, Activity::class.java)
+            module.hook(method)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .setId("qq-navigation:instrumentation:$name")
+                .intercept { chain ->
+                    val activity = chain.getArg(0) as? Activity
+                    val matches = activity?.packageName == qq.packageName &&
+                        (activity.javaClass.name == qq.activityName ||
+                            activity.javaClass.superclass?.name == qq.activityName)
+                    if (matches && name == "callActivityOnDestroy") {
+                        synchronized(sessions) { sessions.remove(activity) }?.destroy()
+                    }
+                    val result = chain.proceed()
+                    if (matches) {
+                        when (name) {
+                            "callActivityOnResume" -> synchronized(sessions) {
+                                sessions.getOrPut(activity) {
+                                    Session(module, activity, qq, blurRadius.coerceIn(0, 40),
+                                        labelMode, navigationStyle, advancedMaterial, colorMode, accentColor, null, showBadges)
+                                }
+                            }.resume()
+                            "callActivityOnPause" -> synchronized(sessions) { sessions[activity] }?.pause()
+                        }
+                    }
+                    result
+                }
+        }
+        btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, TAG, "QQ navigation using instrumentation lifecycle fallback")
+    }
+
+    @JvmStatic
+    @Throws(ReflectiveOperationException::class)
     fun installCloudMusic(
         module: XposedModule,
         loader: ClassLoader,
@@ -559,8 +619,9 @@ object AppBottomNavHooks {
         navigationStyle: String,
         advancedMaterial: Boolean,
         colorMode: String,
-        accentColor: Int = 0
-    ) = install(module, loader, wechat, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
+        accentColor: Int = 0,
+        showBadges: Boolean = true
+    ) = install(module, loader, wechat, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor, showBadges = showBadges)
 
     @JvmStatic
     @Throws(ReflectiveOperationException::class)
@@ -700,7 +761,8 @@ object AppBottomNavHooks {
         advancedMaterial: Boolean,
         colorMode: String,
         accentColor: Int = 0,
-        visibleTabs: Set<String>? = null
+        visibleTabs: Set<String>? = null,
+        showBadges: Boolean = false
     ) {
         val activityClass = Class.forName(config.activityName, false, loader)
         val onResume = findMethod(activityClass, "onResume")
@@ -725,7 +787,8 @@ object AppBottomNavHooks {
                                 advancedMaterial,
                                 colorMode,
                                 accentColor,
-                                visibleTabs
+                                visibleTabs,
+                                showBadges
                             )
                         }
                     }.resume()
@@ -787,7 +850,8 @@ object AppBottomNavHooks {
         private val advancedMaterial: Boolean,
         private val colorMode: String,
         private val accentColor: Int,
-        private val visibleTabs: Set<String>?
+        private val visibleTabs: Set<String>?,
+        private val showBadges: Boolean = false
     ) {
         private val selectedIndex = mutableIntStateOf(0)
         private val originalViews = linkedSetOf<View>()
@@ -804,6 +868,15 @@ object AppBottomNavHooks {
         private var resumed = false
         private var attempts = 0
         private var originalBar: ViewGroup? = null
+        // QQ's TabBarView is stable while a page is scrolling. Re-discovering it
+        // from the whole view tree on every pre-draw makes the host miss frames.
+        private var qqCachedDetection: DetectedBar? = null
+        private var qqLastDetectionAt = 0L
+        private var qqLastLabelCheckAt = 0L
+        private var qqLastBadgeCheckAt = 0L
+        private var qqDetectionDirty = true
+        private var qqLastMaintenanceBar: ViewGroup? = null
+        private var qqLastMaintenanceContent: ViewGroup? = null
         private var lastWeiboHierarchySearchAt = 0L
         private var detectedTabs = emptyList<DetectedTab>()
         private var navigationTabs by mutableStateOf(emptyList<DetectedTab>())
@@ -931,6 +1004,11 @@ object AppBottomNavHooks {
             try {
                 originalBar = detected.container
                 detectedTabs = detected.tabs
+                if (config === qq) {
+                    qqCachedDetection = detected
+                    qqLastDetectionAt = android.os.SystemClock.uptimeMillis()
+                    qqDetectionDirty = false
+                }
                 navigationTabs = if (config === xiaomiWallet) {
                     detectedTabs.filter { it.key.name in visibleTabs.orEmpty() }
                         .ifEmpty { detectedTabs }
@@ -973,6 +1051,7 @@ object AppBottomNavHooks {
                 owner.attachTo(overlayHost)
                 val navigationBackdropSource = when (config) {
                     cloudMusic, qqMusic -> content
+                    qq -> findResourceView(content, "main_desk_fragment_pager") ?: sourceView
                     appleMusic -> content
                     else -> sourceView
                 }
@@ -1005,7 +1084,12 @@ object AppBottomNavHooks {
                                     HostTab(
                                         label = tab.displayLabel,
                                         className = tab.key.name,
-                                        icon = extractedTabIcon(tab.key)
+                                        icon = extractedTabIcon(tab.key),
+                                        iconBitmap = if (config === xiaomiHealth) {
+                                            miHealthIcons?.icon(tab.key.name, selectedIndex.intValue == index)
+                                                ?: tab.nativeIcon
+                                        } else tab.nativeIcon,
+                                        badge = showBadges && tab.badge
                                     ) {
                                         if (tab.key != TabKey.PUBLISH && config !== cmbBank) selectedIndex.intValue = index
                                         openTab(tab)
@@ -1015,7 +1099,8 @@ object AppBottomNavHooks {
                                     HostTab(
                                         label = action.displayLabel,
                                         className = "search",
-                                        iconBitmap = action.nativeIcon
+                                        iconBitmap = action.nativeIcon,
+                                        badge = showBadges && action.badge
                                     ) { action.clickTarget.performClick() }
                                 },
                                 selectedIndex = selectedIndex,
@@ -1051,13 +1136,25 @@ object AppBottomNavHooks {
                                 tabIconContent = if (
                                     config === tencentMeeting ||
                                     config === wechat ||
+                                    config === qq ||
+                                    config === xiaomiHealth ||
                                     config.packageName == PinduoduoNavigation.PACKAGE
                                 ) {
                                     { index, color ->
                                         val tab = currentNavigationTabs[index]
-                                        val bitmap = tab.nativeIcon
+                                        val bitmap = if (config === xiaomiHealth) {
+                                            miHealthIcons?.icon(tab.key.name, selectedIndex.intValue == index)
+                                                ?: tab.nativeIcon
+                                        } else tab.nativeIcon
                                         if (bitmap != null) {
-                                            Image(bitmap, null, Modifier.size(24.dp), colorFilter = ColorFilter.tint(color))
+                                            Image(
+                                                bitmap,
+                                                null,
+                                                Modifier.size(if (config === xiaomiHealth) 26.dp else 24.dp),
+                                                colorFilter = if (config === xiaomiHealth &&
+                                                    selectedIndex.intValue == index
+                                                ) null else ColorFilter.tint(color)
+                                            )
                                         }
                                     }
                                 } else if (config === cmbBank) {
@@ -1070,7 +1167,8 @@ object AppBottomNavHooks {
                                 redrawNativeText = config === cloudMusic ||
                                     config === qqMusic || config === appleMusic,
                                 onHostPreDraw = ::syncHostState,
-                                backdropOverride = watchFaceBackdrop
+                                backdropOverride = watchFaceBackdrop,
+                                recordBackdropChildren = config === qq
                             )
                             if (config === cloudMusic || config === appleMusic || config === qqMusic) {
                                 val playerNavigationStyle =
@@ -1236,6 +1334,7 @@ object AppBottomNavHooks {
                 val bar = when (config) {
                     weibo -> refreshDetectedBar(content)?.container
                     qqMusic -> refreshDetectedBar(content)?.container ?: originalBar
+                    qq -> cachedQQDetection(content)?.container
                     else -> originalBar
                 }
                 val applePlayerExpanded = config === appleMusic &&
@@ -1289,12 +1388,18 @@ object AppBottomNavHooks {
                 nav?.visibility = View.VISIBLE
                 configureSystemNavigationBar()
             }
-            if (config === tencentMeeting || config === wechat ||
+            if (config === tencentMeeting || config === wechat || config === qq ||
                 config.packageName == PinduoduoNavigation.PACKAGE
             ) {
-                val detected = content?.let(::detectBottomBar)
+                val previousSelected = selectedIndex.intValue
+                val detected = if (config === qq) content?.let(::cachedQQDetection)
+                else content?.let(::detectBottomBar)
                 if (detected == null) {
                     nav?.visibility = View.GONE
+                    // Keep the main-page native bar state while a QQ detail
+                    // page is active. Restoring it on every pre-draw causes a
+                    // visible full-screen flash during page transitions.
+                    if (config === qq) return
                     restoreHostContentSpace()
                     restoreOriginalBar()
                     return
@@ -1304,10 +1409,41 @@ object AppBottomNavHooks {
                     originalBar = detected.container
                     rememberOriginalNavigationLayers(content, detected.container)
                 }
+                if (config === qq) {
+                    // QQ creates the channel gradient independently of TabBarView
+                    // and may recreate it after every tab switch.
+                    config.navigationLayerResourceNames.forEach { name ->
+                        findResourceView(content, name)?.let(::rememberOriginalView)
+                    }
+                }
                 detectedTabs = detected.tabs
-                if (navigationTabs != detected.tabs) navigationTabs = detected.tabs
+                if (config === qq) {
+                    if (!sameNavigationTabs(navigationTabs, detected.tabs) ||
+                        previousSelected != selectedIndex.intValue
+                    ) navigationTabs = detected.tabs
+                } else if (navigationTabs != detected.tabs) navigationTabs = detected.tabs
                 if (navigationAction != detected.trailingAction) navigationAction = detected.trailingAction
                 nav?.visibility = if (resumed) View.VISIBLE else View.GONE
+                if (config === qq) {
+                    val maintenanceChanged = qqLastMaintenanceBar !== detected.container ||
+                        qqLastMaintenanceContent !== content || qqDetectionDirty
+                    if (maintenanceChanged) {
+                        qqLastMaintenanceBar = detected.container
+                        qqLastMaintenanceContent = content
+                        releaseQQPageNavigationInset(content)
+                        ImmersiveNavigationHooks.activate(activity)
+                        updateNavigationOverlayHeight()
+                        releaseOriginalBarSpace()
+                        hideOriginalBar()
+                        qqDetectionDirty = false
+                    }
+                    // QQ may rebind its own chrome during a scroll. Reapply the
+                    // cached alpha/background state without traversing the page.
+                    hideOriginalBar()
+                    // QQ's native page tree is otherwise untouched during a
+                    // scroll. Avoid the generic per-frame descendant traversal.
+                    return
+                }
             }
             if (content != null) {
                 syncCloudMusicMiniPlayer(content)
@@ -1330,10 +1466,108 @@ object AppBottomNavHooks {
             if (config !== xiaohongshu && config !== qqMusic && config !== weibo &&
                 config !== xiaomiHealthWatchFaceMarket && config !== tencentMeeting && config !== cmbBank && config !== wechat
             ) {
-                navigationTabs.indexOfFirst {
+                val hostSelected = navigationTabs.indexOfFirst {
                     it.key != TabKey.PUBLISH && isSelectedRecursively(it.view)
-                }.takeIf { it >= 0 }?.let { selectedIndex.intValue = it }
+                }.takeIf { it >= 0 }
+                hostSelected?.let { selectedIndex.intValue = it }
+                if (config === xiaomiHealth) refreshMiHealthTabIcons()
             }
+        }
+
+        private fun refreshMiHealthTabIcons() {
+            val icons = miHealthIcons ?: return
+            val selected = selectedIndex.intValue
+            val refreshed = navigationTabs.mapIndexed { index, tab ->
+                val icon = icons.icon(tab.key.name, index == selected)
+                if (tab.nativeIcon === icon) tab else tab.copy(nativeIcon = icon)
+            }
+            if (refreshed != navigationTabs) navigationTabs = refreshed
+        }
+
+        /**
+         * QQ's detector is intentionally expensive because it protects against
+         * secondary-page toolbars. Keep its result bound to the primary bar and
+         * only run it again when the bound row is detached/replaced or its direct
+         * child topology changes. This mirrors WeChat-LiquidGlass' cached row
+         * strategy while retaining HyperChanger's adaptive detector.
+         */
+        private fun cachedQQDetection(content: ViewGroup): DetectedBar? {
+            val now = android.os.SystemClock.uptimeMillis()
+            val cached = qqCachedDetection
+            if (!qqDetectionDirty && cached != null &&
+                qqLastMaintenanceContent === content && isQQDetectionStillBound(cached)
+            ) {
+                if (now - qqLastLabelCheckAt >= 500L) {
+                    qqLastLabelCheckAt = now
+                    val labelBar = QQNavigation.Bar(cached.container, cached.tabs.map {
+                        QQNavigation.Item(it.view, it.clickTarget, it.displayLabel, it.nativeIcon, it.badge)
+                    }, selectedIndex.intValue)
+                    if (!QQNavigation.labelsMatch(labelBar)) {
+                        qqDetectionDirty = true
+                        content.post { syncHostState() }
+                        return cached
+                    }
+                }
+                val nativeBar = QQNavigation.Bar(cached.container, cached.tabs.map {
+                    QQNavigation.Item(it.view, it.clickTarget, it.displayLabel, it.nativeIcon, it.badge)
+                }, selectedIndex.intValue)
+                val selected = QQNavigation.readSelectedIndex(nativeBar)
+                val refreshed = if (now - qqLastBadgeCheckAt >= 250L) {
+                    qqLastBadgeCheckAt = now
+                    QQNavigation.refreshBadges(nativeBar)
+                } else nativeBar
+                val current = if (refreshed !== nativeBar) cached.copy(
+                    tabs = refreshed.items.mapIndexed { index, item ->
+                        cached.tabs[index].copy(badge = item.badge)
+                    }
+                ) else cached
+                if (current !== cached) {
+                    qqCachedDetection = current
+                    detectedTabs = current.tabs
+                    if (navigationTabs.size == current.tabs.size) navigationTabs = current.tabs
+                }
+                if (selected != selectedIndex.intValue) {
+                    selectedIndex.intValue = selected
+                    qqDetectionDirty = true
+                    content.post { syncHostState() }
+                }
+                return current
+            }
+            // A detail page has no primary TabBarView. Do not rediscover the
+            // whole activity tree on every scroll frame while it is absent.
+            if (qqLastDetectionAt != 0L && now - qqLastDetectionAt < 240L) return cached
+            val detected = QQNavigation.detect(activity, content)?.let { native ->
+                selectedIndex.intValue = native.selectedIndex
+                DetectedBar(native.view, native.items.mapIndexed { index, item ->
+                    DetectedTab(
+                        TabKey.NATIVE,
+                        tr(item.label, item.label),
+                        item.view,
+                        item.clickTarget,
+                        identity = "qq:$index:${item.label}:${item.view.javaClass.name}",
+                        nativeIcon = item.icon,
+                        badge = item.badge,
+                    )
+                })
+            }
+            qqCachedDetection = detected
+            qqLastDetectionAt = now
+            qqDetectionDirty = detected == null
+            return detected
+        }
+
+        private fun isQQDetectionStillBound(detected: DetectedBar): Boolean {
+            val bar = detected.container
+            if (!QQNavigation.isUsable(
+                    QQNavigation.Bar(
+                        bar,
+                        detected.tabs.map { QQNavigation.Item(it.view, it.clickTarget, it.displayLabel, it.nativeIcon, it.badge) },
+                        selectedIndex.intValue
+                    )
+                )) return false
+            val container = if (bar.childCount == 1) bar.getChildAt(0) as? ViewGroup else bar
+            return container != null && container.childCount == detected.tabs.size &&
+                detected.tabs.indices.all { index -> container.getChildAt(index) === detected.tabs[index].view }
         }
 
         private fun hideXiaomiNavigationLayers() {
@@ -1349,11 +1583,21 @@ object AppBottomNavHooks {
         }
 
         private fun openTab(tab: DetectedTab) {
-            if (config === tencentMeeting || config === cmbBank || config === wechat) {
+            if (config === tencentMeeting || config === cmbBank || config === wechat || config === qq) {
                 val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
-                val current = detectBottomBar(content)?.tabs?.firstOrNull { it.identity == tab.identity } ?: return
-                current.clickTarget.performClick()
+                val current = if (config === qq) cachedQQDetection(content)?.tabs
+                    ?.firstOrNull { it.identity == tab.identity }
+                else detectBottomBar(content)?.tabs?.firstOrNull { it.identity == tab.identity }
+                    ?: return
+                if (current == null) return
+                hideOriginalBar()
+                val touched = if (config === qq) dispatchSyntheticTap(current.clickTarget) else false
+                if (!touched && !current.clickTarget.callOnClick()) current.clickTarget.performClick()
                 current.view.postDelayed(::syncHostState, 120L)
+                if (config === qq) {
+                    qqDetectionDirty = true
+                    current.view.post { syncHostState() }
+                }
                 return
             }
             if (config === xiaomiHealthWatchFaceMarket) {
@@ -1601,12 +1845,13 @@ object AppBottomNavHooks {
             ) return
             originalViews.forEach { view ->
                 if (view.alpha != 0f) view.alpha = 0f
+                if (config === qq && view.background != null) view.background = null
                 if (view is ViewGroup) view.setWillNotDraw(true)
             }
         }
 
         private fun releaseOriginalBarSpace() {
-            if (config === qqMusic || config === weibo || config === xiaomiWallet ||
+            if (config === qq || config === qqMusic || config === weibo || config === xiaomiWallet ||
                 config.coordinateTabSurface
             ) return
             val bar = originalBar ?: return
@@ -1635,6 +1880,8 @@ object AppBottomNavHooks {
                 releaseTencentMeetingPageNavigationInset(pager)
             } else if (config === wechat) {
                 releaseWeChatPageNavigationInset(content)
+            } else if (config === qq) {
+                releaseQQPageNavigationInset(content)
             } else if (config.packageName == PinduoduoNavigation.PACKAGE) {
                 releasePinduoduoPageNavigationInset(content)
             } else if (config === cmbBank) {
@@ -2001,6 +2248,44 @@ object AppBottomNavHooks {
                 if (!view.isShown || view is ComposeView || view === originalBar ||
                     view.height < inset * 4 || view.width < content.width * 3 / 4
                 ) return@forEach
+                if (view.paddingBottom == inset) {
+                    originalContentPaddings.putIfAbsent(view, intArrayOf(
+                        view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom
+                    ))
+                    view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, 0)
+                }
+                val params = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return@forEach
+                if (params.bottomMargin == inset) {
+                    originalContentBottomMargins.putIfAbsent(view, params.bottomMargin)
+                    params.bottomMargin = 0
+                    view.layoutParams = params
+                }
+            }
+        }
+
+        /** Releases only QQ's page-level navigation reservation, keeping the native TabBarView intact. */
+        private fun releaseQQPageNavigationInset(content: ViewGroup) {
+            val inset = navigationBarInset()
+            if (inset <= 0) return
+            val injectedNav = nav
+            val detectedBar = originalBar
+            val qqBarClass = "com.tencent.mobileqq.widget.TabBarView"
+            descendants(content).forEach { view ->
+                if (!view.isShown || view is ComposeView || view === injectedNav ||
+                    view === detectedBar ||
+                    (injectedNav != null && (isDescendantOf(view, injectedNav) || isDescendantOf(injectedNav, view))) ||
+                    (detectedBar != null && (isDescendantOf(view, detectedBar) || isDescendantOf(detectedBar, view))) ||
+                    view.javaClass.name == qqBarClass ||
+                    view.height < inset * 4 || view.width < content.width * 3 / 4
+                ) return@forEach
+
+                // QQ 9.3.75 uses these page hosts on Contacts/Dynamic; retain the
+                // structural guard so a future release cannot clear arbitrary rows.
+                val name = view.javaClass.name
+                val likelyPageHost = name.contains("CommonRefreshLayout") ||
+                    name.contains("PullToZoomHeaderFrameLayout") ||
+                    view.parent === content || view.width >= content.width * 0.9f
+                if (!likelyPageHost) return@forEach
                 if (view.paddingBottom == inset) {
                     originalContentPaddings.putIfAbsent(view, intArrayOf(
                         view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom
@@ -2495,6 +2780,7 @@ object AppBottomNavHooks {
         private fun restoreOriginalBar() {
             originalStates.forEach { (view, state) ->
                 view.alpha = state.alpha
+                view.background = state.background
                 if (view is ViewGroup) view.setWillNotDraw(state.willNotDraw)
                 view.layoutParams?.takeIf { it.height != state.layoutHeight }?.let { params ->
                     params.height = state.layoutHeight
@@ -2510,6 +2796,7 @@ object AppBottomNavHooks {
             if (originalViews.add(view)) {
                 originalStates[view] = OriginalViewState(
                     alpha = view.alpha,
+                    background = view.background,
                     willNotDraw = view is ViewGroup && view.willNotDraw(),
                     layoutHeight = view.layoutParams?.height ?: ViewGroup.LayoutParams.WRAP_CONTENT
                 )
@@ -2599,6 +2886,14 @@ object AppBottomNavHooks {
             }
             return true
         }
+
+        private fun sameNavigationTabs(left: List<DetectedTab>, right: List<DetectedTab>): Boolean =
+            left.size == right.size && left.indices.all { index ->
+                val a = left[index]
+                val b = right[index]
+                a.view === b.view && a.clickTarget === b.clickTarget &&
+                    a.identity == b.identity && a.displayLabel == b.displayLabel && a.badge == b.badge
+            }
 
         private fun syncCloudMusicMiniPlayer(content: ViewGroup) {
             if (config !== cloudMusic) return
@@ -3268,7 +3563,23 @@ object AppBottomNavHooks {
                         else -> TabKey.PROFILE
                     }
                     DetectedTab(key, tr(item.label, item.label), item.view, item.clickTarget,
-                        identity = "wechat:$index:${item.label}", nativeIcon = item.icon)
+                        identity = "wechat:$index:${item.label}", nativeIcon = item.icon,
+                        badge = item.badge)
+                })
+            }
+            if (config === qq) {
+                val native = QQNavigation.detect(activity, content) ?: return null
+                selectedIndex.intValue = native.selectedIndex
+                return DetectedBar(native.view, native.items.mapIndexed { index, item ->
+                    DetectedTab(
+                        TabKey.NATIVE,
+                        tr(item.label, item.label),
+                        item.view,
+                        item.clickTarget,
+                        identity = "qq:$index:${item.label}:${item.view.javaClass.name}",
+                        nativeIcon = item.icon,
+                        badge = item.badge,
+                    )
                 })
             }
             // MainFrameActivity uses a copied AppConfig so it can be hooked alongside
@@ -3439,7 +3750,13 @@ object AppBottomNavHooks {
             return fallbackOrder.mapIndexed { index, key ->
                 val child = candidate.getChildAt(index)
                 val clickTarget = findClickable(child) ?: return null
-                DetectedTab(key, displayLabel(key, semanticText(child)), child, clickTarget)
+                DetectedTab(
+                    key,
+                    displayLabel(key, semanticText(child)),
+                    child,
+                    clickTarget,
+                    nativeIcon = miHealthIcons?.icon(key.name, isSelectedRecursively(child))
+                )
             }
         }
 
@@ -3701,11 +4018,13 @@ object AppBottomNavHooks {
         val view: View,
         val clickTarget: View,
         val identity: String = key.name,
-        val nativeIcon: ImageBitmap? = null
+        val nativeIcon: ImageBitmap? = null,
+        val badge: Boolean = false
     )
 
     private data class OriginalViewState(
         val alpha: Float,
+        val background: Drawable?,
         val willNotDraw: Boolean,
         val layoutHeight: Int
     )

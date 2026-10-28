@@ -1057,6 +1057,15 @@ class HyperSystemUiModule : XposedModule() {
             }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install sound effect hooks", error) }
             return
         }
+        if (param.packageName == "com.android.contacts") {
+            if (!runCatching { android.app.Application.getProcessName() == param.packageName }.getOrDefault(false)) return
+            runCatching {
+                othersHooks.installContactsDialerHooks(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+            }.onFailure { error ->
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install Contacts dialer hooks", error)
+            }
+            return
+        }
         if (param.packageName == "com.miui.screenshot") {
             runCatching {
                 othersHooks.installScreenshotHooks(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
@@ -1106,6 +1115,7 @@ class HyperSystemUiModule : XposedModule() {
             param.packageName == "com.sina.weibo" || param.packageName == "com.xingin.xhs" ||
             param.packageName == "com.lucky.luckyclient" || param.packageName == "com.tencent.wemeet.app" ||
             param.packageName == "cmb.pb" || param.packageName == "com.tencent.mm" ||
+            param.packageName == "com.tencent.mobileqq" ||
             param.packageName == "com.xunmeng.pinduoduo"
         ) {
             othersHooks.installAppNavigation(param)
@@ -1341,6 +1351,7 @@ class HyperSystemUiModule : XposedModule() {
                     if (param.packageName == SYSTEM_UI && !systemUiClockMaterialLimitHookInstalled) {
                         installClockMaterialLimitHook(param.defaultClassLoader, preferences)
                         installClockMaterialCapabilityHook(param.defaultClassLoader, preferences)
+                        installSystemUiClockGlassRestoreHook(param.defaultClassLoader, preferences)
                         systemUiClockMaterialLimitHookInstalled = true
                     }
                     if (param.packageName == SYSTEM_UI_PLUGIN && !softGlassThemePluginHookInstalled) {
@@ -1353,7 +1364,7 @@ class HyperSystemUiModule : XposedModule() {
                     if (!depthEffectHookInstalled) {
                         installDepthEffectHook(param.defaultClassLoader, preferences)
                         installAodThirdPartyWallpaperDepthHook(param.defaultClassLoader, preferences)
-                        installVideoWallpaperGlassSupportHook(param.defaultClassLoader)
+                        installVideoWallpaperGlassSupportHook(param.defaultClassLoader, preferences)
                         depthEffectHookInstalled = true
                     }
                     if (!aodClockMaterialLimitHookInstalled) {
@@ -1416,7 +1427,7 @@ class HyperSystemUiModule : XposedModule() {
                         themeManagerClockMaterialLimitHookInstalled = true
                     }
                     installAodLockscreenTemplateLimitHook(param.defaultClassLoader, preferences)
-                    installVideoWallpaperGlassSupportHook(param.defaultClassLoader)
+                    installVideoWallpaperGlassSupportHook(param.defaultClassLoader, preferences)
                     if (preferences.getBoolean("unlock_xiaomi_18_rear_screen_ai", false) || preferences.getBoolean("remove_custom_rear_screen_restrictions", false)) {
                         othersHooks.installCustomRearScreenWidgetRegistration(param.defaultClassLoader)
                     }
@@ -3264,6 +3275,69 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
+    /** Restore glass fields after SystemUI parses and normalizes persisted clock settings. */
+    private fun installSystemUiClockGlassRestoreHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
+        runCatching {
+            val controllerClass = classLoader.loadClass("com.miui.clock.MiuiClockController")
+            hook(controllerClass.getMethod("getClockBeanFromSetting", String::class.java))
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("systemui-restore-persisted-glass-clock")
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    if (preferences.getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false) &&
+                        isDowngradedGlassClockBean(result)
+                    ) restoreGlassClockBean(result)
+                    result
+                }
+
+            hook(controllerClass.getMethod(
+                "setClockBean",
+                Boolean::class.javaPrimitiveType,
+                Boolean::class.javaPrimitiveType,
+                classLoader.loadClass("com.miui.clock.module.ClockBean"),
+            ))
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("systemui-preserve-glass-clock-bean")
+                .intercept { chain ->
+                    val bean = chain.getArg(2)
+                    val restore = preferences.getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false) &&
+                        isDowngradedGlassClockBean(bean)
+                    if (restore) restoreGlassClockBean(bean)
+                    val result = chain.proceed()
+                    if (restore) restoreGlassClockBean(bean)
+                    result
+                }
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed SystemUI glass clock restore hooks")
+        }.onFailure { error ->
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "SystemUI glass clock restore hooks unavailable", error)
+        }
+    }
+
+    private fun isDowngradedGlassClockBean(bean: Any?): Boolean = runCatching {
+        val templateId = bean?.javaClass?.getMethod("getTemplateId")?.invoke(bean) as? String
+            ?: return@runCatching false
+        if (templateId != "all_in_one" && !templateId.startsWith("all_in_one_")) return@runCatching false
+        if (bean.javaClass.getMethod("getClockEffect").invoke(bean) as? Int != 1) return@runCatching false
+        val style = bean.javaClass.getMethod("getStyle").invoke(bean) as? Int ?: return@runCatching false
+        val fontStyle = bean.javaClass.getMethod("getFontStyle").invoke(bean) as? Int ?: return@runCatching false
+        val hollowStyle = bean.javaClass.getMethod("getHollowStyle").invoke(bean) as? Int ?: return@runCatching false
+        val transparency = (bean.javaClass.getMethod("getGlassTransparency").invoke(bean) as? Number)?.toFloat()
+            ?: return@runCatching false
+        style == 5 && fontStyle == 22 && hollowStyle in 0..1 && transparency.isFinite() && transparency in 0f..0.2f
+    }.getOrDefault(false)
+
+    private fun restoreGlassClockBean(bean: Any?) {
+        runCatching {
+            bean?.javaClass?.getMethod("setClockEffect", Int::class.javaPrimitiveType)
+                ?.invoke(bean, CLOCK_EFFECT_GLASS)
+        }.onFailure { error ->
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not restore persisted glass clock effect", error)
+        }
+    }
+
     private fun installDynamicIslandHooks(
         classLoader: ClassLoader,
         preferences: SharedPreferences,
@@ -4880,28 +4954,53 @@ class HyperSystemUiModule : XposedModule() {
                     }
             }
 
-            val filterClass = classLoader.loadClass("com.miui.keyguard.editor.data.preset.FontFilterKt")
-            val filterMethod = filterClass.getDeclaredMethod("getFILTER_SUPPORT_INFO").apply { isAccessible = true }
-            @Suppress("UNCHECKED_CAST")
-            val support = filterMethod.invoke(null) as? MutableMap<Int, Boolean>
-            val originalGlass = support?.get(CLOCK_EFFECT_GLASS)
-            val originalOverlay = support?.get(CLOCK_EFFECT_OVERLAY)
-            fun syncSupport() {
-                if (preferences.getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false)) {
-                    support?.set(CLOCK_EFFECT_GLASS, true)
-                    support?.set(CLOCK_EFFECT_OVERLAY, true)
-                } else {
-                    originalGlass?.let { support?.set(CLOCK_EFFECT_GLASS, it) }
-                    originalOverlay?.let { support?.set(CLOCK_EFFECT_OVERLAY, it) }
-                }
+            // Other MIUI revisions expose the same decision as glassEffectDisable;
+            // the reference implementation hooks both names.
+            companionClass.declaredMethods.filter {
+                it.name == "glassEffectDisable" && it.parameterCount == 2 &&
+                    it.parameterTypes[0] == Int::class.javaPrimitiveType &&
+                    it.returnType == Boolean::class.javaPrimitiveType
+            }.forEach { method ->
+                method.isAccessible = true
+                hookDeoptimized(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("aod-editor-glass-effect-disable")
+                    .intercept { chain ->
+                        if (preferences.getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false) &&
+                            chain.getArg(0) == CLOCK_EFFECT_GLASS
+                        ) false else chain.proceed()
+                    }
             }
-            syncSupport()
-            hook(filterMethod)
+
+            val filterGroupClass = classLoader.loadClass("com.miui.keyguard.editor.data.preset.FilterGroup")
+            // FontFilterKt's support table is immutable on this build. It copies
+            // that table into each FilterGroup via setSupport(), so override that
+            // write for Glass/Overlay and also cover groups already constructed.
+            filterGroupClass.getMethod("setSupport", Boolean::class.javaPrimitiveType)
+                .let { setSupport ->
+                    hookDeoptimized(setSupport)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("aod-editor-clock-filter-support-write")
+                        .intercept { chain ->
+                            val filterId = runCatching {
+                                chain.thisObject.javaClass.getMethod("getFilterId").invoke(chain.thisObject) as? Int
+                            }.getOrNull()
+                            if (preferences.getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false) &&
+                                (filterId == CLOCK_EFFECT_GLASS || filterId == CLOCK_EFFECT_OVERLAY)
+                            ) chain.proceed(arrayOf(true)) else chain.proceed()
+                        }
+                }
+            val glassSupport = filterGroupClass.getMethod("isSupport")
+            hookDeoptimized(glassSupport)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("aod-editor-clock-filter-support")
+                .setId("aod-editor-glass-filter-visibility")
                 .intercept { chain ->
-                    syncSupport()
-                    chain.proceed()
+                    val filterId = runCatching {
+                        chain.thisObject.javaClass.getMethod("getFilterId").invoke(chain.thisObject) as? Int
+                    }.getOrNull()
+                    if (preferences.getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false) &&
+                        filterId == CLOCK_EFFECT_GLASS
+                    ) true else chain.proceed()
                 }
 
             val clockViewClass = classLoader.loadClass("com.miui.keyguard.editor.edit.base.BaseClockView")
@@ -4926,7 +5025,7 @@ class HyperSystemUiModule : XposedModule() {
                 it.name == "processDepthVideo" && it.parameterCount == 3
             } ?: error("processDepthVideo was not found")
             depthMethod.isAccessible = true
-            hook(depthMethod)
+            hookDeoptimized(depthMethod)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("aod-depth-video-clock-material-limit")
                 .intercept { chain ->
@@ -5006,12 +5105,26 @@ class HyperSystemUiModule : XposedModule() {
                         ) false else chain.proceed()
                     }
             }
-            val filters = classLoader.loadClass("com.miui.keyguard.editor.data.preset.FontFilterKt")
-            @Suppress("UNCHECKED_CAST")
-            val support = filters.getDeclaredField("fti").apply { isAccessible = true }.get(null) as? MutableMap<Int, Boolean>
-            if (preferences.getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false)) {
-                support?.set(CLOCK_EFFECT_GLASS, true)
-                support?.set(CLOCK_EFFECT_OVERLAY, true)
+            val filterGroupClass = classLoader.loadClass("com.miui.keyguard.editor.data.preset.FilterGroup")
+            listOf("x2", "n").forEach { supportGetterName ->
+                filterGroupClass.declaredMethods.firstOrNull {
+                    it.name == supportGetterName && it.parameterCount == 0 &&
+                        it.returnType == Boolean::class.javaPrimitiveType
+                }?.let { supportGetter ->
+                    supportGetter.isAccessible = true
+                    hookDeoptimized(supportGetter)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("theme-manager-editor-glass-filter-visibility-$supportGetterName")
+                        .intercept { chain ->
+                            val filterId = runCatching {
+                                chain.thisObject.javaClass.getDeclaredMethod("s").apply { isAccessible = true }
+                                    .invoke(chain.thisObject) as? Int
+                            }.getOrNull()
+                            if (preferences.getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false) &&
+                                filterId == CLOCK_EFFECT_GLASS
+                            ) true else chain.proceed()
+                        }
+                }
             }
         }.onFailure { error ->
             btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "ThemeManager editor clock material hook unavailable", error)
@@ -5075,7 +5188,7 @@ class HyperSystemUiModule : XposedModule() {
                 it.name == THEME_MANAGER_TEMPLATE_API_METHOD && it.parameterCount == 3
             } ?: error("$THEME_MANAGER_TEMPLATE_API_METHOD was not found")
             applyWallpaperType.isAccessible = true
-            hook(applyWallpaperType)
+            hookDeoptimized(applyWallpaperType)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("theme-manager-clock-material-limit")
                 .intercept { chain ->
@@ -6009,6 +6122,14 @@ class HyperSystemUiModule : XposedModule() {
                         if (pluginClass.getMethod("getPackageName").invoke(instance) == AOD) {
                             pluginClass.getMethod("getPlugin").invoke(instance)?.javaClass?.classLoader?.let {
                                 lockscreenHooks.installShortcutGestureHooks(it, preferences)
+                                // Some HyperOS builds host the lockscreen editor inside
+                                // SystemUI's AOD plugin, bypassing the standalone AOD
+                                // package callback. Install the full glass chain in the
+                                // plugin's actual ClassLoader as the reference does.
+                                installClockMaterialLimitHook(it, preferences)
+                                installClockMaterialCapabilityHook(it, preferences)
+                                installAodClockMaterialLimitHook(it, preferences)
+                                installVideoWallpaperGlassSupportHook(it, preferences)
                             }
                         }
                     }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not bind AOD shortcut plugin", it) }
@@ -9394,6 +9515,16 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     chain.proceed()
                 }
+            runCatching { installSuperWallpaperStaticDepthHook(classLoader, preferences) }
+                .onFailure { error ->
+                    btm.m.os4.systemuihook.HookModuleLogger.log(
+                        this,
+                        Log.DEBUG,
+                        TAG,
+                        "Super wallpaper static-depth hook unavailable",
+                        error,
+                    )
+                }
             installDepthDisplayStateHook(classLoader, preferences)
             installThirdPartyWallpaperDepthHook(classLoader, preferences)
             forceDepthImageThreshold(evaluatorClass, thresholdClass, preferences)
@@ -9402,6 +9533,82 @@ class HyperSystemUiModule : XposedModule() {
             btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install SystemUI lockscreen depth hooks", error)
         }
     }
+
+    /**
+     * Follow the reference module's split between static subject depth and video depth.
+     * Super wallpapers can use the existing subject-mask path when their wallpaper metadata
+     * identifies them as a Super wallpaper; they are not marked as video-depth wallpapers.
+     */
+    private fun installSuperWallpaperStaticDepthHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
+        val panelClass = classLoader.loadClass(KEYGUARD_PANEL_VIEW_CONTROLLER_CLASS)
+        val depthEnabled = panelClass.getDeclaredField("depthEffectEnable").apply { isAccessible = true }
+        val interactor = panelClass.getDeclaredField("keyguardDepthInteractor").apply { isAccessible = true }
+        val depthEnabledInner = interactor.type.getDeclaredField("depthEffectEnableInner")
+            .apply { isAccessible = true }
+        val actualDisplayDepth = interactor.type.getDeclaredField("isActualDisplayDepth")
+            .apply { isAccessible = true }
+        val updateElements = panelClass.getMethod("updateKeyguardElementsVisibility")
+        hook(panelClass.getMethod("updateShowDepthState"))
+            .setExceptionMode(ExceptionMode.PROTECTIVE)
+            .setId("systemui-super-wallpaper-static-depth")
+            .intercept { chain ->
+                val enabled = preferences.getBoolean(KEY_REMOVE_DEPTH_IMAGE_LIMIT, false) &&
+                    isSuperWallpaperDepthReady(chain.thisObject)
+                superWallpaperDepthActive = enabled
+                if (enabled) {
+                    depthEnabled.setBoolean(chain.thisObject, true)
+                    depthEnabledInner.setBoolean(interactor.get(chain.thisObject), true)
+                }
+                val result = chain.proceed()
+                if (enabled) {
+                    val depthInteractor = interactor.get(chain.thisObject)
+                    if (!actualDisplayDepth.getBoolean(depthInteractor)) {
+                        actualDisplayDepth.setBoolean(depthInteractor, true)
+                        updateElements.invoke(chain.thisObject)
+                    }
+                }
+                result
+            }
+
+        val clockControllerClass = classLoader.loadClass("com.miui.clock.MiuiClockController")
+        hook(clockControllerClass.getMethod("isWallpaperSupportDepth"))
+            .setExceptionMode(ExceptionMode.PROTECTIVE)
+            .setId("systemui-super-wallpaper-clock-depth-support")
+            .intercept { chain ->
+                val result = chain.proceed()
+                if (preferences.getBoolean(KEY_REMOVE_DEPTH_IMAGE_LIMIT, false) &&
+                    superWallpaperDepthActive
+                ) true else result
+            }
+    }
+
+    /** Detect only the active lock wallpaper reported by MiuiKeyguardWallPaperManager. */
+    private fun isSuperWallpaperDepthReady(target: Any?): Boolean = runCatching {
+        val panel = target ?: return@runCatching false
+        val managerField = panel.javaClass.getDeclaredField("miuiKeyguardWallPaperManager")
+            .apply { isAccessible = true }
+        val keyguardManager = managerField.get(panel) ?: return@runCatching false
+        val wallpaperType = runCatching {
+            val miuiManager = keyguardManager.javaClass.getDeclaredField("mMiuiWallpaperManager")
+                .apply { isAccessible = true }
+                .get(keyguardManager) ?: return@runCatching null
+            miuiManager.javaClass.getMethod("getMiuiWallpaperType", Int::class.javaPrimitiveType)
+                .invoke(miuiManager, 2) as? String
+        }.getOrNull()
+        val currentType = wallpaperType
+            ?: keyguardManager.javaClass.getDeclaredField("mKeyguardWallpaperType")
+                .apply { isAccessible = true }
+                .get(keyguardManager) as? String
+        val isSuperWallpaper = currentType.equals("super_wallpaper", ignoreCase = true) ||
+            currentType.equals("blank_super_wallpaper", ignoreCase = true) ||
+            currentType.equals("aod_using_super_wallpaper", ignoreCase = true)
+        isSuperWallpaper && keyguardManager.javaClass.getDeclaredField("mDepthVideoReady")
+            .apply { isAccessible = true }
+            .getBoolean(keyguardManager)
+    }.getOrDefault(false)
 
     private fun forceDepthImageThreshold(
         evaluatorClass: Class<*>,
@@ -10318,13 +10525,11 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
-    /**
-     * The editor disables the glass filter for video/sensor/linkage wallpapers unless the
-     * separate MiWallpaper metadata flag is enabled.  That flag is a stock capability gate,
-     * not a renderer requirement on this device, so force the capability query on in both the
-     * AOD editor and the ThemeManager copy of the editor.
-     */
-    private fun installVideoWallpaperGlassSupportHook(classLoader: ClassLoader) {
+    /** Preserve the reference behavior: allow Glass on dynamic wallpapers and keep its filter enabled. */
+    private fun installVideoWallpaperGlassSupportHook(
+        classLoader: ClassLoader,
+        preferences: SharedPreferences,
+    ) {
         if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         runCatching {
             val companionClass = classLoader.loadClass(
@@ -10344,12 +10549,73 @@ class HyperSystemUiModule : XposedModule() {
                 hookDeoptimized(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("editor-video-wallpaper-glass-support-${method.name}")
-                    .intercept { true }
+                    .intercept { chain ->
+                        if (preferences.getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false)) true
+                        else chain.proceed()
+                    }
             }
-            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed video-wallpaper glass support hook")
         }.onFailure { error ->
             btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Video-wallpaper glass support hook unavailable", error)
         }
+        runCatching {
+            val effectsClass = classLoader.loadClass("com.miui.keyguard.editor.edit.base.EffectsTemplateView")
+            // This is the editor's actual wallpaper gate used by
+            // WallpaperChangedCallBack before it calls disableGlassFilter().
+            // Hooking the utility predicate alone does not cover this decision.
+            effectsClass.declaredMethods.filter { method ->
+                method.name == "isWallpaperSupportGlassFilter" &&
+                    method.parameterTypes.contentEquals(arrayOf(String::class.java)) &&
+                    method.returnType == Boolean::class.javaPrimitiveType
+            }.forEach { method ->
+                method.isAccessible = true
+                hookDeoptimized(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("editor-glass-wallpaper-filter-support")
+                    .intercept { chain ->
+                        val resourceType = chain.getArg(0) as? String
+                        if (preferences.getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false) &&
+                            isDynamicWallpaperResourceType(resourceType)
+                        ) true else chain.proceed()
+                    }
+            }
+            val disableGlass = effectsClass.getMethod("disableGlassFilter")
+            hookDeoptimized(disableGlass)
+                .setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("editor-preserve-glass-filter-on-dynamic-wallpaper")
+                .intercept { chain ->
+                    if (preferences.getBoolean(KEY_REMOVE_CLOCK_MATERIAL_LIMIT, false) &&
+                        shouldKeepGlassEnabled(chain.thisObject)
+                    ) null else chain.proceed()
+                }
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed dynamic-wallpaper Glass filter preservation hook")
+        }.onFailure { error ->
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Dynamic-wallpaper Glass filter preservation unavailable", error)
+        }
+    }
+
+    private fun shouldKeepGlassEnabled(target: Any?): Boolean = runCatching {
+        val view = target ?: return@runCatching false
+        val config = view.javaClass.getMethod("getTemplateConfig").invoke(view) ?: return@runCatching false
+        val lockscreen = config.javaClass.getMethod("getLockscreenInfo").invoke(config) ?: return@runCatching false
+        val clock = lockscreen.javaClass.getMethod("getClockInfo").invoke(lockscreen) ?: return@runCatching false
+        val templateId = clock.javaClass.getMethod("getTemplateId").invoke(clock) as? String ?: return@runCatching false
+        if (templateId != "all_in_one" && !templateId.startsWith("all_in_one_")) return@runCatching false
+        val wallpaper = lockscreen.javaClass.getMethod("getWallpaperInfo").invoke(lockscreen) ?: return@runCatching false
+        val resourceType = wallpaper.javaClass.getMethod("getResourceType").invoke(wallpaper) as? String
+            ?: return@runCatching false
+        val type = resourceType.trim().lowercase()
+        type.isNotEmpty() && type !in setOf("image", "gallery") &&
+            (type in setOf("video", "dynamic", "live", "live_photo", "livephoto", "super", "super_wallpaper", "superwallpaper", "depth", "depth_video") ||
+                type.contains("video") || type.contains("super"))
+    }.getOrDefault(false)
+
+    private fun isDynamicWallpaperResourceType(resourceType: String?): Boolean {
+        val type = resourceType?.trim()?.lowercase().orEmpty()
+        return type.isNotEmpty() && type !in setOf("image", "gallery") &&
+            (type in setOf(
+                "video", "dynamic", "live", "live_photo", "livephoto",
+                "super", "super_wallpaper", "superwallpaper", "depth", "depth_video",
+            ) || type.contains("video") || type.contains("super"))
     }
 
     private fun installAodLockscreenTemplateLimitHook(
@@ -11447,6 +11713,7 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     companion object {
+        @Volatile private var superWallpaperDepthActive = false
         private const val SETTINGS_PACKAGE = "com.android.settings"
         private const val AIRDROP_PACKAGE = "com.miui.mishare.connectivity"
         private const val KEY_HIDE_APP_ICON = "hide_app_icon"

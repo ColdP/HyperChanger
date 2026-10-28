@@ -299,7 +299,7 @@ private enum class PageId {
     DEVICE_PROFILE_PRESETS, DEVICE_PROFILE_CLOUD_PRESETS,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
-    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND,
+    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, CONTACTS_DIALER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND,
 }
 
 private data class CategorySearchItem(
@@ -388,6 +388,12 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
         PageId.OTHER,
     ),
     CategorySearchItem(
+        tr("拨号与通话", "拨号与通话"),
+        tr("category_search_contacts_dialer_description", "调整拨号盘背景模糊、模糊度与不透明度。"),
+        setOf(ScopeApplication.CONTACTS_DIALER),
+        PageId.CONTACTS_DIALER,
+    ),
+    CategorySearchItem(
         tr("iosNotificationCenter", "iOS 风格通知中心"),
         tr("iosNotificationCenterSummary", "下拉时展示圆角壁纸面板、锁屏时钟及景深效果。动态壁纸暂不支持。"),
         setOf(ScopeApplication.SYSTEM_UI),
@@ -467,6 +473,7 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
             ScopeApplication.TENCENT_MEETING,
             ScopeApplication.CMB_BANK,
             ScopeApplication.WECHAT,
+            ScopeApplication.QQ,
             ScopeApplication.PINDUODUO,
         ),
         PageId.APP_NAVIGATION,
@@ -1729,7 +1736,10 @@ private fun CategoryHome(
                 item {
                     CategoryGroup(
                         title = tr("其他", "其他"),
-                        entries = listOf(CategoryPageEntry(tr("其他", "其他"), PageId.OTHER)),
+                        entries = listOf(
+                            CategoryPageEntry(tr("拨号与通话", "拨号与通话"), PageId.CONTACTS_DIALER),
+                            CategoryPageEntry(tr("其他", "其他"), PageId.OTHER),
+                        ),
                         enabled = connected,
                         open = open,
                     )
@@ -3015,6 +3025,7 @@ private fun RestartScopesPage(
         ScopeApplication.MEDIA_EDITOR,
     )
     val otherTargets = listOf(
+        ScopeApplication.CONTACTS_DIALER,
         ScopeApplication.APPLE_MUSIC,
         ScopeApplication.WEIBO,
         ScopeApplication.XIAOHONGSHU,
@@ -3024,6 +3035,7 @@ private fun RestartScopesPage(
         ScopeApplication.TENCENT_MEETING,
         ScopeApplication.CMB_BANK,
         ScopeApplication.WECHAT,
+        ScopeApplication.QQ,
         ScopeApplication.PINDUODUO,
     )
     val toggleTarget: (ScopeApplication) -> Unit = { target ->
@@ -5067,6 +5079,7 @@ private fun Detail(
         PageId.REAR_MUSIC_APPS -> RearMusicApps(musicWhitelist, updateMusicWhitelist, back)
         PageId.REAR_SWIPE_APP -> RearSwipeAppPicker(back)
         PageId.OTHER -> OtherPage(airDropSettings, updateAirDrop, screenRecorder, updateScreenRecorder, openPage, back)
+        PageId.CONTACTS_DIALER -> ContactsDialerPage(back)
         PageId.APP_NAVIGATION -> AppNavigationPage(back)
         PageId.RESTART_SCOPES -> RestartScopesPage(
             suggestedTargets = suggestedRestartTargets,
@@ -6343,7 +6356,7 @@ private fun Shade(
                     },
                 )
                 SwitchPreference(
-                    title = tr("\u89e3\u9664\u201c\u73bb\u7483\u201d\u548c\u201c\u53e0\u52a0\u201d\u65f6\u949f\u6750\u8d28\u9650\u5236", "\u89e3\u9664\u201c\u73bb\u7483\u201d\u548c\u201c\u53e0\u52a0\u201d\u65f6\u949f\u6750\u8d28\u9650\u5236"),
+                    title = tr("\u53bb\u9664\u65f6\u949f\u6750\u8d28\u5bf9\u52a8\u6001\u58c1\u7eb8\u548c\u8d85\u7ea7\u58c1\u7eb8\u7684\u9650\u5236", "\u53bb\u9664\u65f6\u949f\u6750\u8d28\u5bf9\u52a8\u6001\u58c1\u7eb8\u548c\u8d85\u7ea7\u58c1\u7eb8\u7684\u9650\u5236"),
                     checked = s.removeClockMaterialLimit,
                     onCheckedChange = { enabled ->
                         update { it.copy(removeClockMaterialLimit = enabled) }
@@ -11671,7 +11684,7 @@ private fun signedPaletteValue(value: Float): String {
 private fun signedExposure(value: Float): String = if (value >= 0f) "+${"%.1f".format(Locale.US, value)}" else "%.1f".format(Locale.US, value)
 
 @Composable
-private fun EditableSliderPreference(
+internal fun EditableSliderPreference(
     value: Float,
     onValueChange: (Float) -> Unit,
     onValueChangeFinished: () -> Unit,

@@ -17,7 +17,7 @@ internal object WeChatNavigation {
     private const val ICON = "com.tencent.mm.ui.TabIconView"
     private val iconCache = IdentityHashMap<View, Pair<ImageBitmap, ImageBitmap>>()
 
-    data class Item(val view: View, val clickTarget: View, val label: String, val icon: ImageBitmap?)
+    data class Item(val view: View, val clickTarget: View, val label: String, val icon: ImageBitmap?, val badge: Boolean)
     data class Bar(val view: ViewGroup, val items: List<Item>, val selectedIndex: Int)
 
     fun detect(content: ViewGroup): Bar? {
@@ -30,14 +30,14 @@ internal object WeChatNavigation {
         if (row.childCount !in 4..6) return null
         val items = row.children().mapNotNull { tab ->
             val label = descendants(tab).filterIsInstance<TextView>()
-                .firstOrNull { it.text?.toString()?.trim()?.isNotEmpty() == true }
+                .firstOrNull { isTitleText(it) }
                 ?.text?.toString()?.trim() ?: return@mapNotNull null
             val clickTarget = tab.takeIf { it.hasOnClickListeners() }
                 ?: descendants(tab).firstOrNull { it.hasOnClickListeners() }
                 ?: return@mapNotNull null
             val icon = descendants(tab).firstOrNull { it.javaClass.name == ICON }
                 ?.let(::snapshot)
-            Item(tab, clickTarget, label, icon)
+            Item(tab, clickTarget, label, icon, hasBadge(tab))
         }.toList()
         if (items.size != row.childCount) return null
         val selected = runCatching {
@@ -78,6 +78,22 @@ internal object WeChatNavigation {
             focus.setInt(view, original)
         }
         }.getOrNull()?.let { pair -> if (view.isSelected) pair.second else pair.first }
+
+    private fun isTitleText(view: TextView): Boolean {
+        val value = view.text?.toString()?.trim().orEmpty()
+        val name = view.javaClass.name
+        return value.isNotEmpty() &&
+            !value.matches(Regex("(?:[1-9]\\d?|99\\+)")) &&
+            !name.contains("Badge", true) && !name.contains("RedTouch", true)
+    }
+
+    private fun hasBadge(view: View): Boolean = descendants(view).any { child ->
+        if (!child.isShown) return@any false
+        val name = child.javaClass.name
+        val text = (child as? TextView)?.text?.toString()?.trim().orEmpty()
+        name.contains("Badge", true) || name.contains("RedTouch", true) ||
+            text.matches(Regex("(?:[1-9]\\d?|99\\+)"))
+    }
 
     private fun descendants(root: View): Sequence<View> = sequence {
         yield(root)

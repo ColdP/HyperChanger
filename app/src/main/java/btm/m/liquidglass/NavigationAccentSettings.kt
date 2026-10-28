@@ -17,6 +17,7 @@ object NavigationAccentSettings {
         "com.tencent.wemeet.app" to 0xFF0052D9.toInt(),
         "cmb.pb" to 0xFFD11A2D.toInt(),
         "com.tencent.mm" to 0xFF07C160.toInt(),
+        "com.tencent.mobileqq" to 0xFF12B7F5.toInt(),
         "com.xunmeng.pinduoduo" to 0xFFE02E24.toInt(),
     )
 

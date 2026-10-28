@@ -51,6 +51,10 @@ internal class OthersHooks(
     private var islandSimulationRearScreenInstalled = false
     private val rearMiniPlayerHooks = RearMiniPlayerHooks(module)
     private val screenshotHooks = ScreenshotHooks(module, hookDeoptimized, logTag)
+    private val contactsDialerHooks = ContactsDialerHooks(module, hookDeoptimized, logTag)
+
+    fun installContactsDialerHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
+        contactsDialerHooks.install(classLoader, preferences)
 
     fun installScreenshotHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
         screenshotHooks.install(classLoader, preferences)
@@ -256,13 +260,18 @@ internal class OthersHooks(
             packageName != "com.mi.health" && packageName != "com.apple.android.music" &&
             packageName != "com.sina.weibo" && packageName != "com.xingin.xhs" &&
             packageName != "com.lucky.luckyclient" && packageName != "com.tencent.wemeet.app" &&
-            packageName != "cmb.pb" && packageName != "com.tencent.mm"
+            packageName != "cmb.pb" && packageName != "com.tencent.mm" &&
+            packageName != "com.tencent.mobileqq"
             && packageName != "com.xunmeng.pinduoduo"
         ) return
         if (!runCatching { android.app.Application.getProcessName() == packageName }.getOrDefault(false)) return
         runCatching {
             val prefs = module.getRemotePreferences(REMOTE_PREFERENCE_GROUP)
             if (!ScopedSettings.getBoolean(prefs, packageName, ScopedSettings.KEY_MODULE_ENABLED, true)) return
+            if (packageName == "com.tencent.mm") {
+                // Avatar tuning is independent from the optional custom bottom bar.
+                btm.m.liquidglass.hook.WeChatAvatarRadiusHooks.install(module, param.defaultClassLoader)
+            }
             if (packageName == "com.mi.health" && ScopedSettings.getBoolean(
                     prefs,
                     packageName,
@@ -283,6 +292,7 @@ internal class OthersHooks(
             val blur = ScopedSettings.getBlurRadius(prefs, packageName, style, 18)
             val advanced = ScopedSettings.getBoolean(prefs, packageName, ScopedSettings.KEY_ADVANCED_MATERIAL, true)
             val accent = btm.m.liquidglass.NavigationAccentSettings.getColor(prefs, packageName)
+            val showBadges = btm.m.liquidglass.NavigationBadgeSettings.getShowBadges(prefs, packageName)
             when (packageName) {
                 "com.xiaomi.shop" -> AppBottomNavHooks.installXiaomiStore(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 "com.mipay.wallet" -> AppBottomNavHooks.installXiaomiWallet(module, param.defaultClassLoader, blur, label, style, advanced, color, ScopedSettings.getWalletVisibleTabs(prefs), accent)
@@ -294,8 +304,11 @@ internal class OthersHooks(
                 "com.sina.weibo" -> AppBottomNavHooks.installWeibo(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 "com.xingin.xhs" -> AppBottomNavHooks.installXiaohongshu(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 "com.tencent.wemeet.app" -> AppBottomNavHooks.installTencentMeeting(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
+                "com.tencent.mobileqq" -> AppBottomNavHooks.installQQ(module, param.defaultClassLoader, blur, label, style, advanced, color, accent, showBadges)
                 "cmb.pb" -> AppBottomNavHooks.installCmbBank(module, blur, label, style, advanced, color, accent)
-                "com.tencent.mm" -> AppBottomNavHooks.installWeChat(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
+                "com.tencent.mm" -> {
+                    AppBottomNavHooks.installWeChat(module, param.defaultClassLoader, blur, label, style, advanced, color, accent, showBadges)
+                }
                 "com.xunmeng.pinduoduo" -> AppBottomNavHooks.installPinduoduo(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 "com.lucky.luckyclient" -> {
                     LuckinAntiDetectionHooks.install(module)

@@ -130,7 +130,8 @@ class BitmapNativeViewBackdrop internal constructor(
 fun rememberNativeViewBackdrop(
     sourceView: View,
     onHostPreDraw: () -> Unit,
-    redrawNativeText: Boolean = false
+    redrawNativeText: Boolean = false,
+    useRecordedChildren: Boolean = false
 ): NativeViewBackdrop {
     val graphicsLayer = rememberGraphicsLayer()
     val density = LocalDensity.current
@@ -138,6 +139,7 @@ fun rememberNativeViewBackdrop(
     val backdrop = remember(graphicsLayer) { NativeViewBackdrop(graphicsLayer) }
     backdrop.sourceView = sourceView
     backdrop.redrawNativeText = redrawNativeText
+    backdrop.useRecordedChildren = useRecordedChildren
     backdrop.density = density
     backdrop.layoutDirection = layoutDirection
 
@@ -162,10 +164,16 @@ class NativeViewBackdrop internal constructor(
 ) : Backdrop {
     internal var sourceView: View? = null
     internal var redrawNativeText: Boolean = false
+    internal var useRecordedChildren: Boolean = false
     internal var density: Density = Density(1f)
     internal var layoutDirection: LayoutDirection = LayoutDirection.Ltr
     private var version by mutableIntStateOf(0)
     private val composeSnapshots = IdentityHashMap<View, android.graphics.Bitmap>()
+
+    private companion object {
+        var drawChildMethod: java.lang.reflect.Method? = null
+        var drawChildResolved = false
+    }
 
     override val isCoordinatesDependent: Boolean = true
 
@@ -181,7 +189,11 @@ class NativeViewBackdrop internal constructor(
                 val native = canvas.nativeCanvas
                 val checkpoint = native.save()
                 native.translate(-source.scrollX.toFloat(), -source.scrollY.toFloat())
-                source.draw(native)
+                if (!useRecordedChildren || !drawRecordedChildren(native, source)) {
+                    // Fallback for non-ViewGroup sources or platform releases
+                    // where the protected display-list path is unavailable.
+                    source.draw(native)
+                }
                 native.restoreToCount(checkpoint)
                 if (redrawNativeText) {
                     redrawTextViews(native, source)
@@ -189,6 +201,36 @@ class NativeViewBackdrop internal constructor(
                 }
             }
         }
+    }
+
+    /** Reuses the host's already-recorded child display lists instead of rerunning
+     * the entire QQ page tree during every glass sample. */
+    private fun drawRecordedChildren(canvas: android.graphics.Canvas, source: View): Boolean {
+        val group = source as? ViewGroup ?: return false
+        val drawChild = synchronized(NativeViewBackdrop::class.java) {
+            if (!drawChildResolved) {
+                drawChildResolved = true
+                drawChildMethod = runCatching {
+                    ViewGroup::class.java.getDeclaredMethod(
+                        "drawChild",
+                        android.graphics.Canvas::class.java,
+                        View::class.java,
+                        Long::class.javaPrimitiveType
+                    ).apply { isAccessible = true }
+                }.getOrNull()
+            }
+            drawChildMethod
+        } ?: return false
+        val drawingTime = group.drawingTime
+        for (index in 0 until group.childCount) {
+            val child = group.getChildAt(index)
+            if (child.visibility != View.VISIBLE || child.alpha <= 0f ||
+                child.width <= 0 || child.height <= 0
+            ) continue
+            runCatching { drawChild.invoke(group, canvas, child, drawingTime) }
+                .getOrElse { return false }
+        }
+        return true
     }
 
     private fun redrawTextViews(canvas: android.graphics.Canvas, source: View) {
