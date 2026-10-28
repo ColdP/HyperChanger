@@ -10,7 +10,7 @@ import androidx.compose.runtime.setValue
 import btm.m.os4.systemuihook.tr
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 
-/** UI for MiTrustService diagnostics; kept alongside its implementation. */
+/** UI for the MiTrustService MRMD-disable hook; kept alongside its implementation. */
 @Composable
 internal fun TrustServiceSettingsPreference(
     checked: Boolean,
@@ -18,10 +18,10 @@ internal fun TrustServiceSettingsPreference(
 ) {
     var enabled by remember(checked) { mutableStateOf(checked) }
     SwitchPreference(
-        title = tr("MiTrustService 风险检测（诊断）", "MiTrustService 风险检测（诊断）"),
+        title = tr("禁用 MiTrustService MRMD 初始化", "禁用 MiTrustService MRMD 初始化"),
         summary = tr(
-            "仅记录目标方法是否匹配；不会修改系统风险检测结果。开启后重新启动安全服务进程。",
-            "仅记录目标方法是否匹配；不会修改系统风险检测结果。开启后重新启动安全服务进程。",
+            "阻止 MiTrustService 初始化 MRMD 服务。开启后强制停止并重新启动安全服务进程使其生效。",
+            "阻止 MiTrustService 初始化 MRMD 服务。开启后强制停止并重新启动安全服务进程使其生效。",
         ),
         checked = enabled,
         onCheckedChange = { value ->
