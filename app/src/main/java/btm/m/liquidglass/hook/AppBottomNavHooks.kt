@@ -245,6 +245,30 @@ object AppBottomNavHooks {
         targetVersion = "3.47.2.410 (2024081672)"
     )
 
+    private val wechat = AppConfig(
+        displayName = "WeChat",
+        packageName = WeChatNavigation.PACKAGE,
+        activityName = WeChatNavigation.ACTIVITY,
+        barResourceName = null,
+        anchorResourceName = null,
+        requiredTabs = emptySet(),
+        targetVersion = "8.0.79 (3200)"
+    )
+
+    private val pinduoduo = AppConfig(
+        displayName = "Pinduoduo",
+        packageName = PinduoduoNavigation.PACKAGE,
+        activityName = PinduoduoNavigation.ACTIVITY,
+        barResourceName = null,
+        anchorResourceName = null,
+        requiredTabs = emptySet(),
+        targetVersion = "8.29.0"
+    )
+
+    private val pinduoduoMainFrame = pinduoduo.copy(
+        activityName = "com.xunmeng.pinduoduo.ui.activity.MainFrameActivity"
+    )
+
     private val sessions = WeakHashMap<Activity, Session>()
 
     private val cmbBank = AppConfig(
@@ -264,7 +288,8 @@ object AppBottomNavHooks {
         labelMode: String,
         navigationStyle: String,
         advancedMaterial: Boolean,
-        colorMode: String
+        colorMode: String,
+        accentColor: Int = 0
     ) {
         ImmersiveNavigationHooks.install(module)
         // The protected Activity is unavailable in the package callback's ClassLoader.
@@ -286,7 +311,7 @@ object AppBottomNavHooks {
                             "callActivityOnResume" -> synchronized(sessions) {
                                 sessions.getOrPut(activity) {
                                     Session(module, activity, cmbBank, blurRadius.coerceIn(0, 40),
-                                        labelMode, navigationStyle, advancedMaterial, colorMode, null)
+                                        labelMode, navigationStyle, advancedMaterial, colorMode, accentColor, null)
                                 }
                             }.resume()
                             "callActivityOnPause" -> synchronized(sessions) { sessions[activity] }?.pause()
@@ -308,8 +333,9 @@ object AppBottomNavHooks {
         labelMode: String,
         navigationStyle: String,
         advancedMaterial: Boolean,
-        colorMode: String
-    ) = install(module, loader, xiaohongshu, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode)
+        colorMode: String,
+        accentColor: Int = 0
+    ) = install(module, loader, xiaohongshu, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
 
     @JvmStatic
     @Throws(ReflectiveOperationException::class)
@@ -320,8 +346,9 @@ object AppBottomNavHooks {
         labelMode: String,
         navigationStyle: String,
         advancedMaterial: Boolean,
-        colorMode: String
-    ) = install(module, loader, tim, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode)
+        colorMode: String,
+        accentColor: Int = 0
+    ) = install(module, loader, tim, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
 
     @JvmStatic
     @Throws(ReflectiveOperationException::class)
@@ -332,9 +359,10 @@ object AppBottomNavHooks {
         labelMode: String,
         navigationStyle: String,
         advancedMaterial: Boolean,
-        colorMode: String
+        colorMode: String,
+        accentColor: Int = 0
     ) {
-        install(module, loader, cloudMusic, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode)
+        install(module, loader, cloudMusic, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
         installCloudMusicMiniPlayerHook(module)
     }
 
@@ -347,9 +375,10 @@ object AppBottomNavHooks {
         labelMode: String,
         navigationStyle: String,
         advancedMaterial: Boolean,
-        colorMode: String
+        colorMode: String,
+        accentColor: Int = 0
     ) {
-        install(module, loader, qqMusic, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode)
+        install(module, loader, qqMusic, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
         val clipLayout = Class.forName(
             "com.tencent.qqmusic.ui.minibar.ClipBottomConstraintLayout",
             false,
@@ -374,8 +403,9 @@ object AppBottomNavHooks {
         labelMode: String,
         navigationStyle: String,
         advancedMaterial: Boolean,
-        colorMode: String
-    ) = install(module, loader, weibo, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode)
+        colorMode: String,
+        accentColor: Int = 0
+    ) = install(module, loader, weibo, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
 
     @JvmStatic
     @Throws(ReflectiveOperationException::class)
@@ -386,8 +416,9 @@ object AppBottomNavHooks {
         labelMode: String,
         navigationStyle: String,
         advancedMaterial: Boolean,
-        colorMode: String
-    ) = install(module, loader, appleMusic, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode)
+        colorMode: String,
+        accentColor: Int = 0
+    ) = install(module, loader, appleMusic, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
 
     @JvmStatic
     @Throws(ReflectiveOperationException::class)
@@ -398,10 +429,11 @@ object AppBottomNavHooks {
         labelMode: String,
         navigationStyle: String,
         advancedMaterial: Boolean,
-        colorMode: String
+        colorMode: String,
+        accentColor: Int = 0
     ) {
         installRedditBottomBarHook(module, loader)
-        install(module, loader, reddit, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode)
+        install(module, loader, reddit, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
     }
 
     private fun installRedditBottomBarHook(module: XposedModule, loader: ClassLoader) {
@@ -428,8 +460,9 @@ object AppBottomNavHooks {
         labelMode: String,
         navigationStyle: String,
         advancedMaterial: Boolean,
-        colorMode: String
-    ) = install(module, loader, xiaomiStore, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode)
+        colorMode: String,
+        accentColor: Int = 0
+    ) = install(module, loader, xiaomiStore, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
 
     @JvmStatic
     @Throws(ReflectiveOperationException::class)
@@ -440,8 +473,9 @@ object AppBottomNavHooks {
         labelMode: String,
         navigationStyle: String,
         advancedMaterial: Boolean,
-        colorMode: String
-    ) = install(module, loader, xiaomiHealth, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode)
+        colorMode: String,
+        accentColor: Int = 0
+    ) = install(module, loader, xiaomiHealth, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
 
     @JvmStatic
     @Throws(ReflectiveOperationException::class)
@@ -452,8 +486,9 @@ object AppBottomNavHooks {
         labelMode: String,
         navigationStyle: String,
         advancedMaterial: Boolean,
-        colorMode: String
-    ) = install(module, loader, xiaomiHealthWatchFaceMarket, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode)
+        colorMode: String,
+        accentColor: Int = 0
+    ) = install(module, loader, xiaomiHealthWatchFaceMarket, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
 
     @JvmStatic
     @Throws(ReflectiveOperationException::class)
@@ -464,7 +499,8 @@ object AppBottomNavHooks {
         labelMode: String,
         navigationStyle: String,
         advancedMaterial: Boolean,
-        colorMode: String
+        colorMode: String,
+        accentColor: Int = 0
     ) {
         if (runCatching {
                 install(module, loader, luckinCoffee, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode)
@@ -486,7 +522,7 @@ object AppBottomNavHooks {
                             runCatching {
                                 install(
                                     module, result.classLoader, luckinCoffee,
-                                    blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode
+                                    blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor
                                 )
                             }.onSuccess { installed = true }
                                 .onFailure { error ->
@@ -509,8 +545,40 @@ object AppBottomNavHooks {
         labelMode: String,
         navigationStyle: String,
         advancedMaterial: Boolean,
-        colorMode: String
-    ) = install(module, loader, tencentMeeting, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode)
+        colorMode: String,
+        accentColor: Int = 0
+    ) = install(module, loader, tencentMeeting, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
+
+    @JvmStatic
+    @Throws(ReflectiveOperationException::class)
+    fun installWeChat(
+        module: XposedModule,
+        loader: ClassLoader,
+        blurRadius: Int,
+        labelMode: String,
+        navigationStyle: String,
+        advancedMaterial: Boolean,
+        colorMode: String,
+        accentColor: Int = 0
+    ) = install(module, loader, wechat, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
+
+    @JvmStatic
+    @Throws(ReflectiveOperationException::class)
+    fun installPinduoduo(
+        module: XposedModule,
+        loader: ClassLoader,
+        blurRadius: Int,
+        labelMode: String,
+        navigationStyle: String,
+        advancedMaterial: Boolean,
+        colorMode: String,
+        accentColor: Int = 0
+    ) {
+        install(module, loader, pinduoduo, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
+        runCatching {
+            install(module, loader, pinduoduoMainFrame, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
+        }
+    }
 
     @JvmStatic
     @Throws(ReflectiveOperationException::class)
@@ -522,7 +590,8 @@ object AppBottomNavHooks {
         navigationStyle: String,
         advancedMaterial: Boolean,
         colorMode: String,
-        visibleTabs: Set<String>
+        visibleTabs: Set<String>,
+        accentColor: Int = 0
     ) {
         installWalletTextureRenderMode(module, loader)
         install(
@@ -534,6 +603,7 @@ object AppBottomNavHooks {
             navigationStyle,
             advancedMaterial,
             colorMode,
+            accentColor,
             visibleTabs
         )
     }
@@ -629,6 +699,7 @@ object AppBottomNavHooks {
         navigationStyle: String,
         advancedMaterial: Boolean,
         colorMode: String,
+        accentColor: Int = 0,
         visibleTabs: Set<String>? = null
     ) {
         val activityClass = Class.forName(config.activityName, false, loader)
@@ -653,6 +724,7 @@ object AppBottomNavHooks {
                                 navigationStyle,
                                 advancedMaterial,
                                 colorMode,
+                                accentColor,
                                 visibleTabs
                             )
                         }
@@ -714,6 +786,7 @@ object AppBottomNavHooks {
         private val navigationStyle: String,
         private val advancedMaterial: Boolean,
         private val colorMode: String,
+        private val accentColor: Int,
         private val visibleTabs: Set<String>?
     ) {
         private val selectedIndex = mutableIntStateOf(0)
@@ -737,6 +810,7 @@ object AppBottomNavHooks {
         private var navigationAction by mutableStateOf<DetectedTab?>(null)
         private val meetingNavigation = if (config === tencentMeeting) TencentMeetingNavigation() else null
         private val cmbBankIcons = if (config === cmbBank) CmbBankNavIcons(activity) else null
+        private val miHealthIcons = if (config === xiaomiHealth) MiHealthNavIcons(activity) else null
         private var cmbBankPage: ViewGroup? = null
         private var cmbBankBackground: View? = null
         private var cmbRootListener: View.OnAttachStateChangeListener? = null
@@ -882,7 +956,7 @@ object AppBottomNavHooks {
                 syncCloudMusicMiniPlayer(content)
                 syncAppleMusicMiniPlayer(content)
                 syncQQMusicMiniPlayer(content)
-                if (config !== tencentMeeting && config !== cmbBank) selectedIndex.intValue = navigationTabs.indexOfFirst { tab ->
+                if (config !== tencentMeeting && config !== cmbBank && config !== wechat) selectedIndex.intValue = navigationTabs.indexOfFirst { tab ->
                     tab.key != TabKey.PUBLISH && (
                         isSelectedRecursively(tab.view) ||
                             (config === xiaomiHealthWatchFaceMarket &&
@@ -955,16 +1029,17 @@ object AppBottomNavHooks {
                                     config === xiaomiHealthWatchFaceMarket || config === appleMusic,
                                 adaptiveLiquidWidth = config === xiaomiHealth ||
                                     config === xiaomiHealthWatchFaceMarket || config === appleMusic ||
-                                    config === tencentMeeting || config === cmbBank,
+                                    config === tencentMeeting || config === cmbBank || config === wechat,
                                 softBackdropShadow = config === tencentMeeting,
                                 liquidBottomSpacingDp = if (config === xiaomiWallet) -8 else 8,
                                 concealHostBottomBar = config.concealHostBottomBar ||
                                     config === xiaomiWallet,
-                                accentColorOverride = if (config === appleMusic) {
-                                    androidx.compose.ui.graphics.Color(0xFFFA243C)
-                                } else {
-                                    null
-                                },
+                                accentColorOverride = accentColor.takeIf {
+                                    it != 0 && NavigationStyle.fromPreference(navigationStyle) in setOf(
+                                        NavigationStyle.LIQUID_GLASS,
+                                        NavigationStyle.HARMONY_OS_FLOATING,
+                                    )
+                                }?.let { androidx.compose.ui.graphics.Color(it) },
                                 tabImageVector = when (config) {
                                     appleMusic -> ::appleMusicTabIcon
                                     weibo -> { index ->
@@ -973,7 +1048,11 @@ object AppBottomNavHooks {
                                     }
                                     else -> null
                                 },
-                                tabIconContent = if (config === tencentMeeting) {
+                                tabIconContent = if (
+                                    config === tencentMeeting ||
+                                    config === wechat ||
+                                    config.packageName == PinduoduoNavigation.PACKAGE
+                                ) {
                                     { index, color ->
                                         val tab = currentNavigationTabs[index]
                                         val bitmap = tab.nativeIcon
@@ -1147,7 +1226,9 @@ object AppBottomNavHooks {
                 }.also(content::addOnAttachStateChangeListener)
             }
             guard = ViewTreeObserver.OnPreDrawListener {
-                if (config === tencentMeeting || config === cmbBank) {
+                if (config === tencentMeeting || config === cmbBank || config === wechat ||
+                    config.packageName == PinduoduoNavigation.PACKAGE
+                ) {
                     // Discovery must continue while the host hides or replaces its native bar.
                     syncHostState()
                     return@OnPreDrawListener true
@@ -1208,7 +1289,9 @@ object AppBottomNavHooks {
                 nav?.visibility = View.VISIBLE
                 configureSystemNavigationBar()
             }
-            if (config === tencentMeeting) {
+            if (config === tencentMeeting || config === wechat ||
+                config.packageName == PinduoduoNavigation.PACKAGE
+            ) {
                 val detected = content?.let(::detectBottomBar)
                 if (detected == null) {
                     nav?.visibility = View.GONE
@@ -1245,7 +1328,7 @@ object AppBottomNavHooks {
             hideOriginalBar()
             adaptMiniPlayer()
             if (config !== xiaohongshu && config !== qqMusic && config !== weibo &&
-                config !== xiaomiHealthWatchFaceMarket && config !== tencentMeeting && config !== cmbBank
+                config !== xiaomiHealthWatchFaceMarket && config !== tencentMeeting && config !== cmbBank && config !== wechat
             ) {
                 navigationTabs.indexOfFirst {
                     it.key != TabKey.PUBLISH && isSelectedRecursively(it.view)
@@ -1266,7 +1349,7 @@ object AppBottomNavHooks {
         }
 
         private fun openTab(tab: DetectedTab) {
-            if (config === tencentMeeting || config === cmbBank) {
+            if (config === tencentMeeting || config === cmbBank || config === wechat) {
                 val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
                 val current = detectBottomBar(content)?.tabs?.firstOrNull { it.identity == tab.identity } ?: return
                 current.clickTarget.performClick()
@@ -1550,6 +1633,10 @@ object AppBottomNavHooks {
                 val home = findResourceView(content, "tabView") ?: return
                 val pager = findResourceView(home, "viewPager") as? ViewGroup ?: return
                 releaseTencentMeetingPageNavigationInset(pager)
+            } else if (config === wechat) {
+                releaseWeChatPageNavigationInset(content)
+            } else if (config.packageName == PinduoduoNavigation.PACKAGE) {
+                releasePinduoduoPageNavigationInset(content)
             } else if (config === cmbBank) {
                 cmbBankPage?.let(::releaseCmbBankPageNavigationInset)
             } else if (config === xiaohongshu) {
@@ -1891,6 +1978,55 @@ object AppBottomNavHooks {
                 if (!view.isShown || view is ComposeView || view === originalBar ||
                     view === cmbBankBackground || view.height < inset * 4 ||
                     view.width < page.width * 3 / 4
+                ) return@forEach
+                if (view.paddingBottom == inset) {
+                    originalContentPaddings.putIfAbsent(view, intArrayOf(
+                        view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom
+                    ))
+                    view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, 0)
+                }
+                val params = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return@forEach
+                if (params.bottomMargin == inset) {
+                    originalContentBottomMargins.putIfAbsent(view, params.bottomMargin)
+                    params.bottomMargin = 0
+                    view.layoutParams = params
+                }
+            }
+        }
+
+        private fun releaseWeChatPageNavigationInset(content: ViewGroup) {
+            val inset = navigationBarInset()
+            if (inset <= 0) return
+            descendants(content).forEach { view ->
+                if (!view.isShown || view is ComposeView || view === originalBar ||
+                    view.height < inset * 4 || view.width < content.width * 3 / 4
+                ) return@forEach
+                if (view.paddingBottom == inset) {
+                    originalContentPaddings.putIfAbsent(view, intArrayOf(
+                        view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom
+                    ))
+                    view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, 0)
+                }
+                val params = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return@forEach
+                if (params.bottomMargin == inset) {
+                    originalContentBottomMargins.putIfAbsent(view, params.bottomMargin)
+                    params.bottomMargin = 0
+                    view.layoutParams = params
+                }
+            }
+        }
+
+        private fun releasePinduoduoPageNavigationInset(content: ViewGroup) {
+            val inset = navigationBarInset()
+            if (inset <= 0) return
+            val injectedNav = nav
+            val detectedBar = originalBar
+            descendants(content).forEach { view ->
+                if (!view.isShown || view is ComposeView || view === injectedNav ||
+                    view === detectedBar ||
+                    (injectedNav != null && isDescendantOf(view, injectedNav)) ||
+                    (detectedBar != null && (isDescendantOf(view, detectedBar) || isDescendantOf(detectedBar, view))) ||
+                    view.height < inset * 4 || view.width < content.width * 3 / 4
                 ) return@forEach
                 if (view.paddingBottom == inset) {
                     originalContentPaddings.putIfAbsent(view, intArrayOf(
@@ -3121,6 +3257,37 @@ object AppBottomNavHooks {
                     )
                 }, trailingAction)
             }
+            if (config === wechat) {
+                val native = WeChatNavigation.detect(content) ?: return null
+                selectedIndex.intValue = native.selectedIndex
+                return DetectedBar(native.view, native.items.mapIndexed { index, item ->
+                    val key = when (index) {
+                        0 -> TabKey.HOME
+                        1 -> TabKey.CONTACTS
+                        2 -> TabKey.DISCOVER
+                        else -> TabKey.PROFILE
+                    }
+                    DetectedTab(key, tr(item.label, item.label), item.view, item.clickTarget,
+                        identity = "wechat:$index:${item.label}", nativeIcon = item.icon)
+                })
+            }
+            // MainFrameActivity uses a copied AppConfig so it can be hooked alongside
+            // HomeActivity. Match Pinduoduo by package rather than object identity.
+            if (config.packageName == PinduoduoNavigation.PACKAGE) {
+                val native = PinduoduoNavigation.detect(activity, content) ?: return null
+                selectedIndex.intValue = native.selectedIndex
+                return DetectedBar(native.container, native.items.mapIndexed { index, item ->
+                    val key = TabKey.NATIVE
+                    DetectedTab(
+                        key,
+                        item.label,
+                        item.view,
+                        item.clickTarget,
+                        identity = "pdd:$index:${item.label}:${item.view.javaClass.name}",
+                        nativeIcon = item.icon
+                    )
+                })
+            }
             if (config === weibo) {
                 val cached = WeiboBottomBarDetector.detect(content, originalBar, searchHierarchy = false)
                 val bar = cached ?: run {
@@ -3255,7 +3422,13 @@ object AppBottomNavHooks {
                 val child = candidate.getChildAt(index)
                 val key = canonicalTab(semanticText(child)) ?: return@mapNotNull null
                 val clickTarget = findClickable(child) ?: return@mapNotNull null
-                DetectedTab(key, displayLabel(key, semanticText(child)), child, clickTarget)
+                DetectedTab(
+                    key,
+                    displayLabel(key, semanticText(child)),
+                    child,
+                    clickTarget,
+                    nativeIcon = miHealthIcons?.icon(key.name, isSelectedRecursively(child))
+                )
             }.distinctBy { it.key }
             if (tabs.mapTo(mutableSetOf()) { it.key } == config.requiredTabs) {
                 return tabs.sortedBy { IntArray(2).also(it.view::getLocationInWindow)[0] }

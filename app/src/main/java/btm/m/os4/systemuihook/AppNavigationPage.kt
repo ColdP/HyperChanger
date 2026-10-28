@@ -2,6 +2,7 @@ package btm.m.os4.systemuihook
 
 import android.graphics.drawable.Drawable
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
@@ -11,6 +12,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.Color as ComposeColor
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -20,7 +23,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import io.github.libxposed.service.XposedService
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.ColorPalette
 import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.preference.ArrowPreference
@@ -32,6 +37,7 @@ import btm.m.liquidglass.AppColorMode
 import btm.m.liquidglass.LabelMode
 import btm.m.liquidglass.NavigationStyle
 import btm.m.liquidglass.ScopedSettings
+import btm.m.liquidglass.NavigationAccentSettings
 import btm.m.liquidglass.rememberMomentumPredictiveBack
 import btm.m.liquidglass.momentumBackTransform
 
@@ -47,6 +53,8 @@ private val appNavItems = listOf(
     AppNavItem("瑞幸咖啡", "com.lucky.luckyclient"),
     AppNavItem("腾讯会议", "com.tencent.wemeet.app"),
     AppNavItem("招商银行", "cmb.pb"),
+    AppNavItem("微信", "com.tencent.mm"),
+    AppNavItem("拼多多", "com.xunmeng.pinduoduo"),
 )
 
 @Composable
@@ -70,7 +78,7 @@ internal fun AppNavigationPage(back: () -> Unit) {
         }
         return
     }
-    AppPage(tr("应用底部导航", "应用底部导航"), back, restartScopes = setOf(ScopeApplication.APPLE_MUSIC, ScopeApplication.WEIBO, ScopeApplication.XIAOHONGSHU, ScopeApplication.XIAOMI_STORE, ScopeApplication.XIAOMI_WALLET, ScopeApplication.XIAOMI_HEALTH, ScopeApplication.LUCKIN_COFFEE, ScopeApplication.TENCENT_MEETING, ScopeApplication.CMB_BANK), restartEnabled = service != null) { padding, scroll ->
+    AppPage(tr("应用底部导航", "应用底部导航"), back, restartScopes = setOf(ScopeApplication.APPLE_MUSIC, ScopeApplication.WEIBO, ScopeApplication.XIAOHONGSHU, ScopeApplication.XIAOMI_STORE, ScopeApplication.XIAOMI_WALLET, ScopeApplication.XIAOMI_HEALTH, ScopeApplication.LUCKIN_COFFEE, ScopeApplication.TENCENT_MEETING, ScopeApplication.CMB_BANK, ScopeApplication.WECHAT, ScopeApplication.PINDUODUO), restartEnabled = service != null) { padding, scroll ->
         AppList(padding, scroll, 28) {
             item { SmallTitle(tr("支持的应用", "支持的应用"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp)) }
             items(appNavItems, key = { it.packageName }) { item ->
@@ -124,6 +132,12 @@ private fun AppNavigationSettings(appItem: AppNavItem, prefs: android.content.Sh
     var styleIndex by remember(appItem.packageName) { mutableIntStateOf(NavigationStyle.fromPreference(ScopedSettings.getString(prefs, appItem.packageName, NavigationStyle.PREFERENCE_KEY, NavigationStyle.DEFAULT_VALUE)).ordinal) }
     var labelIndex by remember(appItem.packageName) { mutableIntStateOf(LabelMode.fromPreference(ScopedSettings.getLabelMode(prefs, appItem.packageName)).ordinal) }
     var colorIndex by remember(appItem.packageName) { mutableIntStateOf(AppColorMode.fromPreference(ScopedSettings.getString(prefs, appItem.packageName, ScopedSettings.KEY_COLOR_MODE, AppColorMode.DEFAULT_VALUE)).ordinal) }
+    var accentColor by remember(appItem.packageName) { mutableIntStateOf(NavigationAccentSettings.getColor(prefs, appItem.packageName)) }
+    var showAccentDialog by remember { mutableStateOf(false) }
+    val accentEnabled = enabled && NavigationStyle.entries.getOrNull(styleIndex) in setOf(
+        NavigationStyle.LIQUID_GLASS,
+        NavigationStyle.HARMONY_OS_FLOATING,
+    )
     var walletTabs by remember(appItem.packageName) { mutableStateOf(ScopedSettings.getWalletVisibleTabs(prefs)) }
     AppPage(tr(appItem.name, appItem.name), back) { padding, scroll ->
         AppList(padding, scroll, 28) {
@@ -133,6 +147,11 @@ private fun AppNavigationSettings(appItem: AppNavItem, prefs: android.content.Sh
                     OverlayDropdownPreference(title = tr("导航栏样式", "导航栏样式"), items = NavigationStyle.entries.map { tr(it.displayName, it.displayName) }, selectedIndex = styleIndex, enabled = enabled) { value -> styleIndex = value; prefs.edit().putString(ScopedSettings.key(appItem.packageName, NavigationStyle.PREFERENCE_KEY), NavigationStyle.entries[value].preferenceValue).apply(); onChanged() }
                     OverlayDropdownPreference(title = tr("标签显示方式", "标签显示方式"), items = LabelMode.entries.map { tr(it.displayName, it.displayName) }, selectedIndex = labelIndex, enabled = enabled) { value -> labelIndex = value; prefs.edit().putString(ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_LABEL_MODE), LabelMode.entries[value].preferenceValue).apply(); onChanged() }
                     OverlayDropdownPreference(title = tr("颜色模式", "颜色模式"), items = AppColorMode.entries.map { tr(it.displayName, it.displayName) }, selectedIndex = colorIndex, enabled = enabled) { value -> colorIndex = value; prefs.edit().putString(ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_COLOR_MODE), AppColorMode.entries[value].preferenceValue).apply(); onChanged() }
+                    NavigationAccentPreference(
+                        color = accentColor,
+                        enabled = accentEnabled,
+                        onClick = { if (accentEnabled) showAccentDialog = true },
+                    )
                 }
             }
             if (appItem.packageName == "com.mipay.wallet") item {
@@ -146,6 +165,61 @@ private fun AppNavigationSettings(appItem: AppNavItem, prefs: android.content.Sh
                         })
                     }
                 }
+            }
+        }
+    }
+    NavigationAccentDialog(
+        show = showAccentDialog,
+        initialColor = accentColor,
+        defaultColor = NavigationAccentSettings.defaultColor(appItem.packageName),
+        onDismiss = { showAccentDialog = false },
+        onSave = { selected ->
+            accentColor = selected
+            if (selected == NavigationAccentSettings.defaultColor(appItem.packageName)) {
+                NavigationAccentSettings.resetColor(prefs, appItem.packageName)
+            } else {
+                NavigationAccentSettings.saveColor(prefs, appItem.packageName, selected)
+            }
+            onChanged()
+            showAccentDialog = false
+        },
+    )
+}
+
+@Composable
+private fun NavigationAccentPreference(color: Int, enabled: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(tr("底栏强调色", "底栏强调色"), modifier = Modifier.weight(1f), style = MiuixTheme.textStyles.body1, color = if (enabled) MiuixTheme.colorScheme.onSurface else MiuixTheme.colorScheme.onSurface.copy(alpha = .38f))
+        Box(Modifier.size(28.dp).background(MiuixTheme.colorScheme.outline.copy(alpha = .45f), androidx.compose.foundation.shape.CircleShape).padding(2.dp).background(ComposeColor(color), androidx.compose.foundation.shape.CircleShape))
+    }
+}
+
+@Composable
+private fun NavigationAccentDialog(
+    show: Boolean,
+    initialColor: Int,
+    defaultColor: Int,
+    onDismiss: () -> Unit,
+    onSave: (Int) -> Unit,
+) {
+    var draftColor by remember(show, initialColor) { mutableIntStateOf(initialColor) }
+    WindowDialog(show = show, onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(tr("底栏强调色", "底栏强调色"), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
+            ColorPalette(
+                color = ComposeColor(draftColor or 0xFF000000.toInt()),
+                onColorChanged = { draftColor = it.toArgb() or 0xFF000000.toInt() },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            GlassDialogButton(onClick = { draftColor = defaultColor }, modifier = Modifier.fillMaxWidth()) {
+                Text(tr("恢复默认", "恢复默认"))
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GlassDialogButton(onDismiss, Modifier.weight(1f)) { Text(tr("取消", "取消")) }
+                GlassDialogButton({ onSave(draftColor) }, Modifier.weight(1f), colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("保存", "保存")) }
             }
         }
     }

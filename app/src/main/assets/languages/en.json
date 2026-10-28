@@ -159,7 +159,6 @@
     "rear_screenshot_shell_export": "Export",
     "rear_screenshot_untitled": "Untitled",
     "rear_screenshot_imported": "Imported shell",
-
     "超级岛展开态背景调整": "Super Island expanded background adjustment",
     "超级岛展开态背景参数": "Super Island expanded background parameters",
     "腾讯会议": "Tencent Meeting",
@@ -815,6 +814,7 @@
     "图片已导出": "Image exported",
     "外观": "Appearance",
     "完成": "Done",
+    "微信": "WeChat",
     "微信赞赏码": "WeChat Appreciation Code",
     "伪装 SOTA (XMS) 热更新版本": "Masquerade Sota (XMS) Hot Update Version",
     "伪装 SOTA 版本": "Masquerade Sota Version",
@@ -1699,5 +1699,6 @@
   "rear_screenshot_shell_cancel": "Cancel",
   "rear_screenshot_shell_save": "Save",
   "rear_screenshot_shell_delete": "Delete",
-  "rear_screenshot_shell_delete_confirm": "Delete this shell style?"
+  "rear_screenshot_shell_delete_confirm": "Delete this shell style?",
+  "拼多多": "Pinduoduo"
 }
