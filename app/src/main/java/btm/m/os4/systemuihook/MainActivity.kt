@@ -459,6 +459,8 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
             ScopeApplication.LUCKIN_COFFEE,
             ScopeApplication.TENCENT_MEETING,
             ScopeApplication.CMB_BANK,
+            ScopeApplication.WECHAT,
+            ScopeApplication.PINDUODUO,
         ),
         PageId.APP_NAVIGATION,
     ),
@@ -2978,6 +2980,8 @@ private fun RestartScopesPage(
         ScopeApplication.XIAOMI_HEALTH,
         ScopeApplication.TENCENT_MEETING,
         ScopeApplication.CMB_BANK,
+        ScopeApplication.WECHAT,
+        ScopeApplication.PINDUODUO,
     )
     val toggleTarget: (ScopeApplication) -> Unit = { target ->
         selectedTargets = if (target in selectedTargets) selectedTargets - target else selectedTargets + target

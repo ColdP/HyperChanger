@@ -159,7 +159,6 @@
     "rear_screenshot_shell_export": "导出",
     "rear_screenshot_untitled": "未命名",
     "rear_screenshot_imported": "导入的外壳",
-
     "超级岛展开态背景调整": "超级岛展开态背景调整",
     "超级岛展开态背景参数": "超级岛展开态背景参数",
     "腾讯会议": "腾讯会议",
@@ -827,6 +826,7 @@
     "图片已导出": "Image exported",
     "外观": "Appearance",
     "完成": "Complete",
+    "微信": "WeChat",
     "微信赞赏码": "WeChat Appreciation Code",
     "伪装 SOTA (XMS) 热更新版本": "Masquerade Sota (XMS) Hot Update Version",
     "伪装 SOTA 版本": "Masquerade Sota Version",
@@ -1639,5 +1639,6 @@
   "rear_screenshot_shell_cancel": "取消",
   "rear_screenshot_shell_save": "保存",
   "rear_screenshot_shell_delete": "删除",
-  "rear_screenshot_shell_delete_confirm": "确定删除此外壳样式吗？"
+  "rear_screenshot_shell_delete_confirm": "确定删除此外壳样式吗？",
+  "拼多多": "Pinduoduo"
 }

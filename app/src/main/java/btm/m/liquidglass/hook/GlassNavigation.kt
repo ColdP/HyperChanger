@@ -1251,7 +1251,14 @@ private fun HyperFloatingNavigationBar(
         dragAnimation.animateToValue(selectedIndex.intValue.coerceIn(0, tabCount - 1).toFloat())
     }
     val contentColor = if (isDarkTheme) Color.White else Color.Black
-    val selectedContentColor = accentColorOverride ?: contentColor
+    // HyperOS floating keeps the native white/black foreground. Only HarmonyOS
+    // floating accepts the per-app accent override; liquid glass handles its
+    // accent independently in LiquidBottomTabs.
+    val selectedContentColor = if (harmonyFloating) {
+        accentColorOverride ?: Color(0xFF0088FF)
+    } else {
+        contentColor
+    }
     val pressedIndex = if (dragAnimation.pressProgress > 0.001f) {
         dragAnimation.value.fastRoundToInt().fastCoerceIn(0, tabCount - 1)
     } else {
@@ -1390,7 +1397,7 @@ private fun HyperFloatingNavigationBar(
                 tabs.forEachIndexed { index, tab ->
                     val pressedProgress = if (pressedIndex == index) dragAnimation.pressProgress else 0f
                     val color = if (harmonyFloating) {
-                        if (index == selectedIndex.intValue || pressedProgress > 0f) Color(0xFF0088FF) else contentColor.copy(alpha = 0.58f)
+                        if (index == selectedIndex.intValue || pressedProgress > 0f) selectedContentColor else contentColor.copy(alpha = 0.58f)
                     } else if (pressedProgress > 0f) {
                         Color.Gray
                     } else {

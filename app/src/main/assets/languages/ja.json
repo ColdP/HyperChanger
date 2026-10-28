@@ -159,7 +159,6 @@
     "rear_screenshot_shell_export": "エクスポート",
     "rear_screenshot_untitled": "名称未設定",
     "rear_screenshot_imported": "インポートしたシェル",
-
     "超级岛展开态背景调整": "スーパーアイランド展開時の背景調整",
     "超级岛展开态背景参数": "スーパーアイランド展開時の背景パラメータ",
     "腾讯会议": "Tencent Meeting",
@@ -815,6 +814,7 @@
     "图片已导出": "画像をエクスポートしました",
     "外观": "外観",
     "完成": "完了",
+    "微信": "WeChat",
     "微信赞赏码": "WeChat感謝コード",
     "伪装 SOTA (XMS) 热更新版本": "仮面舞踏会SOTA （ XMS ）ホットアップデートバージョン",
     "伪装 SOTA 版本": "仮面舞踏会SOTAバージョン",
@@ -1699,5 +1699,6 @@
   "rear_screenshot_shell_cancel": "キャンセル",
   "rear_screenshot_shell_save": "保存",
   "rear_screenshot_shell_delete": "削除",
-  "rear_screenshot_shell_delete_confirm": "このシェルスタイルを削除しますか？"
+  "rear_screenshot_shell_delete_confirm": "このシェルスタイルを削除しますか？",
+  "拼多多": "Pinduoduo"
 }

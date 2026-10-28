@@ -256,7 +256,8 @@ internal class OthersHooks(
             packageName != "com.mi.health" && packageName != "com.apple.android.music" &&
             packageName != "com.sina.weibo" && packageName != "com.xingin.xhs" &&
             packageName != "com.lucky.luckyclient" && packageName != "com.tencent.wemeet.app" &&
-            packageName != "cmb.pb"
+            packageName != "cmb.pb" && packageName != "com.tencent.mm"
+            && packageName != "com.xunmeng.pinduoduo"
         ) return
         if (!runCatching { android.app.Application.getProcessName() == packageName }.getOrDefault(false)) return
         runCatching {
@@ -281,21 +282,24 @@ internal class OthersHooks(
             val color = ScopedSettings.getString(prefs, packageName, ScopedSettings.KEY_COLOR_MODE, AppColorMode.DEFAULT_VALUE)
             val blur = ScopedSettings.getBlurRadius(prefs, packageName, style, 18)
             val advanced = ScopedSettings.getBoolean(prefs, packageName, ScopedSettings.KEY_ADVANCED_MATERIAL, true)
+            val accent = btm.m.liquidglass.NavigationAccentSettings.getColor(prefs, packageName)
             when (packageName) {
-                "com.xiaomi.shop" -> AppBottomNavHooks.installXiaomiStore(module, param.defaultClassLoader, blur, label, style, advanced, color)
-                "com.mipay.wallet" -> AppBottomNavHooks.installXiaomiWallet(module, param.defaultClassLoader, blur, label, style, advanced, color, ScopedSettings.getWalletVisibleTabs(prefs))
+                "com.xiaomi.shop" -> AppBottomNavHooks.installXiaomiStore(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
+                "com.mipay.wallet" -> AppBottomNavHooks.installXiaomiWallet(module, param.defaultClassLoader, blur, label, style, advanced, color, ScopedSettings.getWalletVisibleTabs(prefs), accent)
                 "com.mi.health" -> {
-                    AppBottomNavHooks.installXiaomiHealth(module, param.defaultClassLoader, blur, label, style, advanced, color)
-                    AppBottomNavHooks.installXiaomiHealthWatchFaceMarket(module, param.defaultClassLoader, blur, label, style, advanced, color)
+                    AppBottomNavHooks.installXiaomiHealth(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
+                    AppBottomNavHooks.installXiaomiHealthWatchFaceMarket(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 }
-                "com.apple.android.music" -> AppBottomNavHooks.installAppleMusic(module, param.defaultClassLoader, blur, label, style, advanced, color)
-                "com.sina.weibo" -> AppBottomNavHooks.installWeibo(module, param.defaultClassLoader, blur, label, style, advanced, color)
-                "com.xingin.xhs" -> AppBottomNavHooks.installXiaohongshu(module, param.defaultClassLoader, blur, label, style, advanced, color)
-                "com.tencent.wemeet.app" -> AppBottomNavHooks.installTencentMeeting(module, param.defaultClassLoader, blur, label, style, advanced, color)
-                "cmb.pb" -> AppBottomNavHooks.installCmbBank(module, blur, label, style, advanced, color)
+                "com.apple.android.music" -> AppBottomNavHooks.installAppleMusic(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
+                "com.sina.weibo" -> AppBottomNavHooks.installWeibo(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
+                "com.xingin.xhs" -> AppBottomNavHooks.installXiaohongshu(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
+                "com.tencent.wemeet.app" -> AppBottomNavHooks.installTencentMeeting(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
+                "cmb.pb" -> AppBottomNavHooks.installCmbBank(module, blur, label, style, advanced, color, accent)
+                "com.tencent.mm" -> AppBottomNavHooks.installWeChat(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
+                "com.xunmeng.pinduoduo" -> AppBottomNavHooks.installPinduoduo(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 "com.lucky.luckyclient" -> {
                     LuckinAntiDetectionHooks.install(module)
-                    AppBottomNavHooks.installLuckinCoffee(module, param.defaultClassLoader, blur, label, style, advanced, color)
+                    AppBottomNavHooks.installLuckinCoffee(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 }
             }
             btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed app navigation hooks for $packageName")
