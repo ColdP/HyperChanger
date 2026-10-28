@@ -2,8 +2,8 @@
 // Copyright 2026 btm_m
 package btm.m.os4.systemuihook
 
-import btm.m.os4.systemuihook.mitrustservice.KEY_TRUSTSERVICE_DIAGNOSTICS
-import btm.m.os4.systemuihook.mitrustservice.TrustServiceSettingsPreference
+import btm.m.os4.systemuihook.trustservice.KEY_TRUSTSERVICE_DIAGNOSTICS
+import btm.m.os4.systemuihook.trustservice.TrustServiceSettingsPreference
 
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsStore
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationShortcutsSettingsStore
