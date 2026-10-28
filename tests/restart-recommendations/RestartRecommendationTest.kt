@@ -30,6 +30,12 @@ private class Preferences {
 }
 
 fun main() {
+    val dialerPrefs = Preferences()
+    check(ContactsDialerSettings.read(dialerPrefs.prefs) == ContactsDialerBackgroundSettings())
+    dialerPrefs.write(KEY_CONTACTS_DIALER_BACKGROUND_BLUR_RADIUS to -1, KEY_CONTACTS_DIALER_BACKGROUND_OPACITY to 101)
+    check(ContactsDialerSettings.read(dialerPrefs.prefs).let { it.blurRadiusDp == 0 && it.opacityPercent == 100 })
+    dialerPrefs.write(KEY_CONTACTS_DIALER_BACKGROUND_BLUR_RADIUS to 101, KEY_CONTACTS_DIALER_BACKGROUND_OPACITY to -1)
+    check(ContactsDialerSettings.read(dialerPrefs.prefs).let { it.blurRadiusDp == 100 && it.opacityPercent == 0 })
     val local = Preferences()
     val remote = Preferences()
     val events = mutableListOf<Set<ScopeApplication>>()
@@ -45,6 +51,22 @@ fun main() {
     local.write("ios_notification_center" to false, "ios_notification_header" to false, "ios_notification_clear_style" to 0)
     local.write("control_center_header_height_offset_dp" to 0)
     check(events.isEmpty()) { "Default materialization generated restart suggestions: $events" }
+    local.write(
+        KEY_CONTACTS_DIALER_BACKGROUND_BLUR to false,
+        KEY_CONTACTS_DIALER_BACKGROUND_BLUR_CUSTOM to false,
+        KEY_CONTACTS_DIALER_BACKGROUND_BLUR_RADIUS to 24,
+        KEY_CONTACTS_DIALER_BACKGROUND_OPACITY_ENABLED to false,
+        KEY_CONTACTS_DIALER_BACKGROUND_OPACITY to 70,
+    )
+    check(events.isEmpty()) { "Dialer defaults must not suggest a restart" }
+    local.write(KEY_CONTACTS_DIALER_BACKGROUND_BLUR to true)
+    check(events.removeLast() == setOf(ScopeApplication.CONTACTS_DIALER))
+    local.write(KEY_CONTACTS_DIALER_BACKGROUND_BLUR_CUSTOM to true, KEY_CONTACTS_DIALER_BACKGROUND_BLUR_RADIUS to 48)
+    check(events.removeLast() == setOf(ScopeApplication.CONTACTS_DIALER))
+    check(events.isEmpty()) { "A multi-key dialer edit must produce one event" }
+    local.write(KEY_CONTACTS_DIALER_BACKGROUND_OPACITY_ENABLED to true, KEY_CONTACTS_DIALER_BACKGROUND_OPACITY to 0)
+    check(events.removeLast() == setOf(ScopeApplication.CONTACTS_DIALER))
+    check(events.isEmpty())
     local.write(KEY_REAR_SCREEN_LEFT_SWIPE_ENABLED to false, KEY_REAR_SCREEN_LEFT_SWIPE_PACKAGE to "")
     check(events.isEmpty()) { "Rear-screen defaults must not suggest a restart" }
     local.write(KEY_REAR_SCREEN_LEFT_SWIPE_ENABLED to true)

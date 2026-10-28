@@ -74,6 +74,9 @@ internal fun restartScopesForPreference(group: String, key: String): Set<ScopeAp
         return ScopeApplication.entries.filter { key.startsWith("scope.${it.packageName}.") }.toSet()
     }
     return when {
+        key == KEY_CONTACTS_DIALER_BACKGROUND_BLUR || key == KEY_CONTACTS_DIALER_BACKGROUND_BLUR_CUSTOM ||
+            key == KEY_CONTACTS_DIALER_BACKGROUND_BLUR_RADIUS || key == KEY_CONTACTS_DIALER_BACKGROUND_OPACITY_ENABLED ||
+            key == KEY_CONTACTS_DIALER_BACKGROUND_OPACITY -> setOf(ScopeApplication.CONTACTS_DIALER)
         key.startsWith("home_") || key.startsWith("dock_") -> setOf(ScopeApplication.DESKTOP)
         key.startsWith("settings_") || key in setOf(
             "unlock_never_screen_timeout", "show_google_service_entry", "show_saved_wifi_passwords",

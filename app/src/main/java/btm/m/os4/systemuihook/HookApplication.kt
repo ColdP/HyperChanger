@@ -18,6 +18,10 @@ class HookApplication : Application(), XposedServiceHelper.OnServiceListener {
     }
 
     override fun onServiceBind(service: XposedService) {
+        runCatching { ContactsDialerSettings.syncRemote(this, service) }
+            .onFailure { ModuleLog.w("ContactsDialer", "Could not sync dialer setting", it) }
+        runCatching { btm.m.liquidglass.NavigationBadgeSettings.syncRemote(this, service) }
+            .onFailure { ModuleLog.w("NavigationBadges", "Could not sync navigation badge setting", it) }
         runCatching { ModuleHotReloadSettingsStore(this).syncRemote(service) }
             .onFailure { ModuleLog.w("HotReload", "Could not sync hot reload setting", it) }
         runCatching { ModuleSafetySettingsStore(this).syncRemote(service) }

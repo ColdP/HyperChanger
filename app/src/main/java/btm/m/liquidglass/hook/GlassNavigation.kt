@@ -28,10 +28,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.border
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -124,8 +126,19 @@ data class HostTab(
     val className: String,
     val icon: ImageVector? = null,
     val iconBitmap: ImageBitmap? = null,
+    val badge: Boolean = false,
     val onClick: () -> Unit
 )
+
+@Composable
+private fun BadgeDot(modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .size(8.dp)
+            .background(Color(0xFFFF3B30), CircleShape)
+            .border(1.dp, Color.White.copy(alpha = 0.9f), CircleShape)
+    )
+}
 
 data class MusicMiniPlayerState(
     val visible: Boolean = false,
@@ -184,6 +197,7 @@ internal fun CustomNavigation(
     redrawNativeText: Boolean = false,
     onHostPreDraw: () -> Unit,
     backdropOverride: Backdrop? = null,
+    recordBackdropChildren: Boolean = false,
     tabImageVector: ((Int) -> ImageVector)? = null,
     tabIconContent: (@Composable (Int, Color) -> Unit)? = null,
     trailingAction: HostTab? = null,
@@ -202,7 +216,12 @@ internal fun CustomNavigation(
         AppColorMode.LIGHT -> false
         AppColorMode.DARK -> true
     }
-    val backdrop = backdropOverride ?: rememberNativeViewBackdrop(sourceView, onHostPreDraw, redrawNativeText)
+    val backdrop = backdropOverride ?: rememberNativeViewBackdrop(
+        sourceView,
+        onHostPreDraw,
+        redrawNativeText,
+        useRecordedChildren = recordBackdropChildren
+    )
     val density = LocalDensity.current
     if (style != NavigationStyle.LIQUID_GLASS) {
         Box(Modifier.fillMaxSize()) {
@@ -298,7 +317,10 @@ internal fun CustomNavigation(
                                     modifier = Modifier.size(28.dp)
                                 )
                             } else if (tabIconContent != null) {
-                                tabIconContent(index, LocalLiquidContentColor.current)
+                                Box {
+                                    tabIconContent(index, LocalLiquidContentColor.current)
+                                    if (tab.badge) BadgeDot(Modifier.align(Alignment.TopEnd).offset(x = 8.dp, y = (-2).dp))
+                                }
                             } else {
                                 TabIcon(tab.label, LocalLiquidContentColor.current)
                             }
@@ -349,8 +371,12 @@ internal fun CustomNavigation(
                         }
                     ) {
                         if (effectiveMode != LabelMode.TEXT_ONLY) {
-                            if (tabIconContent != null) tabIconContent(index, LocalLiquidContentColor.current)
-                            else TabIcon(tab.label, LocalLiquidContentColor.current)
+                            if (tabIconContent != null) {
+                                Box {
+                                    tabIconContent(index, LocalLiquidContentColor.current)
+                                    if (tab.badge) BadgeDot(Modifier.align(Alignment.TopEnd).offset(x = 8.dp, y = (-2).dp))
+                                }
+                            } else TabIcon(tab.label, LocalLiquidContentColor.current)
                         }
                         if (effectiveMode != LabelMode.ICON_ONLY) {
                             BasicText(
@@ -1133,7 +1159,12 @@ private fun HyperNavigation(
                                 modifier = Modifier.weight(1f),
                                 selectedColor = accentColorOverride,
                                 icon = { color ->
-                                    if (showIcons) tabIconContent(index, color)
+                                    if (showIcons) {
+                                        Box {
+                                            tabIconContent(index, color)
+                                            if (tab.badge) BadgeDot(Modifier.align(Alignment.TopEnd).offset(x = 8.dp, y = (-2).dp))
+                                        }
+                                    }
                                 }
                             )
                         } else {
@@ -1426,7 +1457,10 @@ private fun HyperFloatingNavigationBar(
                         if (showIcons) {
                             val icon = tab.icon ?: tabImageVector?.invoke(index) ?: hyperIcon(tab.label)
                             if (tabIconContent != null) {
-                                tabIconContent(index, color)
+                                Box {
+                                    tabIconContent(index, color)
+                                    if (tab.badge) BadgeDot(Modifier.align(Alignment.TopEnd).offset(x = 8.dp, y = (-2).dp))
+                                }
                             } else {
                                 Image(icon, null, Modifier.size(28.dp * floatingScale), colorFilter = ColorFilter.tint(color))
                             }
