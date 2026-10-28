@@ -1029,7 +1029,7 @@ class HyperSystemUiModule : XposedModule() {
         if (param.packageName == "com.xiaomi.trustservice") {
             val preferences = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
             if (preferences.getBoolean(KEY_TRUSTSERVICE_DIAGNOSTICS, false)) {
-                TrustServiceDiagnostics.inspect(this, param)
+                TrustServiceDiagnostics.install(this, param)
             }
             return
         }
