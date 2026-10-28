@@ -55,7 +55,7 @@ internal object SecurityCenterRootDiagnostics {
 
             module.hook(members.returnEnvironment)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("hyperchanger:com.miui.securitycenter:DisableRootedCheck:return-environment")
+                .setId("hyperchanger:a.oopt:DisableRootedCheck:return-environment")
                 .intercept { chain ->
                     runCatching {
                         val request = chain.getArg(0)
@@ -88,7 +88,7 @@ internal object SecurityCenterRootDiagnostics {
                 HookModuleLogger.log(module, Log.INFO, TAG, "DisableRootedCheck: hooking CheckRoot method: $method")
                 module.hook(method)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
-                    .setId("hyperchanger:com.miui.securitycenter:DisableRootedCheck:check-root:$index:${method.name}")
+                    .setId("hyperchanger:a.oopt:DisableRootedCheck:check-root:$index:${method.name}")
                     .intercept {
                         false
                     }
@@ -118,7 +118,7 @@ internal object SecurityCenterRootDiagnostics {
             HookModuleLogger.log(module, Log.INFO, TAG, "DisableRootCheck: resolved original method: ${method.toGenericString()}")
             module.hook(method)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("hyperchanger:com.miui.securitycenter:DisableRootCheck:${method.declaringClass.name}.${method.name}")
+                .setId("hyperchanger:a.oopt:DisableRootCheck:${method.declaringClass.name}.${method.name}")
                 .intercept {
                     false
                 }
