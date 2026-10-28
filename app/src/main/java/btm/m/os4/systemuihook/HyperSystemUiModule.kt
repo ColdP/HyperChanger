@@ -4,6 +4,9 @@ package btm.m.os4.systemuihook
 
 import btm.m.os4.systemuihook.trustservice.KEY_TRUSTSERVICE_DIAGNOSTICS
 import btm.m.os4.systemuihook.trustservice.TrustServiceDiagnostics
+import btm.m.os4.systemuihook.securitycenter.KEY_SECURITYCENTER_ROOTED_DIAGNOSTICS
+import btm.m.os4.systemuihook.securitycenter.KEY_SECURITYCENTER_ROOT_DIAGNOSTICS
+import btm.m.os4.systemuihook.securitycenter.SecurityCenterRootDiagnostics
 
 import android.content.Context
 import android.content.Intent
@@ -1029,7 +1032,17 @@ class HyperSystemUiModule : XposedModule() {
         if (param.packageName == "com.xiaomi.trustservice") {
             val preferences = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
             if (preferences.getBoolean(KEY_TRUSTSERVICE_DIAGNOSTICS, false)) {
-                TrustServiceDiagnostics.install(this, param)
+                TrustServiceDiagnostics.inspect(this, param)
+            }
+            return
+        }
+        if (param.packageName == "com.miui.securitycenter") {
+            val preferences = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
+            if (preferences.getBoolean(KEY_SECURITYCENTER_ROOTED_DIAGNOSTICS, false)) {
+                SecurityCenterRootDiagnostics.inspectRootedCheck(this, param)
+            }
+            if (preferences.getBoolean(KEY_SECURITYCENTER_ROOT_DIAGNOSTICS, false)) {
+                SecurityCenterRootDiagnostics.inspectRootCheck(this, param)
             }
             return
         }
