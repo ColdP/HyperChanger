@@ -2,6 +2,12 @@
 // Copyright 2026 btm_m
 package btm.m.os4.systemuihook
 
+import btm.m.os4.systemuihook.trustservice.KEY_TRUSTSERVICE_DIAGNOSTICS
+import btm.m.os4.systemuihook.trustservice.TrustServiceDiagnostics
+import btm.m.os4.systemuihook.securitycenter.KEY_SECURITYCENTER_ROOTED_DIAGNOSTICS
+import btm.m.os4.systemuihook.securitycenter.KEY_SECURITYCENTER_ROOT_DIAGNOSTICS
+import btm.m.os4.systemuihook.securitycenter.SecurityCenterRootDiagnostics
+
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -1023,6 +1029,23 @@ class HyperSystemUiModule : XposedModule() {
     override fun onPackageLoaded(param: PackageLoadedParam) {
         if (!HookModuleSafety.enter(this, param.packageName)) return
         if (!OsCompatibility.areHooksAllowed()) return
+        if (param.packageName == "com.xiaomi.trustservice") {
+            val preferences = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
+            if (preferences.getBoolean(KEY_TRUSTSERVICE_DIAGNOSTICS, false)) {
+                TrustServiceDiagnostics.install(this, param)
+            }
+            return
+        }
+        if (param.packageName == "com.miui.securitycenter") {
+            val preferences = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
+            if (preferences.getBoolean(KEY_SECURITYCENTER_ROOTED_DIAGNOSTICS, false)) {
+                SecurityCenterRootDiagnostics.inspectRootedCheck(this, param)
+            }
+            if (preferences.getBoolean(KEY_SECURITYCENTER_ROOT_DIAGNOSTICS, false)) {
+                SecurityCenterRootDiagnostics.inspectRootCheck(this, param)
+            }
+            return
+        }
         if (param.packageName == "com.android.systemui") {
             runCatching {
                 installLiftToWakeScheduleHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
@@ -1601,8 +1624,10 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
-    private fun isStandaloneHyperMusicCoverInstalled(context: Context): Boolean =
-        HmcConflictDetector.isHmcVariantInstalled(context)
+    private fun isStandaloneHyperMusicCoverInstalled(context: Context): Boolean = runCatching {
+        context.packageManager.getPackageInfo("com.github.zyl6932.HyperMusicCover", 0)
+        true
+    }.getOrDefault(false)
 
     private fun sendHyperMusicCoverMediaCardCommand(
         context: Context,
