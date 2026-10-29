@@ -61,6 +61,28 @@ internal fun PortalPage(openMaterial: () -> Unit, back: () -> Unit) {
                             tr("展开态高度偏移", "展开态高度偏移"), settings.expandedHeightOffsetDp, -128..256, 0, " dp", true,
                         ) { save(settings.copy(expandedHeightOffsetDp = it)) }
                     }
+                    SwitchPreference(
+                        title = tr("调整悬浮态整体大小", "调整悬浮态整体大小"),
+                        checked = settings.customSplashSize,
+                        onCheckedChange = { save(settings.copy(customSplashSize = it)) },
+                    )
+                    PortalAppearanceVisibility(settings.customSplashSize) {
+                        PortalSlider(
+                            tr("悬浮态整体大小", "悬浮态整体大小"),
+                            settings.splashSizeOffsetPercent, -100..100, 0, "%", true,
+                        ) { save(settings.copy(splashSizeOffsetPercent = it)) }
+                    }
+                    SwitchPreference(
+                        title = tr("调整悬浮态传送门图标大小", "调整悬浮态传送门图标大小"),
+                        checked = settings.customSplashIconSize,
+                        onCheckedChange = { save(settings.copy(customSplashIconSize = it)) },
+                    )
+                    PortalAppearanceVisibility(settings.customSplashIconSize) {
+                        PortalSlider(
+                            tr("悬浮态图标大小", "悬浮态图标大小"),
+                            settings.splashIconSizeOffsetPercent, -100..100, 0, "%", true,
+                        ) { save(settings.copy(splashIconSizeOffsetPercent = it)) }
+                    }
                 }
             }
             item {

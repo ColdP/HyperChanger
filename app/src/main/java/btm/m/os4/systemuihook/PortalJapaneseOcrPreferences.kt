@@ -31,7 +31,7 @@ internal fun PortalJapaneseOcrPreferences(enabled: Boolean, onChange: (Boolean) 
     var modelDialog by remember { mutableStateOf(false) }
     var deleteDialog by remember { mutableStateOf(false) }
     SwitchPreference(
-        title = tr("为传送门添加日语识别的能力", "为传送门添加日语识别的能力"),
+        title = tr("增强传送门文本识别能力", "增强传送门文本识别能力"),
         checked = enabled,
         onCheckedChange = { value ->
             onChange(value)
@@ -44,7 +44,7 @@ internal fun PortalJapaneseOcrPreferences(enabled: Boolean, onChange: (Boolean) 
         exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
     ) {
         ArrowPreference(
-            title = tr("OCR 本地识别模型下载", "OCR 本地识别模型下载"),
+            title = tr("OCR 中日英本地识别模型下载", "OCR 中日英本地识别模型下载"),
             summary = when (state.phase) {
                 PortalModelPhase.CHECKING -> tr("正在检查模型…", "正在检查模型…")
                 PortalModelPhase.MISSING -> tr("未下载，点击下载", "未下载，点击下载")
@@ -67,8 +67,8 @@ internal fun PortalJapaneseOcrPreferences(enabled: Boolean, onChange: (Boolean) 
     }
     WindowDialog(
         show = enabled && modelDialog,
-        title = tr("日语识别模型名称", PORTAL_OCR_MODEL_NAME),
-        summary = tr("日语识别模型", "日语识别模型"),
+        title = tr("中日英识别模型名称", PORTAL_OCR_MODEL_NAME),
+        summary = tr("中日英识别模型", "中日英识别模型"),
         titleTextAlign = TextAlign.Start,
         summaryTextAlign = TextAlign.Start,
         onDismissRequest = { modelDialog = false },
@@ -82,8 +82,8 @@ internal fun PortalJapaneseOcrPreferences(enabled: Boolean, onChange: (Boolean) 
     }
     WindowDialog(
         show = enabled && deleteDialog,
-        title = tr("删除日语识别模型？", "删除日语识别模型？"),
-        summary = tr("删除后需要重新下载才能使用日语识别。", "删除后需要重新下载才能使用日语识别。"),
+        title = tr("删除中日英识别模型？", "删除中日英识别模型？"),
+        summary = tr("删除后需要重新下载才能使用增强识别能力。", "删除后需要重新下载才能使用增强识别能力。"),
         titleTextAlign = TextAlign.Start,
         summaryTextAlign = TextAlign.Start,
         onDismissRequest = { deleteDialog = false; modelDialog = true },

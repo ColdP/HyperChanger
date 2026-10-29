@@ -35,26 +35,29 @@ internal class PortalOcrHooks(
             val pair = classLoader.loadClass("kotlin.Pair").getConstructor(Any::class.java, Any::class.java)
             check(target.returnType == pair.declaringClass) { "Unexpected Portal OCR return signature" }
             hookDeoptimized(target).setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("hyperchanger:portal:japanese-ocr")
+                .setId("hyperchanger:portal:multilingual-ocr")
                 .intercept { chain ->
                     val bitmap = chain.getArg(0) as? Bitmap
                     val eligible = preferences.getBoolean(KEY_PORTAL_JAPANESE_OCR, false) &&
                         Looper.myLooper() != Looper.getMainLooper() && bitmap != null && !bitmap.isRecycled &&
                         bitmap.width.toLong() * bitmap.height <= PORTAL_OCR_MAX_PIXELS
-                    val localResult = if (eligible) runCatching {
+                    // Invoke the original exactly once and use it as a fallback when the
+                    // local multilingual model is unavailable or returns no text.
+                    val original = chain.proceed()
+                    if (!eligible) return@intercept original
+                    val localResult = runCatching {
                         val context = app.invoke(null) as Context
                         val structured = recognize(context, requireNotNull(bitmap))
                         structured?.let { pair.newInstance(false, it) }
                     }.onFailure {
                         // Never log the image or the recognized text.
-                        HookModuleLogger.log(module, Log.DEBUG, logTag, "Portal Japanese OCR unavailable: ${it.javaClass.simpleName}")
-                    }.getOrNull() else null
-                    // No result means the original method still executes exactly once.
-                    localResult ?: chain.proceed()
+                        HookModuleLogger.log(module, Log.DEBUG, logTag, "Portal multilingual OCR unavailable: ${it.javaClass.simpleName}")
+                    }.getOrNull()
+                    localResult ?: original
                 }
             installed = true
-            HookModuleLogger.log(module, Log.INFO, logTag, "Installed Portal Japanese OCR bridge")
-        }.onFailure { HookModuleLogger.log(module, Log.WARN, logTag, "Portal Japanese OCR hook unavailable", it) }
+            HookModuleLogger.log(module, Log.INFO, logTag, "Installed Portal multilingual OCR bridge")
+        }.onFailure { HookModuleLogger.log(module, Log.WARN, logTag, "Portal multilingual OCR hook unavailable", it) }
     }
 
     private fun recognize(context: Context, bitmap: Bitmap): String? {

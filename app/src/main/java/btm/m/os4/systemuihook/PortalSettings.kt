@@ -22,6 +22,10 @@ internal const val KEY_PORTAL_MATERIAL_MODE = "portal_material_mode"
 internal const val KEY_PORTAL_USE_GLOBAL_GLASS = "portal_material_use_global_glass"
 internal const val KEY_PORTAL_GLASS_PREFIX = "portal_material_glass_"
 internal const val KEY_PORTAL_ADVANCED_HIGHLIGHT = "portal_advanced_material_highlight"
+internal const val KEY_PORTAL_CUSTOM_SPLASH_SIZE = "portal_custom_splash_size"
+internal const val KEY_PORTAL_SPLASH_SIZE_OFFSET = "portal_splash_size_offset_percent"
+internal const val KEY_PORTAL_CUSTOM_SPLASH_ICON_SIZE = "portal_custom_splash_icon_size"
+internal const val KEY_PORTAL_SPLASH_ICON_SIZE_OFFSET = "portal_splash_icon_size_offset_percent"
 internal const val PORTAL_DEVELOPER_SETTING = "key_dev_developer_mode_v1"
 
 internal const val PORTAL_MATERIAL_DEFAULT = 0
@@ -44,6 +48,10 @@ internal data class PortalAppearanceSettings(
     val materialMode: Int = PORTAL_MATERIAL_DEFAULT,
     val useGlobalGlass: Boolean = true,
     val advancedHighlight: Boolean = false,
+    val customSplashSize: Boolean = false,
+    val splashSizeOffsetPercent: Int = 0,
+    val customSplashIconSize: Boolean = false,
+    val splashIconSizeOffsetPercent: Int = 0,
     val glass: SoftGlassSettings = SoftGlassSettings().resetParameters(),
 )
 
@@ -67,6 +75,10 @@ internal object PortalSettings {
         materialMode = preferences.getInt(KEY_PORTAL_MATERIAL_MODE, if (preferences.getBoolean(KEY_PORTAL_BLUR, false)) PORTAL_MATERIAL_ADVANCED else PORTAL_MATERIAL_DEFAULT).coerceIn(PORTAL_MATERIAL_DEFAULT, PORTAL_MATERIAL_SOFT_GLASS),
         useGlobalGlass = preferences.getBoolean(KEY_PORTAL_USE_GLOBAL_GLASS, true),
         advancedHighlight = preferences.getBoolean(KEY_PORTAL_ADVANCED_HIGHLIGHT, false),
+        customSplashSize = preferences.getBoolean(KEY_PORTAL_CUSTOM_SPLASH_SIZE, false),
+        splashSizeOffsetPercent = preferences.getInt(KEY_PORTAL_SPLASH_SIZE_OFFSET, 0).coerceIn(-100, 100),
+        customSplashIconSize = preferences.getBoolean(KEY_PORTAL_CUSTOM_SPLASH_ICON_SIZE, false),
+        splashIconSizeOffsetPercent = preferences.getInt(KEY_PORTAL_SPLASH_ICON_SIZE_OFFSET, 0).coerceIn(-100, 100),
         glass = readSoftGlassSettings(preferences, KEY_PORTAL_GLASS_PREFIX),
     )
 
@@ -96,6 +108,10 @@ internal object PortalSettings {
             if (local.contains(KEY_PORTAL_BLUR)) read(local).materialMode else value.materialMode)
         if (!local.contains(KEY_PORTAL_USE_GLOBAL_GLASS)) editor.putBoolean(KEY_PORTAL_USE_GLOBAL_GLASS, value.useGlobalGlass)
         if (!local.contains(KEY_PORTAL_ADVANCED_HIGHLIGHT)) editor.putBoolean(KEY_PORTAL_ADVANCED_HIGHLIGHT, value.advancedHighlight)
+        if (!local.contains(KEY_PORTAL_CUSTOM_SPLASH_SIZE)) editor.putBoolean(KEY_PORTAL_CUSTOM_SPLASH_SIZE, value.customSplashSize)
+        if (!local.contains(KEY_PORTAL_SPLASH_SIZE_OFFSET)) editor.putInt(KEY_PORTAL_SPLASH_SIZE_OFFSET, value.splashSizeOffsetPercent)
+        if (!local.contains(KEY_PORTAL_CUSTOM_SPLASH_ICON_SIZE)) editor.putBoolean(KEY_PORTAL_CUSTOM_SPLASH_ICON_SIZE, value.customSplashIconSize)
+        if (!local.contains(KEY_PORTAL_SPLASH_ICON_SIZE_OFFSET)) editor.putInt(KEY_PORTAL_SPLASH_ICON_SIZE_OFFSET, value.splashIconSizeOffsetPercent)
         remote.all.forEach { (key, entry) ->
             if (key.startsWith(KEY_PORTAL_GLASS_PREFIX) && !local.contains(key)) {
                 when (entry) {
@@ -125,6 +141,10 @@ internal object PortalSettings {
             .putInt(KEY_PORTAL_MATERIAL_MODE, settings.materialMode.coerceIn(PORTAL_MATERIAL_DEFAULT, PORTAL_MATERIAL_SOFT_GLASS))
             .putBoolean(KEY_PORTAL_USE_GLOBAL_GLASS, settings.useGlobalGlass)
             .putBoolean(KEY_PORTAL_ADVANCED_HIGHLIGHT, settings.advancedHighlight)
+            .putBoolean(KEY_PORTAL_CUSTOM_SPLASH_SIZE, settings.customSplashSize)
+            .putInt(KEY_PORTAL_SPLASH_SIZE_OFFSET, settings.splashSizeOffsetPercent.coerceIn(-100, 100))
+            .putBoolean(KEY_PORTAL_CUSTOM_SPLASH_ICON_SIZE, settings.customSplashIconSize)
+            .putInt(KEY_PORTAL_SPLASH_ICON_SIZE_OFFSET, settings.splashIconSizeOffsetPercent.coerceIn(-100, 100))
             .putBoolean(KEY_PORTAL_GLASS_PREFIX + "enabled", settings.glass.enabled)
             .putInt(KEY_PORTAL_GLASS_PREFIX + "refraction_blur", settings.glass.refractionBlur)
             .putInt(KEY_PORTAL_GLASS_PREFIX + "blur_percent", settings.glass.backgroundBlur)

@@ -59,6 +59,22 @@ fun main() {
     }
     portalPrefs.write(KEY_PORTAL_ADVANCED_HIGHLIGHT to true)
     check(PortalSettings.read(portalPrefs.prefs).advancedHighlight)
+    portalPrefs.write(KEY_PORTAL_SPLASH_SIZE_OFFSET to -101)
+    check(PortalSettings.read(portalPrefs.prefs).splashSizeOffsetPercent == -100)
+    portalPrefs.write(KEY_PORTAL_SPLASH_SIZE_OFFSET to 101)
+    check(PortalSettings.read(portalPrefs.prefs).splashSizeOffsetPercent == 100)
+    portalPrefs.write(KEY_PORTAL_CUSTOM_SPLASH_ICON_SIZE to true, KEY_PORTAL_SPLASH_ICON_SIZE_OFFSET to -101)
+    check(PortalSettings.read(portalPrefs.prefs).let { it.customSplashIconSize && it.splashIconSizeOffsetPercent == -100 })
+    check(!PortalSettings.read(portalPrefs.prefs).customSplashSize)
+    portalPrefs.write(KEY_PORTAL_SPLASH_ICON_SIZE_OFFSET to 101)
+    check(PortalSettings.read(portalPrefs.prefs).splashIconSizeOffsetPercent == 100)
+    check(portalSplashScale(-100) == 0f)
+    check(portalSplashScale(0) == 1f)
+    check(portalSplashScale(100) == 2f)
+    check(portalSplashDimension(190, 100) == 380)
+    check(portalSplashDimension(190, -50) == 95)
+    check(portalSplashDimension(190, 0) == 190)
+    check(portalSplashDimension(190, -100) == 1)
     portalPrefs.write(KEY_PORTAL_EXPANDED_HEIGHT to -129)
     check(PortalSettings.read(portalPrefs.prefs).expandedHeightOffsetDp == -128)
     portalPrefs.write(KEY_PORTAL_EXPANDED_HEIGHT to 257)
@@ -121,10 +137,19 @@ fun main() {
         KEY_PORTAL_CUSTOM_EXPANDED_HEIGHT to false, KEY_PORTAL_EXPANDED_HEIGHT to 0,
         KEY_PORTAL_MATERIAL_MODE to PORTAL_MATERIAL_DEFAULT, KEY_PORTAL_USE_GLOBAL_GLASS to true,
         KEY_PORTAL_ADVANCED_HIGHLIGHT to false,
+        KEY_PORTAL_CUSTOM_SPLASH_SIZE to false, KEY_PORTAL_SPLASH_SIZE_OFFSET to 0,
+        KEY_PORTAL_CUSTOM_SPLASH_ICON_SIZE to false, KEY_PORTAL_SPLASH_ICON_SIZE_OFFSET to 0,
     )
     check(events.isEmpty()) { "Portal defaults must not suggest a restart" }
     local.write(KEY_PORTAL_ADVANCED_HIGHLIGHT to true)
     check(events.removeLast() == setOf(ScopeApplication.PORTAL))
+    local.write(KEY_PORTAL_CUSTOM_SPLASH_SIZE to true, KEY_PORTAL_SPLASH_SIZE_OFFSET to 100)
+    check(events.removeLast() == setOf(ScopeApplication.PORTAL))
+    local.write(KEY_PORTAL_CUSTOM_SPLASH_ICON_SIZE to true, KEY_PORTAL_SPLASH_ICON_SIZE_OFFSET to -50)
+    check(events.removeLast() == setOf(ScopeApplication.PORTAL))
+    check(PortalSettings.read(local.prefs).let {
+        it.customSplashSize && it.splashSizeOffsetPercent == 100 && it.customSplashIconSize && it.splashIconSizeOffsetPercent == -50
+    })
     local.write(KEY_PORTAL_MATERIAL_MODE to PORTAL_MATERIAL_SOFT_GLASS, KEY_PORTAL_USE_GLOBAL_GLASS to false)
     check(events.removeLast() == setOf(ScopeApplication.PORTAL))
     local.write(KEY_PORTAL_GLASS_PREFIX + "refraction" to 30)

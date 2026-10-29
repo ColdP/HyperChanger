@@ -33,6 +33,7 @@ internal class PortalHooks(
     private val installed = mutableSetOf<String>()
     private val cards = WeakHashMap<View, CardState>()
     private val buttons = WeakHashMap<ImageView, Boolean>()
+    private val splashIcons = WeakHashMap<ImageView, Boolean>()
     private var globalGlass: SoftGlassRuntimeSettings? = null
     private val ocrHooks = PortalOcrHooks(module, hookDeoptimized, logTag)
     private val cardNames = setOf(
@@ -63,6 +64,38 @@ internal class PortalHooks(
         if (settings.japaneseOcr) ocrHooks.install(classLoader, preferences)
         val material = settings.materialMode != PORTAL_MATERIAL_DEFAULT
         val adjustCards = material || (settings.customCorner && settings.cornerOffsetDp != 0)
+        if (settings.customSplashSize) installHook("splash-size") {
+            hookAfter(classLoader.loadClass(floatPrefix + "TaplusSplashFloatView"), "initView") { owner ->
+                if (owner.field("mIsClipboardView") != false || settings.splashSizeOffsetPercent == 0) return@hookAfter
+                val root = owner.field("mMainView") as? ViewGroup ?: return@hookAfter
+                val params = owner.field("wmParams") as? WindowManager.LayoutParams ?: return@hookAfter
+                if (params.width <= 0) return@hookAfter
+                val nativeWidth = params.width
+                val wrapper = PortalSplashSizeLayout(root, nativeWidth, settings.splashSizeOffsetPercent)
+                owner.setField("mMainView", wrapper)
+                params.width = portalSplashDimension(nativeWidth, settings.splashSizeOffsetPercent)
+            }
+        }
+        if (settings.customSplashIconSize && settings.splashIconSizeOffsetPercent != 0) installHook("splash-icon-size") {
+            val card = classLoader.loadClass("com.miui.contentextension.text.cardview.TaplusRecognitionShrinkCard")
+            val setter = card.getDeclaredMethod("setRecognitionIcon", Int::class.javaPrimitiveType)
+            hookDeoptimized(setter).setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("hyperchanger:portal:splash-icon-size").intercept { chain ->
+                    val result = chain.proceed()
+                    protect {
+                        val icon = chain.thisObject.field("mRecognitionIcon") as? ImageView
+                        if (icon != null) {
+                            applyPortalSplashIconSize(icon, settings.splashIconSizeOffsetPercent)
+                            if (splashIcons.put(icon, true) == null) {
+                                icon.addOnLayoutChangeListener { view, _, _, _, _, _, _, _, _ ->
+                                    protect { applyPortalSplashIconSize(view as ImageView, settings.splashIconSizeOffsetPercent) }
+                                }
+                            }
+                        }
+                    }
+                    result
+                }
+        }
         if (adjustCards) {
             installHook("card-background") {
                 // Common setter also covers resource-backed and legacy background assignments.
@@ -185,6 +218,19 @@ internal class PortalHooks(
             type = current.superclass
         }
         return null
+    }
+
+    private fun Any.setField(name: String, value: Any?) {
+        var type: Class<*>? = javaClass
+        while (type != null) {
+            val member = runCatching { type!!.getDeclaredField(name) }.getOrNull()
+            if (member != null) {
+                member.isAccessible = true
+                member.set(this, value)
+                return
+            }
+            type = type.superclass
+        }
     }
 
     private fun View.hasResourceName(name: String): Boolean =

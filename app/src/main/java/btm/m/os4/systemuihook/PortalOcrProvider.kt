@@ -24,7 +24,12 @@ class PortalOcrProvider : ContentProvider() {
         Thread(task, "PortalOcrDeadline").apply { isDaemon = true }
     }
 
-    override fun onCreate(): Boolean = true
+    override fun onCreate(): Boolean {
+        // Providers are created on app startup, even if enhanced OCR is disabled.
+        // The store performs legacy-model cleanup on its IO scope.
+        PortalOcrModelStore.get(requireNotNull(context))
+        return true
+    }
 
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle? {
         val context = requireNotNull(context)
@@ -45,7 +50,7 @@ class PortalOcrProvider : ContentProvider() {
                 var finished = false
                 val timedOut = AtomicBoolean(false)
                 try {
-                    check(engine.init(directory.absolutePath, "jpn", TessBaseAPI.OEM_LSTM_ONLY))
+                    check(engine.init(directory.absolutePath, PORTAL_OCR_LANGUAGES, TessBaseAPI.OEM_LSTM_ONLY))
                     engine.pageSegMode = TessBaseAPI.PageSegMode.PSM_AUTO
                     engine.setImage(bitmap)
                     val timer = deadline.schedule({
@@ -67,7 +72,7 @@ class PortalOcrProvider : ContentProvider() {
                 }
             }
         } catch (error: Exception) {
-            ModuleLog.w("PortalOcr", "Japanese recognition unavailable: ${error.javaClass.simpleName}")
+            ModuleLog.w("PortalOcr", "Multilingual recognition unavailable: ${error.javaClass.simpleName}")
             null
         } catch (_: LinkageError) {
             // An unavailable ABI/native dependency must preserve the stock OCR fallback.

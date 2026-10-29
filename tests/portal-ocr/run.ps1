@@ -10,7 +10,7 @@ $appClasses = Join-Path $project 'app\build\intermediates\built_in_kotlinc\debug
 $testClasspath = "$appClasses;$stdlib;$annotations;$json"
 & java "-Djava.io.tmpdir=$output" -cp "$gradleLib\*" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler -no-stdlib -no-reflect "-Xfriend-paths=$appClasses" -classpath $testClasspath -d "$output\classes" "$PSScriptRoot\PortalOcrTest.kt"
 if ($LASTEXITCODE -ne 0) { throw 'Portal OCR regression checks failed to compile.' }
-$model = Join-Path $project '.reverse-tmp\portal-ocr-analysis\jpn.traineddata'
+$model = Join-Path $project '.reverse-tmp\portal-ocr-analysis\portal-ocr-eng-chi_sim-jpn.zip'
 $modelArgs = @()
 if (Test-Path -LiteralPath $model) { $modelArgs = @($model) }
 & java "-Djava.io.tmpdir=$output" -cp "$output\classes;$testClasspath" btm.m.os4.systemuihook.PortalOcrTestKt @modelArgs

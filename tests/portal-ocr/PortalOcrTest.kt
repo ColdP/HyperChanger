@@ -15,6 +15,15 @@ private fun selectedText(words: List<PortalOcrWord>): String = buildString {
 }
 
 fun main(args: Array<String>) {
+    // The enhancement uses one model set for Chinese, Japanese, English and mixed text.
+    for (text in listOf("中文识别测试", "繁體中文辨識", "日本語の認識", "漢字", "English 123", "中文と日本語 English")) {
+        val result = JSONObject(checkNotNull(portalOcrJson(text)))
+        val words = (0 until result.getJSONArray("wordsList").length()).map { index ->
+            val item = result.getJSONArray("wordsList").getJSONObject(index)
+            PortalOcrWord(item.getString("word"), item.getBoolean("needBlank"))
+        }
+        check(selectedText(words) == text)
+    }
     val samples = listOf(
         "今日はいい天気です。カタカナとひらがな、日本語の認識テスト！",
         "日本語 OCR test 123 と English、2026年。",
@@ -41,6 +50,23 @@ fun main(args: Array<String>) {
     check(portalOcrJson(" \n\t") == null)
     check(portalOcrJson("あ".repeat(16_385)) == null)
 
+    val migrationRoot = java.nio.file.Files.createTempDirectory(File(System.getProperty("java.io.tmpdir")).toPath(), "portal-migration-").toFile()
+    try {
+        val legacy = File(migrationRoot, "portal-ocr/tessdata").apply { mkdirs() }
+        val current = File(migrationRoot, "portal-ocr-multilingual-v1/models/tessdata").apply { mkdirs() }
+        File(legacy, "jpn.traineddata").writeText("old model")
+        File(legacy, "jpn.traineddata.part").writeText("old partial")
+        File(legacy, "unrelated").writeText("preserve")
+        File(current, "jpn.traineddata").writeText("new model")
+        check(removeLegacyPortalOcrModel(migrationRoot))
+        check(!File(legacy, "jpn.traineddata").exists() && !File(legacy, "jpn.traineddata.part").exists())
+        check(File(legacy, "unrelated").readText() == "preserve")
+        check(File(current, "jpn.traineddata").readText() == "new model")
+        check(removeLegacyPortalOcrModel(migrationRoot)) // Repeated startup is harmless.
+    } finally {
+        migrationRoot.deleteRecursively()
+    }
+
     val sink = OutputStream.nullOutputStream()
     check(runCatching {
         transferPortalOcrModel(ByteArrayInputStream(ByteArray(100)), sink, { false }, {})
@@ -62,6 +88,13 @@ fun main(args: Array<String>) {
         val output = ByteArrayOutputStream()
         model.inputStream().use { input -> transferPortalOcrModel(input, output, { false }, {}) }
         check(output.toByteArray().contentEquals(model.readBytes()))
+        val unpacked = File(model.parentFile, "test-unpacked").also { it.deleteRecursively() }
+        unpackPortalOcrModel(model, unpacked) { false }
+        check(validPortalOcrLanguages(unpacked))
+        File(unpacked, "tessdata/chi_sim.traineddata").appendText("corrupt")
+        check(!validPortalOcrLanguages(unpacked))
+        check(runCatching { unpackPortalOcrModel(model, unpacked) { true } }.exceptionOrNull() is CancellationException)
+        unpacked.deleteRecursively()
     }
     println("Portal OCR text, JSON, model integrity and cancellation checks passed")
 }

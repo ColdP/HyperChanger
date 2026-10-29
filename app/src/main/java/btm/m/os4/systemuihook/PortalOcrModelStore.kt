@@ -25,8 +25,11 @@ internal data class PortalModelState(val phase: PortalModelPhase, val downloaded
 /** One owner in the module app; switching the feature off never removes its model. */
 internal class PortalOcrModelStore private constructor(context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val directory = File(context.noBackupFilesDir, "portal-ocr")
-    private val model = File(directory, "tessdata/$PORTAL_OCR_MODEL_NAME")
+    private val noBackupFilesDir = context.noBackupFilesDir
+    private val directory = File(context.noBackupFilesDir, "portal-ocr-multilingual-v1")
+    private val installedModels = File(directory, "models")
+    private val staging = File(directory, "staging")
+    private val model = File(directory, PORTAL_OCR_MODEL_NAME)
     private val partial = File(model.parentFile, "$PORTAL_OCR_MODEL_NAME.part")
     private val files = ReentrantReadWriteLock()
     private val gate = Any()
@@ -40,10 +43,13 @@ internal class PortalOcrModelStore private constructor(context: Context) {
 
     init {
         scope.launch {
-            val ready = files.write {
+            val ready = files.write { runCatching {
+                // One-way migration: the old Japanese-only file must never be loaded.
+                if (!removeLegacyPortalOcrModel(noBackupFilesDir)) ModuleLog.w("PortalOcr", "Legacy model cleanup failed")
                 partial.delete() // An app/process exit may have left an incomplete download.
-                runCatching { validPortalOcrModel(model) }.getOrDefault(false)
-            }
+                staging.deleteRecursively()
+                validPortalOcrModel(model) && validPortalOcrLanguages(installedModels)
+            }.getOrDefault(false) }
             mutableState.value = PortalModelState(if (ready) PortalModelPhase.READY else PortalModelPhase.MISSING)
         }
     }
@@ -76,11 +82,15 @@ internal class PortalOcrModelStore private constructor(context: Context) {
                         output.fd.sync()
                     }
                 }
+                staging.deleteRecursively()
+                unpackPortalOcrModel(partial, staging, current.cancelled::get)
                 // Cancellation and final commit share the same lock: a cancelled transfer
                 // can never subsequently publish a ready model.
                 synchronized(gate) {
                     check(!current.cancelled.get())
                     files.write {
+                        check(!installedModels.exists() || installedModels.deleteRecursively())
+                        Files.move(staging.toPath(), installedModels.toPath(), StandardCopyOption.ATOMIC_MOVE)
                         Files.move(partial.toPath(), model.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
                     }
                     ready = true
@@ -90,6 +100,7 @@ internal class PortalOcrModelStore private constructor(context: Context) {
             } finally {
                 current.connection?.disconnect()
                 partial.delete()
+                staging.deleteRecursively()
                 synchronized(gate) {
                     attempt = null
                     mutableState.value = PortalModelState(when {
@@ -113,15 +124,19 @@ internal class PortalOcrModelStore private constructor(context: Context) {
         if (attempt != null || mutableState.value.phase != PortalModelPhase.READY) return@synchronized
         mutableState.value = PortalModelState(PortalModelPhase.DELETING)
         scope.launch {
-            val deleted = files.write { runCatching { !model.exists() || model.delete() }.getOrDefault(false) }
+            val deleted = files.write { runCatching {
+                val removedLanguages = !installedModels.exists() || installedModels.deleteRecursively()
+                val removedArchive = !model.exists() || model.delete()
+                removedLanguages && removedArchive
+            }.getOrDefault(false) }
             mutableState.value = PortalModelState(if (deleted) PortalModelPhase.MISSING else PortalModelPhase.READY, deleteFailed = !deleted)
             // A failed delete leaves the READY state; the UI lets the user retry.
         }
     }
 
     fun <T> withModel(action: (File) -> T): T? = files.read {
-        if (!runCatching { validPortalOcrModel(model) }.getOrDefault(false)) return@read null
-        action(directory)
+        if (!runCatching { validPortalOcrModel(model) && validPortalOcrLanguages(installedModels) }.getOrDefault(false)) return@read null
+        action(installedModels)
     }
 
     companion object {
