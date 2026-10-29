@@ -30,6 +30,16 @@ private class Preferences {
 }
 
 fun main() {
+    val portalPrefs = Preferences()
+    check(PortalSettings.read(portalPrefs.prefs) == PortalAppearanceSettings())
+    portalPrefs.write(KEY_PORTAL_BLUR_RADIUS to -1, KEY_PORTAL_OPACITY to 101, KEY_PORTAL_CORNER to -33)
+    check(PortalSettings.read(portalPrefs.prefs).let { it.blurRadiusDp == 0 && it.opacityPercent == 100 && it.cornerOffsetDp == -32 })
+    portalPrefs.write(KEY_PORTAL_BLUR_RADIUS to 101, KEY_PORTAL_OPACITY to -1, KEY_PORTAL_CORNER to 65)
+    check(PortalSettings.read(portalPrefs.prefs).let { it.blurRadiusDp == 100 && it.opacityPercent == 0 && it.cornerOffsetDp == 64 })
+    check(portalCornerRadius(30f, 0, 3f) == 30f)
+    check(portalCornerRadius(30f, -32, 3f) == 0f)
+    check(portalCornerRadius(30f, -5, 3f) == 15f)
+    check(portalCornerRadius(30f, 64, 3f) == 222f)
     val dialerPrefs = Preferences()
     check(ContactsDialerSettings.read(dialerPrefs.prefs) == ContactsDialerBackgroundSettings())
     dialerPrefs.write(KEY_CONTACTS_DIALER_BACKGROUND_BLUR_RADIUS to -1, KEY_CONTACTS_DIALER_BACKGROUND_OPACITY to 101)
@@ -71,6 +81,30 @@ fun main() {
     local.write("ios_notification_center" to false, "ios_notification_header" to false, "ios_notification_clear_style" to 0)
     local.write("control_center_header_height_offset_dp" to 0)
     check(events.isEmpty()) { "Default materialization generated restart suggestions: $events" }
+    local.write(
+        KEY_PORTAL_BLUR to false, KEY_PORTAL_CUSTOM_BLUR to false, KEY_PORTAL_BLUR_RADIUS to 24,
+        KEY_PORTAL_CUSTOM_OPACITY to false, KEY_PORTAL_OPACITY to 70,
+        KEY_PORTAL_CUSTOM_CORNER to false, KEY_PORTAL_CORNER to 0, KEY_PORTAL_DEVELOPER to false,
+        KEY_PORTAL_REMOVE_SCRIM to false,
+        KEY_PORTAL_JAPANESE_OCR to false,
+    )
+    check(events.isEmpty()) { "Portal defaults must not suggest a restart" }
+    local.write(KEY_PORTAL_BLUR to true, KEY_PORTAL_CUSTOM_BLUR to true, KEY_PORTAL_BLUR_RADIUS to 48)
+    check(events.removeLast() == setOf(ScopeApplication.PORTAL))
+    check(events.isEmpty()) { "A multi-key Portal edit must produce one event" }
+    local.write(KEY_PORTAL_CUSTOM_OPACITY to true, KEY_PORTAL_OPACITY to 0)
+    check(events.removeLast() == setOf(ScopeApplication.PORTAL))
+    local.write(KEY_PORTAL_CUSTOM_CORNER to true, KEY_PORTAL_CORNER to -32)
+    check(events.removeLast() == setOf(ScopeApplication.PORTAL))
+    local.write(KEY_PORTAL_DEVELOPER to true)
+    check(events.removeLast() == setOf(ScopeApplication.PORTAL))
+    local.write(KEY_PORTAL_REMOVE_SCRIM to true)
+    check(events.removeLast() == setOf(ScopeApplication.PORTAL))
+    check(PortalSettings.read(local.prefs).removeScrim)
+    local.write(KEY_PORTAL_JAPANESE_OCR to true)
+    check(events.removeLast() == setOf(ScopeApplication.PORTAL))
+    check(PortalSettings.read(local.prefs).japaneseOcr)
+    check(events.isEmpty())
     local.write(
         KEY_CONTACTS_DIALER_BACKGROUND_BLUR to false,
         KEY_CONTACTS_DIALER_BACKGROUND_BLUR_CUSTOM to false,

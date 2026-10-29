@@ -52,6 +52,10 @@ internal class OthersHooks(
     private val rearMiniPlayerHooks = RearMiniPlayerHooks(module)
     private val screenshotHooks = ScreenshotHooks(module, hookDeoptimized, logTag)
     private val contactsDialerHooks = ContactsDialerHooks(module, hookDeoptimized, logTag)
+    private val portalHooks = PortalHooks(module, hookDeoptimized, logTag)
+
+    fun installPortalHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
+        portalHooks.install(classLoader, preferences)
 
     fun installContactsDialerHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
         contactsDialerHooks.install(classLoader, preferences)
@@ -727,6 +731,22 @@ internal class OthersHooks(
                     }
                 }
         }
+    }
+
+    /** Restore the full color-style page using HyperLight's simplified-mode gate override. */
+    fun installSettingsAdvancedColorStyleHook(loader: ClassLoader, prefs: SharedPreferences) {
+        if (!readSettingsAdvancedColorStyleSettings(prefs).enabled) return
+        val target = loader.loadClass("com.android.settings.display.ScreenEffectFragment")
+            .getDeclaredMethod("isSupportSimplifiedColormode")
+        check(java.lang.reflect.Modifier.isStatic(target.modifiers) && target.returnType == Boolean::class.javaPrimitiveType) {
+            "Unexpected ScreenEffectFragment.isSupportSimplifiedColormode signature"
+        }
+        // Keep supportDisplayAdvanced's hardware and primary-user checks in the stock path.
+        hookDeoptimized(target)
+            .setExceptionMode(ExceptionMode.PROTECTIVE)
+            .setId("hyperchanger:settings-advanced-color-style")
+            .intercept { false }
+        btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed Settings advanced color style hook")
     }
 
     /** Best-effort tweaks that reshape the system Settings app itself. */

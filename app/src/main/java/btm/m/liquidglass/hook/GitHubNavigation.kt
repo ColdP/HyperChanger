@@ -27,6 +27,8 @@ internal object GitHubNavigation {
     const val PACKAGE = "com.github.android"
     const val ACTIVITY = "com.github.android.main.MainActivity"
     private val snapshots = WeakHashMap<Activity, Snapshot>()
+    private data class ActiveState(val active: Boolean, val root: Boolean)
+    private val activeStates = WeakHashMap<Activity, ActiveState>()
     private data class InsetState(val active: Boolean, val heightPx: Int)
     private val insetStates = WeakHashMap<Activity, InsetState>()
     private val lastAppliedInsets = WeakHashMap<View, Int>()
@@ -74,6 +76,20 @@ internal object GitHubNavigation {
         private val destinationKey = type("ydo").getDeclaredField("q").apply { isAccessible = true }
         private val destinationRoute = type("hc5").getDeclaredField("c").apply { isAccessible = true }
         private val isSelected = main.getDeclaredMethod("r0", tab, type("ydo")).apply { isAccessible = true }
+        // q4a.i is the shared lower-right FAB host used by both Home and Copilot.
+        // Resolve this optional bridge independently: a host signature change must
+        // never prevent n5a.q from feeding the custom navigation detector.
+        val fab: java.lang.reflect.Method? = runCatching {
+            type("q4a").getDeclaredMethod(
+                "i", type("v4o"), type("v4o"), Boolean::class.javaPrimitiveType!!,
+                function, type("yh9"), type("j4i"), Int::class.javaPrimitiveType!!,
+            ).apply { isAccessible = true }
+        }.getOrNull()
+        private val modifierOffset: java.lang.reflect.Method? = runCatching {
+            type("o410").getDeclaredMethod(
+                "a", type("v4o"), Float::class.javaPrimitiveType!!, Float::class.javaPrimitiveType!!,
+            ).apply { isAccessible = true }
+        }.getOrNull()
 
         fun owner(click: Any): Activity? = if (callback.isInstance(click) && callbackKind.getInt(click) == 0) {
             callbackActivity.get(click) as? Activity
@@ -103,11 +119,15 @@ internal object GitHubNavigation {
             return normalized in rootRoutes
         }
 
-        fun currentClick(snapshot: Snapshot, destination: Any): Any? = snapshot.click.get()?.takeIf {
-            callbackDestination.get(it) === destination
+        fun currentClick(snapshot: Snapshot, destination: Any): Any? {
+            val click = snapshot.click.get() ?: return null
+            return click.takeIf { callbackDestination.get(click) === destination }
         }
 
         fun selected(entry: Any, destination: Any) = isSelected.invoke(null, entry, destination) == true
+
+        fun moveModifier(modifier: Any, dp: Float): Any =
+            modifierOffset?.invoke(null, modifier, 0f, -dp)!!
     }
 
     fun install(module: XposedModule, loader: ClassLoader) {
@@ -136,14 +156,44 @@ internal object GitHubNavigation {
                 // Never skip, modify or retry the original composable.
                 chain.proceed()
             }
+        host.fab?.let { fabMethod ->
+            runCatching { module.hook(fabMethod).setId("github-navigation:fab-avoidance")
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE).intercept { chain ->
+                val args = runCatching {
+                    val activity = activeActivity() ?: return@runCatching null
+                    val state = synchronized(activeStates) { activeStates[activity] }
+                    if (state?.active != true || !state.root) return@runCatching null
+                    val modifier = chain.getArg(1) ?: return@runCatching null
+                    fabMethod.parameterTypes.indices.map { chain.getArg(it) }.toTypedArray().also {
+                        // q4a.i owns the shared Home/Copilot lower-right FAB. Move the
+                        // host surface above the injected navigation surface; the host
+                        // keeps ownership of its hit target and animation.
+                        it[1] = host.moveModifier(modifier, 78f)
+                    }
+                }.onFailure { error ->
+                    HookModuleLogger.log(module, ModuleLog.WARN, "CustomNav-GitHub", "Unable to offset host Copilot FAB", error)
+                }.getOrNull()
+                if (args == null) chain.proceed() else chain.proceed(args)
+            }
+            }.onFailure { error ->
+                HookModuleLogger.log(module, ModuleLog.WARN, "CustomNav-GitHub", "FAB bridge unavailable; keeping navigation hook active", error)
+            }
+        }
     }
 
-    fun setActive(activity: Activity, active: Boolean, heightPx: Int = 0) {
+    fun setActive(activity: Activity, active: Boolean, heightPx: Int = 0, root: Boolean = false) {
+        synchronized(activeStates) {
+            activeStates[activity] = ActiveState(active, root)
+        }
         synchronized(insetStates) {
             if (active) insetStates[activity] = InsetState(true, heightPx.coerceAtLeast(0))
             else insetStates[activity] = InsetState(false, 0)
         }
         activity.findViewById<View>(android.R.id.content)?.requestApplyInsets()
+    }
+
+    private fun activeActivity(): Activity? = synchronized(activeStates) {
+        activeStates.entries.firstOrNull { it.value.active }?.key
     }
 
     private fun installInsetBridge(module: XposedModule) {
@@ -261,6 +311,12 @@ internal object GitHubNavigation {
             val entry = snapshot.entries.getOrNull(index) ?: return false
             host.invoke.invoke(click, entry)
             true
+        }.getOrDefault(false)
+
+        fun isRoot(): Boolean = runCatching {
+            val host = runtime ?: return false
+            val destination = host.currentDestination(activity) ?: return false
+            host.rootRoute(destination)
         }.getOrDefault(false)
 
         private fun icon(resource: Int): ImageBitmap? {

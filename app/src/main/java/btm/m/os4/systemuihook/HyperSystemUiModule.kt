@@ -1072,6 +1072,15 @@ class HyperSystemUiModule : XposedModule() {
             }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install screenshot shell hooks", error) }
             return
         }
+        if (param.packageName == "com.miui.contentextension") {
+            if (!runCatching { android.app.Application.getProcessName() == param.packageName }.getOrDefault(false)) return
+            runCatching {
+                othersHooks.installPortalHooks(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+            }.onFailure { error ->
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install Portal hooks", error)
+            }
+            return
+        }
         if (param.packageName == "com.android.systemui") {
             runCatching {
                 controlCenterHooks.installOldControlCenterHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
@@ -1122,6 +1131,9 @@ class HyperSystemUiModule : XposedModule() {
             return
         }
         if (param.packageName == SETTINGS_PACKAGE) {
+            runCatching {
+                othersHooks.installSettingsAdvancedColorStyleHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+            }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install Settings advanced color style hook", error) }
             runCatching {
                 othersHooks.installSettingsAppScopeHooks(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
             }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install Settings app scope hooks", error) }

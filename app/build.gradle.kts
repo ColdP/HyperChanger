@@ -91,6 +91,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.graphics:graphics-shapes:1.1.0")
     implementation("com.google.zxing:core:3.5.3")
+    implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
     implementation("org.luckypray:dexkit:2.2.0")
     implementation("org.lsposed.hiddenapibypass:hiddenapibypass:6.1")
     implementation("io.github.proify.lyricon:subscriber:0.1.70")

@@ -32,3 +32,18 @@ https://github.com/1812z/HyperIsland
 Copyright (c) 2026 1812z
 Licensed under the MIT License; the complete notice is distributed in
 app/src/main/assets/licenses/HyperIsland-MIT.txt.
+
+Japanese OCR runtime: Tesseract4Android 4.9.0
+https://github.com/adaptech-cz/Tesseract4Android/tree/4.9.0
+Copyright (C) 2019 Adaptech s.r.o., Robert Pösel
+Copyright (C) 2011 Google Inc.; Copyright (C) 2011 Robert Theis
+Licensed under Apache-2.0; see Tesseract4Android-Apache-2.0.txt.
+Includes Tesseract 5.5.1 (Apache-2.0), Leptonica 1.85.0 (BSD-style,
+see Leptonica-BSD.txt), libpng (see Libpng-LICENSE.txt), and the Independent
+JPEG Group's software (see Libjpeg-README.txt).
+
+The optional Japanese jpn.traineddata model is downloaded separately from
+https://coldp.github.io/hyperchanger-updateinfo/models/jpn.traineddata .
+It is mirrored without changes from tesseract-ocr/tessdata_fast revision
+87416418657359cb625c412a48b6e1d6d41c29bd, licensed under Apache-2.0.
+The model is not bundled in the application APK.

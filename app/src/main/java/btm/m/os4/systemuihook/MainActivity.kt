@@ -292,7 +292,7 @@ private enum class PageId {
     DEVICE_PROFILE_PRESETS, DEVICE_PROFILE_CLOUD_PRESETS,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
-    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND,
+    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND,
 }
 
 private data class CategorySearchItem(
@@ -891,6 +891,7 @@ private fun Root(
         service?.let {
             restartTracker.withoutTracking {
                 hooks.syncRemote(it)
+                PortalSettings.syncRemote(context, it)
                 globalSoftGlassStore.syncRemote(it)
                 VolumePanelGlassSettingsStore(context).syncRemote(it)
                 VolumePanelLayoutSettingsStore(context).syncRemote(it)
@@ -929,6 +930,7 @@ private fun Root(
                 homeFolderStore.syncRemote(it)
                 homeMaterialStore.syncRemote(it)
                 settingsAppStore.syncRemote(it)
+                SettingsAdvancedColorStyleSettingsStore(context).syncRemote(it)
                 superXiaoAiStore.syncRemote(it)
                 systemUpdateStore.syncRemote(it)
                 settings = hooks.settings
@@ -1298,8 +1300,6 @@ private fun Shell(
     val osCode = remember { OsCompatibility.versionCode() }
     var showOsWarning by remember { mutableStateOf(false) }
     var showOsMissing by remember { mutableStateOf(false) }
-    var showDebug by remember { mutableStateOf(false) }
-    var debugPreview by remember { mutableStateOf<String?>(null) }
     var disclaimerRead by remember { mutableStateOf(false) }
     // Module self-update prompt. Seeded from the process-level result so a rebuilt composition does
     // not lose an already resolved update.
@@ -1373,7 +1373,7 @@ private fun Shell(
         } else {
             pageStack.clear()
         }
-        if (leavingDisclaimer && (debugPreview == "non4" || (osCode.isNotBlank() && osCode != "4"))) {
+        if (leavingDisclaimer && osCode.isNotBlank() && osCode != "4") {
             showOsWarning = true
         }
         Unit
@@ -1419,7 +1419,7 @@ private fun Shell(
                 updateDeviceProfile, updateAppearance, updateMusicWhitelist, presetActions, updateAirDrop,
                 settingsApp = settingsApp, updateSettingsApp = updateSettingsApp, superXiaoAi = superXiaoAi, updateSuperXiaoAi = updateSuperXiaoAi, systemUpdate = systemUpdate, updateSystemUpdate = updateSystemUpdate,
                 openPage = openNestedPage, back = dismissPage,
-                onDebugMode = { showDebug = true }, captcha = captcha,
+                onEnterOobe = onEnterOobe, captcha = captcha,
                 onPickRasterImages = onPickRasterImages, onApplyRasterWallpaper = onApplyRasterWallpaper,
                 onPickAppearanceHome = onPickAppearanceHome, onPickAppearanceDevice = onPickAppearanceDevice,
                 onClearAppearanceHome = onClearAppearanceHome, onClearAppearanceDevice = onClearAppearanceDevice,
@@ -1560,26 +1560,26 @@ private fun Shell(
             }
         }
         OsWarningDialog(
-            show = page != PageId.DISCLAIMER && (showOsWarning || debugPreview == "non4"),
-            version = if (debugPreview == "non4") "3" else osCode,
+            show = page != PageId.DISCLAIMER && showOsWarning,
+            version = osCode,
             captcha = captcha,
             captchaInput = captchaInput,
             disclaimerRead = disclaimerRead,
-            preview = debugPreview == "non4",
+            preview = false,
             onCaptchaInput = { captchaInput = it.filter(Char::isDigit).take(6) },
             onDisclaimer = { showOsWarning = false; openNestedPage(PageId.DISCLAIMER) },
-            onConfirm = { if (disclaimerRead && captchaInput == captcha) { showOsWarning = false; debugPreview = null } },
+            onConfirm = { if (disclaimerRead && captchaInput == captcha) showOsWarning = false },
             onExit = { (context as? Activity)?.finishAndRemoveTask() },
         )
         OsMissingDialog(
-            show = showOsMissing || debugPreview == "empty",
-            seconds = if (debugPreview == "empty") 10 else exitSeconds,
-            preview = debugPreview == "empty",
-            onExit = { if (debugPreview == "empty") debugPreview = null else (context as? Activity)?.finishAndRemoveTask() },
+            show = showOsMissing,
+            seconds = exitSeconds,
+            preview = false,
+            onExit = { (context as? Activity)?.finishAndRemoveTask() },
         )
         UpdateAvailableDialog(
-            // Never stack on top of the compatibility gates or a preview.
-            show = pendingUpdate != null && !showOsWarning && !showOsMissing && debugPreview == null,
+            // Never stack on top of the compatibility gates.
+            show = pendingUpdate != null && !showOsWarning && !showOsMissing,
             currentVersion = BuildConfig.VERSION_NAME,
             latestVersion = pendingUpdate?.versionName.orEmpty(),
             onDismiss = {
@@ -1592,14 +1592,6 @@ private fun Shell(
                 openRootPage(PageId.SOFTWARE_UPDATE)
             },
         )
-        if (showDebug) {
-            DebugModeDialog(
-                onDismiss = { showDebug = false },
-                onNonHyperOs4 = { showDebug = false; debugPreview = "non4" },
-                onNonHyperOs = { showDebug = false; debugPreview = "empty" },
-                onEnterOobe = { showDebug = false; onEnterOobe() },
-            )
-        }
     }
     }
     }
@@ -3003,6 +2995,7 @@ private fun RestartScopesPage(
     )
     val otherTargets = listOf(
         ScopeApplication.CONTACTS_DIALER,
+        ScopeApplication.PORTAL,
         ScopeApplication.APPLE_MUSIC,
         ScopeApplication.WEIBO,
         ScopeApplication.XIAOHONGSHU,
@@ -3786,6 +3779,14 @@ private fun SystemSettings(
             appScope = appScopeStore.settings
         }
     }
+    val advancedColorStyleStore = remember(cpuIconContext) { SettingsAdvancedColorStyleSettingsStore(cpuIconContext) }
+    var advancedColorStyle by remember { mutableStateOf(advancedColorStyleStore.settings) }
+    LaunchedEffect(appScopeService) {
+        appScopeService?.let {
+            advancedColorStyleStore.syncRemote(it)
+            advancedColorStyle = advancedColorStyleStore.settings
+        }
+    }
     val soundEffectStore = remember(cpuIconContext) { SoundEffectPreferencesStore(cpuIconContext) }
     var soundEffect by remember { mutableStateOf(soundEffectStore.settings) }
     LaunchedEffect(soundEffectService) {
@@ -3963,6 +3964,14 @@ private fun SystemSettings(
                     onCheckedChange = { value ->
                         appScopeStore.update(appScopeService) { it.copy(oldControlCenter = value) }
                         appScope = appScopeStore.settings
+                    },
+                )
+                SwitchPreference(
+                    title = tr("解锁屏幕色彩风格的高级模式", "解锁屏幕色彩风格的高级模式"),
+                    checked = advancedColorStyle.enabled,
+                    onCheckedChange = { value ->
+                        advancedColorStyleStore.update(appScopeService) { it.copy(enabled = value) }
+                        advancedColorStyle = advancedColorStyleStore.settings
                     },
                 )
             }
@@ -4957,7 +4966,7 @@ private fun Detail(
     updateSettingsApp: ((SettingsAppPreferences) -> SettingsAppPreferences) -> Unit,
     updateSuperXiaoAi: ((SuperXiaoAiPreferences) -> SuperXiaoAiPreferences) -> Unit,
     updateSystemUpdate: ((SystemUpdatePreferences) -> SystemUpdatePreferences) -> Unit,
-    onDebugMode: () -> Unit,
+    onEnterOobe: () -> Unit,
     captcha: String,
     onPickRasterImages: () -> Unit,
     onApplyRasterWallpaper: () -> Unit,
@@ -4992,7 +5001,7 @@ private fun Detail(
         PageId.MODULE_SAFETY -> ModuleSafetyPage(
             openLogs = { openPage(PageId.MODULE_LOGS) },
             back = back,
-            onEnterOobe = {},
+            onEnterOobe = onEnterOobe,
         )
         PageId.MODULE_LOGS -> ModuleLogsPage(back)
         PageId.SHADE -> Shade(settings, update, presetActions, openPage, back)
@@ -5026,7 +5035,7 @@ private fun Detail(
         PageId.LOCKSCREEN_WIDGET_BACKGROUND -> LockscreenWidgetBackgroundSettings(settings, update, back)
         PageId.LYRIC_LIBRARY -> LyricLibraryPage(back)
         PageId.RASTER_WALLPAPER -> RasterWallpaper(settings, update, onPickRasterImages, onApplyRasterWallpaper, back)
-        PageId.SUPER_XIAOAI -> SuperXiaoAi(settings, superXiaoAi, updateSuperXiaoAi, back)
+        PageId.SUPER_XIAOAI -> SuperXiaoAi(settings, superXiaoAi, updateSuperXiaoAi, openPage, back)
         PageId.CAMERA -> Camera(cameras, updateCamera, openPage, back)
         PageId.CAMERA_PALETTE -> CameraPalette(cameras, updateCamera, back)
         PageId.SYSTEM_UPDATE -> SystemUpdate(systemUpdate, updateSystemUpdate, back)
@@ -5039,7 +5048,7 @@ private fun Detail(
         PageId.SETTINGS_APPEARANCE_HOME -> SettingsAppearancePage(APPEARANCE_SLOT_HOME, appearance, updateAppearance, onPickAppearanceHome, onClearAppearanceHome, back)
         PageId.SETTINGS_APPEARANCE_DEVICE -> SettingsAppearancePage(APPEARANCE_SLOT_DEVICE, appearance, updateAppearance, onPickAppearanceDevice, onClearAppearanceDevice, back)
             PageId.TUTORIAL_DEVICE_CARD -> TutorialDeviceCardSettings(appearance, updateAppearance, onPickAppearanceLogo, onClearAppearanceLogo, onPickTutorialDeviceImage, onClearTutorialDeviceImage, onPickCustomDeviceLogo, onClearCustomDeviceLogo, onPickStyle1UpdateBackground, onClearStyle1UpdateBackground, onPickStyle2DeviceImage, onClearStyle2DeviceImage, onPickStyle2DeviceLogo, onClearStyle2DeviceLogo, onPickStyle2UpdateBackground, onClearStyle2UpdateBackground, onColorModeAssetAction, back)
-        PageId.ABOUT -> About(back, openPage, onDebugMode)
+        PageId.ABOUT -> About(back, openPage)
         PageId.LEGAL_DISCLAIMER -> LegalDocument(PageId.LEGAL_DISCLAIMER, back)
         PageId.LEGAL_PRIVACY -> LegalDocument(PageId.LEGAL_PRIVACY, back)
         PageId.LEGAL_USER_AGREEMENT -> LegalDocument(PageId.LEGAL_USER_AGREEMENT, back)
@@ -5061,6 +5070,7 @@ private fun Detail(
         PageId.ENVIRONMENT_DETECTION -> EnvironmentDetectionPage(back)
         PageId.CONTACTS_DIALER -> ContactsDialerPage({ openPage(PageId.CONTACTS_DIALER_BACKGROUND) }, back)
         PageId.CONTACTS_DIALER_BACKGROUND -> ContactsDialerBackgroundPage(back)
+        PageId.PORTAL -> PortalPage(back)
         PageId.APP_NAVIGATION -> AppNavigationPage(back)
         PageId.RESTART_SCOPES -> RestartScopesPage(
             suggestedTargets = suggestedRestartTargets,
@@ -5604,6 +5614,7 @@ private fun SuperXiaoAi(
     settings: HookSettings,
     superXiaoAi: SuperXiaoAiPreferences,
     update: ((SuperXiaoAiPreferences) -> SuperXiaoAiPreferences) -> Unit,
+    openPage: (PageId) -> Unit,
     back: () -> Unit,
 ) = AppPage(tr("超级小爱与输入法", "超级小爱与输入法"), back, restartScopes = setOf(ScopeApplication.SUPER_XIAOAI, ScopeApplication.SUPER_XIAOAI_IME)) { padding, scroll ->
     val context = LocalContext.current
@@ -5638,6 +5649,11 @@ private fun SuperXiaoAi(
             }
         }
 
+        item {
+            Group(tr("传送门", "传送门")) {
+                ArrowPreference(title = tr("传送门", "传送门"), onClick = { openPage(PageId.PORTAL) })
+            }
+        }
         item {
             Group(tr("\u8f93\u5165\u6cd5\u5916\u89c2", "\u8f93\u5165\u6cd5\u5916\u89c2")) {
                 SwitchPreference(
@@ -12470,7 +12486,7 @@ internal fun DeviceInfoItem(title: String, summary: String) {
 }
 
 @Composable
-private fun About(back: () -> Unit, openPage: (PageId) -> Unit, onDebugMode: () -> Unit) = AppPage(tr("\u5173\u4e8e", "\u5173\u4e8e"), back, showLargeTitle = false, pageBackground = { AboutMaterialBackground(Modifier.matchParentSize()) }) { padding, scroll ->
+private fun About(back: () -> Unit, openPage: (PageId) -> Unit) = AppPage(tr("\u5173\u4e8e", "\u5173\u4e8e"), back, showLargeTitle = false, pageBackground = { AboutMaterialBackground(Modifier.matchParentSize()) }) { padding, scroll ->
     val context = LocalContext.current
     val unavailable = tr("未检测到", "未检测到")
     val marketName = remember { OsCompatibility.systemProperty("ro.product.marketname").ifBlank { unavailable } }
@@ -12480,7 +12496,6 @@ private fun About(back: () -> Unit, openPage: (PageId) -> Unit, onDebugMode: () 
             .ifBlank { unavailable }
     }
     val androidVersion = remember { "${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})" }
-    var iconTaps by remember { mutableIntStateOf(0) }
     var versionTaps by remember { mutableIntStateOf(0) }
     var confettiKey by remember { mutableIntStateOf(0) }
     val listState = rememberLazyListState()
@@ -12490,7 +12505,7 @@ private fun About(back: () -> Unit, openPage: (PageId) -> Unit, onDebugMode: () 
     LazyColumn(Modifier.fillMaxSize().nestedScroll(scroll.nestedScrollConnection), state = listState, contentPadding = PaddingValues(16.dp, padding.calculateTopPadding() + 4.dp, 16.dp, padding.calculateBottomPadding() + 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             AboutAdvancedMaterialHeader(
-                onLogoClick = { iconTaps++; if (iconTaps >= 10) { iconTaps = 0; onDebugMode() } },
+                onLogoClick = {},
                 onVersionClick = {
                     versionTaps++
                     if (versionTaps >= 5) {
@@ -12577,24 +12592,6 @@ private fun OsMissingDialog(show: Boolean, seconds: Int, preview: Boolean, onExi
             Text("检测到当前系统并非 HyperOS", style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
             Text("未读取到 ro.mi.os.version.code，系统环境可能存在重大差异。为避免不可预期的问题，HyperChanger 将退出。", style = MiuixTheme.textStyles.body1)
             GlassDialogButton(onClick = onExit, modifier = Modifier.fillMaxWidth()) { Text(if (preview) "退出" else "退出（${seconds.coerceAtLeast(0)}s）", color = ComposeColor(0xFFD32F2F)) }
-        }
-    }
-}
-
-@Composable
-private fun DebugModeDialog(
-    onDismiss: () -> Unit,
-    onNonHyperOs4: () -> Unit,
-    onNonHyperOs: () -> Unit,
-    onEnterOobe: () -> Unit,
-) {
-    WindowDialog(show = true, onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("调试模式", style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
-            GlassDialogButton(onClick = onEnterOobe, modifier = Modifier.fillMaxWidth()) { Text(tr("进入 OOBE", "进入 OOBE")) }
-            GlassDialogButton(onClick = onNonHyperOs4, modifier = Modifier.fillMaxWidth()) { Text("非 HyperOS 4 弹窗") }
-            GlassDialogButton(onClick = onNonHyperOs, modifier = Modifier.fillMaxWidth()) { Text("非 HyperOS 弹窗") }
-            GlassDialogButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("取消") }
         }
     }
 }

@@ -92,6 +92,10 @@
             android:authorities="btm.m.os4.systemuihook.statusbaricons"
             android:exported="true" />
         <provider
+            android:name=".PortalOcrProvider"
+            android:authorities="${applicationId}.portalocr"
+            android:exported="true" />
+        <provider
             android:name=".DockMaterialProvider"
             android:authorities="btm.m.os4.systemuihook.dockmaterial"
             android:exported="true" />

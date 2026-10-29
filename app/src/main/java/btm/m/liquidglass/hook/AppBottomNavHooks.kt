@@ -1184,6 +1184,16 @@ object AppBottomNavHooks {
                     appleMusic -> navigationBackdropSource
                     else -> sourceView
                 }
+                // Publish GitHub's active/root state before the first Compose frame so
+                // q4a.i can apply the host FAB offset during initial composition.
+                if (config === github) {
+                    GitHubNavigation.setActive(
+                        activity,
+                        true,
+                        navigationOverlayHeight(),
+                        githubNavigation?.isRoot() == true,
+                    )
+                }
                 val composeView = ComposeView(activity).apply {
                     owner.attachTo(this)
                     setBackgroundColor(android.graphics.Color.TRANSPARENT)
@@ -2050,6 +2060,18 @@ object AppBottomNavHooks {
             }
         }
 
+        private fun hideGitHubNavigationBars(content: ViewGroup) {
+            if (config !== github) return
+            val id = content.resources.getIdentifier("navigation_bar", "id", GitHubNavigation.PACKAGE)
+            if (id == 0) return
+            descendants(content).filter { it.id == id }.forEach { view ->
+                rememberOriginalView(view)
+                if (view.alpha != 0f) view.alpha = 0f
+                if (view is ViewGroup) view.setWillNotDraw(true)
+            }
+            hideOriginalBar()
+        }
+
         private fun releaseOriginalBarSpace() {
             if (config === twitter) return
             if (config === qq || config === qqMusic || config === weibo || config === xiaomiWallet ||
@@ -2567,7 +2589,7 @@ object AppBottomNavHooks {
                 nav?.visibility = View.GONE
                 GitHubNavigation.setActive(activity, false)
                 restoreHostContentSpace()
-                restoreOriginalBar()
+                hideGitHubNavigationBars(content)
                 ImmersiveNavigationHooks.deactivate(activity)
                 restoreSystemNavigationBar()
                 return
@@ -2584,7 +2606,12 @@ object AppBottomNavHooks {
                 navigationTabs = detected.tabs
             }
             nav?.visibility = View.VISIBLE
-            GitHubNavigation.setActive(activity, true, navigationOverlayHeight())
+            GitHubNavigation.setActive(
+                activity,
+                true,
+                navigationOverlayHeight(),
+                githubNavigation?.isRoot() == true,
+            )
             val now = android.os.SystemClock.uptimeMillis()
             if (barChanged || now - githubLastInsetMaintenanceAt >= 500L) {
                 githubLastInsetMaintenanceAt = now
