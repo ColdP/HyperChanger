@@ -282,6 +282,27 @@ object AppBottomNavHooks {
         activityName = "com.xunmeng.pinduoduo.ui.activity.MainFrameActivity"
     )
 
+    private val instagram = AppConfig(
+        displayName = "Instagram",
+        packageName = InstagramNavigation.PACKAGE,
+        activityName = InstagramNavigation.ACTIVITY,
+        barResourceName = "tab_bar",
+        anchorResourceName = null,
+        requiredTabs = emptySet(),
+        targetVersion = "453.0.0.55.79",
+        navigationLayerResourceNames = setOf("tab_bar_shadow", "layout_bottom_searchbar")
+    )
+
+    private val twitter = AppConfig(
+        displayName = "X",
+        packageName = XNavigation.PACKAGE,
+        activityName = XNavigation.ACTIVITY,
+        barResourceName = null,
+        anchorResourceName = null,
+        requiredTabs = emptySet(),
+        targetVersion = "12.37.2-prod.01 (312372001)"
+    )
+
     private val sessions = WeakHashMap<Activity, Session>()
 
     private val cmbBank = AppConfig(
@@ -643,6 +664,36 @@ object AppBottomNavHooks {
 
     @JvmStatic
     @Throws(ReflectiveOperationException::class)
+    fun installInstagram(
+        module: XposedModule,
+        loader: ClassLoader,
+        blurRadius: Int,
+        labelMode: String,
+        navigationStyle: String,
+        advancedMaterial: Boolean,
+        colorMode: String,
+        accentColor: Int = 0
+    ) = install(module, loader, instagram, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
+
+    @JvmStatic
+    @Throws(ReflectiveOperationException::class)
+    fun installX(
+        module: XposedModule,
+        loader: ClassLoader,
+        blurRadius: Int,
+        labelMode: String,
+        navigationStyle: String,
+        advancedMaterial: Boolean,
+        colorMode: String,
+        accentColor: Int = 0
+    ) {
+        XNavigation.install(module, loader)
+        ImmersiveNavigationHooks.install(module)
+        install(module, loader, twitter, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
+    }
+
+    @JvmStatic
+    @Throws(ReflectiveOperationException::class)
     fun installXiaomiWallet(
         module: XposedModule,
         loader: ClassLoader,
@@ -884,6 +935,16 @@ object AppBottomNavHooks {
         private val meetingNavigation = if (config === tencentMeeting) TencentMeetingNavigation() else null
         private val cmbBankIcons = if (config === cmbBank) CmbBankNavIcons(activity) else null
         private val miHealthIcons = if (config === xiaomiHealth) MiHealthNavIcons(activity) else null
+        private val pinduoduoNavigation = if (config.packageName == PinduoduoNavigation.PACKAGE) {
+            PinduoduoNavigation.Detector(activity)
+        } else null
+        private var pinduoduoLastInsetMaintenanceAt = 0L
+        private val instagramNavigation = if (config.packageName == InstagramNavigation.PACKAGE) {
+            InstagramNavigation.Detector(activity)
+        } else null
+        private var instagramLastInsetMaintenanceAt = 0L
+        private val xNavigation = if (config === twitter) XNavigation.Detector(activity) else null
+        private var xLastInsetMaintenanceAt = 0L
         private var cmbBankPage: ViewGroup? = null
         private var cmbBankBackground: View? = null
         private var cmbRootListener: View.OnAttachStateChangeListener? = null
@@ -954,13 +1015,23 @@ object AppBottomNavHooks {
 
         fun resume() {
             resumed = true
-            nav?.visibility = View.VISIBLE
+            if (config === twitter) {
+                // A resumed Activity may still be showing a secondary X surface. Let the
+                // Compose page flag and detector decide whether the overlay can be shown;
+                // never expose the stale main-Tab overlay during that transition.
+                xNavigation?.setActive(false)
+                nav?.visibility = View.GONE
+            } else {
+                xNavigation?.setActive(nav != null, navigationOverlayHeight())
+                nav?.visibility = View.VISIBLE
+            }
             attempts = 0
             activity.window.decorView.postDelayed(::attachOrRetry, 300L)
         }
 
         fun pause() {
             resumed = false
+            xNavigation?.setActive(false)
             nav?.visibility = View.GONE
             resetMiniPlayerPosition()
             if (config === cmbBank) destroy()
@@ -979,6 +1050,12 @@ object AppBottomNavHooks {
                 (it.parent as? ViewGroup)?.removeView(it)
             }
             nav = null
+            pinduoduoNavigation?.clear()
+            pinduoduoLastInsetMaintenanceAt = 0L
+            instagramNavigation?.clear()
+            instagramLastInsetMaintenanceAt = 0L
+            xNavigation?.clear()
+            xLastInsetMaintenanceAt = 0L
             removeMiniPlayerBackground()
             lifecycleOwner?.destroy()
             lifecycleOwner = null
@@ -1034,7 +1111,7 @@ object AppBottomNavHooks {
                 syncCloudMusicMiniPlayer(content)
                 syncAppleMusicMiniPlayer(content)
                 syncQQMusicMiniPlayer(content)
-                if (config !== tencentMeeting && config !== cmbBank && config !== wechat) selectedIndex.intValue = navigationTabs.indexOfFirst { tab ->
+                if (config !== twitter && config !== tencentMeeting && config !== cmbBank && config !== wechat) selectedIndex.intValue = navigationTabs.indexOfFirst { tab ->
                     tab.key != TabKey.PUBLISH && (
                         isSelectedRecursively(tab.view) ||
                             (config === xiaomiHealthWatchFaceMarket &&
@@ -1114,7 +1191,10 @@ object AppBottomNavHooks {
                                     config === xiaomiHealthWatchFaceMarket || config === appleMusic,
                                 adaptiveLiquidWidth = config === xiaomiHealth ||
                                     config === xiaomiHealthWatchFaceMarket || config === appleMusic ||
-                                    config === tencentMeeting || config === cmbBank || config === wechat,
+                                    config === tencentMeeting || config === cmbBank || config === wechat ||
+                                    config === qq || config === twitter ||
+                                    config.packageName == PinduoduoNavigation.PACKAGE ||
+                                    config.packageName == InstagramNavigation.PACKAGE,
                                 softBackdropShadow = config === tencentMeeting,
                                 liquidBottomSpacingDp = if (config === xiaomiWallet) -8 else 8,
                                 concealHostBottomBar = config.concealHostBottomBar ||
@@ -1138,7 +1218,9 @@ object AppBottomNavHooks {
                                     config === wechat ||
                                     config === qq ||
                                     config === xiaomiHealth ||
-                                    config.packageName == PinduoduoNavigation.PACKAGE
+                                    config === twitter ||
+                                    config.packageName == PinduoduoNavigation.PACKAGE ||
+                                    config.packageName == InstagramNavigation.PACKAGE
                                 ) {
                                     { index, color ->
                                         val tab = currentNavigationTabs[index]
@@ -1151,8 +1233,9 @@ object AppBottomNavHooks {
                                                 bitmap,
                                                 null,
                                                 Modifier.size(if (config === xiaomiHealth) 26.dp else 24.dp),
-                                                colorFilter = if (config === xiaomiHealth &&
-                                                    selectedIndex.intValue == index
+                                                colorFilter = if (
+                                                    (config === xiaomiHealth && selectedIndex.intValue == index) ||
+                                                    (config.packageName == InstagramNavigation.PACKAGE && tab.key == TabKey.PROFILE)
                                                 ) null else ColorFilter.tint(color)
                                             )
                                         }
@@ -1168,7 +1251,7 @@ object AppBottomNavHooks {
                                     config === qqMusic || config === appleMusic,
                                 onHostPreDraw = ::syncHostState,
                                 backdropOverride = watchFaceBackdrop,
-                                recordBackdropChildren = config === qq
+                                recordBackdropChildren = config === qq || config === twitter
                             )
                             if (config === cloudMusic || config === appleMusic || config === qqMusic) {
                                 val playerNavigationStyle =
@@ -1298,6 +1381,9 @@ object AppBottomNavHooks {
                     )
                 )
                 installGuard(content)
+                // Activate only after the overlay has been successfully added. Host snapshot
+                // state triggers composition and removes the native row on the next frame.
+                xNavigation?.setActive(true, navigationOverlayHeight())
                 composeView.post(::syncHostState)
                 btm.m.os4.systemuihook.HookModuleLogger.log(module,
                     Log.INFO,
@@ -1324,7 +1410,7 @@ object AppBottomNavHooks {
                 }.also(content::addOnAttachStateChangeListener)
             }
             guard = ViewTreeObserver.OnPreDrawListener {
-                if (config === tencentMeeting || config === cmbBank || config === wechat ||
+                if (config === twitter || config === tencentMeeting || config === cmbBank || config === wechat ||
                     config.packageName == PinduoduoNavigation.PACKAGE
                 ) {
                     // Discovery must continue while the host hides or replaces its native bar.
@@ -1361,6 +1447,10 @@ object AppBottomNavHooks {
         }
 
         private fun syncHostState() {
+            if (config === twitter) {
+                syncXHostState()
+                return
+            }
             if (config === cmbBank && (!resumed || nav == null)) return
             val content = activity.findViewById<ViewGroup>(android.R.id.content)
             if (config === cmbBank) {
@@ -1389,7 +1479,8 @@ object AppBottomNavHooks {
                 configureSystemNavigationBar()
             }
             if (config === tencentMeeting || config === wechat || config === qq ||
-                config.packageName == PinduoduoNavigation.PACKAGE
+                config.packageName == PinduoduoNavigation.PACKAGE ||
+                config.packageName == InstagramNavigation.PACKAGE
             ) {
                 val previousSelected = selectedIndex.intValue
                 val detected = if (config === qq) content?.let(::cachedQQDetection)
@@ -1404,7 +1495,8 @@ object AppBottomNavHooks {
                     restoreOriginalBar()
                     return
                 }
-                if (detected.container !== originalBar) {
+                val barChanged = detected.container !== originalBar
+                if (barChanged) {
                     restoreOriginalBar()
                     originalBar = detected.container
                     rememberOriginalNavigationLayers(content, detected.container)
@@ -1442,6 +1534,38 @@ object AppBottomNavHooks {
                     hideOriginalBar()
                     // QQ's native page tree is otherwise untouched during a
                     // scroll. Avoid the generic per-frame descendant traversal.
+                    return
+                }
+                if (config.packageName == PinduoduoNavigation.PACKAGE) {
+                    val now = android.os.SystemClock.uptimeMillis()
+                    // Only the small, verified native row is read per frame. Tab
+                    // changes may create page content asynchronously, so retain a
+                    // bounded inset check without rescanning the product tree on
+                    // every pre-draw (including those caused by our own overlay).
+                    if (barChanged || previousSelected != selectedIndex.intValue ||
+                        now - pinduoduoLastInsetMaintenanceAt >= 500L
+                    ) {
+                        pinduoduoLastInsetMaintenanceAt = now
+                        ImmersiveNavigationHooks.activate(activity)
+                        releaseHostContentSpace()
+                    }
+                    updateNavigationOverlayHeight()
+                    releaseOriginalBarSpace()
+                    hideOriginalBar()
+                    return
+                }
+                if (config.packageName == InstagramNavigation.PACKAGE) {
+                    val now = android.os.SystemClock.uptimeMillis()
+                    if (barChanged || previousSelected != selectedIndex.intValue ||
+                        now - instagramLastInsetMaintenanceAt >= 500L
+                    ) {
+                        instagramLastInsetMaintenanceAt = now
+                        ImmersiveNavigationHooks.activate(activity)
+                        releaseHostContentSpace()
+                    }
+                    updateNavigationOverlayHeight()
+                    releaseOriginalBarSpace()
+                    hideOriginalBar()
                     return
                 }
             }
@@ -1583,7 +1707,18 @@ object AppBottomNavHooks {
         }
 
         private fun openTab(tab: DetectedTab) {
-            if (config === tencentMeeting || config === cmbBank || config === wechat || config === qq) {
+            if (config === twitter) {
+                val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
+                val current = detectBottomBar(content)?.tabs?.firstOrNull { it.identity == tab.identity } ?: return
+                if (xNavigation?.open(current.identity) == true) {
+                    activity.window.decorView.postDelayed(::syncHostState, 120L)
+                }
+                return
+            }
+            if (config === tencentMeeting || config === cmbBank || config === wechat || config === qq ||
+                config.packageName == PinduoduoNavigation.PACKAGE ||
+                config.packageName == InstagramNavigation.PACKAGE
+            ) {
                 val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
                 val current = if (config === qq) cachedQQDetection(content)?.tabs
                     ?.firstOrNull { it.identity == tab.identity }
@@ -1840,6 +1975,8 @@ object AppBottomNavHooks {
         }
 
         private fun hideOriginalBar() {
+            // X's host is also the business page. Its own Compose hide flag owns concealment.
+            if (config === twitter) return
             if (config === xiaomiWallet ||
                 (config.coordinateTabSurface && config !== xiaomiHealthWatchFaceMarket)
             ) return
@@ -1851,6 +1988,7 @@ object AppBottomNavHooks {
         }
 
         private fun releaseOriginalBarSpace() {
+            if (config === twitter) return
             if (config === qq || config === qqMusic || config === weibo || config === xiaomiWallet ||
                 config.coordinateTabSurface
             ) return
@@ -1884,6 +2022,8 @@ object AppBottomNavHooks {
                 releaseQQPageNavigationInset(content)
             } else if (config.packageName == PinduoduoNavigation.PACKAGE) {
                 releasePinduoduoPageNavigationInset(content)
+            } else if (config.packageName == InstagramNavigation.PACKAGE) {
+                releaseInstagramPageNavigationInset(content)
             } else if (config === cmbBank) {
                 cmbBankPage?.let(::releaseCmbBankPageNavigationInset)
             } else if (config === xiaohongshu) {
@@ -2321,6 +2461,106 @@ object AppBottomNavHooks {
                 }
                 val params = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return@forEach
                 if (params.bottomMargin == inset) {
+                    originalContentBottomMargins.putIfAbsent(view, params.bottomMargin)
+                    params.bottomMargin = 0
+                    view.layoutParams = params
+                }
+            }
+        }
+
+        private fun syncXHostState() {
+            if (!resumed || nav == null) return
+            val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
+            val before = selectedIndex.intValue
+            val detected = detectBottomBar(content)
+            if (detected == null) {
+                nav?.visibility = View.GONE
+                xNavigation?.setActive(false)
+                restoreHostContentSpace()
+                ImmersiveNavigationHooks.deactivate(activity)
+                restoreSystemNavigationBar()
+                return
+            }
+            originalBar = detected.container
+            detectedTabs = detected.tabs
+            if (navigationTabs != detected.tabs) navigationTabs = detected.tabs
+            nav?.visibility = View.VISIBLE
+            xNavigation?.setActive(true, navigationOverlayHeight())
+            val now = android.os.SystemClock.uptimeMillis()
+            if (before != selectedIndex.intValue || now - xLastInsetMaintenanceAt >= 500L) {
+                xLastInsetMaintenanceAt = now
+                configureSystemNavigationBar()
+                ImmersiveNavigationHooks.activate(activity)
+                releaseXPageNavigationInset(content)
+                updateNavigationOverlayHeight()
+            }
+        }
+
+        private fun releaseXPageNavigationInset(content: ViewGroup) {
+            val inset = navigationBarInset()
+            if (inset <= 0) return
+            val injectedNav = nav
+            // XNavigation preserves the overlay's business-content avoidance in host Compose.
+            // Only release duplicate system-inset reservations on large View containers.
+            descendants(content).forEach { view ->
+                if (!view.isShown || view is ComposeView || view === injectedNav ||
+                    (injectedNav != null && isDescendantOf(view, injectedNav)) ||
+                    view.width < content.width * 0.9f || view.height < inset * 4
+                ) return@forEach
+                if (view.paddingBottom == inset) {
+                    originalContentPaddings.putIfAbsent(view, intArrayOf(
+                        view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom
+                    ))
+                    view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, 0)
+                }
+                val params = view.layoutParams as? ViewGroup.MarginLayoutParams
+                if (params != null && params.bottomMargin == inset) {
+                    originalContentBottomMargins.putIfAbsent(view, params.bottomMargin)
+                    params.bottomMargin = 0
+                    view.layoutParams = params
+                }
+            }
+        }
+
+        private fun releaseInstagramPageNavigationInset(content: ViewGroup) {
+            val inset = navigationBarInset()
+            if (inset <= 0) return
+            val injectedNav = nav
+            val detectedBar = originalBar
+            val resourceNames = setOf(
+                "layout_container_main_wrapper",
+                "layout_container_main",
+                "swipeable_tab_view_pager"
+            )
+            descendants(content).forEach { view ->
+                if (!view.isShown || view is ComposeView || view === injectedNav || view === detectedBar ||
+                    (injectedNav != null && isDescendantOf(view, injectedNav)) ||
+                    (detectedBar != null && (isDescendantOf(view, detectedBar) || isDescendantOf(detectedBar, view)))
+                ) return@forEach
+                val resourceName = view.id.takeIf { it != View.NO_ID }?.let {
+                    runCatching { view.resources.getResourceEntryName(it) }.getOrNull()
+                }
+                val params = view.layoutParams as? ViewGroup.MarginLayoutParams
+                val targeted = resourceName in resourceNames
+                val widePage = view.width >= content.width * 0.9f && view.height >= inset * 4
+                if (!targeted && !widePage) return@forEach
+                if (targeted && params != null &&
+                    (resourceName == "layout_container_main_wrapper" && params.bottomMargin > 50 ||
+                        resourceName != "layout_container_main_wrapper")
+                ) {
+                    originalContentBottomMargins.putIfAbsent(view, params.bottomMargin)
+                    if (params.bottomMargin != 0) {
+                        params.bottomMargin = 0
+                        view.layoutParams = params
+                    }
+                }
+                if (!targeted && view.paddingBottom == inset) {
+                    originalContentPaddings.putIfAbsent(view, intArrayOf(
+                        view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom
+                    ))
+                    view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, 0)
+                }
+                if (!targeted && params != null && params.bottomMargin == inset) {
                     originalContentBottomMargins.putIfAbsent(view, params.bottomMargin)
                     params.bottomMargin = 0
                     view.layoutParams = params
@@ -2804,7 +3044,7 @@ object AppBottomNavHooks {
         }
 
         private fun rememberOriginalNavigationLayers(content: ViewGroup, bar: ViewGroup) {
-            if (config === xiaomiWallet) return
+            if (config === twitter || config === xiaomiWallet) return
             if (config === xiaomiHealthWatchFaceMarket) {
                 rememberWatchFaceMarketBottomChrome(content, bar)
                 return
@@ -3517,6 +3757,14 @@ object AppBottomNavHooks {
         }
 
         private fun detectBottomBar(content: ViewGroup): DetectedBar? {
+            if (config === twitter) {
+                val native = xNavigation?.detect(content) ?: return null
+                selectedIndex.intValue = native.selectedIndex
+                return DetectedBar(native.host, native.items.map { item ->
+                    DetectedTab(TabKey.NATIVE, item.label, native.host, native.host,
+                        identity = item.identity, nativeIcon = item.icon, badge = item.badge)
+                })
+            }
             if (config === cmbBank) {
                 val native = CmbBankNavigation.detect(content) ?: return null
                 val tabs = native.items.mapIndexed { index, item ->
@@ -3585,17 +3833,32 @@ object AppBottomNavHooks {
             // MainFrameActivity uses a copied AppConfig so it can be hooked alongside
             // HomeActivity. Match Pinduoduo by package rather than object identity.
             if (config.packageName == PinduoduoNavigation.PACKAGE) {
-                val native = PinduoduoNavigation.detect(activity, content) ?: return null
+                val native = pinduoduoNavigation?.detect(content) ?: return null
                 selectedIndex.intValue = native.selectedIndex
                 return DetectedBar(native.container, native.items.mapIndexed { index, item ->
                     val key = TabKey.NATIVE
                     DetectedTab(
                         key,
-                        item.label,
+                        tr(item.label, item.label),
                         item.view,
                         item.clickTarget,
                         identity = "pdd:$index:${item.label}:${item.view.javaClass.name}",
                         nativeIcon = item.icon
+                    )
+                })
+            }
+            if (config.packageName == InstagramNavigation.PACKAGE) {
+                val native = instagramNavigation?.detect(content) ?: return null
+                selectedIndex.intValue = native.selectedIndex
+                return DetectedBar(native.container, native.items.mapIndexed { index, item ->
+                    DetectedTab(
+                        key = if (item.profile) TabKey.PROFILE else TabKey.NATIVE,
+                        displayLabel = item.label,
+                        view = item.view,
+                        clickTarget = item.clickTarget,
+                        identity = "instagram:$index:${item.profile}:${item.label}",
+                        nativeIcon = item.icon,
+                        badge = item.badge,
                     )
                 })
             }

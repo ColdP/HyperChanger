@@ -299,7 +299,7 @@ private enum class PageId {
     DEVICE_PROFILE_PRESETS, DEVICE_PROFILE_CLOUD_PRESETS,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
-    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, CONTACTS_DIALER, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND,
+    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND,
 }
 
 private data class CategorySearchItem(
@@ -475,6 +475,8 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
             ScopeApplication.WECHAT,
             ScopeApplication.QQ,
             ScopeApplication.PINDUODUO,
+            ScopeApplication.INSTAGRAM,
+        ScopeApplication.X,
         ),
         PageId.APP_NAVIGATION,
     ),
@@ -3037,6 +3039,8 @@ private fun RestartScopesPage(
         ScopeApplication.WECHAT,
         ScopeApplication.QQ,
         ScopeApplication.PINDUODUO,
+        ScopeApplication.INSTAGRAM,
+        ScopeApplication.X,
     )
     val toggleTarget: (ScopeApplication) -> Unit = { target ->
         selectedTargets = if (target in selectedTargets) selectedTargets - target else selectedTargets + target
@@ -5079,7 +5083,8 @@ private fun Detail(
         PageId.REAR_MUSIC_APPS -> RearMusicApps(musicWhitelist, updateMusicWhitelist, back)
         PageId.REAR_SWIPE_APP -> RearSwipeAppPicker(back)
         PageId.OTHER -> OtherPage(airDropSettings, updateAirDrop, screenRecorder, updateScreenRecorder, openPage, back)
-        PageId.CONTACTS_DIALER -> ContactsDialerPage(back)
+        PageId.CONTACTS_DIALER -> ContactsDialerPage({ openPage(PageId.CONTACTS_DIALER_BACKGROUND) }, back)
+        PageId.CONTACTS_DIALER_BACKGROUND -> ContactsDialerBackgroundPage(back)
         PageId.APP_NAVIGATION -> AppNavigationPage(back)
         PageId.RESTART_SCOPES -> RestartScopesPage(
             suggestedTargets = suggestedRestartTargets,

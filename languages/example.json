@@ -3,6 +3,11 @@
   "creator": "btm_m",
   "locale": "en",
   "strings": {
+    "拨号盘背景": "Dial Pad Background",
+    "为拨号盘背景添加边框": "Add a Border to the Dial Pad Background",
+    "边框粗细": "Border Thickness",
+    "边框不透明度": "Border Opacity",
+    "拨号盘背景圆角": "Dial Pad Background Corner Radius",
     "拨号与通话": "Dialing & Calls",
     "界面调整": "Interface Adjustments",
     "为拨号盘添加背景模糊": "Add Background Blur to the Dial Pad",
@@ -1654,5 +1659,7 @@
   "rear_screenshot_shell_save": "保存",
   "rear_screenshot_shell_delete": "删除",
   "rear_screenshot_shell_delete_confirm": "确定删除此外壳样式吗？",
-  "拼多多": "Pinduoduo"
+  "拼多多": "Pinduoduo",
+  "Instagram": "Instagram",
+  "X": "X"
 }

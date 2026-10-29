@@ -58,6 +58,8 @@ private val appNavItems = listOf(
     AppNavItem("招商银行", "cmb.pb"),
     AppNavItem("微信", "com.tencent.mm"),
     AppNavItem("拼多多", "com.xunmeng.pinduoduo"),
+    AppNavItem("Instagram", "com.instagram.android"),
+    AppNavItem("X", "com.twitter.android"),
 )
 
 @Composable
@@ -81,7 +83,7 @@ internal fun AppNavigationPage(back: () -> Unit) {
         }
         return
     }
-    AppPage(tr("应用底部导航", "应用底部导航"), back, restartScopes = setOf(ScopeApplication.QQ, ScopeApplication.APPLE_MUSIC, ScopeApplication.WEIBO, ScopeApplication.XIAOHONGSHU, ScopeApplication.XIAOMI_STORE, ScopeApplication.XIAOMI_WALLET, ScopeApplication.XIAOMI_HEALTH, ScopeApplication.LUCKIN_COFFEE, ScopeApplication.TENCENT_MEETING, ScopeApplication.CMB_BANK, ScopeApplication.WECHAT, ScopeApplication.PINDUODUO), restartEnabled = service != null) { padding, scroll ->
+    AppPage(tr("应用底部导航", "应用底部导航"), back, restartScopes = setOf(ScopeApplication.QQ, ScopeApplication.APPLE_MUSIC, ScopeApplication.WEIBO, ScopeApplication.XIAOHONGSHU, ScopeApplication.XIAOMI_STORE, ScopeApplication.XIAOMI_WALLET, ScopeApplication.XIAOMI_HEALTH, ScopeApplication.LUCKIN_COFFEE, ScopeApplication.TENCENT_MEETING, ScopeApplication.CMB_BANK, ScopeApplication.WECHAT, ScopeApplication.PINDUODUO, ScopeApplication.INSTAGRAM, ScopeApplication.X), restartEnabled = service != null) { padding, scroll ->
         AppList(padding, scroll, 28) {
             item { SmallTitle(tr("支持的应用", "支持的应用"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp)) }
             items(appNavItems, key = { it.packageName }) { item ->
