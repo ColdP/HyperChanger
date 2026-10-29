@@ -16,7 +16,17 @@ internal const val KEY_PORTAL_CORNER = "portal_background_corner_offset_dp"
 internal const val KEY_PORTAL_DEVELOPER = "portal_developer_mode"
 internal const val KEY_PORTAL_REMOVE_SCRIM = "portal_remove_fullscreen_scrim"
 internal const val KEY_PORTAL_JAPANESE_OCR = "portal_japanese_ocr"
+internal const val KEY_PORTAL_CUSTOM_EXPANDED_HEIGHT = "portal_custom_expanded_height"
+internal const val KEY_PORTAL_EXPANDED_HEIGHT = "portal_expanded_height_offset_dp"
+internal const val KEY_PORTAL_MATERIAL_MODE = "portal_material_mode"
+internal const val KEY_PORTAL_USE_GLOBAL_GLASS = "portal_material_use_global_glass"
+internal const val KEY_PORTAL_GLASS_PREFIX = "portal_material_glass_"
+internal const val KEY_PORTAL_ADVANCED_HIGHLIGHT = "portal_advanced_material_highlight"
 internal const val PORTAL_DEVELOPER_SETTING = "key_dev_developer_mode_v1"
+
+internal const val PORTAL_MATERIAL_DEFAULT = 0
+internal const val PORTAL_MATERIAL_ADVANCED = 1
+internal const val PORTAL_MATERIAL_SOFT_GLASS = 2
 
 internal data class PortalAppearanceSettings(
     val blur: Boolean = false,
@@ -29,6 +39,12 @@ internal data class PortalAppearanceSettings(
     val developerMode: Boolean = false,
     val removeScrim: Boolean = false,
     val japaneseOcr: Boolean = false,
+    val customExpandedHeight: Boolean = false,
+    val expandedHeightOffsetDp: Int = 0,
+    val materialMode: Int = PORTAL_MATERIAL_DEFAULT,
+    val useGlobalGlass: Boolean = true,
+    val advancedHighlight: Boolean = false,
+    val glass: SoftGlassSettings = SoftGlassSettings().resetParameters(),
 )
 
 internal fun portalCornerRadius(nativeRadiusPx: Float, offsetDp: Int, density: Float): Float =
@@ -46,6 +62,12 @@ internal object PortalSettings {
         developerMode = preferences.getBoolean(KEY_PORTAL_DEVELOPER, false),
         removeScrim = preferences.getBoolean(KEY_PORTAL_REMOVE_SCRIM, false),
         japaneseOcr = preferences.getBoolean(KEY_PORTAL_JAPANESE_OCR, false),
+        customExpandedHeight = preferences.getBoolean(KEY_PORTAL_CUSTOM_EXPANDED_HEIGHT, false),
+        expandedHeightOffsetDp = preferences.getInt(KEY_PORTAL_EXPANDED_HEIGHT, 0).coerceIn(-128, 256),
+        materialMode = preferences.getInt(KEY_PORTAL_MATERIAL_MODE, if (preferences.getBoolean(KEY_PORTAL_BLUR, false)) PORTAL_MATERIAL_ADVANCED else PORTAL_MATERIAL_DEFAULT).coerceIn(PORTAL_MATERIAL_DEFAULT, PORTAL_MATERIAL_SOFT_GLASS),
+        useGlobalGlass = preferences.getBoolean(KEY_PORTAL_USE_GLOBAL_GLASS, true),
+        advancedHighlight = preferences.getBoolean(KEY_PORTAL_ADVANCED_HIGHLIGHT, false),
+        glass = readSoftGlassSettings(preferences, KEY_PORTAL_GLASS_PREFIX),
     )
 
     fun save(context: Context, service: XposedService?, settings: PortalAppearanceSettings) {
@@ -68,13 +90,27 @@ internal object PortalSettings {
         if (!local.contains(KEY_PORTAL_DEVELOPER)) editor.putBoolean(KEY_PORTAL_DEVELOPER, value.developerMode)
         if (!local.contains(KEY_PORTAL_REMOVE_SCRIM)) editor.putBoolean(KEY_PORTAL_REMOVE_SCRIM, value.removeScrim)
         if (!local.contains(KEY_PORTAL_JAPANESE_OCR)) editor.putBoolean(KEY_PORTAL_JAPANESE_OCR, value.japaneseOcr)
+        if (!local.contains(KEY_PORTAL_CUSTOM_EXPANDED_HEIGHT)) editor.putBoolean(KEY_PORTAL_CUSTOM_EXPANDED_HEIGHT, value.customExpandedHeight)
+        if (!local.contains(KEY_PORTAL_EXPANDED_HEIGHT)) editor.putInt(KEY_PORTAL_EXPANDED_HEIGHT, value.expandedHeightOffsetDp)
+        if (!local.contains(KEY_PORTAL_MATERIAL_MODE)) editor.putInt(KEY_PORTAL_MATERIAL_MODE,
+            if (local.contains(KEY_PORTAL_BLUR)) read(local).materialMode else value.materialMode)
+        if (!local.contains(KEY_PORTAL_USE_GLOBAL_GLASS)) editor.putBoolean(KEY_PORTAL_USE_GLOBAL_GLASS, value.useGlobalGlass)
+        if (!local.contains(KEY_PORTAL_ADVANCED_HIGHLIGHT)) editor.putBoolean(KEY_PORTAL_ADVANCED_HIGHLIGHT, value.advancedHighlight)
+        remote.all.forEach { (key, entry) ->
+            if (key.startsWith(KEY_PORTAL_GLASS_PREFIX) && !local.contains(key)) {
+                when (entry) {
+                    is Int -> editor.putInt(key, entry)
+                    is Boolean -> editor.putBoolean(key, entry)
+                }
+            }
+        }
         editor.apply()
         write(remote, read(local))
     }
 
     private fun write(preferences: SharedPreferences, settings: PortalAppearanceSettings) {
         preferences.edit()
-            .putBoolean(KEY_PORTAL_BLUR, settings.blur)
+            .putBoolean(KEY_PORTAL_BLUR, settings.materialMode == PORTAL_MATERIAL_ADVANCED)
             .putBoolean(KEY_PORTAL_CUSTOM_BLUR, settings.customBlur)
             .putInt(KEY_PORTAL_BLUR_RADIUS, settings.blurRadiusDp.coerceIn(0, 100))
             .putBoolean(KEY_PORTAL_CUSTOM_OPACITY, settings.customOpacity)
@@ -84,6 +120,22 @@ internal object PortalSettings {
             .putBoolean(KEY_PORTAL_DEVELOPER, settings.developerMode)
             .putBoolean(KEY_PORTAL_REMOVE_SCRIM, settings.removeScrim)
             .putBoolean(KEY_PORTAL_JAPANESE_OCR, settings.japaneseOcr)
+            .putBoolean(KEY_PORTAL_CUSTOM_EXPANDED_HEIGHT, settings.customExpandedHeight)
+            .putInt(KEY_PORTAL_EXPANDED_HEIGHT, settings.expandedHeightOffsetDp.coerceIn(-128, 256))
+            .putInt(KEY_PORTAL_MATERIAL_MODE, settings.materialMode.coerceIn(PORTAL_MATERIAL_DEFAULT, PORTAL_MATERIAL_SOFT_GLASS))
+            .putBoolean(KEY_PORTAL_USE_GLOBAL_GLASS, settings.useGlobalGlass)
+            .putBoolean(KEY_PORTAL_ADVANCED_HIGHLIGHT, settings.advancedHighlight)
+            .putBoolean(KEY_PORTAL_GLASS_PREFIX + "enabled", settings.glass.enabled)
+            .putInt(KEY_PORTAL_GLASS_PREFIX + "refraction_blur", settings.glass.refractionBlur)
+            .putInt(KEY_PORTAL_GLASS_PREFIX + "blur_percent", settings.glass.backgroundBlur)
+            .putInt(KEY_PORTAL_GLASS_PREFIX + "scale_percent", settings.glass.backgroundScale)
+            .putInt(KEY_PORTAL_GLASS_PREFIX + "opacity_percent", settings.glass.backgroundOpacity)
+            .also { editor ->
+                softGlassParameters.forEach { definition ->
+                    editor.putInt(KEY_PORTAL_GLASS_PREFIX + if (definition.key == "edge_feather") "edge_feather_inverse" else definition.key,
+                        settings.glass.adjustments[definition.key] ?: if (definition.key == "darker") -100 else 0)
+                }
+            }
             .apply()
     }
 }

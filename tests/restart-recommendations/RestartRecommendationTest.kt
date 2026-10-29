@@ -32,6 +32,37 @@ private class Preferences {
 fun main() {
     val portalPrefs = Preferences()
     check(PortalSettings.read(portalPrefs.prefs) == PortalAppearanceSettings())
+    portalPrefs.write(KEY_PORTAL_BLUR to true)
+    check(PortalSettings.read(portalPrefs.prefs).materialMode == PORTAL_MATERIAL_ADVANCED)
+    portalPrefs.write(KEY_PORTAL_MATERIAL_MODE to PORTAL_MATERIAL_SOFT_GLASS)
+    check(PortalSettings.read(portalPrefs.prefs).materialMode == PORTAL_MATERIAL_SOFT_GLASS)
+    portalPrefs.write(KEY_PORTAL_MATERIAL_MODE to PORTAL_MATERIAL_DEFAULT)
+    check(PortalSettings.read(portalPrefs.prefs).materialMode == PORTAL_MATERIAL_DEFAULT)
+    portalPrefs.write(KEY_PORTAL_MATERIAL_MODE to 99)
+    check(PortalSettings.read(portalPrefs.prefs).materialMode == PORTAL_MATERIAL_SOFT_GLASS)
+    portalPrefs.write(KEY_PORTAL_MATERIAL_MODE to -1)
+    check(PortalSettings.read(portalPrefs.prefs).materialMode == PORTAL_MATERIAL_DEFAULT)
+    portalPrefs.write(KEY_PORTAL_GLASS_PREFIX + "refraction_blur" to 180, KEY_PORTAL_GLASS_PREFIX + "refraction" to 50)
+    val localGlass = PortalSettings.read(portalPrefs.prefs).copy(useGlobalGlass = false)
+    check(resolvePortalGlass(portalPrefs.prefs, localGlass).let { it.enabled && it.refractionBlur == 180 && it.adjustments["refraction"] == 50 })
+    check(resolvePortalGlass(portalPrefs.prefs, localGlass.copy(useGlobalGlass = true)).let { it.enabled && it.refractionBlur == 100 && it.adjustments["refraction"] == 0 })
+    // Optical source selection must retain Portal's independently stored geometry.
+    for (mode in PORTAL_MATERIAL_DEFAULT..PORTAL_MATERIAL_SOFT_GLASS) {
+        for (global in listOf(false, true)) {
+            portalPrefs.write(KEY_PORTAL_MATERIAL_MODE to mode, KEY_PORTAL_USE_GLOBAL_GLASS to global,
+                KEY_PORTAL_CUSTOM_CORNER to true, KEY_PORTAL_CORNER to -5)
+            val stored = PortalSettings.read(portalPrefs.prefs)
+            val resolved = stored.copy(glass = resolvePortalGlass(portalPrefs.prefs, stored))
+            check(resolved.customCorner && resolved.cornerOffsetDp == -5)
+            check(portalCornerRadius(30f, resolved.cornerOffsetDp, 3f) == 15f)
+        }
+    }
+    portalPrefs.write(KEY_PORTAL_ADVANCED_HIGHLIGHT to true)
+    check(PortalSettings.read(portalPrefs.prefs).advancedHighlight)
+    portalPrefs.write(KEY_PORTAL_EXPANDED_HEIGHT to -129)
+    check(PortalSettings.read(portalPrefs.prefs).expandedHeightOffsetDp == -128)
+    portalPrefs.write(KEY_PORTAL_EXPANDED_HEIGHT to 257)
+    check(PortalSettings.read(portalPrefs.prefs).expandedHeightOffsetDp == 256)
     portalPrefs.write(KEY_PORTAL_BLUR_RADIUS to -1, KEY_PORTAL_OPACITY to 101, KEY_PORTAL_CORNER to -33)
     check(PortalSettings.read(portalPrefs.prefs).let { it.blurRadiusDp == 0 && it.opacityPercent == 100 && it.cornerOffsetDp == -32 })
     portalPrefs.write(KEY_PORTAL_BLUR_RADIUS to 101, KEY_PORTAL_OPACITY to -1, KEY_PORTAL_CORNER to 65)
@@ -87,8 +118,17 @@ fun main() {
         KEY_PORTAL_CUSTOM_CORNER to false, KEY_PORTAL_CORNER to 0, KEY_PORTAL_DEVELOPER to false,
         KEY_PORTAL_REMOVE_SCRIM to false,
         KEY_PORTAL_JAPANESE_OCR to false,
+        KEY_PORTAL_CUSTOM_EXPANDED_HEIGHT to false, KEY_PORTAL_EXPANDED_HEIGHT to 0,
+        KEY_PORTAL_MATERIAL_MODE to PORTAL_MATERIAL_DEFAULT, KEY_PORTAL_USE_GLOBAL_GLASS to true,
+        KEY_PORTAL_ADVANCED_HIGHLIGHT to false,
     )
     check(events.isEmpty()) { "Portal defaults must not suggest a restart" }
+    local.write(KEY_PORTAL_ADVANCED_HIGHLIGHT to true)
+    check(events.removeLast() == setOf(ScopeApplication.PORTAL))
+    local.write(KEY_PORTAL_MATERIAL_MODE to PORTAL_MATERIAL_SOFT_GLASS, KEY_PORTAL_USE_GLOBAL_GLASS to false)
+    check(events.removeLast() == setOf(ScopeApplication.PORTAL))
+    local.write(KEY_PORTAL_GLASS_PREFIX + "refraction" to 30)
+    check(events.removeLast() == setOf(ScopeApplication.PORTAL))
     local.write(KEY_PORTAL_BLUR to true, KEY_PORTAL_CUSTOM_BLUR to true, KEY_PORTAL_BLUR_RADIUS to 48)
     check(events.removeLast() == setOf(ScopeApplication.PORTAL))
     check(events.isEmpty()) { "A multi-key Portal edit must produce one event" }
@@ -104,6 +144,11 @@ fun main() {
     local.write(KEY_PORTAL_JAPANESE_OCR to true)
     check(events.removeLast() == setOf(ScopeApplication.PORTAL))
     check(PortalSettings.read(local.prefs).japaneseOcr)
+    local.write(KEY_PORTAL_CUSTOM_EXPANDED_HEIGHT to true, KEY_PORTAL_EXPANDED_HEIGHT to -128)
+    check(events.removeLast() == setOf(ScopeApplication.PORTAL))
+    check(PortalSettings.read(local.prefs).let { it.customExpandedHeight && it.expandedHeightOffsetDp == -128 })
+    local.write(KEY_PORTAL_EXPANDED_HEIGHT to 256)
+    check(events.removeLast() == setOf(ScopeApplication.PORTAL))
     check(events.isEmpty())
     local.write(
         KEY_CONTACTS_DIALER_BACKGROUND_BLUR to false,

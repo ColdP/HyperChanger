@@ -292,7 +292,7 @@ private enum class PageId {
     DEVICE_PROFILE_PRESETS, DEVICE_PROFILE_CLOUD_PRESETS,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
-    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND,
+    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, PORTAL_MATERIAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND,
 }
 
 private data class CategorySearchItem(
@@ -5070,7 +5070,8 @@ private fun Detail(
         PageId.ENVIRONMENT_DETECTION -> EnvironmentDetectionPage(back)
         PageId.CONTACTS_DIALER -> ContactsDialerPage({ openPage(PageId.CONTACTS_DIALER_BACKGROUND) }, back)
         PageId.CONTACTS_DIALER_BACKGROUND -> ContactsDialerBackgroundPage(back)
-        PageId.PORTAL -> PortalPage(back)
+        PageId.PORTAL -> PortalPage({ openPage(PageId.PORTAL_MATERIAL) }, back)
+        PageId.PORTAL_MATERIAL -> PortalMaterialPage(back)
         PageId.APP_NAVIGATION -> AppNavigationPage(back)
         PageId.RESTART_SCOPES -> RestartScopesPage(
             suggestedTargets = suggestedRestartTargets,
@@ -9340,7 +9341,7 @@ private fun LockscreenShortcutBackgroundPage(back: () -> Unit) {
 }
 
 @Composable
-private fun SoftGlassMaterialSliders(
+internal fun SoftGlassMaterialSliders(
     glass: SoftGlassSettings,
     includeBackdrop: Boolean = true,
     onChange: ((SoftGlassSettings) -> SoftGlassSettings) -> Unit,

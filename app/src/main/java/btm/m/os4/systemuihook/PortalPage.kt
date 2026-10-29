@@ -9,15 +9,15 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.preference.SwitchPreference
+import top.yukonga.miuix.kmp.preference.ArrowPreference
 
 @Composable
-internal fun PortalPage(back: () -> Unit) {
+internal fun PortalPage(openMaterial: () -> Unit, back: () -> Unit) {
     val context = LocalContext.current
     val service by HookApplication.service.collectAsStateWithLifecycle()
     val preferences = remember(context) { context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE) }
@@ -33,44 +33,33 @@ internal fun PortalPage(back: () -> Unit) {
         AppList(padding, scroll, 28) {
             item {
                 Group(tr("外观调整", "外观调整")) {
-                    SwitchPreference(
-                        title = tr("为传送门添加背景模糊", "为传送门添加背景模糊"),
-                        checked = settings.blur, onCheckedChange = { save(settings.copy(blur = it)) },
+                    ArrowPreference(
+                        title = tr("传送门材质调整", "传送门材质调整"),
+                        onClick = openMaterial,
                     )
+                    SwitchPreference(
+                        title = tr("自定义背景卡片圆角", "自定义背景卡片圆角"),
+                        checked = settings.customCorner,
+                        onCheckedChange = { save(settings.copy(customCorner = it)) },
+                    )
+                    PortalAppearanceVisibility(settings.customCorner) {
+                        PortalSlider(tr("背景卡片圆角", "背景卡片圆角"), settings.cornerOffsetDp, -32..64, 0, " dp", true) {
+                            save(settings.copy(cornerOffsetDp = it))
+                        }
+                    }
                     SwitchPreference(
                         title = tr("去除全屏半透明遮罩层", "去除全屏半透明遮罩层"),
                         checked = settings.removeScrim, onCheckedChange = { save(settings.copy(removeScrim = it)) },
                     )
-                    PortalAppearanceVisibility(settings.blur) {
-                        Column {
-                            SwitchPreference(
-                                title = tr("自定义背景卡片模糊度", "自定义背景卡片模糊度"),
-                                checked = settings.customBlur, onCheckedChange = { save(settings.copy(customBlur = it)) },
-                            )
-                            PortalAppearanceVisibility(settings.customBlur) {
-                                PortalSlider(
-                                    tr("背景卡片模糊度", "背景卡片模糊度"), settings.blurRadiusDp, 0..100, 24, " dp",
-                                ) { save(settings.copy(blurRadiusDp = it)) }
-                            }
-                            SwitchPreference(
-                                title = tr("自定义背景卡片不透明度", "自定义背景卡片不透明度"),
-                                checked = settings.customOpacity, onCheckedChange = { save(settings.copy(customOpacity = it)) },
-                            )
-                            PortalAppearanceVisibility(settings.customOpacity) {
-                                PortalSlider(
-                                    tr("背景卡片不透明度", "背景卡片不透明度"), settings.opacityPercent, 0..100, 70, "%",
-                                ) { save(settings.copy(opacityPercent = it)) }
-                            }
-                            SwitchPreference(
-                                title = tr("自定义背景卡片圆角", "自定义背景卡片圆角"),
-                                checked = settings.customCorner, onCheckedChange = { save(settings.copy(customCorner = it)) },
-                            )
-                            PortalAppearanceVisibility(settings.customCorner) {
-                                PortalSlider(
-                                    tr("背景卡片圆角", "背景卡片圆角"), settings.cornerOffsetDp, -32..64, 0, " dp", true,
-                                ) { save(settings.copy(cornerOffsetDp = it)) }
-                            }
-                        }
+                    SwitchPreference(
+                        title = tr("调整传送门背景展开态高度", "调整传送门背景展开态高度"),
+                        checked = settings.customExpandedHeight,
+                        onCheckedChange = { save(settings.copy(customExpandedHeight = it)) },
+                    )
+                    PortalAppearanceVisibility(settings.customExpandedHeight) {
+                        PortalSlider(
+                            tr("展开态高度偏移", "展开态高度偏移"), settings.expandedHeightOffsetDp, -128..256, 0, " dp", true,
+                        ) { save(settings.copy(expandedHeightOffsetDp = it)) }
                     }
                 }
             }
@@ -89,7 +78,7 @@ internal fun PortalPage(back: () -> Unit) {
 
 /** Same fade/scale visibility used by the existing background settings pages. */
 @Composable
-private fun PortalAppearanceVisibility(visible: Boolean, content: @Composable () -> Unit) {
+internal fun PortalAppearanceVisibility(visible: Boolean, content: @Composable () -> Unit) {
     AnimatedVisibility(
         visible = visible,
         enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
@@ -98,7 +87,7 @@ private fun PortalAppearanceVisibility(visible: Boolean, content: @Composable ()
 }
 
 @Composable
-private fun PortalSlider(
+internal fun PortalSlider(
     title: String, value: Int, range: IntRange, default: Int, suffix: String = "", relative: Boolean = false,
     save: (Int) -> Unit,
 ) {

@@ -8,6 +8,8 @@ import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
@@ -31,6 +33,7 @@ internal class PortalHooks(
     private val installed = mutableSetOf<String>()
     private val cards = WeakHashMap<View, CardState>()
     private val buttons = WeakHashMap<ImageView, Boolean>()
+    private var globalGlass: SoftGlassRuntimeSettings? = null
     private val ocrHooks = PortalOcrHooks(module, hookDeoptimized, logTag)
     private val cardNames = setOf(
         "TaplusRecognitionExpandedCard", "TaplusRecommendExpandedCard", "TaplusCtaCard",
@@ -46,9 +49,21 @@ internal class PortalHooks(
     }
 
     fun install(classLoader: ClassLoader, preferences: SharedPreferences) {
-        val settings = PortalSettings.read(preferences)
+        val stored = PortalSettings.read(preferences)
+        val settings = stored.copy(glass = resolvePortalGlass(preferences, stored))
+        if (settings.materialMode == PORTAL_MATERIAL_SOFT_GLASS && settings.useGlobalGlass && globalGlass == null) {
+            val main = Handler(Looper.getMainLooper())
+            globalGlass = SoftGlassRuntimeSettings(preferences) {
+                main.post {
+                    cards.keys.toList().filter { it.isAttachedToWindow }.forEach { protect { applyCard(it, settings, refresh = true) } }
+                    buttons.keys.toList().filter { it.isAttachedToWindow }.forEach { protect { applyCloseButton(it, settings) } }
+                }
+            }
+        }
         if (settings.japaneseOcr) ocrHooks.install(classLoader, preferences)
-        if (settings.blur) {
+        val material = settings.materialMode != PORTAL_MATERIAL_DEFAULT
+        val adjustCards = material || (settings.customCorner && settings.cornerOffsetDp != 0)
+        if (adjustCards) {
             installHook("card-background") {
                 // Common setter also covers resource-backed and legacy background assignments.
                 hookDeoptimized(View::class.java.getDeclaredMethod("setBackgroundDrawable", Drawable::class.java))
@@ -81,6 +96,8 @@ internal class PortalHooks(
                         result
                     }
             }
+        }
+        if (material) {
             installHook("main-window") {
                 hookAfter(classLoader.loadClass(floatPrefix + "TaplusMainFloatView"), "initWindow") { owner ->
                     val params = owner.field("wmParams") as WindowManager.LayoutParams
@@ -100,12 +117,13 @@ internal class PortalHooks(
                     .setId("hyperchanger:portal:navigation-dim").intercept { null }
             }
         }
-        if (settings.blur || settings.removeScrim) installHook("main-content") {
+        if (adjustCards || settings.removeScrim || settings.customExpandedHeight) installHook("main-content") {
             hookAfter(classLoader.loadClass(floatPrefix + "TaplusMainFloatView"), "initView") { owner ->
                 val root = owner.field("mMainView") as? View
                 if (settings.removeScrim) (owner.field("mMainBg") as? View)?.setBackgroundColor(Color.TRANSPARENT)
-                if (settings.blur && root != null) {
-                    installNavigationInsets(root)
+                if (settings.customExpandedHeight && root != null) applyExpandedHeight(root, settings.expandedHeightOffsetDp)
+                if (adjustCards && root != null) {
+                    if (material) installNavigationInsets(root)
                     applyTree(root, settings)
                 }
             }
@@ -147,6 +165,17 @@ internal class PortalHooks(
             }
     }
 
+    private fun applyAdvancedHighlight(view: View, settings: PortalAppearanceSettings) {
+        if (settings.materialMode != PORTAL_MATERIAL_ADVANCED || !settings.advancedHighlight) return
+        protect {
+            View::class.java.getMethod("setMiBloomStroke", FloatArray::class.java)
+                .invoke(view, floatArrayOf(
+                    3f, 180f, 1f, 1f, 1f, .05f, 8f, .5f, .5f, -.5f, 1f,
+                    1f, 1f, .6f, .5f, .95f, -.5f, 1f, 1f, 1f, .35f,
+                ))
+        }
+    }
+
     private fun Any.field(name: String): Any? {
         var type: Class<*>? = javaClass
         while (type != null) {
@@ -171,7 +200,9 @@ internal class PortalHooks(
 
     private fun applyTree(view: View, settings: PortalAppearanceSettings) {
         if (view.javaClass.name in cardNames) applyCard(view, settings, refresh = true)
-        if (view is ImageView && view.hasResourceName("icon_close")) applyCloseButton(view, settings)
+        if (settings.materialMode != PORTAL_MATERIAL_DEFAULT && view is ImageView && view.hasResourceName("icon_close")) {
+            applyCloseButton(view, settings)
+        }
         if (view is ViewGroup) for (index in 0 until view.childCount) applyTree(view.getChildAt(index), settings)
     }
 
@@ -182,6 +213,7 @@ internal class PortalHooks(
             val native = original.cloneFor(view) ?: return
             state = CardState(native)
             cards[view] = state
+            installMaterialLayoutListener(view, settings)
             view.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
                 override fun onViewAttachedToWindow(v: View) {
                     v.post { if (v.isAttachedToWindow) protect { applyCard(v, settings, refresh = true) } }
@@ -196,9 +228,12 @@ internal class PortalHooks(
         val background = state.native.cloneFor(view) ?: return
         // Register after attach as pass-window blur needs a ViewRootImpl. Before attach
         // retain native opacity until a backdrop can be registered.
-        val blurred = view.isAttachedToWindow && applyBlur(view, settings)
-        val opacity = if (settings.customOpacity) settings.opacityPercent else if (blurred) 70 else null
+        val blurred = settings.materialMode != PORTAL_MATERIAL_DEFAULT && view.isAttachedToWindow && applyBlur(view, settings)
+        val advanced = settings.materialMode == PORTAL_MATERIAL_ADVANCED
+        val opacity = if (!advanced) { if (blurred) 0 else null }
+            else if (settings.customOpacity) settings.opacityPercent else if (blurred) 70 else null
         if (opacity != null) background.alpha = (state.native.alpha * opacity / 100f).roundToInt().coerceIn(0, 255)
+        // Geometry belongs to the Portal card, independently of local/global optical settings.
         if (settings.customCorner && settings.cornerOffsetDp != 0) {
             val radii = state.native.cornerRadii
             val density = view.resources.displayMetrics.density
@@ -209,6 +244,7 @@ internal class PortalHooks(
         view.background = background
         view.clipToOutline = true
         view.invalidateOutline()
+        if (blurred) applyAdvancedHighlight(view, settings)
     }
 
     private fun GradientDrawable.cloneFor(view: View): GradientDrawable? =
@@ -216,6 +252,7 @@ internal class PortalHooks(
 
     private fun applyCloseButton(button: ImageView, settings: PortalAppearanceSettings) {
         if (buttons.put(button, true) == null) {
+            installMaterialLayoutListener(button, settings)
             val size = button.drawable?.intrinsicWidth?.takeIf { it > 0 } ?: (30 * button.resources.displayMetrics.density).roundToInt()
             button.setImageDrawable(PortalCloseIconDrawable(button.resources, size))
             button.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
@@ -225,13 +262,41 @@ internal class PortalHooks(
         }
         val blurred = button.isAttachedToWindow && applyBlur(button, settings)
         val dark = button.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
-        val fill = if (settings.customOpacity) settings.opacityPercent else if (blurred) 70 else 100
+        val fill = if (settings.materialMode == PORTAL_MATERIAL_SOFT_GLASS) { if (blurred) 0 else 100 }
+            else if (settings.customOpacity) settings.opacityPercent else if (blurred) 70 else 100
         button.background = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setColor(if (dark) Color.rgb(36, 36, 36) else Color.WHITE)
             alpha = fill * 255 / 100
         }
         button.clipToOutline = true
+        if (blurred) applyAdvancedHighlight(button, settings)
+    }
+
+    private fun installMaterialLayoutListener(view: View, settings: PortalAppearanceSettings) {
+        if (settings.materialMode != PORTAL_MATERIAL_SOFT_GLASS) return
+        view.addOnLayoutChangeListener { v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+            if (v.isAttachedToWindow && (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop)) {
+                protect {
+                    if (v is ImageView) applyCloseButton(v, settings) else applyCard(v, settings, refresh = true)
+                }
+            }
+        }
+    }
+
+    private fun applyExpandedHeight(root: View, offsetDp: Int) {
+        if (offsetDp == 0) return
+        val card = root.findByResourceName("recognition_card") ?: return
+        val pager = card.findByResourceName("recognition_pager") ?: return
+        val cardHeight = card.layoutParams.height
+        val pagerHeight = pager.layoutParams.height
+        if (cardHeight <= 0 || pagerHeight <= 0) return
+        // The group is bottom-anchored. A negative delta lowers its top edge.
+        // Keep the page and its container in sync so the bottom mode switcher fits.
+        val requested = (offsetDp.coerceIn(-128, 256) * root.resources.displayMetrics.density).roundToInt()
+        val delta = requested.coerceAtLeast(1 - minOf(cardHeight, pagerHeight))
+        card.layoutParams = card.layoutParams.apply { height = cardHeight + delta }
+        pager.layoutParams = pager.layoutParams.apply { height = pagerHeight + delta }
     }
 
     private fun installNavigationInsets(root: View) {
@@ -260,12 +325,17 @@ internal class PortalHooks(
         // Small overlay windows must explicitly opt into sampling the window behind them.
         enablePassWindowBlur(view)
         View::class.java.getMethod("setMiBackgroundBlurMode", intType).invoke(view, 1)
+        if (settings.materialMode == PORTAL_MATERIAL_SOFT_GLASS) {
+            PortalGlassMaterial.apply(view, globalGlass?.settings?.copy(enabled = true) ?: settings.glass)
+            return@runCatching true
+        }
         View::class.java.getMethod("setMiBackgroundBlurRadius", intType).invoke(
             view, ((if (settings.customBlur) settings.blurRadiusDp else 24) * view.resources.displayMetrics.density).roundToInt().coerceIn(0, 400),
         )
         View::class.java.getMethod("setMiViewBlurMode", intType).invoke(view, 1)
         true
     }.onFailure { error ->
+        if (settings.materialMode == PORTAL_MATERIAL_SOFT_GLASS) PortalGlassMaterial.clear(view)
         runCatching { View::class.java.getMethod("setMiBackgroundBlurMode", Int::class.javaPrimitiveType).invoke(view, 0) }
         runCatching { View::class.java.getMethod("setMiViewBlurMode", Int::class.javaPrimitiveType).invoke(view, 0) }
         HookModuleLogger.log(module, Log.DEBUG, logTag, "Portal background blur API unavailable", error)
