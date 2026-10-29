@@ -19,8 +19,8 @@ internal fun SecurityCenterRootedCheckDiagnosticsPreference(
     SwitchPreference(
         title = tr("Root 环境检测 Hook", "Root 环境检测 Hook"),
         summary = tr(
-            "(未测试功能)环境状态处理，并将匹配到的 /system/bin/ 布尔检测方法返回 false。",
-            "(未测试功能)环境状态处理，并将匹配到的 /system/bin/ 布尔检测方法返回 false。",
+            "环境状态处理，并将匹配到的 /system/bin/ 布尔检测方法返回 false。",
+            "环境状态处理，并将匹配到的 /system/bin/ 布尔检测方法返回 false。",
         ),
         checked = enabled,
         onCheckedChange = { value ->
@@ -39,8 +39,8 @@ internal fun SecurityCenterRootCheckDiagnosticsPreference(
     SwitchPreference(
         title = tr("Root 检查项 Hook", "Root 检查项 Hook"),
         summary = tr(
-            "(未测试功能)修改key_check_item_root 匹配逻辑，并将目标布尔方法返回 false。",
-            "(未测试功能)修改key_check_item_root 匹配逻辑，并将目标布尔方法返回 false。",
+            "修改key_check_item_root 匹配逻辑，并将目标布尔方法返回 false。",
+            "修改key_check_item_root 匹配逻辑，并将目标布尔方法返回 false。",
         ),
         checked = enabled,
         onCheckedChange = { value ->

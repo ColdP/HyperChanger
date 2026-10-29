@@ -188,6 +188,8 @@ internal fun CustomNavigation(
     advancedMaterial: Boolean,
     colorMode: String,
     liquidBottomSpacingDp: Int = 8,
+    liquidBarWidthFraction: Float = 1f,
+    liquidBarAlignment: Alignment = Alignment.BottomCenter,
     concealHostBottomBar: Boolean = false,
     forceFloatingGlass: Boolean = false,
     adaptiveFloatingWidth: Boolean = false,
@@ -291,10 +293,10 @@ internal fun CustomNavigation(
                 isDarkTheme = hostIsDarkTheme,
                 accentColorOverride = accentColorOverride,
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
+                    .align(liquidBarAlignment)
                     .fillMaxWidth(
                         if (adaptiveLiquidWidth) {
-                            1f
+                            liquidBarWidthFraction.coerceIn(0.5f, 1f)
                         } else {
                             0.53f * 0.82f * 1.10f
                         }

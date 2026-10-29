@@ -2,13 +2,6 @@
 // Copyright 2026 btm_m
 package btm.m.os4.systemuihook
 
-import btm.m.os4.systemuihook.trustservice.KEY_TRUSTSERVICE_DIAGNOSTICS
-import btm.m.os4.systemuihook.trustservice.TrustServiceSettingsPreference
-import btm.m.os4.systemuihook.securitycenter.KEY_SECURITYCENTER_ROOTED_DIAGNOSTICS
-import btm.m.os4.systemuihook.securitycenter.KEY_SECURITYCENTER_ROOT_DIAGNOSTICS
-import btm.m.os4.systemuihook.securitycenter.SecurityCenterRootedCheckDiagnosticsPreference
-import btm.m.os4.systemuihook.securitycenter.SecurityCenterRootCheckDiagnosticsPreference
-
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsStore
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationShortcutsSettingsStore
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationBottomOffsetSettingsStore
@@ -288,7 +281,7 @@ private fun defaultModulePresetFileName(): String {
 }
 
 private enum class PageId {
-    MODULE_SAFETY, MODULE_LOGS,
+    MODULE_SAFETY, MODULE_LOGS, ENVIRONMENT_DETECTION,
     SHADE,
     SHADE_PRESETS,
     SOFT_GLASS_PARAMETERS,
@@ -1936,28 +1929,10 @@ private fun OtherPage(
                 insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp),
             )
             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-                // MiTrustService feature entry is intentionally grouped under Other → System app optimization.
-                TrustServiceSettingsPreference(
-                    checked = scopedPrefs.getBoolean(KEY_TRUSTSERVICE_DIAGNOSTICS, false),
-                    onCheckedChange = { enabled ->
-                        scopedPrefs.edit().putBoolean(KEY_TRUSTSERVICE_DIAGNOSTICS, enabled).apply()
-                    },
-                )
-                SecurityCenterRootedCheckDiagnosticsPreference(
-                    checked = scopedPrefs.getBoolean(KEY_SECURITYCENTER_ROOTED_DIAGNOSTICS, false),
-                    onCheckedChange = { enabled ->
-                        scopedPrefs.edit()
-                            .putBoolean(KEY_SECURITYCENTER_ROOTED_DIAGNOSTICS, enabled)
-                            .apply()
-                    },
-                )
-                SecurityCenterRootCheckDiagnosticsPreference(
-                    checked = scopedPrefs.getBoolean(KEY_SECURITYCENTER_ROOT_DIAGNOSTICS, false),
-                    onCheckedChange = { enabled ->
-                        scopedPrefs.edit()
-                            .putBoolean(KEY_SECURITYCENTER_ROOT_DIAGNOSTICS, enabled)
-                            .apply()
-                    },
+                ArrowPreference(
+                    title = tr("环境检测", "环境检测"),
+                    summary = tr("实验性功能", "实验性功能"),
+                    onClick = { open(PageId.ENVIRONMENT_DETECTION) },
                 )
                 ArrowPreference(
                     title = tr("应用底部导航", "应用底部导航"),
@@ -5083,6 +5058,7 @@ private fun Detail(
         PageId.REAR_MUSIC_APPS -> RearMusicApps(musicWhitelist, updateMusicWhitelist, back)
         PageId.REAR_SWIPE_APP -> RearSwipeAppPicker(back)
         PageId.OTHER -> OtherPage(airDropSettings, updateAirDrop, screenRecorder, updateScreenRecorder, openPage, back)
+        PageId.ENVIRONMENT_DETECTION -> EnvironmentDetectionPage(back)
         PageId.CONTACTS_DIALER -> ContactsDialerPage({ openPage(PageId.CONTACTS_DIALER_BACKGROUND) }, back)
         PageId.CONTACTS_DIALER_BACKGROUND -> ContactsDialerBackgroundPage(back)
         PageId.APP_NAVIGATION -> AppNavigationPage(back)

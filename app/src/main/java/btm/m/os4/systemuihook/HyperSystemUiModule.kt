@@ -1031,17 +1031,17 @@ class HyperSystemUiModule : XposedModule() {
         if (!OsCompatibility.areHooksAllowed()) return
         if (param.packageName == "com.xiaomi.trustservice") {
             val preferences = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
-            if (preferences.getBoolean(KEY_TRUSTSERVICE_DIAGNOSTICS, false)) {
+            if (preferences.isEnvironmentDetectionEnabled() && preferences.getBoolean(KEY_TRUSTSERVICE_DIAGNOSTICS, false)) {
                 TrustServiceDiagnostics.install(this, param)
             }
             return
         }
         if (param.packageName == "com.miui.securitycenter") {
             val preferences = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
-            if (preferences.getBoolean(KEY_SECURITYCENTER_ROOTED_DIAGNOSTICS, false)) {
+            if (preferences.isEnvironmentDetectionEnabled() && preferences.getBoolean(KEY_SECURITYCENTER_ROOTED_DIAGNOSTICS, false)) {
                 SecurityCenterRootDiagnostics.inspectRootedCheck(this, param)
             }
-            if (preferences.getBoolean(KEY_SECURITYCENTER_ROOT_DIAGNOSTICS, false)) {
+            if (preferences.isEnvironmentDetectionEnabled() && preferences.getBoolean(KEY_SECURITYCENTER_ROOT_DIAGNOSTICS, false)) {
                 SecurityCenterRootDiagnostics.inspectRootCheck(this, param)
             }
             return
@@ -1116,7 +1116,7 @@ class HyperSystemUiModule : XposedModule() {
             param.packageName == "com.lucky.luckyclient" || param.packageName == "com.tencent.wemeet.app" ||
             param.packageName == "cmb.pb" || param.packageName == "com.tencent.mm" ||
             param.packageName == "com.tencent.mobileqq" ||
-            param.packageName == "com.xunmeng.pinduoduo" || param.packageName == "com.instagram.android" || param.packageName == "com.twitter.android"
+            param.packageName == "com.xunmeng.pinduoduo" || param.packageName == "com.instagram.android" || param.packageName == "com.twitter.android" || param.packageName == "com.github.android"
         ) {
             othersHooks.installAppNavigation(param)
             return

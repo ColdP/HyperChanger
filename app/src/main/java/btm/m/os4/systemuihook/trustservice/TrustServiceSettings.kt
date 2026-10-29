@@ -20,8 +20,8 @@ internal fun TrustServiceSettingsPreference(
     SwitchPreference(
         title = tr("禁用 MiTrustService MRMD 初始化", "禁用 MiTrustService MRMD 初始化"),
         summary = tr(
-            "(未测试功能)阻止 MiTrustService 初始化 MRMD 服务。开启后强制停止并重新启动安全服务进程使其生效。",
-            "(未测试功能)阻止 MiTrustService 初始化 MRMD 服务。开启后强制停止并重新启动安全服务进程使其生效。",
+            "阻止 MiTrustService 初始化 MRMD 服务。开启后强制停止并重新启动安全服务进程使其生效。",
+            "阻止 MiTrustService 初始化 MRMD 服务。开启后强制停止并重新启动安全服务进程使其生效。",
         ),
         checked = enabled,
         onCheckedChange = { value ->

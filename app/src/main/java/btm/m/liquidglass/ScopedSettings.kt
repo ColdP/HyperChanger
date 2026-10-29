@@ -40,7 +40,8 @@ object ScopedSettings {
         ScopeApp("微信", "com.tencent.mm")
         ,ScopeApp("拼多多", "com.xunmeng.pinduoduo"),
         ScopeApp("Instagram", "com.instagram.android"),
-        ScopeApp("X", "com.twitter.android")
+        ScopeApp("X", "com.twitter.android"),
+        ScopeApp("GitHub", "com.github.android")
     )
 
     @JvmStatic

@@ -125,6 +125,7 @@ enum class ScopeApplication(val title: String, val packageName: String) {
     PINDUODUO("拼多多", "com.xunmeng.pinduoduo"),
     INSTAGRAM("Instagram", "com.instagram.android"),
     X("X", "com.twitter.android"),
+    GITHUB("GitHub", "com.github.android"),
     CONTACTS_DIALER("拨号与通话", "com.android.contacts"),
     SOUND_EFFECT("音质音效", "com.miui.misound"),
     MI_SETTINGS("小米设置", "com.xiaomi.misettings"),

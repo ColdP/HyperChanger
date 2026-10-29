@@ -303,7 +303,21 @@ object AppBottomNavHooks {
         targetVersion = "12.37.2-prod.01 (312372001)"
     )
 
+    private val github = AppConfig(
+        displayName = "GitHub",
+        packageName = GitHubNavigation.PACKAGE,
+        activityName = GitHubNavigation.ACTIVITY,
+        barResourceName = "navigation_bar",
+        anchorResourceName = null,
+        requiredTabs = emptySet(),
+        targetVersion = "1.282.0 (953)"
+    )
+
     private val sessions = WeakHashMap<Activity, Session>()
+
+    internal fun onGitHubNavigationChanged(activity: Activity) {
+        synchronized(sessions) { sessions[activity] }?.onGitHubNavigationChanged()
+    }
 
     private val cmbBank = AppConfig(
         displayName = "CMB Bank",
@@ -694,6 +708,23 @@ object AppBottomNavHooks {
 
     @JvmStatic
     @Throws(ReflectiveOperationException::class)
+    fun installGitHub(
+        module: XposedModule,
+        loader: ClassLoader,
+        blurRadius: Int,
+        labelMode: String,
+        navigationStyle: String,
+        advancedMaterial: Boolean,
+        colorMode: String,
+        accentColor: Int = 0
+    ) {
+        GitHubNavigation.install(module, loader)
+        ImmersiveNavigationHooks.install(module)
+        install(module, loader, github, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
+    }
+
+    @JvmStatic
+    @Throws(ReflectiveOperationException::class)
     fun installXiaomiWallet(
         module: XposedModule,
         loader: ClassLoader,
@@ -945,6 +976,8 @@ object AppBottomNavHooks {
         private var instagramLastInsetMaintenanceAt = 0L
         private val xNavigation = if (config === twitter) XNavigation.Detector(activity) else null
         private var xLastInsetMaintenanceAt = 0L
+        private val githubNavigation = if (config === github) GitHubNavigation.Detector(activity) else null
+        private var githubLastInsetMaintenanceAt = 0L
         private var cmbBankPage: ViewGroup? = null
         private var cmbBankBackground: View? = null
         private var cmbRootListener: View.OnAttachStateChangeListener? = null
@@ -1013,13 +1046,22 @@ object AppBottomNavHooks {
             forceQQMusicVisiblePageChain(pager)
         }
 
+        fun onGitHubNavigationChanged() {
+            if (config !== github || !resumed) return
+            activity.window.decorView.post {
+                if (!resumed) return@post
+                if (nav == null) attachOrRetry() else syncHostState()
+            }
+        }
+
         fun resume() {
             resumed = true
-            if (config === twitter) {
+            if (config === twitter || config === github) {
                 // A resumed Activity may still be showing a secondary X surface. Let the
                 // Compose page flag and detector decide whether the overlay can be shown;
                 // never expose the stale main-Tab overlay during that transition.
                 xNavigation?.setActive(false)
+                if (config === github) GitHubNavigation.setActive(activity, false)
                 nav?.visibility = View.GONE
             } else {
                 xNavigation?.setActive(nav != null, navigationOverlayHeight())
@@ -1032,6 +1074,7 @@ object AppBottomNavHooks {
         fun pause() {
             resumed = false
             xNavigation?.setActive(false)
+            if (config === github) GitHubNavigation.setActive(activity, false)
             nav?.visibility = View.GONE
             resetMiniPlayerPosition()
             if (config === cmbBank) destroy()
@@ -1056,6 +1099,9 @@ object AppBottomNavHooks {
             instagramLastInsetMaintenanceAt = 0L
             xNavigation?.clear()
             xLastInsetMaintenanceAt = 0L
+            githubNavigation?.clear()
+            if (config === github) GitHubNavigation.setActive(activity, false)
+            githubLastInsetMaintenanceAt = 0L
             removeMiniPlayerBackground()
             lifecycleOwner?.destroy()
             lifecycleOwner = null
@@ -1193,10 +1239,13 @@ object AppBottomNavHooks {
                                     config === xiaomiHealthWatchFaceMarket || config === appleMusic ||
                                     config === tencentMeeting || config === cmbBank || config === wechat ||
                                     config === qq || config === twitter ||
+                                    config === github ||
                                     config.packageName == PinduoduoNavigation.PACKAGE ||
                                     config.packageName == InstagramNavigation.PACKAGE,
                                 softBackdropShadow = config === tencentMeeting,
                                 liquidBottomSpacingDp = if (config === xiaomiWallet) -8 else 8,
+                                liquidBarWidthFraction = 1f,
+                                liquidBarAlignment = androidx.compose.ui.Alignment.BottomCenter,
                                 concealHostBottomBar = config.concealHostBottomBar ||
                                     config === xiaomiWallet,
                                 accentColorOverride = accentColor.takeIf {
@@ -1219,6 +1268,7 @@ object AppBottomNavHooks {
                                     config === qq ||
                                     config === xiaomiHealth ||
                                     config === twitter ||
+                                    config === github ||
                                     config.packageName == PinduoduoNavigation.PACKAGE ||
                                     config.packageName == InstagramNavigation.PACKAGE
                                 ) {
@@ -1384,6 +1434,7 @@ object AppBottomNavHooks {
                 // Activate only after the overlay has been successfully added. Host snapshot
                 // state triggers composition and removes the native row on the next frame.
                 xNavigation?.setActive(true, navigationOverlayHeight())
+                if (config === github) GitHubNavigation.setActive(activity, true, navigationOverlayHeight())
                 composeView.post(::syncHostState)
                 btm.m.os4.systemuihook.HookModuleLogger.log(module,
                     Log.INFO,
@@ -1410,7 +1461,7 @@ object AppBottomNavHooks {
                 }.also(content::addOnAttachStateChangeListener)
             }
             guard = ViewTreeObserver.OnPreDrawListener {
-                if (config === twitter || config === tencentMeeting || config === cmbBank || config === wechat ||
+                if (config === twitter || config === github || config === tencentMeeting || config === cmbBank || config === wechat ||
                     config.packageName == PinduoduoNavigation.PACKAGE
                 ) {
                     // Discovery must continue while the host hides or replaces its native bar.
@@ -1449,6 +1500,10 @@ object AppBottomNavHooks {
         private fun syncHostState() {
             if (config === twitter) {
                 syncXHostState()
+                return
+            }
+            if (config === github) {
+                syncGitHubHostState()
                 return
             }
             if (config === cmbBank && (!resumed || nav == null)) return
@@ -1707,6 +1762,14 @@ object AppBottomNavHooks {
         }
 
         private fun openTab(tab: DetectedTab) {
+            if (config === github) {
+                if (githubNavigation?.open(tab.identity) == true) {
+                    selectedIndex.intValue = navigationTabs.indexOfFirst { it.identity == tab.identity }
+                        .takeIf { it >= 0 } ?: selectedIndex.intValue
+                    activity.window.decorView.postDelayed(::syncHostState, 120L)
+                }
+                return
+            }
             if (config === twitter) {
                 val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
                 val current = detectBottomBar(content)?.tabs?.firstOrNull { it.identity == tab.identity } ?: return
@@ -2475,7 +2538,7 @@ object AppBottomNavHooks {
             val detected = detectBottomBar(content)
             if (detected == null) {
                 nav?.visibility = View.GONE
-                xNavigation?.setActive(false)
+            xNavigation?.setActive(false)
                 restoreHostContentSpace()
                 ImmersiveNavigationHooks.deactivate(activity)
                 restoreSystemNavigationBar()
@@ -2496,6 +2559,44 @@ object AppBottomNavHooks {
             }
         }
 
+        private fun syncGitHubHostState() {
+            if (!resumed || nav == null) return
+            val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
+            val detected = detectBottomBar(content)
+            if (detected == null) {
+                nav?.visibility = View.GONE
+                GitHubNavigation.setActive(activity, false)
+                restoreHostContentSpace()
+                restoreOriginalBar()
+                ImmersiveNavigationHooks.deactivate(activity)
+                restoreSystemNavigationBar()
+                return
+            }
+            val barChanged = detected.container !== originalBar
+            if (barChanged) {
+                restoreHostContentSpace()
+                restoreOriginalBar()
+                originalBar = detected.container
+                rememberOriginalNavigationLayers(content, detected.container)
+            }
+            detectedTabs = detected.tabs
+            if (!sameNavigationTabs(navigationTabs, detected.tabs)) {
+                navigationTabs = detected.tabs
+            }
+            nav?.visibility = View.VISIBLE
+            GitHubNavigation.setActive(activity, true, navigationOverlayHeight())
+            val now = android.os.SystemClock.uptimeMillis()
+            if (barChanged || now - githubLastInsetMaintenanceAt >= 500L) {
+                githubLastInsetMaintenanceAt = now
+                configureSystemNavigationBar()
+                ImmersiveNavigationHooks.activate(activity)
+                releaseGitHubPageNavigationInset(content)
+                releaseOriginalBarSpace()
+                hideOriginalBar()
+                updateNavigationOverlayHeight()
+            }
+        }
+
         private fun releaseXPageNavigationInset(content: ViewGroup) {
             val inset = navigationBarInset()
             if (inset <= 0) return
@@ -2505,6 +2606,32 @@ object AppBottomNavHooks {
             descendants(content).forEach { view ->
                 if (!view.isShown || view is ComposeView || view === injectedNav ||
                     (injectedNav != null && isDescendantOf(view, injectedNav)) ||
+                    view.width < content.width * 0.9f || view.height < inset * 4
+                ) return@forEach
+                if (view.paddingBottom == inset) {
+                    originalContentPaddings.putIfAbsent(view, intArrayOf(
+                        view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom
+                    ))
+                    view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, 0)
+                }
+                val params = view.layoutParams as? ViewGroup.MarginLayoutParams
+                if (params != null && params.bottomMargin == inset) {
+                    originalContentBottomMargins.putIfAbsent(view, params.bottomMargin)
+                    params.bottomMargin = 0
+                    view.layoutParams = params
+                }
+            }
+        }
+
+        private fun releaseGitHubPageNavigationInset(content: ViewGroup) {
+            val inset = navigationBarInset()
+            if (inset <= 0) return
+            val injectedNav = nav
+            val detectedBar = originalBar
+            descendants(content).forEach { view ->
+                if (!view.isShown || view is ComposeView || view === injectedNav || view === detectedBar ||
+                    (injectedNav != null && isDescendantOf(view, injectedNav)) ||
+                    (detectedBar != null && (isDescendantOf(view, detectedBar) || isDescendantOf(detectedBar, view))) ||
                     view.width < content.width * 0.9f || view.height < inset * 4
                 ) return@forEach
                 if (view.paddingBottom == inset) {
@@ -3683,7 +3810,11 @@ object AppBottomNavHooks {
                 else -> false
             }
             val miniPlayerHeightDp = if (miniPlayerVisible) 72 else 0
-            return ((baseHeightDp + miniPlayerHeightDp) * density).toInt() + navigationInset
+            // GitHub's Home and Copilot roots place a floating "new conversation"
+            // action in the lower-right content area. Reserve a separate vertical
+            // band so the injected navigation surface cannot cover that action.
+            val githubActionAvoidanceDp = 0
+            return ((baseHeightDp + miniPlayerHeightDp + githubActionAvoidanceDp) * density).toInt() + navigationInset
         }
 
         private fun updateNavigationOverlayHeight() {
@@ -3757,6 +3888,20 @@ object AppBottomNavHooks {
         }
 
         private fun detectBottomBar(content: ViewGroup): DetectedBar? {
+            if (config === github) {
+                val native = githubNavigation?.detect(content) ?: return null
+                selectedIndex.intValue = native.selectedIndex
+                return DetectedBar(native.container, native.items.map { item ->
+                    DetectedTab(
+                        key = TabKey.NATIVE,
+                        displayLabel = item.label,
+                        view = native.container,
+                        clickTarget = native.container,
+                        identity = item.identity,
+                        nativeIcon = item.icon,
+                    )
+                })
+            }
             if (config === twitter) {
                 val native = xNavigation?.detect(content) ?: return null
                 selectedIndex.intValue = native.selectedIndex
