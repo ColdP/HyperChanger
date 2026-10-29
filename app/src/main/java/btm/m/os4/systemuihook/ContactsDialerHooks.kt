@@ -30,7 +30,7 @@ internal class ContactsDialerHooks(
 
     fun install(classLoader: ClassLoader, preferences: SharedPreferences) {
         val settings = ContactsDialerSettings.read(preferences)
-        if (installed || (!settings.blur && !settings.customOpacity)) return
+        if (installed || (!settings.blur && !settings.customOpacity && !settings.border && settings.cornerOffset == 0)) return
         runCatching {
             val dialpadLayout = classLoader.loadClass("com.android.contacts.dialer.view.DialpadLayout")
             val finishInflate = dialpadLayout.getDeclaredMethod("onFinishInflate").apply { isAccessible = true }
@@ -88,11 +88,21 @@ internal class ContactsDialerHooks(
         }
         val drawable = background.background ?: return
         if (state.drawable === drawable) return
-        if (!settings.customOpacity && !state.blurApplied) return
+        val fillOpacity = when {
+            settings.customOpacity -> settings.opacityPercent
+            state.blurApplied -> 70
+            else -> null
+        }
+        if (fillOpacity == null && !settings.border && settings.cornerOffset == 0) return
         // Mutating the Drawable preserves native NinePatch padding/geometry and isolates it
         // from other resource consumers; View.alpha would also fade the input and keys.
-        val isolated = drawable.mutate()
-        isolated.alpha = ((if (settings.customOpacity) settings.opacityPercent else 70) * 255f / 100f).roundToInt()
+        val isolated = if (settings.border || settings.cornerOffset != 0) {
+            ContactsDialerBackgroundDrawable(
+                drawable.mutate(), settings, background.resources.displayMetrics.density, fillOpacity,
+            )
+        } else {
+            drawable.mutate().apply { alpha = (requireNotNull(fillOpacity) * 255f / 100f).roundToInt() }
+        }
         state.drawable = isolated
         background.background = isolated
         background.invalidateOutline()

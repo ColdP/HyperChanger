@@ -19,6 +19,8 @@ object NavigationAccentSettings {
         "com.tencent.mm" to 0xFF07C160.toInt(),
         "com.tencent.mobileqq" to 0xFF12B7F5.toInt(),
         "com.xunmeng.pinduoduo" to 0xFFE02E24.toInt(),
+        "com.instagram.android" to 0xFFE1306C.toInt(),
+        "com.twitter.android" to 0xFF1D9BF0.toInt(),
     )
 
     @JvmStatic

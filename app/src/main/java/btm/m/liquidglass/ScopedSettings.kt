@@ -38,7 +38,9 @@ object ScopedSettings {
         ScopeApp("腾讯会议", "com.tencent.wemeet.app"),
         ScopeApp("招商银行", "cmb.pb"),
         ScopeApp("微信", "com.tencent.mm")
-        ,ScopeApp("拼多多", "com.xunmeng.pinduoduo")
+        ,ScopeApp("拼多多", "com.xunmeng.pinduoduo"),
+        ScopeApp("Instagram", "com.instagram.android"),
+        ScopeApp("X", "com.twitter.android")
     )
 
     @JvmStatic

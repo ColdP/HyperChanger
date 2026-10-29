@@ -3,6 +3,11 @@
   "creator": "btm_m",
   "locale": "ja",
   "strings": {
+    "拨号盘背景": "ダイヤルパッドの背景",
+    "为拨号盘背景添加边框": "ダイヤルパッドの背景に枠線を追加",
+    "边框粗细": "枠線の太さ",
+    "边框不透明度": "枠線の不透明度",
+    "拨号盘背景圆角": "ダイヤルパッドの背景の角丸",
     "拨号与通话": "ダイヤルと通話",
     "界面调整": "画面の調整",
     "为拨号盘添加背景模糊": "ダイヤルパッドの背景をぼかす",
@@ -1714,5 +1719,7 @@
   "rear_screenshot_shell_save": "保存",
   "rear_screenshot_shell_delete": "削除",
   "rear_screenshot_shell_delete_confirm": "このシェルスタイルを削除しますか？",
-  "拼多多": "Pinduoduo"
+  "拼多多": "Pinduoduo",
+  "Instagram": "Instagram",
+  "X": "X"
 }

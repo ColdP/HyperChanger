@@ -262,7 +262,7 @@ internal class OthersHooks(
             packageName != "com.lucky.luckyclient" && packageName != "com.tencent.wemeet.app" &&
             packageName != "cmb.pb" && packageName != "com.tencent.mm" &&
             packageName != "com.tencent.mobileqq"
-            && packageName != "com.xunmeng.pinduoduo"
+            && packageName != "com.xunmeng.pinduoduo" && packageName != "com.instagram.android" && packageName != "com.twitter.android"
         ) return
         if (!runCatching { android.app.Application.getProcessName() == packageName }.getOrDefault(false)) return
         runCatching {
@@ -310,6 +310,8 @@ internal class OthersHooks(
                     AppBottomNavHooks.installWeChat(module, param.defaultClassLoader, blur, label, style, advanced, color, accent, showBadges)
                 }
                 "com.xunmeng.pinduoduo" -> AppBottomNavHooks.installPinduoduo(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
+                "com.instagram.android" -> AppBottomNavHooks.installInstagram(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
+                "com.twitter.android" -> AppBottomNavHooks.installX(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 "com.lucky.luckyclient" -> {
                     LuckinAntiDetectionHooks.install(module)
                     AppBottomNavHooks.installLuckinCoffee(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)

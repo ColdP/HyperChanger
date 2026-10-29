@@ -36,6 +36,26 @@ fun main() {
     check(ContactsDialerSettings.read(dialerPrefs.prefs).let { it.blurRadiusDp == 0 && it.opacityPercent == 100 })
     dialerPrefs.write(KEY_CONTACTS_DIALER_BACKGROUND_BLUR_RADIUS to 101, KEY_CONTACTS_DIALER_BACKGROUND_OPACITY to -1)
     check(ContactsDialerSettings.read(dialerPrefs.prefs).let { it.blurRadiusDp == 100 && it.opacityPercent == 0 })
+    dialerPrefs.write(
+        KEY_CONTACTS_DIALER_BACKGROUND_BORDER_WIDTH to 1,
+        KEY_CONTACTS_DIALER_BACKGROUND_BORDER_OPACITY to 100,
+        KEY_CONTACTS_DIALER_BACKGROUND_CORNER to -50,
+    )
+    check(ContactsDialerSettings.read(dialerPrefs.prefs).let { it.borderWidthPx == .01f && it.cornerOffset == -50 })
+    dialerPrefs.write(KEY_CONTACTS_DIALER_BACKGROUND_BORDER_WIDTH to 123)
+    check(ContactsDialerSettings.read(dialerPrefs.prefs).borderWidthPx == 1.23f)
+    dialerPrefs.write(
+        KEY_CONTACTS_DIALER_BACKGROUND_BORDER_WIDTH to 601,
+        KEY_CONTACTS_DIALER_BACKGROUND_BORDER_OPACITY to -1,
+        KEY_CONTACTS_DIALER_BACKGROUND_CORNER to 65,
+    )
+    check(ContactsDialerSettings.read(dialerPrefs.prefs).let {
+        it.borderWidthPx == 6f && it.borderOpacityPercent == 0 && it.cornerOffset == 64
+    })
+    check(contactsDialerCornerRadius(90f, 0, 3f) == 90f)
+    check(contactsDialerCornerRadius(90f, -50, 3f) == 0f)
+    check(contactsDialerCornerRadius(90f, -25, 3f) == 45f)
+    check(contactsDialerCornerRadius(90f, 64, 3f) == 282f)
     val local = Preferences()
     val remote = Preferences()
     val events = mutableListOf<Set<ScopeApplication>>()
@@ -57,6 +77,10 @@ fun main() {
         KEY_CONTACTS_DIALER_BACKGROUND_BLUR_RADIUS to 24,
         KEY_CONTACTS_DIALER_BACKGROUND_OPACITY_ENABLED to false,
         KEY_CONTACTS_DIALER_BACKGROUND_OPACITY to 70,
+        KEY_CONTACTS_DIALER_BACKGROUND_BORDER to false,
+        KEY_CONTACTS_DIALER_BACKGROUND_BORDER_WIDTH to 100,
+        KEY_CONTACTS_DIALER_BACKGROUND_BORDER_OPACITY to 100,
+        KEY_CONTACTS_DIALER_BACKGROUND_CORNER to 0,
     )
     check(events.isEmpty()) { "Dialer defaults must not suggest a restart" }
     local.write(KEY_CONTACTS_DIALER_BACKGROUND_BLUR to true)
@@ -65,6 +89,11 @@ fun main() {
     check(events.removeLast() == setOf(ScopeApplication.CONTACTS_DIALER))
     check(events.isEmpty()) { "A multi-key dialer edit must produce one event" }
     local.write(KEY_CONTACTS_DIALER_BACKGROUND_OPACITY_ENABLED to true, KEY_CONTACTS_DIALER_BACKGROUND_OPACITY to 0)
+    check(events.removeLast() == setOf(ScopeApplication.CONTACTS_DIALER))
+    check(events.isEmpty())
+    local.write(KEY_CONTACTS_DIALER_BACKGROUND_BORDER to true, KEY_CONTACTS_DIALER_BACKGROUND_BORDER_WIDTH to 1)
+    check(events.removeLast() == setOf(ScopeApplication.CONTACTS_DIALER))
+    local.write(KEY_CONTACTS_DIALER_BACKGROUND_BORDER_OPACITY to 50, KEY_CONTACTS_DIALER_BACKGROUND_CORNER to -50)
     check(events.removeLast() == setOf(ScopeApplication.CONTACTS_DIALER))
     check(events.isEmpty())
     local.write(KEY_REAR_SCREEN_LEFT_SWIPE_ENABLED to false, KEY_REAR_SCREEN_LEFT_SWIPE_PACKAGE to "")
