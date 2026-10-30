@@ -74,6 +74,13 @@ android {
     }
 }
 
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        // Compress DEX in the distributed APK; keep native libraries directly loadable.
+        variant.packaging.dex.useLegacyPackaging.set(true)
+    }
+}
+
 dependencies {
     implementation("top.yukonga.miuix.kmp:miuix-ui-android:0.9.4")
     implementation("top.yukonga.miuix.kmp:miuix-preference-android:0.9.4")
