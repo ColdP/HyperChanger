@@ -12630,6 +12630,11 @@ internal fun UpdateToolbarButton(
     primary: Boolean = false,
     enabled: Boolean = true,
     backdrop: LayerBackdrop? = LocalToolbarBackdrop.current,
+    shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(50.dp),
+    surfaceColor: ComposeColor? = null,
+    blurRadius: Dp = TOOLBAR_GLASS_BLUR_RADIUS,
+    leadingIcon: (@Composable () -> Unit)? = null,
+    allowDrag: Boolean = true,
 ) {
     val animationScope = rememberCoroutineScope()
     val drag = remember(animationScope) {
@@ -12647,17 +12652,16 @@ internal fun UpdateToolbarButton(
     val highlight = remember(animationScope) {
         InteractiveHighlight(animationScope) { size, offset -> Offset(offset.x.coerceIn(0f, size.width), offset.y.coerceIn(0f, size.height)) }
     }
-    val shape = RoundedCornerShape(50.dp)
-    val tint = if (primary) ComposeColor(0xFF0088FF).copy(alpha = .92f) else MiuixTheme.colorScheme.surfaceContainer.copy(alpha = .82f)
+    val tint = surfaceColor ?: if (primary) ComposeColor(0xFF0088FF).copy(alpha = .92f) else MiuixTheme.colorScheme.surfaceContainer.copy(alpha = .82f)
     Box(
         modifier.height(48.dp)
             .then(if (enabled) highlight.gestureModifier else Modifier)
-            .then(if (enabled) drag.modifier else Modifier)
+            .then(if (enabled && allowDrag) drag.modifier else Modifier)
             .clip(shape)
             .then(if (backdrop != null) Modifier.drawBackdrop(
                 backdrop = backdrop,
                 shape = { shape },
-                effects = { vibrancy(); blur(TOOLBAR_GLASS_BLUR_RADIUS.toPx()); toolbarGlassLens(drag.pressProgress) },
+                effects = { vibrancy(); if (blurRadius > 0.dp) blur(blurRadius.toPx()); toolbarGlassLens(drag.pressProgress) },
                 highlight = { toolbarGlassHighlight(drag.pressProgress) },
                 shadow = { Shadow.Default.copy(radius = 5.dp, color = ComposeColor.Black, alpha = .24f) },
                 innerShadow = null,
@@ -12673,7 +12677,10 @@ internal fun UpdateToolbarButton(
             .clickable(enabled = enabled, interactionSource = null, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, color = if (primary) ComposeColor.White else MiuixTheme.colorScheme.onSurface, style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+            leadingIcon?.let { it(); Spacer(Modifier.width(9.dp)) }
+            Text(text, color = if (primary) ComposeColor.White else MiuixTheme.colorScheme.onSurface, style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold)
+        }
     }
 }
 
@@ -13064,49 +13071,8 @@ private fun contributorDescription(context: android.content.Context, description
 }
 
 @Composable
-private fun ContributorCard(contributor: Contributor) {
+private fun Contributors(back: () -> Unit) {
     val context = LocalContext.current
-    val avatar by produceState<Bitmap?>(initialValue = null, contributor.avatarUrl) {
-        value = withContext(Dispatchers.IO) { loadContributorAvatar(contributor.avatarUrl) }
-    }
-    val description = contributorDescription(context, contributor.descriptions)
-    val clickable = contributor.githubLink.isNotBlank()
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        cornerRadius = 22.5.dp,
-        insideMargin = PaddingValues(14.dp),
-        onClick = if (clickable) ({ openUrl(context, contributor.githubLink) }) else null,
-        showIndication = clickable,
-    ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.size(52.dp).clip(CircleShape).background(MiuixTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (avatar != null) {
-                    Image(avatar!!.asImageBitmap(), contributor.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                } else {
-                    Text(contributor.name.take(1).uppercase(Locale.getDefault()), style = MiuixTheme.textStyles.title3)
-                }
-            }
-            Column(Modifier.padding(start = 14.dp).weight(1f)) {
-                Text(contributor.name, style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (contributor.githubLink.isNotBlank()) {
-                    Text(contributor.githubLink, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
-                }
-                if (description.isNotBlank()) {
-                    Text(description, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 5.dp))
-                }
-            }
-            if (contributor.githubLink.isNotBlank()) {
-                Image(MiuixIcons.Regular.ChevronForward, null, Modifier.padding(start = 12.dp).size(22.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary))
-            }
-        }
-    }
-}
-
-@Composable
-private fun Contributors(back: () -> Unit) = AppPage(tr("contributors", "\u8d21\u732e\u8005"), back) { padding, scroll ->
     var reloadToken by remember { mutableIntStateOf(0) }
     val result by produceState<ContributorsResult?>(initialValue = null, reloadToken) {
         value = withContext(Dispatchers.IO) { fetchContributors() }.fold(
@@ -13114,23 +13080,52 @@ private fun Contributors(back: () -> Unit) = AppPage(tr("contributors", "\u8d21\
             onFailure = { ContributorsResult(error = true) },
         )
     }
-    AppList(padding, scroll, 28) {
-        when {
-            result == null -> item {
-                Text(tr("contributors_loading", "正在加载贡献者"), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-            }
-            result!!.error -> item {
-                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(16.dp)) {
-                    Text(tr("contributors_load_failed", "无法加载贡献者列表"), style = MiuixTheme.textStyles.body1)
-                    Button(onClick = { reloadToken++ }, modifier = Modifier.padding(top = 12.dp), colors = ButtonDefaults.buttonColorsPrimary()) {
-                        Text(tr("retry", "重试"))
+    val entries = result?.contributors.orEmpty().map {
+        ContributorGalleryEntry(it.name, it.avatarUrl, it.githubLink, contributorDescription(context, it.descriptions))
+    }
+    val gallery = rememberContributorGalleryState(entries) { url ->
+        withContext(Dispatchers.IO) { loadContributorAvatar(url) }
+    }
+    val ambient = contributorAmbientColors(entries, gallery)
+    val ambientBackdrop = rememberLayerBackdrop()
+    AppPage(
+        tr("contributors", "\u8d21\u732e\u8005"), back,
+        pageBackground = { ContributorAmbientBackground(ambient, Modifier.fillMaxSize().layerBackdrop(ambientBackdrop)) },
+    ) { padding, scroll ->
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val availableHeight = (maxHeight - padding.calculateTopPadding() - 4.dp).coerceAtLeast(200.dp)
+            LazyColumn(
+                Modifier.fillMaxSize().nestedScroll(scroll.nestedScrollConnection),
+                userScrollEnabled = false,
+                contentPadding = PaddingValues(top = padding.calculateTopPadding() + 4.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                when {
+                    result == null -> item {
+                        Text(tr("contributors_loading", "正在加载贡献者"), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                    }
+                    result!!.error -> item {
+                        Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(16.dp)) {
+                            Text(tr("contributors_load_failed", "无法加载贡献者列表"), style = MiuixTheme.textStyles.body1)
+                            Button(onClick = { reloadToken++ }, modifier = Modifier.padding(top = 12.dp), colors = ButtonDefaults.buttonColorsPrimary()) {
+                                Text(tr("retry", "重试"))
+                            }
+                        }
+                    }
+                    result!!.contributors.isEmpty() -> item {
+                        Text(tr("contributors_empty", "暂无贡献者信息"), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                    }
+                    else -> item {
+                        ContributorsGallery(
+                            contributors = entries,
+                            state = gallery,
+                            ambientBackdrop = ambientBackdrop,
+                            openProfile = { openUrl(context, it) },
+                            availableHeight = availableHeight,
+                        )
                     }
                 }
             }
-            result!!.contributors.isEmpty() -> item {
-                Text(tr("contributors_empty", "暂无贡献者信息"), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-            }
-            else -> items(result!!.contributors) { contributor -> ContributorCard(contributor) }
         }
     }
 }

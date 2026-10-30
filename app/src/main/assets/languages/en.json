@@ -655,6 +655,8 @@
     "contributors_loading": "Loading contributors",
     "contributors_load_failed": "Unable to load contributors",
     "contributors_empty": "No contributor information",
+    "contributors_focus": "Center on %s",
+    "contributors_github": "Visit GitHub",
     "retry": "Retry",
     "开启锁屏小组件": "Enable lock screen widget",
     "开源代码声明": "Open source code declaration",

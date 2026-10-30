@@ -655,6 +655,8 @@
     "contributors_loading": "貢献者を読み込み中",
     "contributors_load_failed": "貢献者を読み込めません",
     "contributors_empty": "貢献者情報はありません",
+    "contributors_focus": "%s を中央に表示",
+    "contributors_github": "GitHub へ",
     "retry": "再試行",
     "开启锁屏小组件": "ロック画面ウィジェットを開く",
     "开源代码声明": "オープンソースコード宣言",
