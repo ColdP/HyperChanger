@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The bus and subway trip's card as the back screen draws it.
+
+  The back screen keeps a list of its own that names com.autonavi.minimap as `carHailing`, so every
+  高德 notification without a card of its own is drawn with the ride-hailing MAML template
+  (assets/smart_assistant/car_hailing in com.xiaomi.subscreencenter) - a car on a studio floor, and
+  the car is all that template can draw. This is that template's geometry, read off its manifest.xml
+  on 2026-10-14 (a 336x213 design, everything in it multiplied by view_width / 336): the picture
+  233x112 at (103, 0), and under it at (103, 112) the app's icon 14x14 at (20, 1) beside a 12sp
+  line at (38, 0), a 32sp line at (20, 22), and a 14sp line at (20, 62), the last two 193 wide.
+
+  What is different is the picture: 智能助理's high-speed train (TransitRear.train), the one its own
+  travel card draws, the trip's bus for a bus leg, and none for a walk. The big line is set smaller
+  by TransitRear when it would not fit.
+
+  The sizes here are in dp, which is the template on a panel 336dp wide; TransitRear sets every one
+  again in the panel's width / 336, as the template itself scales (see RearPanel).
+
+  Framework widgets only, and pictures set with setImageViewIcon alone - the back screen inflates
+  this with an AppCompat factory, and setImageBitmap on AppCompatImageView takes that app down
+  (see PickupCard).
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/mc_transit_rear_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- The template's floor: one column of it, stretched. Set by TransitRear. -->
+    <ImageView
+        android:id="@+id/mc_transit_rear_floor"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:contentDescription="@null"
+        android:scaleType="fitXY" />
+
+    <!-- Standing on the template's own line at 112, as its car does. -->
+    <ImageView
+        android:id="@+id/mc_transit_rear_picture"
+        android:layout_width="233dp"
+        android:layout_height="112dp"
+        android:layout_marginStart="103dp"
+        android:contentDescription="@null"
+        android:scaleType="fitEnd" />
+
+    <ImageView
+        android:id="@+id/mc_transit_rear_logo"
+        android:layout_width="14dp"
+        android:layout_height="14dp"
+        android:layout_marginStart="123dp"
+        android:layout_marginTop="113dp"
+        android:contentDescription="@null"
+        android:scaleType="fitCenter" />
+
+    <TextView
+        android:id="@+id/mc_transit_rear_line1"
+        android:layout_width="175dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="141dp"
+        android:layout_marginTop="112dp"
+        android:ellipsize="end"
+        android:fontFamily="sans-serif"
+        android:includeFontPadding="false"
+        android:maxLines="1"
+        android:textSize="12sp" />
+
+    <TextView
+        android:id="@+id/mc_transit_rear_line2"
+        android:layout_width="193dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="123dp"
+        android:layout_marginTop="134dp"
+        android:ellipsize="end"
+        android:fontFamily="mipro-medium"
+        android:includeFontPadding="false"
+        android:maxLines="1"
+        android:textSize="32sp" />
+
+    <TextView
+        android:id="@+id/mc_transit_rear_line3"
+        android:layout_width="193dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="123dp"
+        android:layout_marginTop="174dp"
+        android:ellipsize="end"
+        android:fontFamily="mipro-medium"
+        android:includeFontPadding="false"
+        android:maxLines="1"
+        android:textSize="14sp" />
+</FrameLayout>

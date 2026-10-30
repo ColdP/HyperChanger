@@ -74,6 +74,13 @@ internal fun restartScopesForPreference(group: String, key: String): Set<ScopeAp
         return ScopeApplication.entries.filter { key.startsWith("scope.${it.packageName}.") }.toSet()
     }
     return when {
+        key == HMC_NEXT_SETTINGS_KEY -> setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.WALLPAPER)
+        key.startsWith("custom_depth_wallpaper_") -> setOf(
+            ScopeApplication.SYSTEM_UI,
+            ScopeApplication.WALLPAPER,
+            ScopeApplication.AOD,
+            ScopeApplication.THEME_MANAGER,
+        )
         key.startsWith("contacts_dialer_background_") -> setOf(ScopeApplication.CONTACTS_DIALER)
         key.startsWith("portal_") -> setOf(ScopeApplication.PORTAL)
         key.startsWith("home_") || key.startsWith("dock_") -> setOf(ScopeApplication.DESKTOP)

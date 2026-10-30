@@ -23,7 +23,7 @@
   <img src="https://img.shields.io/badge/Platform-Android-green?style=flat-square&logo=android" alt="プラットフォーム">
   <img src="https://img.shields.io/badge/minSdk-35-blue?style=flat-square" alt="最小 SDK">
   <img src="https://img.shields.io/badge/targetSdk-37-blue?style=flat-square" alt="ターゲット SDK">
-  <img src="https://img.shields.io/badge/License-AGPL--3.0--or--later-yellow?style=flat-square" alt="ライセンス">
+  <img src="https://img.shields.io/badge/License-AGPL--3.0-yellow?style=flat-square" alt="ライセンス">
 </p>
 
 ## 概要
@@ -277,9 +277,9 @@ HyperChanger はコミュニティが開発する実験的なモジュールで�
 
 ## ライセンスと謝辞
 
-本プロジェクトは [AGPL-3.0-or-later](LICENSE) で公開され、GNU Affero General Public License 第3版または任意の後続版を選択できます。過去の MIT・Apache-2.0 ライセンスおよび第三者の権利表記は [NOTICE](NOTICE) を参照してください。
+この結合した配布物は [GNU AGPL 第3版](LICENSE) に基づき提供されます。HyperChanger の独自ファイルは AGPL-3.0-or-later、新しい HyperMusicCover は AGPL-3.0-only のため、結合した配布物には第3版を適用します。過去の許諾、第三者の権利表記と変更記録は [NOTICE](NOTICE) を参照してください。
 
-- ロック画面の音楽カバー実装は [HyperMusicCover](https://github.com/zyl6932/HyperMusicCover)（Copyright 2026 zyl6932、Apache License 2.0）から導入・改変しています。
+- 音楽ロック画面、歌詞、ロック画面カプセルは [HyperMusicCover](https://github.com/zyl6932/HyperMusicCover) の 2026-10-30 ソーススナップショット（AGPL-3.0-only、一部 Apache-2.0 / GPL-3.0）から導入・改変しています。既存の通知センターは元の Apache-2.0 許諾を維持します。ハッシュと適用範囲は [統合監査](docs/hypermusiccover-upstream-sync.md) を参照してください。
 - 折りたたみ時のアイランドの輪郭、大小アイランド間の距離、顔認証アイランドの実装は [HyperIsland 3.1.8](https://github.com/1812z/HyperIsland)（Copyright 2026 1812z、MIT）を基にしています。全文は [HyperIsland-MIT.txt](app/src/main/assets/licenses/HyperIsland-MIT.txt) を参照してください。
 - MIUIX、AndroidLiquidGlass / Backdrop、および各依存プロジェクトに感謝します。詳細はアプリ内のオープンソース表記を参照してください。
 

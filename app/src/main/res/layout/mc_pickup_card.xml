@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The pickup card in the official shape.
+
+  HyperOS's own pickup card is 小爱同学's (com.miui.voiceassist):
+  res/layout/memory_scene_focused_remote_view.xml, whose ids this file mirrors slot for
+  slot - a brand picture, the code large, a rule, the product, the shop, and one pill
+  button, all inside 130dp. The geometry is theirs (values/dimens.xml, memory_scene_focused_*):
+  16dp padding, an 84x98dp picture, 10dp to the text block, a 28sp title, a 1.2dp rule,
+  16sp content over 14sp subtitle, and a 104x37dp pill with a 56dp radius. Two TextView
+  springs between them hold the rule mid-card, which is how the code ends up above the
+  rule and the product below it.
+
+  What is ours is what goes in the slots and the pictures: the brand, its colour and its
+  artwork come from the rules XML and the artwork packed in this apk (see PickupCard).
+
+  Deliberately no background, as in theirs: the focus notification's card backdrop is
+  drawn by SystemUI around this view, not by us. Everything here is a framework widget,
+  which is what a RemoteViews may inflate.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/mc_pickup_root"
+    android:layout_width="match_parent"
+    android:layout_height="130dp"
+    android:gravity="bottom"
+    android:orientation="horizontal"
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp"
+    android:paddingTop="16dp"
+    android:paddingBottom="16dp">
+
+    <!-- The one picture slot of the official card, in two layers as ColorOS builds it
+         (`card_modular_center_access_code.xml`): `picture_d19` is the drink animation and
+         `picture_d20` is the brand's logo, centred on it and 42dp above its bottom edge in their
+         117dp box - 35dp in this 98dp one. The logo starts transparent and is faded in by the
+         module once the drink's animation has run; `PickupCard` sets the picture. -->
+    <FrameLayout
+        android:id="@+id/mc_pickup_picture"
+        android:layout_width="84dp"
+        android:layout_height="98dp">
+
+        <ImageView
+            android:id="@+id/mc_pickup_icon"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="@null"
+            android:scaleType="fitCenter" />
+
+        <ImageView
+            android:id="@+id/mc_pickup_logo"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:layout_gravity="center_horizontal|bottom"
+            android:layout_marginBottom="35dp"
+            android:alpha="0"
+            android:contentDescription="@null"
+            android:scaleType="fitCenter" />
+    </FrameLayout>
+
+    <LinearLayout
+        android:id="@+id/mc_pickup_content_area"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:layout_marginStart="10dp"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/mc_pickup_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:fontFamily="mipro-demibold"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:textSize="28sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <TextView
+            android:id="@+id/mc_pickup_divider"
+            android:layout_width="match_parent"
+            android:layout_height="1.2dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="bottom"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/mc_pickup_product"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="mipro-demibold"
+                    android:includeFontPadding="false"
+                    android:lineSpacingExtra="0sp"
+                    android:lineSpacingMultiplier="1"
+                    android:maxLines="1"
+                    android:textSize="16sp" />
+
+                <TextView
+                    android:id="@+id/mc_pickup_store"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:ellipsize="end"
+                    android:fontFamily="mipro"
+                    android:includeFontPadding="false"
+                    android:lineSpacingExtra="0sp"
+                    android:lineSpacingMultiplier="1"
+                    android:maxLines="1"
+                    android:textSize="14sp" />
+            </LinearLayout>
+
+            <FrameLayout
+                android:id="@+id/mc_pickup_action_container"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="104dp"
+                android:minHeight="37dp">
+
+                <ImageView
+                    android:id="@+id/mc_pickup_action_bg"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:contentDescription="@null"
+                    android:scaleType="fitXY" />
+
+                <TextView
+                    android:id="@+id/mc_pickup_action"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:ellipsize="end"
+                    android:fontFamily="mipro-demibold"
+                    android:gravity="center"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:paddingStart="20dp"
+                    android:paddingEnd="20dp"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp"
+                    android:textSize="16sp" />
+            </FrameLayout>
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

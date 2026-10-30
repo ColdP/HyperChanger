@@ -89,7 +89,9 @@ hyperos4-glass-blur-main/
 /HANDOFF/
 
 # Ignore project documentation
-/docs/
+/docs/*
+!/docs/hypermusiccover-upstream-sync.md
+!/docs/hypermusiccover-source-manifest.json
 
 # Python inspection caches
 __pycache__/

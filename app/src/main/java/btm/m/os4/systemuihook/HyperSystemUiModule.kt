@@ -215,6 +215,7 @@ class HyperSystemUiModule : XposedModule() {
     private val islandSmoothingHook by lazy { IslandSmoothingHook(this) }
     private val lockscreenFaceUnlockHook by lazy { LockscreenFaceUnlockHook(this) }
     private val unlockFocusAuthHook by lazy { UnlockFocusAuthHook(this) }
+    private val customDepthWallpaperHooks by lazy { CustomDepthWallpaperHooks(this) }
     internal fun installHook(member: java.lang.reflect.Executable) = hook(member)
 
     override fun onSystemServerStarting(param: SystemServerStartingParam) {
@@ -1029,6 +1030,11 @@ class HyperSystemUiModule : XposedModule() {
     override fun onPackageLoaded(param: PackageLoadedParam) {
         if (!HookModuleSafety.enter(this, param.packageName)) return
         if (!OsCompatibility.areHooksAllowed()) return
+        runCatching {
+            HyperMusicCoverRuntimeBridge.install(this, param.packageName, param.defaultClassLoader) { view, loader ->
+                applyMiniPlayerMaterial(view, miniPlayerAppearance(getRemotePreferences(REMOTE_PREFERENCE_GROUP)), loader)
+            }
+        }.onFailure { HookModuleLogger.log(this, android.util.Log.ERROR, "HyperMusicCover", "Runtime installation failed in ${param.packageName}", it) }
         if (param.packageName == "com.xiaomi.trustservice") {
             val preferences = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
             if (preferences.isEnvironmentDetectionEnabled() && preferences.getBoolean(KEY_TRUSTSERVICE_DIAGNOSTICS, false)) {
@@ -1151,8 +1157,15 @@ class HyperSystemUiModule : XposedModule() {
             return
         }
         if (param.packageName == LOCKSCREEN_WALLPAPER) {
-            // HyperMusicCover's original Java WallpaperProbe is registered separately through
-            // java_init.list and owns this process's GL upload hook.
+            // The new HyperMusicCover runtime above owns this process's wallpaper hooks.
+            runCatching {
+                customDepthWallpaperHooks.installMiWallpaper(
+                    param.defaultClassLoader,
+                    getRemotePreferences(REMOTE_PREFERENCE_GROUP),
+                )
+            }.onFailure { error ->
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not install custom depth MiWallpaper hook", error)
+            }
             return
         }
         if (param.packageName == XMSF_PACKAGE) {
@@ -1189,7 +1202,7 @@ class HyperSystemUiModule : XposedModule() {
                         synchronized(controlCenterButtonsLock) {
                             systemUiClassLoader = param.defaultClassLoader
                         }
-                        installHyperMusicCoverGestureBridge(param.defaultClassLoader, preferences)
+                        // New runtime owns media gestures and observes existing preferences.
                         scheduleSoftGlassThemeActivation(preferences)
                     }
                     if (!resourceHooksInstalled) {
@@ -1258,10 +1271,7 @@ class HyperSystemUiModule : XposedModule() {
                         lockscreenNotificationHookInstalled = true
                     }
                     if (param.packageName == SYSTEM_UI && !lockscreenMediaNotificationHookInstalled) {
-                        // Keep the imported Main.java as the owner of the card's animation and
-                        // wallpaper. This hook only supplies the real MIUI header lifecycle and
-                        // the artwork gesture bridge that Main cannot see below the window.
-                        installLockscreenMediaNotificationHook(param.defaultClassLoader, preferences)
+                        // New MediaCard/CardTouch own the header lifecycle and lyric page button.
                         lockscreenMediaNotificationHookInstalled = true
                     }
                     // The native clock already keeps the date attached while its glyph group is
@@ -1372,6 +1382,7 @@ class HyperSystemUiModule : XposedModule() {
                     }
                 }
                 AOD -> {
+                    customDepthWallpaperHooks.installVideoValidationBypass(param.defaultClassLoader)
                     lockscreenHooks.installShortcutGestureHooks(param.defaultClassLoader, preferences)
                     if (!depthEffectHookInstalled) {
                         installDepthEffectHook(param.defaultClassLoader, preferences)
@@ -1425,6 +1436,8 @@ class HyperSystemUiModule : XposedModule() {
                     }
                 }
                 THEME_MANAGER -> {
+                    customDepthWallpaperHooks.installThemeManager(param.defaultClassLoader, preferences)
+                    customDepthWallpaperHooks.installVideoValidationBypass(param.defaultClassLoader)
                     // Catalog merge/sanitizer hooks are harmless when the feature toggle is
                     // off and must be installed before ThemeManager initializes its ViewModel.
                     othersHooks.installThemeManagerRearScreenFeatureGuards(param.defaultClassLoader)
@@ -6078,12 +6091,7 @@ class HyperSystemUiModule : XposedModule() {
                         }.onFailure { error ->
                             btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not apply lockscreen shortcut geometry", error)
                         }
-                        scheduleLockscreenMiniPlayerInstallation(
-                            root = root,
-                            shortcutController = chain.thisObject,
-                            preferences = preferences,
-                            classLoader = classLoader,
-                        )
+                        // MiniPlayerRuntime installs the sole capsule controller.
                         scheduleLockscreenWidgetInstallation(
                             root = root,
                             shortcutController = chain.thisObject,
@@ -9608,7 +9616,7 @@ class HyperSystemUiModule : XposedModule() {
         thresholdClass: Class<*>,
         preferences: SharedPreferences,
     ) {
-        if (!preferences.getBoolean(KEY_REMOVE_DEPTH_IMAGE_LIMIT, false)) return
+        if (!preferences.getBoolean(KEY_REMOVE_DEPTH_IMAGE_LIMIT, false) && !isCustomDepthWallpaperEnabled(preferences)) return
         runCatching {
             val threshold = evaluatorClass.getDeclaredField(IMAGE_THRESHOLD_FIELD).get(null)
             thresholdClass.getDeclaredField(THRESHOLD_RATE_FIELD)
@@ -9632,12 +9640,12 @@ class HyperSystemUiModule : XposedModule() {
             .setExceptionMode(ExceptionMode.PROTECTIVE)
             .setId("systemui-depth-display-state")
             .intercept { chain ->
-                if (preferences.getBoolean(KEY_REMOVE_DEPTH_IMAGE_LIMIT, false)) {
+                if ((preferences.getBoolean(KEY_REMOVE_DEPTH_IMAGE_LIMIT, false) || isCustomDepthWallpaperEnabled(preferences))) {
                     depthEnabled.setBoolean(chain.thisObject, true)
                     depthEnabledInner.setBoolean(interactor.get(chain.thisObject), true)
                 }
                 val result = chain.proceed()
-                if (preferences.getBoolean(KEY_REMOVE_DEPTH_IMAGE_LIMIT, false)) {
+                if ((preferences.getBoolean(KEY_REMOVE_DEPTH_IMAGE_LIMIT, false) || isCustomDepthWallpaperEnabled(preferences))) {
                     val depthInteractor = interactor.get(chain.thisObject)
                     if (!actualDisplayDepth.getBoolean(depthInteractor)) {
                         actualDisplayDepth.setBoolean(depthInteractor, true)
@@ -10422,7 +10430,7 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         preferences: SharedPreferences,
     ) {
-        if (!preferences.getBoolean(KEY_REMOVE_DEPTH_IMAGE_LIMIT, false)) return
+        if (!preferences.getBoolean(KEY_REMOVE_DEPTH_IMAGE_LIMIT, false) && !isCustomDepthWallpaperEnabled(preferences)) return
         runCatching {
             val wallpaperInfoClass = classLoader.loadClass(WALLPAPER_INFO_CLASS)
             hook(wallpaperInfoClass.getMethod("getSupportSubject"))
@@ -10457,6 +10465,11 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
+    private fun isCustomDepthWallpaperEnabled(preferences: SharedPreferences): Boolean =
+        readCustomDepthWallpaperSettings(preferences).let { settings ->
+            settings.enabled && settings.activePack.equals("snoopy", ignoreCase = true)
+        }
+
     /**
      * The AOD editor has its own wallpaper model and applies the same third-party checks again.
      * Keep this separate from TemplateApiImpl.isDefaultTheme(), which belongs to the global
@@ -10467,7 +10480,7 @@ class HyperSystemUiModule : XposedModule() {
         preferences: SharedPreferences,
     ) {
         if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
-        if (!preferences.getBoolean(KEY_REMOVE_DEPTH_IMAGE_LIMIT, false)) return
+        if (!preferences.getBoolean(KEY_REMOVE_DEPTH_IMAGE_LIMIT, false) && !isCustomDepthWallpaperEnabled(preferences)) return
         runCatching {
             val wallpaperInfoClass = classLoader.loadClass(AOD_WALLPAPER_INFO_CLASS)
             hook(wallpaperInfoClass.getMethod("getSupportSubject"))

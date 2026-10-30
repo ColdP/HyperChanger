@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The pickup card as the back screen draws it.
+
+  The geometry is 小爱同学's own rear card - res/layout/memory_scene_rear_remote_view.xml and the
+  memory_scene_rear_* entries of its values/dimens.xml - read off its apk on 2026-10-09: a card the
+  size of the panel (213dp tall) whose content starts 47dp down and 113dp in, because the left fifth
+  of the back screen is camera and nothing is drawn under it; an 84dp row of a 72x84dp picture with
+  the words beside it (28sp over 14sp over 12sp, 8dp and 2dp apart); then a 42dp capsule 20dp below
+  that, 10dp in from the words, running the rest of the width. (Their own button radius is 30.94dp,
+  past half of 42 - the same value this file rounds to a capsule.)
+
+  What is ours is the words, the picture, and the background: theirs is a flat scene colour
+  (`scene_style_*_rear_bg`) under a 336x213dp black gradient of theirs; [PickupCard.rear] builds the
+  same shape out of the brand's own colour instead of shipping their art.
+
+  These are the sizes on a panel 213dp tall. [PickupCard.rear] sets every one of them again in
+  units of the panel's own height / 213, the way the back screen's MAML templates scale - see
+  [RearPanel]: the 17 Pro's panel is about 203dp, and in dp the capsule ran off its bottom.
+
+  Framework widgets only, and no method an AppCompat inflater overrides - the back screen inflates
+  this, and `setImageBitmap` on `androidx.appcompat.widget.AppCompatImageView` is an ActionException
+  that takes the whole app down. See [PickupCard].
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/mc_pickup_rear_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- The card itself: one row of the brand's colour, stretched. Set by PickupCard. -->
+    <ImageView
+        android:id="@+id/mc_pickup_rear_backdrop"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:contentDescription="@null"
+        android:scaleType="fitXY" />
+
+    <LinearLayout
+        android:id="@+id/mc_pickup_rear_content"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:paddingStart="113dp"
+        android:paddingTop="47dp"
+        android:paddingEnd="20dp"
+        android:paddingBottom="20dp">
+
+        <LinearLayout
+            android:id="@+id/mc_pickup_rear_row"
+            android:layout_width="match_parent"
+            android:layout_height="84dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <!-- The one picture slot, in the two layers ColorOS's card uses: the drink animation
+                 and the brand's mark over it, which the module fades in once the drink has filled
+                 (see PickupCodeIsland's picture hook). -->
+            <FrameLayout
+                android:id="@+id/mc_pickup_rear_picture"
+                android:layout_width="72dp"
+                android:layout_height="84dp">
+
+                <ImageView
+                    android:id="@+id/mc_pickup_rear_icon"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:contentDescription="@null"
+                    android:scaleType="fitCenter" />
+
+                <ImageView
+                    android:id="@+id/mc_pickup_rear_logo"
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:layout_gravity="center_horizontal|bottom"
+                    android:layout_marginBottom="30dp"
+                    android:contentDescription="@null"
+                    android:scaleType="fitCenter" />
+            </FrameLayout>
+
+            <LinearLayout
+                android:id="@+id/mc_pickup_rear_text"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/mc_pickup_rear_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="mipro-demibold"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:textSize="28sp" />
+
+                <TextView
+                    android:id="@+id/mc_pickup_rear_product"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:ellipsize="end"
+                    android:fontFamily="mipro-medium"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/mc_pickup_rear_store"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:ellipsize="end"
+                    android:fontFamily="mipro-medium"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:textSize="12sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <FrameLayout
+            android:id="@+id/mc_pickup_rear_action_container"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:layout_marginStart="10dp"
+            android:layout_marginTop="20dp">
+
+            <ImageView
+                android:id="@+id/mc_pickup_rear_action_bg"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:contentDescription="@null"
+                android:scaleType="fitXY" />
+
+            <TextView
+                android:id="@+id/mc_pickup_rear_action"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:ellipsize="end"
+                android:fontFamily="mipro-demibold"
+                android:gravity="center"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:textSize="14sp" />
+        </FrameLayout>
+    </LinearLayout>
+</FrameLayout>

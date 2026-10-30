@@ -23,7 +23,7 @@
   <img src="https://img.shields.io/badge/Platform-Android-green?style=flat-square&logo=android" alt="Platform">
   <img src="https://img.shields.io/badge/minSdk-35-blue?style=flat-square" alt="Minimum SDK">
   <img src="https://img.shields.io/badge/targetSdk-37-blue?style=flat-square" alt="Target SDK">
-  <img src="https://img.shields.io/badge/License-AGPL--3.0--or--later-yellow?style=flat-square" alt="License">
+  <img src="https://img.shields.io/badge/License-AGPL--3.0-yellow?style=flat-square" alt="License">
 </p>
 
 ## Overview
@@ -277,9 +277,9 @@ HyperChanger is an experimental community module with no affiliation with or off
 
 ## License and acknowledgments
 
-The project is released under [AGPL-3.0-or-later](LICENSE): GNU Affero General Public License version 3 or, at your option, any later version. See [NOTICE](NOTICE) for historical MIT and Apache-2.0 licensing and third-party notices.
+This combined distribution is provided under [GNU AGPL version 3](LICENSE). Original HyperChanger files retain AGPL-3.0-or-later; the newer HyperMusicCover snapshot is AGPL-3.0-only, so the combined distribution uses version 3. See [NOTICE](NOTICE) for historical grants, third-party notices and modifications.
 
-- The lock-screen music-cover runtime is imported and adapted from [HyperMusicCover](https://github.com/zyl6932/HyperMusicCover) (Copyright 2026 zyl6932, Apache License 2.0).
+- Music lockscreen, lyrics and lockscreen capsules are adapted from the 2026-10-30 source snapshot of [HyperMusicCover](https://github.com/zyl6932/HyperMusicCover) (AGPL-3.0-only, with Apache-2.0 / GPL-3.0 portions). Retained legacy notification-center code keeps its original Apache-2.0 grant. See the [integration audit](docs/hypermusiccover-upstream-sync.md) for source hashes and boundaries.
 - Collapsed-island smoothing, large/small island spacing, and face-unlock island implementations are adapted from [HyperIsland 3.1.8](https://github.com/1812z/HyperIsland) (Copyright 2026 1812z, MIT). The full notice is in [HyperIsland-MIT.txt](app/src/main/assets/licenses/HyperIsland-MIT.txt).
 - Thanks to MIUIX, AndroidLiquidGlass / Backdrop, and other dependencies. See the app's open-source notices for more information.
 

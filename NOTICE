@@ -1,9 +1,10 @@
 HyperChanger
 Copyright 2026 btm_m
 
-HyperChanger is distributed under the GNU Affero General Public License,
-version 3 or (at your option) any later version
-(SPDX-License-Identifier: AGPL-3.0-or-later). See LICENSE for the full text.
+This combined distribution is provided under GNU Affero General Public License,
+version 3 (AGPL-3.0), because the imported HyperMusicCover snapshot permits only
+that version. Original HyperChanger files retain their AGPL-3.0-or-later grant;
+this does not change the licenses of separately identified components. See LICENSE.
 The project was previously distributed under MIT and Apache-2.0; those
 historical releases retain the rights granted under their original licenses.
 
@@ -13,16 +14,41 @@ Apache-2.0 text is in app/src/main/assets/licenses/Apache-2.0.txt.
 Native source attribution is recorded in the file headers and in
 app/src/main/cpp/nativehook/THIRD_PARTY_NOTICES.md.
 
-This product includes the HyperMusicCover lock-screen runtime implementation
-(Main.java, WallpaperProbe.java, Xp.java, MiBlur.java, ShadeBlur.java,
-ShadeGate.java, ShadeHeader.java, ShadeLayer.java, and ShadeSpring.java)
-adapted from HyperMusicCover by zyl6932.
+HyperMusicCover (https://github.com/zyl6932/HyperMusicCover)
+Copyright (C) 2026 zyl6932
 
-HyperMusicCover
-Copyright 2026 zyl6932
-https://github.com/zyl6932/HyperMusicCover
+The supplied source snapshot imported on 2026-10-30 has no Git revision metadata.
+Its newer runtime is under GNU AGPL version 3 only (AGPL-3.0-only), with portions
+retaining Apache-2.0 and GPL-3.0 licenses. Source hashes and imported paths are in
+docs/hypermusiccover-source-manifest.json. The upstream NOTICE is reproduced
+verbatim in app/src/main/assets/licenses/HyperMusicCover-NOTICE.txt and its license
+text in HyperMusicCover-AGPL-3.0.txt. Original file headers are preserved.
 
-The imported implementation is licensed under the Apache License, Version 2.0.
+Modifications by btm_m for HyperChanger, 2026-10-30: namespace/package adaptation;
+host-owned lifecycle dispatch and settings synchronization; local lyric library
+integration; capsule material, media-visibility and appearance compatibility;
+reuse of the existing notification-center artwork owner; exclusion of standalone
+UI, installer, update, pickup, rear-transit and hot-reload installation paths.
+See docs/hypermusiccover-upstream-sync.md for the integration boundaries.
+
+The retained legacy hypermusiccover notification-center implementation was
+imported from an earlier Apache-2.0-licensed HyperMusicCover version. Its existing
+headers and the Apache-2.0 license continue to apply to those files.
+
+The newer MiniPlayer* and HyperTweaks portions retain the upstream notices for
+HyperChanger, Copyright 2026 btm_m, Apache-2.0. QqLyrics, QrcCrypt and LyricMatch
+contain GPL-3.0 adaptations from HyperLyrics Enhanced; KuwoLyrics and TtmlHub
+contain Apache-2.0 adaptations, Copyright 2026 juren233. GPLv3 section 13 and
+AGPLv3 section 13 permit combination without relicensing those portions.
+The complete GPLv3 text is bundled as HyperMusicCover-GPL-3.0.txt.
+AppleLyrics credits the Apple Music approach from Proify and Tomakino's
+LyricProvider (Apache-2.0). accompanist-lyrics-core retains Apache-2.0.
+The material-color-utilities dependency is from MaterialKolor (Apache-2.0).
+
+Corresponding source for this modified distribution must include the complete
+HyperChanger source, the imported runtime and these modifications. The upstream
+URL alone is not the corresponding source of this modified distribution.
+Project source: https://github.com/ColdP/HyperChanger
 
 Collapsed island smoothing (IslandSmoothingHook.kt and IslandSmoothingShape.kt)
 large-small island spacing (IslandSpacingHook.kt), and face-unlock island

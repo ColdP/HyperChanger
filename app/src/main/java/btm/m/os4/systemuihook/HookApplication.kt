@@ -28,6 +28,10 @@ class HookApplication : Application(), XposedServiceHelper.OnServiceListener {
             .onFailure { ModuleLog.w("HotReload", "Could not sync hot reload setting", it) }
         runCatching { ModuleSafetySettingsStore(this).syncRemote(service) }
             .onFailure { ModuleLog.w("ModuleSafety", "Could not sync safety settings", it) }
+        runCatching { CustomDepthWallpaperSettingsStore(this).syncRemote(service) }
+            .onFailure { ModuleLog.w("CustomDepthWallpaper", "Could not sync custom depth wallpaper settings", it) }
+        runCatching { HyperMusicCoverSettingsStore(this).syncRemote(service) }
+            .onFailure { ModuleLog.w("HyperMusicCover", "Could not sync music settings", it) }
         serviceState.value = service
     }
 

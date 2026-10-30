@@ -23,7 +23,7 @@
   <img src="https://img.shields.io/badge/Platform-Android-green?style=flat-square&logo=android" alt="平台">
   <img src="https://img.shields.io/badge/minSdk-35-blue?style=flat-square" alt="最低 SDK">
   <img src="https://img.shields.io/badge/targetSdk-37-blue?style=flat-square" alt="目标 SDK">
-  <img src="https://img.shields.io/badge/License-AGPL--3.0--or--later-yellow?style=flat-square" alt="许可证">
+  <img src="https://img.shields.io/badge/License-AGPL--3.0-yellow?style=flat-square" alt="许可证">
 </p>
 
 ## 项目简介
@@ -277,9 +277,9 @@ HyperChanger 是社区开发的实验性模块，与小米无隶属或官方授�
 
 ## 许可证与致谢
 
-项目依据 [AGPL-3.0-or-later](LICENSE) 开源，可选择 GNU Affero 通用公共许可证第 3 版或任何后续版本。历史 MIT、Apache-2.0 授权说明及第三方来源声明见 [NOTICE](NOTICE)。
+本组合分发依据 [GNU AGPL 第 3 版](LICENSE) 提供：HyperChanger 原创文件保留 AGPL-3.0-or-later 授权，导入的新版 HyperMusicCover 为 AGPL-3.0-only，组合分发采用第 3 版。历史授权、第三方版权和修改说明见 [NOTICE](NOTICE)。
 
-- 锁屏音乐封面运行时引入并适配自 [HyperMusicCover](https://github.com/zyl6932/HyperMusicCover)（Copyright 2026 zyl6932，Apache License 2.0）。
+- 音乐锁屏、歌词与锁屏胶囊更新自 [HyperMusicCover](https://github.com/zyl6932/HyperMusicCover) 2026-10-30 源码快照（AGPL-3.0-only，部分 Apache-2.0 / GPL-3.0）；保留的旧通知中心代码继续适用原 Apache-2.0 授权。导入文件哈希与边界见 [同步审计](docs/hypermusiccover-upstream-sync.md)。
 - 收起岛平滑轮廓、大小岛间距及人脸解锁岛相关实现适配自 [HyperIsland 3.1.8](https://github.com/1812z/HyperIsland)（Copyright 2026 1812z，MIT）；完整声明见 [HyperIsland-MIT.txt](app/src/main/assets/licenses/HyperIsland-MIT.txt)。
 - 感谢 MIUIX、AndroidLiquidGlass / Backdrop 及其他依赖项目；更多信息见应用内开源代码声明。
 

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The collapsed island: the brand's logo, then the code.
+
+  ColorOS's template puts the code on the small island and this module's earlier card lost it once
+  the expanded RemoteViews was attached - the small island is drawn from its own key
+  (miui.focus.rv.tiny, the one the reference implementation touches), and until there is something
+  there the island shows the notification's icon and nothing else.
+
+  Only widgets a RemoteViews may carry: a LinearLayout, an ImageView and a TextView.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:paddingStart="4dp"
+    android:paddingEnd="10dp">
+
+    <ImageView
+        android:id="@+id/mc_pickup_tiny_icon"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:contentDescription="@null"
+        android:scaleType="centerCrop" />
+
+    <TextView
+        android:id="@+id/mc_pickup_tiny_code"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="6dp"
+        android:fontFamily="mipro-demibold"
+        android:includeFontPadding="false"
+        android:maxLines="1"
+        android:textColor="#FFFFFFFF"
+        android:textSize="16sp" />
+</LinearLayout>

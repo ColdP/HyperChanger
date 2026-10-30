@@ -297,8 +297,8 @@ private enum class PageId {
     SOFT_GLASS_PRESETS,
     IOS_NOTIFICATION_CLOCK_GLASS, CONTROL_CENTER_TOP_BUTTONS,
     GESTURE_HANDLE_STYLE, DESKTOP, DESKTOP_MATERIAL,
-    ISLAND, ISLAND_COLLAPSED, ISLAND_EXPANDED, ISLAND_EXPANDED_BACKGROUND, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_HEADER_SETTINGS, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_ADJUSTMENT, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LOCKSCREEN_SHORTCUT_BACKGROUND, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
-    DEVICE_PROFILE_PRESETS, DEVICE_PROFILE_CLOUD_PRESETS,
+    ISLAND, ISLAND_COLLAPSED, ISLAND_EXPANDED, ISLAND_EXPANDED_BACKGROUND, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_HEADER_SETTINGS, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_ADJUSTMENT, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_MUSIC, LOCKSCREEN_CAPSULE, LOCKSCREEN_SHORTCUT_BACKGROUND, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
+    DEVICE_PROFILE_PRESETS, DEVICE_PROFILE_CLOUD_PRESETS, CUSTOM_DEPTH_WALLPAPER,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, THEME_AND_COLOR, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
     SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, PORTAL_MATERIAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND,
@@ -3144,13 +3144,13 @@ private fun RestartScopesPage(
                     enabled = selectedTargets.isNotEmpty(),
                     onClick = { confirmationTargets = selectedTargets },
                     size = 60.dp,
-                    surfaceColor = ComposeColor(0xFF0088FF),
+                    surfaceColor = MiuixTheme.colorScheme.primary,
                 ) {
                     Icon(
                         MiuixIcons.Regular.Refresh,
                         tr("重启", "重启"),
                         Modifier.size(24.dp),
-                        tint = ComposeColor.White,
+                        tint = MiuixTheme.colorScheme.onPrimary,
                     )
                 }
             }
@@ -5203,6 +5203,8 @@ private fun Detail(
         PageId.STATUS_SIGNAL_TUNING -> StatusSignalTuning(settings, update, back)
         PageId.CONTROL -> Control(back)
         PageId.LOCK -> Lock(settings, lockscreenCapsuleSettings, update, openPage, back)
+        PageId.CUSTOM_DEPTH_WALLPAPER -> CustomDepthWallpaperPage(back)
+        PageId.LOCKSCREEN_MUSIC -> MusicLockscreenPage(settings, update, openPage, back)
         PageId.LOCKSCREEN_CAPSULE -> LockscreenCapsule(lockscreenCapsuleSettings, updateLockscreenCapsule, back)
         PageId.LOCKSCREEN_SHORTCUT_BACKGROUND -> LockscreenShortcutBackgroundPage(back)
         PageId.LIFT_TO_WAKE_SCHEDULE -> LiftToWakeSchedulePage(back)
@@ -8945,6 +8947,102 @@ private fun Control(back: () -> Unit) {
 }
 
 @Composable
+private fun CustomDepthWallpaperPage(back: () -> Unit) {
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    val store = remember(context) { CustomDepthWallpaperSettingsStore(context) }
+    var settings by remember { mutableStateOf(store.settings) }
+    var busy by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null || busy) return@rememberLauncherForActivityResult
+        busy = true
+        status = null
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val imported = importCustomDepthWallpaperZip(context, uri)
+                    val selected = imported.defaultPack
+                    activateCustomDepthWallpaper(store, service, imported, selected)
+                }
+            }
+            result.onSuccess {
+                settings = store.settings
+                status = tr("景深壁纸导入成功，请重启系统界面、壁纸和息屏应用", "景深壁纸导入成功，请重启系统界面、壁纸和息屏应用")
+            }.onFailure {
+                status = tr("景深壁纸导入失败", "景深壁纸导入失败") + ": " + (it.message ?: tr("未知错误", "未知错误"))
+            }
+            busy = false
+        }
+    }
+    LaunchedEffect(service) {
+        service?.let {
+            runCatching { store.syncRemote(it) }
+            settings = store.settings
+        }
+    }
+    AppPage(
+        tr("自定义景深壁纸", "自定义景深壁纸"),
+        back,
+        restartScopes = setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.WALLPAPER, ScopeApplication.AOD, ScopeApplication.THEME_MANAGER),
+    ) { padding, scroll ->
+        AppList(padding, scroll, 28) {
+            item {
+                Group(tr("壁纸包", "壁纸包")) {
+                    ArrowPreference(
+                        title = tr("导入壁纸 ZIP", "导入壁纸 ZIP"),
+                        summary = if (busy) tr("正在导入…", "正在导入…") else tr("选择 HyperChanger 景深壁纸包", "选择 HyperChanger 景深壁纸包"),
+                        enabled = !busy,
+                        onClick = { picker.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
+                    )
+                    if (settings.installedPacks.isNotEmpty()) {
+                        OverlayDropdownPreference(
+                            title = tr("当前壁纸包", "当前壁纸包"),
+                            items = settings.installedPacks,
+                            selectedIndex = settings.installedPacks.indexOf(settings.activePack).coerceAtLeast(0),
+                            enabled = !busy,
+                            onSelectedIndexChange = { index ->
+                                runCatching {
+                                    selectInstalledCustomDepthWallpaper(store, service, settings.installedPacks[index])
+                                    settings = store.settings
+                                }.onFailure { status = it.message ?: tr("切换失败", "切换失败") }
+                            },
+                        )
+                    } else {
+                        ArrowPreference(
+                            title = tr("已安装壁纸包", "已安装壁纸包"),
+                            summary = tr("没有找到有效的壁纸包", "没有找到有效的壁纸包"),
+                            enabled = false,
+                            onClick = {},
+                        )
+                    }
+                    SwitchPreference(
+                        title = if (settings.enabled) tr("启用景深壁纸", "启用景深壁纸") else tr("停用景深壁纸", "停用景深壁纸"),
+                        checked = settings.enabled,
+                        enabled = settings.activePack.isNotBlank() && !busy,
+                        onCheckedChange = { enabled ->
+                            store.update(service) { it.copy(enabled = enabled) }
+                            settings = store.settings
+                            status = tr("需要重启系统界面、壁纸和息屏应用", "需要重启系统界面、壁纸和息屏应用")
+                        },
+                    )
+                }
+            }
+            if (status != null) {
+                item {
+                    Text(
+                        status!!,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun Lock(
     s: HookSettings,
     capsule: LockscreenCapsuleSettings,
@@ -9227,7 +9325,12 @@ OverlayDropdownPreference(
             }
         }
         item {
-            Group(tr("锁屏胶囊", "锁屏胶囊")) {
+            Group(tr("lockscreenMediaFeatures", "锁屏媒体")) {
+                ArrowPreference(
+                    title = tr("音乐锁屏", "音乐锁屏"),
+                    summary = if (s.lockscreenMusicLockscreenEnabled) tr("已开启", "已开启") else tr("未开启", "未开启"),
+                    onClick = { open(PageId.LOCKSCREEN_MUSIC) },
+                )
                 ArrowPreference(
                     title = tr("锁屏胶囊", "锁屏胶囊"),
                     summary = if (capsule.enabled) tr("已开启", "已开启") else tr("未开启", "未开启"),
@@ -9321,74 +9424,6 @@ OverlayDropdownPreference(
             }
         }
         item {
-            Group(tr("\u9501\u5c4f\u5a92\u4f53\u4e0e\u6b4c\u8bcd", "\u9501\u5c4f\u5a92\u4f53\u4e0e\u6b4c\u8bcd")) {
-        SwitchPreference(
-            title = tr("\u97f3\u4e50\u9501\u5c4f", "\u97f3\u4e50\u9501\u5c4f"),
-            summary = tr(
-                "\u9700\u8981\u540c\u65f6\u91cd\u542f\u201c\u7cfb\u7edf\u754c\u9762\u201d\u548c\u201c\u58c1\u7eb8\u201d\u5e94\u7528",
-                "\u9700\u8981\u540c\u65f6\u91cd\u542f\u201c\u7cfb\u7edf\u754c\u9762\u201d\u548c\u201c\u58c1\u7eb8\u201d\u5e94\u7528",
-            ),
-            checked = s.lockscreenMusicLockscreenEnabled,
-            onCheckedChange = { value ->
-                update { it.copy(lockscreenMusicLockscreenEnabled = value) }
-            },
-        )
-        AnimatedVisibility(
-            visible = s.lockscreenMusicLockscreenEnabled,
-            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
-            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
-        ) {
-        Column {
-        SwitchPreference(
-            title = tr("\u9501\u5c4f\u6b4c\u8bcd", "\u9501\u5c4f\u6b4c\u8bcd"),
-            summary = tr(
-                "\u5728\u7cfb\u7edf\u9501\u5c4f\u5a92\u4f53\u901a\u77e5\u4e2d\u6ce8\u5165\u6b4c\u8bcd\u6309\u94ae\uff1b\u9700\u5b89\u88c5\u8bcd\u5e55\u6838\u5fc3\u670d\u52a1\u5e76\u542f\u7528\u4e00\u4e2a Provider",
-                "\u5728\u7cfb\u7edf\u9501\u5c4f\u5a92\u4f53\u901a\u77e5\u4e2d\u6ce8\u5165\u6b4c\u8bcd\u6309\u94ae\uff1b\u9700\u5b89\u88c5\u8bcd\u5e55\u6838\u5fc3\u670d\u52a1\u5e76\u542f\u7528\u4e00\u4e2a Provider",
-            ),
-            checked = s.lockscreenMusicLyricsEnabled,
-            onCheckedChange = { value ->
-                update { it.copy(lockscreenMusicLyricsEnabled = value) }
-            },
-        )
-        AnimatedVisibility(
-            visible = s.lockscreenMusicLyricsEnabled,
-            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
-            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
-        ) {
-        Column {
-        SwitchPreference(
-            title = tr("HDR \u9ad8\u5149\u6b4c\u8bcd", "HDR \u9ad8\u5149\u6b4c\u8bcd"),
-            summary = tr(
-                "\u957f\u97f3\u7ed3\u5c3e\u53d1\u5149\u65f6\u5728 HDR \u5c4f\u5e55\u4e0a\u4ee5\u66f4\u9ad8\u4eae\u5ea6\u663e\u793a",
-                "\u957f\u97f3\u7ed3\u5c3e\u53d1\u5149\u65f6\u5728 HDR \u5c4f\u5e55\u4e0a\u4ee5\u66f4\u9ad8\u4eae\u5ea6\u663e\u793a",
-            ),
-            checked = s.lockscreenMusicLyricsHdrEnabled,
-            onCheckedChange = { value ->
-                update { it.copy(lockscreenMusicLyricsHdrEnabled = value) }
-            },
-        )
-        SwitchPreference(
-            title = tr("\u64ad\u653e\u6b4c\u8bcd\u65f6\u5c4f\u5e55\u5e38\u4eae", "\u64ad\u653e\u6b4c\u8bcd\u65f6\u5c4f\u5e55\u5e38\u4eae"),
-            summary = tr(
-                "\u9501\u5c4f\u663e\u793a\u6b4c\u8bcd\u4e14\u6b63\u5728\u64ad\u653e\u65f6\u4e0d\u81ea\u52a8\u606f\u5c4f\uff0c\u6682\u505c\u540e\u6062\u590d",
-                "\u9501\u5c4f\u663e\u793a\u6b4c\u8bcd\u4e14\u6b63\u5728\u64ad\u653e\u65f6\u4e0d\u81ea\u52a8\u606f\u5c4f\uff0c\u6682\u505c\u540e\u6062\u590d",
-            ),
-            checked = s.lockscreenMusicLyricsKeepScreenOn,
-            onCheckedChange = { value ->
-                update { it.copy(lockscreenMusicLyricsKeepScreenOn = value) }
-            },
-        )
-        ArrowPreference(
-            title = tr("\u6b4c\u8bcd\u5e93", "\u6b4c\u8bcd\u5e93"),
-            onClick = { open(PageId.LYRIC_LIBRARY) },
-        )
-        }
-        }
-        }
-        }
-            }
-        }
-        item {
             Group(tr("快捷功能背景", "快捷功能背景")) {
                 ArrowPreference(
                     title = tr("锁屏快捷功能背景", "锁屏快捷功能背景"),
@@ -9435,6 +9470,73 @@ OverlayDropdownPreference(
         onDismiss = { showSaveWallpaperDialog = false },
     )
     }
+
+@Composable
+private fun MusicLockscreenPage(
+    s: HookSettings,
+    update: ((HookSettings) -> HookSettings) -> Unit,
+    open: (PageId) -> Unit,
+    back: () -> Unit,
+) {
+    var tab by rememberSaveable { mutableIntStateOf(0) }
+    AppPage(
+        tr("音乐锁屏", "音乐锁屏"), back,
+        restartScopes = setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.WALLPAPER),
+        header = {
+            SoftGlassHeaderTabs(
+                listOf(tr("音乐锁屏", "音乐锁屏"), tr("锁屏歌词", "锁屏歌词")),
+                tab, { tab = it },
+            )
+        },
+    ) { padding, scroll ->
+        AppList(padding, scroll, 28) {
+            if (tab == 0) {
+                item {
+                    Group(tr("音乐锁屏", "音乐锁屏")) {
+                        SwitchPreference(
+                            title = tr("音乐锁屏", "音乐锁屏"),
+                            summary = tr("需要同时重启“系统界面”和“壁纸”应用", "需要同时重启“系统界面”和“壁纸”应用"),
+                            checked = s.lockscreenMusicLockscreenEnabled,
+                            onCheckedChange = { value -> update { it.copy(lockscreenMusicLockscreenEnabled = value) } },
+                        )
+                        AnimatedVisibility(visible = s.lockscreenMusicLockscreenEnabled) {
+                            HyperMusicCoverOptions(HyperMusicCoverSection.COVER)
+                        }
+                    }
+                }
+            } else {
+                item {
+                    Group(tr("锁屏歌词", "锁屏歌词")) {
+                        SwitchPreference(
+                            title = tr("锁屏歌词", "锁屏歌词"),
+                            summary = tr("hmcLyricsSummary", "支持歌词库、播放器歌词、词幕和在线歌词"),
+                            checked = s.lockscreenMusicLyricsEnabled,
+                            onCheckedChange = { value -> update { it.copy(lockscreenMusicLyricsEnabled = value) } },
+                        )
+                        AnimatedVisibility(visible = s.lockscreenMusicLyricsEnabled) {
+                            Column {
+                                HyperMusicCoverOptions(HyperMusicCoverSection.LYRICS)
+                                SwitchPreference(
+                                    title = tr("HDR 高光歌词", "HDR 高光歌词"),
+                                    summary = tr("长音结尾发光时在 HDR 屏幕上以更高亮度显示", "长音结尾发光时在 HDR 屏幕上以更高亮度显示"),
+                                    checked = s.lockscreenMusicLyricsHdrEnabled,
+                                    onCheckedChange = { value -> update { it.copy(lockscreenMusicLyricsHdrEnabled = value) } },
+                                )
+                                SwitchPreference(
+                                    title = tr("播放歌词时屏幕常亮", "播放歌词时屏幕常亮"),
+                                    summary = tr("锁屏显示歌词且正在播放时不自动息屏，暂停后恢复", "锁屏显示歌词且正在播放时不自动息屏，暂停后恢复"),
+                                    checked = s.lockscreenMusicLyricsKeepScreenOn,
+                                    onCheckedChange = { value -> update { it.copy(lockscreenMusicLyricsKeepScreenOn = value) } },
+                                )
+                            }
+                        }
+                        ArrowPreference(title = tr("歌词库", "歌词库"), onClick = { open(PageId.LYRIC_LIBRARY) })
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun LockscreenShortcutBackgroundPage(back: () -> Unit) {
@@ -10028,6 +10130,7 @@ private fun LockscreenCapsule(
     update: ((LockscreenCapsuleSettings) -> LockscreenCapsuleSettings) -> Unit,
     back: () -> Unit,
 ) {
+    var tab by rememberSaveable { mutableIntStateOf(0) }
     val context = LocalContext.current
     val glassStore = remember(context) { LockscreenCapsuleGlassSettingsStore(context) }
     val service by HookApplication.service.collectAsStateWithLifecycle()
@@ -10039,7 +10142,16 @@ private fun LockscreenCapsule(
         glassState = glassStore.settings
         changed()
     }
-    AppPage(tr("锁屏胶囊", "锁屏胶囊"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.AOD)) { p, scroll ->
+    AppPage(
+        tr("锁屏胶囊", "锁屏胶囊"), back,
+        restartScopes = setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.AOD),
+        header = {
+            SoftGlassHeaderTabs(
+                listOf(tr("hmcAppearanceTab", "外观"), tr("hmcFeaturesTab", "功能")),
+                tab, { tab = it },
+            )
+        },
+    ) { p, scroll ->
         AppList(p, scroll, 28) {
             item {
                 Group(tr("锁屏胶囊", "锁屏胶囊")) {
@@ -10049,77 +10161,98 @@ private fun LockscreenCapsule(
                         checked = capsule.enabled,
                         onCheckedChange = { value -> update { it.copy(enabled = value) } },
                     )
-                    AnimatedVisibility(
-                        visible = capsule.enabled,
-                        enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
-                        exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
-                    ) {
-                        Column {
-                            SwitchPreference(
-                                title = tr("锁屏胶囊歌词", "锁屏胶囊歌词"),
-                                checked = capsule.lyricsEnabled,
-                                onCheckedChange = { value -> update { it.copy(lyricsEnabled = value) } },
-                            )
-                            OverlayDropdownPreference(
-                                title = tr("锁屏媒体通知", "锁屏媒体通知"),
-                                items = listOf(tr("不隐藏", "不隐藏"), tr("始终隐藏", "始终隐藏"), tr("动态显示", "动态显示")),
-                                selectedIndex = capsule.mediaNotificationMode,
-                                onSelectedIndexChange = { value -> update { it.copy(mediaNotificationMode = value) } },
-                            )
-                            OverlayDropdownPreference(
-                                title = tr("锁屏胶囊背景", "锁屏胶囊背景"),
-                                items = listOf(tr("跟随快捷功能背景", "跟随快捷功能背景"), tr("纯色", "纯色"), tr("高级材质", "高级材质"), tr("柔光玻璃", "柔光玻璃")),
-                                selectedIndex = capsule.backgroundMode,
-                                onSelectedIndexChange = { value -> update { it.copy(backgroundMode = value) } },
-                            )
-                            FloatSlide(tr("锁屏胶囊宽度 (dp)", "锁屏胶囊宽度 (dp)"), capsule.width, 160f..360f, defaultValue = 240f) { value -> update { it.copy(width = value) } }
-                            FloatSlide(tr("锁屏胶囊高度 (dp)", "锁屏胶囊高度 (dp)"), capsule.height, 10f..60f, defaultValue = 36f) { value -> update { it.copy(height = value) } }
-                            FloatSlide(tr("媒体封面圆角 (dp)", "媒体封面圆角 (dp)"), capsule.artworkCornerRadius, 0f..60f, defaultValue = 12f) { value -> update { it.copy(artworkCornerRadius = value) } }
+                }
+            }
+            if (tab == 0) {
+                item {
+                    Group(tr("hmcAppearanceTab", "外观")) {
+                        AnimatedVisibility(visible = capsule.enabled) {
+                            Column {
+                                HyperMusicCoverOptions(HyperMusicCoverSection.CAPSULE_APPEARANCE)
+                                FloatSlide(tr("锁屏胶囊宽度 (dp)", "锁屏胶囊宽度 (dp)"), capsule.width, 160f..360f, defaultValue = 240f) { value -> update { it.copy(width = value) } }
+                                FloatSlide(tr("锁屏胶囊高度 (dp)", "锁屏胶囊高度 (dp)"), capsule.height, 10f..60f, defaultValue = 36f) { value -> update { it.copy(height = value) } }
+                                FloatSlide(tr("媒体封面圆角 (dp)", "媒体封面圆角 (dp)"), capsule.artworkCornerRadius, 0f..60f, defaultValue = 12f) { value -> update { it.copy(artworkCornerRadius = value) } }
+                            }
                         }
                     }
-                    AnimatedVisibility(visible = capsule.enabled && capsule.backgroundMode == 1) {
-                        ShortcutBackgroundColorPreference(
-                            title = tr("锁屏胶囊背景颜色", "锁屏胶囊背景颜色"),
-                            color = capsule.pureColor,
-                            onColorChange = { value -> update { it.copy(pureColor = value) } },
-                        )
-                    }
-                    AnimatedVisibility(visible = capsule.enabled && capsule.backgroundMode == 2) {
-                        Column {
+                }
+                item {
+                    Group(tr("背景材质", "背景材质")) {
+                        AnimatedVisibility(visible = capsule.enabled) {
+                            Column {
+                                OverlayDropdownPreference(
+                                    title = tr("锁屏胶囊背景", "锁屏胶囊背景"),
+                                    items = listOf(tr("跟随快捷功能背景", "跟随快捷功能背景"), tr("纯色", "纯色"), tr("高级材质", "高级材质"), tr("柔光玻璃", "柔光玻璃")),
+                                    selectedIndex = capsule.backgroundMode,
+                                    onSelectedIndexChange = { value -> update { it.copy(backgroundMode = value) } },
+                                )
+                            }
+                        }
+                        AnimatedVisibility(visible = capsule.enabled && capsule.backgroundMode == 1) {
                             ShortcutBackgroundColorPreference(
-                                title = tr("锁屏胶囊混色颜色", "锁屏胶囊混色颜色"),
-                                color = capsule.advancedMaterialColor,
-                                onColorChange = { value -> update { it.copy(advancedMaterialColor = value) } },
-                            )
-                            ParameterIntSlide(tr("锁屏胶囊不透明度", "锁屏胶囊不透明度"), capsule.advancedMaterialOpacity, 0..100, "%", defaultValue = 14) { value -> update { it.copy(advancedMaterialOpacity = value) } }
-                            ParameterIntSlide(tr("锁屏胶囊背景模糊度", "锁屏胶囊背景模糊度"), capsule.advancedMaterialBlurRadius, 0..40, defaultValue = 40) { value -> update { it.copy(advancedMaterialBlurRadius = value) } }
-                            SwitchPreference(
-                                title = tr("锁屏胶囊显示高光", "锁屏胶囊显示高光"),
-                                checked = capsule.advancedMaterialHighlight,
-                                onCheckedChange = { value -> update { it.copy(advancedMaterialHighlight = value) } },
+                                title = tr("锁屏胶囊背景颜色", "锁屏胶囊背景颜色"),
+                                color = capsule.pureColor,
+                                onColorChange = { value -> update { it.copy(pureColor = value) } },
                             )
                         }
-                    }
-                    AnimatedVisibility(
-                        visible = capsule.enabled && capsule.backgroundMode == 3,
-                        enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
-                        exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
-                    ) {
-                        Column {
-                            SmallTitle(tr("锁屏胶囊柔光玻璃参数", "锁屏胶囊柔光玻璃参数"))
-                            SwitchPreference(
-                                title = tr("使用全局柔光玻璃参数", "使用全局柔光玻璃参数"),
-                                checked = glassState.useGlobal,
-                                onCheckedChange = { value -> updateGlass { it.copy(useGlobal = value) } },
-                            )
-                            AnimatedVisibility(
-                                visible = !glassState.useGlobal,
-                                enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
-                                exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
-                            ) {
-                                SoftGlassMaterialSliders(glassState.glass) { transform ->
-                                    updateGlass { it.copy(glass = transform(it.glass)) }
+                        AnimatedVisibility(visible = capsule.enabled && capsule.backgroundMode == 2) {
+                            Column {
+                                ShortcutBackgroundColorPreference(
+                                    title = tr("锁屏胶囊混色颜色", "锁屏胶囊混色颜色"),
+                                    color = capsule.advancedMaterialColor,
+                                    onColorChange = { value -> update { it.copy(advancedMaterialColor = value) } },
+                                )
+                                ParameterIntSlide(tr("锁屏胶囊不透明度", "锁屏胶囊不透明度"), capsule.advancedMaterialOpacity, 0..100, "%", defaultValue = 14) { value -> update { it.copy(advancedMaterialOpacity = value) } }
+                                ParameterIntSlide(tr("锁屏胶囊背景模糊度", "锁屏胶囊背景模糊度"), capsule.advancedMaterialBlurRadius, 0..40, defaultValue = 40) { value -> update { it.copy(advancedMaterialBlurRadius = value) } }
+                                SwitchPreference(
+                                    title = tr("锁屏胶囊显示高光", "锁屏胶囊显示高光"),
+                                    checked = capsule.advancedMaterialHighlight,
+                                    onCheckedChange = { value -> update { it.copy(advancedMaterialHighlight = value) } },
+                                )
+                            }
+                        }
+                        AnimatedVisibility(
+                            visible = capsule.enabled && capsule.backgroundMode == 3,
+                            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                        ) {
+                            Column {
+                                SmallTitle(tr("锁屏胶囊柔光玻璃参数", "锁屏胶囊柔光玻璃参数"))
+                                SwitchPreference(
+                                    title = tr("使用全局柔光玻璃参数", "使用全局柔光玻璃参数"),
+                                    checked = glassState.useGlobal,
+                                    onCheckedChange = { value -> updateGlass { it.copy(useGlobal = value) } },
+                                )
+                                AnimatedVisibility(
+                                    visible = !glassState.useGlobal,
+                                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                                ) {
+                                    SoftGlassMaterialSliders(glassState.glass) { transform ->
+                                        updateGlass { it.copy(glass = transform(it.glass)) }
+                                    }
                                 }
+                            }
+                        }
+                    }
+                }
+            } else {
+                item {
+                    Group(tr("hmcFeaturesTab", "功能")) {
+                        AnimatedVisibility(visible = capsule.enabled) {
+                            Column {
+                                HyperMusicCoverOptions(HyperMusicCoverSection.CAPSULE_FEATURES)
+                                SwitchPreference(
+                                    title = tr("锁屏胶囊歌词", "锁屏胶囊歌词"),
+                                    checked = capsule.lyricsEnabled,
+                                    onCheckedChange = { value -> update { it.copy(lyricsEnabled = value) } },
+                                )
+                                OverlayDropdownPreference(
+                                    title = tr("锁屏媒体通知", "锁屏媒体通知"),
+                                    items = listOf(tr("不隐藏", "不隐藏"), tr("始终隐藏", "始终隐藏"), tr("动态显示", "动态显示")),
+                                    selectedIndex = capsule.mediaNotificationMode,
+                                    onSelectedIndexChange = { value -> update { it.copy(mediaNotificationMode = value) } },
+                                )
                             }
                         }
                     }
@@ -10127,8 +10260,8 @@ private fun LockscreenCapsule(
             }
         }
     }
-
 }
+
 @Composable
 private fun LockscreenTemplateLimitDialog(
     show: Boolean,
@@ -12763,7 +12896,7 @@ private fun About(back: () -> Unit, openPage: (PageId) -> Unit) = AppPage(tr("\u
         }
         item {
             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, colors = aboutCardColors()) {
-                ArrowPreference(title = tr("license", "LICENSE"), summary = tr("project_license_name", "AGPL-3.0-or-later"), onClick = { openPage(PageId.LICENSE) })
+                ArrowPreference(title = tr("license", "LICENSE"), summary = tr("project_license_name", "AGPL-3.0（组合分发）"), onClick = { openPage(PageId.LICENSE) })
                 ArrowPreference(title = tr("githubRepository", "GitHub Repository"), summary = "github.com/ColdP/HyperChanger", onClick = { openUrl(context, "https://github.com/ColdP/HyperChanger") })
                 ArrowPreference(title = tr("telegramGroup", "Telegram 群组"), summary = "t.me/HyperChanger", onClick = { openUrl(context, "https://t.me/HyperChanger") })
                 ArrowPreference(title = tr("qqGroup", "QQ 群"), summary = tr("qqGroupNumber", "群号: 429188055"), onClick = { openUrl(context, "https://qm.qq.com/q/rQhbQbiYLe") })
@@ -13015,7 +13148,7 @@ private fun openProjects() = listOf(
     OpenProject("Backdrop / AndroidLiquidGlass", "2.0.0", tr("\u6db2\u6001\u73bb\u7483\u6e32\u67d3\u4e0e\u5e95\u90e8\u5bfc\u822a\u4ea4\u4e92", "\u6db2\u6001\u73bb\u7483\u6e32\u67d3\u4e0e\u5e95\u90e8\u5bfc\u822a\u4ea4\u4e92"), "https://github.com/Kyant0/AndroidLiquidGlass"),
     OpenProject("Compose Multiplatform", "1.11.x", tr("\u58f0\u660e\u5f0f\u754c\u9762\u3001\u5e03\u5c40\u4e0e\u52a8\u753b", "\u58f0\u660e\u5f0f\u754c\u9762\u3001\u5e03\u5c40\u4e0e\u52a8\u753b"), "https://github.com/JetBrains/compose-multiplatform"),
     OpenProject("AndroidX", tr("\u591a\u4e2a\u7ec4\u4ef6", "\u591a\u4e2a\u7ec4\u4ef6"), tr("Activity\u3001Lifecycle\u3001Core \u7b49 Android \u57fa\u7840\u5e93", "Activity\u3001Lifecycle\u3001Core \u7b49 Android \u57fa\u7840\u5e93"), "https://github.com/androidx/androidx"),
-    OpenProject(tr("HyperMusicCover", "HyperMusicCover"), tr("0.0.9", "0.0.9"), tr("\u97f3\u4e50\u9501\u5c4f\u90e8\u5206\u76f8\u5173\u4ee3\u7801", "\u97f3\u4e50\u9501\u5c4f\u90e8\u5206\u76f8\u5173\u4ee3\u7801"), "https://github.com/zyl6932/HyperMusicCover"),
+    OpenProject(tr("HyperMusicCover", "HyperMusicCover"), tr("hmcSnapshot", "源码快照 2026-10-30"), tr("hmcAttribution", "音乐锁屏、歌词与锁屏胶囊；保留旧通知中心实现"), "https://github.com/zyl6932/HyperMusicCover", tr("hmcLicense", "AGPL-3.0-only；部分代码为 Apache-2.0 / GPL-3.0")),
     OpenProject(
         tr("HyperIsland", "HyperIsland"),
         tr("3.1.8", "3.1.8"),
@@ -13201,15 +13334,20 @@ private fun AboutAdvancedMaterialHeader(onLogoClick: () -> Unit, onVersionClick:
 private fun License(back: () -> Unit) {
     val context = LocalContext.current
     val licenseText = remember(context) {
-        context.assets.open("licenses/AGPL-3.0-or-later.txt").bufferedReader().use { it.readText() }
+        context.assets.open("licenses/AGPL-3.0-or-later.txt").bufferedReader().use { it.readText() } + "\n\n" +
+            context.assets.open("licenses/HyperMusicCover-GPL-3.0.txt").bufferedReader().use { it.readText() }
+    }
+    val upstreamNotices = remember(context) {
+        context.assets.open("NOTICE").bufferedReader().use { it.readText() } + "\n\n" +
+            context.assets.open("licenses/HyperMusicCover-NOTICE.txt").bufferedReader().use { it.readText() }
     }
     AppPage(tr("license", "LICENSE"), back) { padding, scroll ->
         AppList(padding, scroll, 28) {
             item {
                 Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(16.dp)) {
-                    Text(tr("project_license_name", "AGPL-3.0-or-later"), style = MiuixTheme.textStyles.title3)
+                    Text(tr("project_license_name", "AGPL-3.0（组合分发）"), style = MiuixTheme.textStyles.title3)
                     Text(
-                        tr("project_license_scope", "本项目采用 GNU Affero 通用公共许可证第 3 版或任何后续版本（AGPL-3.0-or-later）。分发本软件或让用户通过网络与修改版本交互时，请遵守对应源代码提供等许可义务。第三方组件保留其原始许可与版权声明。以下为许可证英文原文。"),
+                        tr("project_license_scope", "本组合分发按 GNU Affero 通用公共许可证第 3 版提供。HyperChanger 原创代码保留 AGPL-3.0-or-later 授权；导入的新版 HyperMusicCover 为 AGPL-3.0-only，部分文件保留 Apache-2.0 或 GPL-3.0。请参阅 NOTICE 与下列许可原文，分发时提供对应源代码及修改说明。"),
                         style = MiuixTheme.textStyles.body2,
                         modifier = Modifier.padding(top = 12.dp),
                     )
@@ -13222,6 +13360,8 @@ private fun License(back: () -> Unit) {
             item {
                 Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(16.dp)) {
                     Text(licenseText, style = MiuixTheme.textStyles.body2)
+                    Text(tr("hmcNotices", "HyperMusicCover 许可与修改说明"), style = MiuixTheme.textStyles.title3, modifier = Modifier.padding(top = 16.dp))
+                    Text(upstreamNotices, style = MiuixTheme.textStyles.body2)
                 }
             }
         }
@@ -14113,5 +14253,57 @@ private fun detectAppearanceMime(context: android.content.Context, uri: Uri): St
         name.endsWith(".xml") -> "application/xml"
         reported.isNotBlank() -> reported
         else -> "application/octet-stream"
+    }
+}
+
+private enum class HyperMusicCoverSection { COVER, LYRICS, CAPSULE_APPEARANCE, CAPSULE_FEATURES }
+
+@Composable
+private fun HyperMusicCoverOptions(section: HyperMusicCoverSection) {
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    val store = remember(context) { HyperMusicCoverSettingsStore(context) }
+    var state by remember { mutableStateOf(store.settings) }
+    LaunchedEffect(service) { service?.let { store.syncRemote(it); state = store.settings } }
+    fun update(transform: (HyperMusicCoverSettings) -> HyperMusicCoverSettings) {
+        store.update(service, transform); state = store.settings
+    }
+    Column {
+        when (section) {
+            HyperMusicCoverSection.CAPSULE_APPEARANCE -> {
+                OverlayDropdownPreference(title = tr("hmcIslandStyle", "胶囊排列方式"), items = listOf(tr("hmcRow", "并排"), tr("hmcStack", "堆叠")), selectedIndex = state.islandStyle, onSelectedIndexChange = { value -> update { it.copy(islandStyle = value) } })
+                SwitchPreference(title = tr("hmcAdaptiveWidth", "适应快捷按钮剩余宽度"), checked = state.adaptiveWidth, onCheckedChange = { value -> update { it.copy(adaptiveWidth = value) } })
+                SwitchPreference(title = tr("hmcStatusAtDate", "状态信息跟随日期显示"), checked = state.statusAtDate, onCheckedChange = { value -> update { it.copy(statusAtDate = value) } })
+                SwitchPreference(title = tr("hmcFingerprintLift", "避让低位屏下指纹"), checked = state.fingerprintLift, onCheckedChange = { value -> update { it.copy(fingerprintLift = value) } })
+            }
+            HyperMusicCoverSection.CAPSULE_FEATURES -> {
+                SwitchPreference(title = tr("hmcOrdinary", "普通通知加入胶囊"), checked = state.ordinaryNotifications, onCheckedChange = { value -> update { it.copy(ordinaryNotifications = value) } })
+                SwitchPreference(title = tr("hmcGroupByApp", "按应用分组通知"), checked = state.groupByApp, onCheckedChange = { value -> update { it.copy(groupByApp = value) } })
+                SwitchPreference(title = tr("hmcNavigationKeepOn", "锁屏导航时保持屏幕常亮"), checked = state.navigationKeepOn, onCheckedChange = { value -> update { it.copy(navigationKeepOn = value) } })
+            }
+            HyperMusicCoverSection.COVER -> {
+                OverlayDropdownPreference(title = tr("hmcCoverStyle", "音乐封面样式"), items = listOf(tr("hmcFullCover", "全屏封面"), tr("hmcCardCover", "方形封面"), tr("hmcKeepWallpaper", "保留壁纸")), selectedIndex = state.coverStyle, onSelectedIndexChange = { value -> update { it.copy(coverStyle = value) } })
+                SwitchPreference(title = tr("hmcAutoEnter", "自动进入音乐锁屏"), checked = state.autoEnter, onCheckedChange = { value -> update { it.copy(autoEnter = value) } })
+                SwitchPreference(title = tr("hmcMotion", "Apple Music 动态封面"), checked = state.motionCover, onCheckedChange = { value -> update { it.copy(motionCover = value) } })
+                SwitchPreference(title = tr("hmcMotionData", "允许使用移动数据加载动态封面"), checked = state.motionOnData, onCheckedChange = { value -> update { it.copy(motionOnData = value) } })
+                FloatSlide(tr("hmcClockSize", "音乐锁屏时钟比例"), state.clockSize, 0.05f..1f, 0.09f) { value -> update { it.copy(clockSize = value) } }
+            }
+            HyperMusicCoverSection.LYRICS -> {
+                SwitchPreference(title = tr("hmcOnline", "在线查找歌词"), checked = state.lyricsOnline, onCheckedChange = { value -> update { it.copy(lyricsOnline = value) } })
+                SwitchPreference(title = tr("hmcTranslation", "显示歌词翻译"), checked = state.lyricsTranslation, onCheckedChange = { value -> update { it.copy(lyricsTranslation = value) } })
+                SwitchPreference(title = tr("hmcRomanization", "显示歌词罗马音"), checked = state.lyricsRomanization, onCheckedChange = { value -> update { it.copy(lyricsRomanization = value) } })
+                OverlayDropdownPreference(title = tr("hmcAlign", "歌词对齐"), items = listOf(tr("hmcLeft", "左对齐"), tr("hmcCenter", "居中"), tr("hmcRight", "右对齐")), selectedIndex = state.lyricsAlign, onSelectedIndexChange = { value -> update { it.copy(lyricsAlign = value) } })
+                FloatSlide(tr("hmcLyricSize", "主歌词字号 (sp)"), state.lyricsSize, 18f..36f, 25f) { value -> update { it.copy(lyricsSize = value) } }
+                FloatSlide(tr("hmcBackgroundSize", "背景歌词字号 (sp)"), state.lyricsBackgroundSize, 10f..30f, 17f) { value -> update { it.copy(lyricsBackgroundSize = value) } }
+                val appearance = JSONObject(state.lyricAppearance)
+                fun updateAppearance(key: String, value: Any) { update { it.copy(lyricAppearance = JSONObject(it.lyricAppearance).put(key, value).toString()) } }
+                OverlayDropdownPreference(title = tr("hmcMainColorMode", "主歌词颜色模式"), items = listOf(tr("hmcOfficial", "默认颜色"), tr("hmcFromCover", "跟随封面"), tr("hmcCustom", "自定义颜色")), selectedIndex = appearance.optInt("mainMode", 0), onSelectedIndexChange = { updateAppearance("mainMode", it) })
+                if (appearance.optInt("mainMode") == 2) ShortcutBackgroundColorPreference(title = tr("hmcMainColor", "主歌词颜色"), color = appearance.optInt("mainColor", -1), onColorChange = { updateAppearance("mainColor", it) })
+                FloatSlide(tr("hmcMainOpacity", "主歌词不透明度"), appearance.optDouble("mainOpacity", 1.0).toFloat(), 0f..1f, 1f) { updateAppearance("mainOpacity", it) }
+                OverlayDropdownPreference(title = tr("hmcBgColorMode", "背景歌词颜色模式"), items = listOf(tr("hmcOfficial", "默认颜色"), tr("hmcFromCover", "跟随封面"), tr("hmcCustom", "自定义颜色")), selectedIndex = appearance.optInt("bgMode", 0), onSelectedIndexChange = { updateAppearance("bgMode", it) })
+                if (appearance.optInt("bgMode") == 2) ShortcutBackgroundColorPreference(title = tr("hmcBgColor", "背景歌词颜色"), color = appearance.optInt("bgColor", -1), onColorChange = { updateAppearance("bgColor", it) })
+                FloatSlide(tr("hmcBgOpacity", "背景歌词不透明度"), appearance.optDouble("bgOpacity", 0.72).toFloat(), 0f..1f, .72f) { updateAppearance("bgOpacity", it) }
+            }
+        }
     }
 }

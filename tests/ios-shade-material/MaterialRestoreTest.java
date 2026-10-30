@@ -4,7 +4,10 @@ import android.view.View;
 import android.view.ViewGroup;
 import com.android.systemui.shade.NotificationPanelView;
 import com.android.systemui.statusbar.notification.row.NotificationBackgroundView;
+import com.android.systemui.statusbar.notification.row.NotificationExpandButton;
 import com.android.systemui.statusbar.notification.mediacontrol.MiuiMediaHeaderView;
+import com.android.systemui.statusbar.notification.stack.NotificationChildrenContainer;
+import com.android.systemui.statusbar.notification.stack.NotificationChildrenContainerInjectorImpl;
 import com.miui.systemui.widget.CircleAndTickAnimView;
 
 /** Exercises the production material class through mock Xposed setter chains. */
@@ -22,10 +25,28 @@ public final class MaterialRestoreTest {
         NotificationPanelView panel = new NotificationPanelView();
         NotificationBackgroundView row = new NotificationBackgroundView();
         CircleAndTickAnimView clear = new CircleAndTickAnimView();
+        NotificationExpandButton collapse = new NotificationExpandButton();
+        NotificationBackgroundView collapseBackground = new NotificationBackgroundView();
+        View idCollapse = new View();
+        idCollapse.id = 8;
+        NotificationChildrenContainer group = new NotificationChildrenContainer();
+        NotificationChildrenContainerInjectorImpl groupInjector =
+                new NotificationChildrenContainerInjectorImpl();
+        NotificationBackgroundView injectedCollapse = new NotificationBackgroundView();
+        NotificationBackgroundView injectedHeader = new NotificationBackgroundView();
+        groupInjector.mCollapsedButton = injectedCollapse;
+        groupInjector.mMiuiGroupHeader = injectedHeader;
+        group.mInjector = groupInjector;
         MiuiMediaHeaderView media = new MiuiMediaHeaderView();
         root.addView(panel);
         panel.addView(row);
         panel.addView(clear);
+        root.addView(collapse);
+        collapse.addView(collapseBackground);
+        root.addView(idCollapse);
+        root.addView(group);
+        group.addView(injectedCollapse);
+        group.addView(injectedHeader);
         panel.addView(media);
         View unrelated = new View();
         root.addView(unrelated);
@@ -37,6 +58,16 @@ public final class MaterialRestoreTest {
                     "opening must not enable a full-screen local material");
             check(row.mode == 1 && row.radius == 80 && !row.pass, "open notification material");
             check(clear.mode == 1 && !clear.pass, "clear button material");
+            check(collapse.mode == 1 && !collapse.pass,
+                    "group collapse button material");
+            check(collapseBackground.mode == 1 && !collapseBackground.pass,
+                    "group collapse background material");
+            check(idCollapse.mode == 1 && !idCollapse.pass,
+                    "resource-named group collapse material");
+            check(injectedCollapse.mode == 1 && !injectedCollapse.pass,
+                    "injected group collapse button material");
+            check(injectedHeader.mode == 1 && !injectedHeader.pass,
+                    "injected group header material");
             check(media.holder.mediaBg.mode == 1 && !media.holder.mediaBg.pass, "media material");
             check(unrelated.mode == 0 && unrelated.pass, "unrelated window child untouched");
 

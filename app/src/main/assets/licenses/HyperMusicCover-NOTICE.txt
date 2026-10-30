@@ -1,0 +1,80 @@
+HyperMusicCover
+Copyright (C) 2026 zyl6932
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, version 3 of the License.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License along
+with this program; the full text is in LICENSE at the root of this repository,
+and at <https://www.gnu.org/licenses/agpl-3.0.txt>.
+
+The complete corresponding source for every published build is this repository:
+<https://github.com/zyl6932/HyperMusicCover>
+
+--------------------------------------------------------------------------------
+Third-party code
+--------------------------------------------------------------------------------
+
+Parts of this program are adapted from the projects below and remain under the
+licences stated here. The files carrying those changes are marked in their
+headers, and the notices are reproduced here as those licences require.
+
+GNU General Public License, version 3
+-------------------------------------
+Combined into this AGPL-3.0 work under GPLv3 section 13 and AGPLv3 section 13,
+which permit the combination; the combined work as a whole is distributed under
+the AGPL-3.0. These files are not relicensed.
+
+  KernelSU (https://github.com/tiann/KernelSU)
+  The menu position provider and the menu row are adapted from that project,
+  and the home page's status card follows its layout.
+
+  HyperLyrics Enhanced (https://github.com/juren233/HyperLyrics-Enhanced)
+  QQ Music's lyric decryption, the QQ Music search and lyric requests, and the
+  scoring every by-name lyric source uses to pick a song are adapted from that
+  project. The files carrying those changes are marked in their headers.
+
+Apache License, Version 2.0
+---------------------------
+One-way compatible with the AGPL-3.0, so these files are distributed here as
+part of the whole without being relicensed.
+
+  HyperNavBar (https://github.com/HyperNavBar/HyperNavBar)
+  The user interface scaffolding - theme handling, the floating and liquid-glass
+  navigation bars, the progressive background blur, the animated background
+  effect, the About and licence pages and the locale helper - is adapted from
+  that project.
+
+  miuix (https://github.com/compose-miuix-ui/miuix)
+  The background effect, the drag animation, the interactive highlight and the
+  liquid-glass pieces (the lens, the inner shadow, the vibrancy and the combined
+  backdrop) come from that project's example app, as do the pager navigation
+  spring's stiffness and damping. Those files carry its copyright line.
+
+  AndroidLiquidGlass (https://github.com/Kyant0/AndroidLiquidGlass)
+  The lens, the inner shadow, the vibrancy and the combined backdrop behind the
+  liquid-glass navigation bar are adapted from that project.
+
+  HyperChanger (https://github.com/ColdP/HyperChanger)
+  The hooks that lift HyperOS's depth-effect restrictions, raise the saved lock
+  screen limit, force the clock's colon and keep the soft glass through a global
+  theme are adapted from that project. The file carrying those changes is marked
+  in its header. The lock screen mini player (the MiniPlayer* files) is adapted
+  from its compact music card, and those files keep its Apache-2.0 header,
+  Copyright 2026 btm_m; the transition between it and the media card
+  (MiniCardMorph) is this project's own.
+
+  HyperLyrics Enhanced (https://github.com/juren233/HyperLyrics-Enhanced)
+  The Kuwo lyric source and the TTML Hub catalogue client are adapted from
+  that project's files licensed under Apache-2.0, Copyright 2026 juren233.
+
+  accompanist-lyrics-core (https://github.com/6xingyv/accompanist-lyrics-core)
+  The lock screen lyric parser, used unmodified as a dependency.
+
+The in-app credits page lists every project this one learnt from, including the
+ones whose ideas rather than whose code are here.

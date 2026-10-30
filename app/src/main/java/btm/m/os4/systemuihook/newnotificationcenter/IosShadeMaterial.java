@@ -31,6 +31,7 @@ public final class IosShadeMaterial {
     private static final WeakHashMap<View, Object[]> SAVED = new WeakHashMap<>();
     private static final WeakHashMap<View, Boolean> CONTAIN_REQUESTS = new WeakHashMap<>();
     private static final WeakHashMap<View, Boolean> MEDIA = new WeakHashMap<>();
+    private static final WeakHashMap<View, Boolean> GROUP_CONTROLS = new WeakHashMap<>();
     private static final ThreadLocal<Boolean> WRITING = new ThreadLocal<>();
     private static boolean active;
     private static ViewGroup root;
@@ -130,9 +131,13 @@ public final class IosShadeMaterial {
                 if (READERS[4] != null) saved[4] = !(Boolean) READERS[4].invoke(view);
                 if (saved[4] != null) {
                     SAVED.put(view, saved);
-                    WRITING.set(true);
-                    METHODS[4].invoke(view, false);
                 }
+                // The hosted clock is an explicitly owned sampling surface. Some HyperOS
+                // builds expose the setter but no readable containment getter; still reapply
+                // the wallpaper boundary on a rapid reopen, where the existing clock is reused
+                // and create() does not get a chance to call allowBackdropSampling().
+                WRITING.set(true);
+                METHODS[4].invoke(view, false);
             } catch (Throwable ignored) {
             } finally {
                 WRITING.remove();
@@ -154,14 +159,54 @@ public final class IosShadeMaterial {
         return view.getClass().getName().equals("com.miui.systemui.widget.CircleAndTickAnimView");
     }
 
+    /**
+     * The OEM's grouped-notification control is a separate NotificationExpandButton. It is
+     * created/rebound when a group opens, so it cannot be treated as part of the row's native
+     * material. Its containment boundary must follow the same wallpaper sibling as the sheet.
+     */
+    private static boolean isGroupCollapseView(View view) {
+        if (GROUP_CONTROLS.containsKey(view)) return true;
+        String className = view.getClass().getName().toLowerCase(java.util.Locale.ROOT);
+        int separator = className.lastIndexOf('.');
+        String simple = separator >= 0 ? className.substring(separator + 1) : className;
+        if (simple.contains("expandbutton") || simple.contains("collapsebutton")) return true;
+        for (Object parent = view.getParent(); parent instanceof View;
+                parent = ((View) parent).getParent()) {
+            String parentName = parent.getClass().getName().toLowerCase(java.util.Locale.ROOT);
+            int parentSeparator = parentName.lastIndexOf('.');
+            String parentSimple = parentSeparator >= 0
+                    ? parentName.substring(parentSeparator + 1) : parentName;
+            if (parentSimple.contains("expandbutton") || parentSimple.contains("collapsebutton")) {
+                return true;
+            }
+        }
+        try {
+            int id = view.getId();
+            if (id > 0) {
+                String entry = view.getResources().getResourceEntryName(id)
+                        .toLowerCase(java.util.Locale.ROOT);
+                if (entry.contains("collapse_button") || entry.contains("group_collapse")
+                        || ((entry.contains("expand") || entry.contains("collapse"))
+                        && (entry.contains("notification") || entry.contains("group")))) return true;
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
+
+    private static boolean isWallpaperSurface(View view) {
+        return isPanel(view) || isDismissView(view) || isGroupCollapseView(view) || isClock(view);
+    }
+
     private static boolean isContainmentSurface(View view) {
-        return isPanel(view) || isDismissView(view) || isClock(view);
+        return isWallpaperSurface(view);
     }
 
     private static boolean target(View view) {
         String name = view.getClass().getName();
         return isPanel(view) || name.endsWith(".NotificationBackgroundView")
-                || name.equals("com.miui.systemui.widget.CircleAndTickAnimView") || MEDIA.containsKey(view);
+                || name.equals("com.miui.systemui.widget.CircleAndTickAnimView")
+                || isGroupCollapseView(view) || MEDIA.containsKey(view);
     }
 
     public static void registerMedia(View header) {
@@ -177,7 +222,46 @@ public final class IosShadeMaterial {
         }
     }
 
+    private static void registerGroupControl(View view) {
+        if (view == null) return;
+        GROUP_CONTROLS.put(view, true);
+        if (active && view.getRootView() == root && !SAVED.containsKey(view)) apply(view);
+    }
+
+    private static final String[] GROUP_CONTROL_FIELDS = {
+            "mExpandButton", "mGroupExpandButton", "mCollapseButton", "mCollapsedButton",
+            "mChildrenContainer", "mNotificationChildrenContainer", "mGroupHeader",
+            "mMiuiGroupHeader", "mGroupHeaderWrapper", "expandButton", "collapseButton",
+            "mInjector"
+    };
+
+    private static void captureGroupFields(Object owner, int depth) {
+        if (owner == null || depth < 0) return;
+        for (String field : GROUP_CONTROL_FIELDS) {
+            try {
+                Object candidate = Xp.getObjectField(owner, field);
+                if (candidate instanceof View) {
+                    registerGroupControl((View) candidate);
+                } else if (candidate != null && depth > 0) {
+                    captureGroupFields(candidate, depth - 1);
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    private static void captureGroupControls(View owner) {
+        String name = owner.getClass().getName().toLowerCase(java.util.Locale.ROOT);
+        if (!name.contains("expandablenotificationrow")
+                && !name.contains("notificationchildrencontainer")) return;
+        // The MIUI group header keeps the actual collapse ImageView inside its injector.
+        // Walk only the named notification-group fields, with a bounded depth, so ordinary
+        // child notification rows are never reclassified as wallpaper surfaces.
+        captureGroupFields(owner, 2);
+    }
+
     private static void scan(View view) {
+        captureGroupControls(view);
         if (view == clockRoot) scanClock(view);
         if (view.getClass().getName().equals(
                 "com.android.systemui.statusbar.notification.mediacontrol.MiuiMediaHeaderView")) registerMedia(view);
@@ -235,7 +319,8 @@ public final class IosShadeMaterial {
                 if (saved[slot] == null) continue;
                 // The panel and clear-all control sample the wallpaper sibling below the
                 // notification surface. Notification rows keep their native containment.
-                if (slot == 4 && (!(isPanel(view) || isDismissView(view)) || saved[4] == null)) continue;
+                if (slot == 4 && (!(isPanel(view) || isDismissView(view) || isGroupCollapseView(view))
+                        || saved[4] == null)) continue;
                 if (METHODS[slot] != null) METHODS[slot].invoke(view, wanted(view, slot, saved));
             }
         } catch (Throwable error) {

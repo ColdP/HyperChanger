@@ -205,6 +205,12 @@ public final class IosNotificationCenterPresentation {
             previousExit.cancel();
         }
         if (host == null && (clockUnavailable || !create())) return;
+        // The shade material owner is deliberately released as soon as the previous
+        // notification panel closes. A fast re-open can reuse this hosted clock before the
+        // exit animator has removed it, so re-register it on every active update instead of
+        // relying on create() having run again. Without this, its containment flag remains
+        // native and the MiGlass sampler sees the notification panel's contents.
+        if (clock != null) IosShadeMaterial.registerClock(clock);
         host.setAlpha(progress);
         if (status != null) status.setAlpha(progress * progress * (3f - 2f * progress));
         sync();

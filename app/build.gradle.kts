@@ -103,6 +103,7 @@ dependencies {
     implementation("org.lsposed.hiddenapibypass:hiddenapibypass:6.1")
     implementation("io.github.proify.lyricon:subscriber:0.1.70")
     implementation("com.mocharealm.accompanist:lyrics-core:0.4.7")
+    implementation("com.materialkolor:material-color-utilities:5.0.0")
 
     compileOnly("io.github.libxposed:api:102.0.0")
     implementation("io.github.libxposed:service:102.0.0")

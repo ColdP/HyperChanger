@@ -1,0 +1,75 @@
+HyperChanger
+Copyright 2026 btm_m
+
+This combined distribution is provided under GNU Affero General Public License,
+version 3 (AGPL-3.0), because the imported HyperMusicCover snapshot permits only
+that version. Original HyperChanger files retain their AGPL-3.0-or-later grant;
+this does not change the licenses of separately identified components. See LICENSE.
+The project was previously distributed under MIT and Apache-2.0; those
+historical releases retain the rights granted under their original licenses.
+
+Third-party components retain their original licenses and copyright notices.
+This project's license does not replace those component licenses. The bundled
+Apache-2.0 text is in app/src/main/assets/licenses/Apache-2.0.txt.
+Native source attribution is recorded in the file headers and in
+app/src/main/cpp/nativehook/THIRD_PARTY_NOTICES.md.
+
+HyperMusicCover (https://github.com/zyl6932/HyperMusicCover)
+Copyright (C) 2026 zyl6932
+
+The supplied source snapshot imported on 2026-10-30 has no Git revision metadata.
+Its newer runtime is under GNU AGPL version 3 only (AGPL-3.0-only), with portions
+retaining Apache-2.0 and GPL-3.0 licenses. Source hashes and imported paths are in
+docs/hypermusiccover-source-manifest.json. The upstream NOTICE is reproduced
+verbatim in app/src/main/assets/licenses/HyperMusicCover-NOTICE.txt and its license
+text in HyperMusicCover-AGPL-3.0.txt. Original file headers are preserved.
+
+Modifications by btm_m for HyperChanger, 2026-10-30: namespace/package adaptation;
+host-owned lifecycle dispatch and settings synchronization; local lyric library
+integration; capsule material, media-visibility and appearance compatibility;
+reuse of the existing notification-center artwork owner; exclusion of standalone
+UI, installer, update, pickup, rear-transit and hot-reload installation paths.
+See docs/hypermusiccover-upstream-sync.md for the integration boundaries.
+
+The retained legacy hypermusiccover notification-center implementation was
+imported from an earlier Apache-2.0-licensed HyperMusicCover version. Its existing
+headers and the Apache-2.0 license continue to apply to those files.
+
+The newer MiniPlayer* and HyperTweaks portions retain the upstream notices for
+HyperChanger, Copyright 2026 btm_m, Apache-2.0. QqLyrics, QrcCrypt and LyricMatch
+contain GPL-3.0 adaptations from HyperLyrics Enhanced; KuwoLyrics and TtmlHub
+contain Apache-2.0 adaptations, Copyright 2026 juren233. GPLv3 section 13 and
+AGPLv3 section 13 permit combination without relicensing those portions.
+The complete GPLv3 text is bundled as HyperMusicCover-GPL-3.0.txt.
+AppleLyrics credits the Apple Music approach from Proify and Tomakino's
+LyricProvider (Apache-2.0). accompanist-lyrics-core retains Apache-2.0.
+The material-color-utilities dependency is from MaterialKolor (Apache-2.0).
+
+Corresponding source for this modified distribution must include the complete
+HyperChanger source, the imported runtime and these modifications. The upstream
+URL alone is not the corresponding source of this modified distribution.
+Project source: https://github.com/ColdP/HyperChanger
+
+Collapsed island smoothing (IslandSmoothingHook.kt and IslandSmoothingShape.kt)
+large-small island spacing (IslandSpacingHook.kt), and face-unlock island
+(LockscreenFaceUnlockHook.kt)
+are adapted from HyperIsland 3.1.8 by 1812z.
+https://github.com/1812z/HyperIsland
+Copyright (c) 2026 1812z
+Licensed under the MIT License; the complete notice is distributed in
+app/src/main/assets/licenses/HyperIsland-MIT.txt.
+
+Japanese OCR runtime: Tesseract4Android 4.9.0
+https://github.com/adaptech-cz/Tesseract4Android/tree/4.9.0
+Copyright (C) 2019 Adaptech s.r.o., Robert Pösel
+Copyright (C) 2011 Google Inc.; Copyright (C) 2011 Robert Theis
+Licensed under Apache-2.0; see Tesseract4Android-Apache-2.0.txt.
+Includes Tesseract 5.5.1 (Apache-2.0), Leptonica 1.85.0 (BSD-style,
+see Leptonica-BSD.txt), libpng (see Libpng-LICENSE.txt), and the Independent
+JPEG Group's software (see Libjpeg-README.txt).
+
+The optional Japanese jpn.traineddata model is downloaded separately from
+https://coldp.github.io/hyperchanger-updateinfo/models/jpn.traineddata .
+It is mirrored without changes from tesseract-ocr/tessdata_fast revision
+87416418657359cb625c412a48b6e1d6d41c29bd, licensed under Apache-2.0.
+The model is not bundled in the application APK.

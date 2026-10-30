@@ -744,21 +744,11 @@ public class Main extends XposedModule {
     @Override
     public void onPackageLoaded(PackageLoadedParam param) {
         if (!btm.m.os4.systemuihook.HookModuleSafety.enter(this, param.getPackageName())) return;
-        Xp.attach(this);
-        String pkg = param.getPackageName();
-        if ("com.autonavi.minimap".equals(pkg)) {
-            if (!btm.m.os4.systemuihook.ModuleSafetyRuntime.allows(btm.m.os4.systemuihook.SafetySection.ISLAND)) return;
-            AmapCapsuleBridge.handle(param.getDefaultClassLoader());
-            return;
-        }
-        if ("com.miui.miwallpaper".equals(pkg)) {
-            WallpaperProbe.handle(param);
-            return;
-        }
-        if (!"com.android.systemui".equals(pkg)) return;
+        if (!"com.android.systemui".equals(param.getPackageName())) return;
         if (!btm.m.os4.systemuihook.ModuleSafetyRuntime.allows(btm.m.os4.systemuihook.SafetySection.LOCKSCREEN) ||
                 !btm.m.os4.systemuihook.ModuleSafetyRuntime.allows(btm.m.os4.systemuihook.SafetySection.NOTIFICATIONS)) return;
-
+        Xp.attach(this);
+        final ClassLoader cl = param.getDefaultClassLoader();
         IosShadeMaterial.install();
         try {
             Class<?> glass = Xp.findClass(
@@ -779,389 +769,19 @@ public class Main extends XposedModule {
             Xp.log(TAG + "notification centre preferences unavailable: " + t);
         }
 
-        final ClassLoader cl = param.getDefaultClassLoader();
-        Xp.log(TAG + "loaded into SystemUI");
 
+        // Notification-only attachment. The new runtime exclusively owns clock/media hooks.
         try {
             sContainerCls = Xp.findClass(CLS_CONTAINER, cl);
-        } catch (Throwable t) {
-            Xp.log(TAG + "KeyguardClockContainer not found, nothing to hook: " + t);
-            return;
-        }
-        // Not fatal, and it used to be. A HyperOS 3 report had no class under the name the
-        // enum has here, the lookup threw, and the whole of SystemUI went unhooked - no cover,
-        // no media card, no depth - over one enum only the clock squeeze needs. Every hook
-        // below now installs on its own terms, and each failure says which feature it cost.
-        sNotifStateChange = findNotifStateChange(sContainerCls);
-        if (sNotifStateChange != null) {
-            sTypeCls = sNotifStateChange.getParameterTypes()[2];
-        } else {
-            Xp.log(TAG + "no notifStateChange(float, boolean, enum) on " + CLS_CONTAINER
-                    + " - the clock squeeze cannot be driven on this build");
-        }
-
-        try {
             Xp.hookAll(sContainerCls, "onAttachedToWindow", chain -> {
                 Object result = chain.proceed();
-                if (IosNotificationCenterPresentation.isHostedClock((View) chain.getThisObject())) {
-                    return result;
-                }
-                sContainer = (View) chain.getThisObject();
-                captureScreenSize(sContainer);
-                // The clock container attach is the first reliably-fired event after both
-                // modules' onPackageLoaded, so arming the HyperLight counter-hook here - not
-                // from setGlassColor, which this build never calls on the all_in_one clock -
-                // guarantees it registers after HyperLight's own View.setMiGlass hook.
-                armMiGlassGuard();
-                Xp.log(TAG + "clock container attached: " + sContainer);
-                try {
+                if (!IosNotificationCenterPresentation.isHostedClock((View) chain.getThisObject())) {
+                    sContainer = (View) chain.getThisObject();
                     registerReceiver(sContainer.getContext().getApplicationContext());
-                } catch (Throwable t) {
-                    Xp.log(TAG + "registerReceiver failed: " + t);
-                }
-                // The keyguard is rebuilt on some transitions, taking our cover with it, so
-                // re-attach rather than assume the view is still in the tree.
-                if (sCoverWanted) {
-                    sCover = null;
-                    attachCover();
-                }
-                // The video path's cover is a view, so a keyguard rebuild takes it - and the
-                // wallpaper it was covering is hidden, so losing it without putting it back
-                // leaves the lock screen blank. Re-compose rather than re-show the old view:
-                // the track may have moved on while the screen was off.
-                // ... and the shade's copy of the cover has to be recomposed for the same
-                // reason even on the image path, where nothing else would notice it had gone:
-                // sShadeArt is a static, so a restart takes it and only this puts it back.
-                if ((sCoverMode || sStyle2Mode) && (sVideoWallpaper || sShadeArt == null)) {
-                    if (sVideoWallpaper) sCover = null;
-                    pushArtAsync(true, false);
-                }
-                // Re-apply on keyguard rebuild. Measured: the system never re-shows the
-                // cut-out on its own, so no per-call ownership hook is warranted - hooking
-                // View.setVisibility process-wide cost every visibility change in SystemUI and
-                // fired zero times. What actually lost the state was SystemUI restarting.
-                if (sDepthHidden) setDepthHidden(true);
-                else if (sVideoWpOwed) setDepthHidden(false);
-                // Same story for the card: the guard and the artwork's tap listener both live on
-                // the view, so a rebuild takes them.
-                if (sCoverMode || sStyle2Mode || wantsArtTap()) applyMediaCard();
-                // A rebuilt keyguard can be a different clock style, so the nudge measured
-                // against the old one means nothing - and neither does the clock view we resolved.
-                sClockTargets.clear();
-                forgetClockRoots();
-                forgetGlyphBox();
-                ClockCollapse.onAttached();
-                main().post(new Runnable() {
-                    @Override
-                    public void run() {
-                        try {
-                            LockLyrics.refresh();
-                        } catch (Throwable t) {
-                            Xp.log(TAG + "lyrics refresh failed: " + t);
-                        }
-                    }
-                });
-                return result;
-            });
-        } catch (Throwable t) {
-            // Everything downstream hangs off this one: it is where the container is captured
-            // and where the broadcast receiver is registered, so without it there is not even
-            // an adb channel to ask what went wrong. Say so plainly rather than throwing out
-            // of onPackageLoaded, which loses the message.
-            Xp.log(TAG + "onAttachedToWindow hook FAILED, the module is inert in SystemUI: " + t);
-        }
-
-        // The keyguard is rebuilt on every screen-off/on, so a captured instance goes
-        // stale. Drop it on detach and always drive the currently attached one.
-        try {
-            Xp.hookAll(sContainerCls, "onDetachedFromWindow", chain -> {
-                Object result = chain.proceed();
-                if (sContainer == chain.getThisObject()) {
-                    ClockCollapse.onDetached();
-                    sContainer = null;
-                    Xp.log(TAG + "clock container detached");
                 }
                 return result;
             });
-        } catch (Throwable t) {
-            Xp.log(TAG + "onDetachedFromWindow hook failed: " + t);
-        }
-
-        // Keep lyric HDR mode on the shade window attributes SystemUI reapplies.
-        try {
-            Class<?> nsw = Xp.findClass(
-                    "com.android.systemui.shade.NotificationShadeWindowControllerImpl", cl);
-            Xp.hookAll(nsw, "applyWindowLayoutParams", chain -> {
-                Object self = chain.getThisObject();
-                try {
-                    LockLyrics.noteShadeWindow(self);
-                    LockLyrics.applyHdrTo((android.view.WindowManager.LayoutParams)
-                            Xp.getObjectField(self, "mLpChanged"));
-                } catch (Throwable t) {
-                    Xp.log(TAG + "lyrics HDR not applied: " + t);
-                }
-                return chain.proceed();
-            });
-        } catch (Throwable t) {
-            Xp.log(TAG + "shade window hook failed, lyrics stay SDR: " + t);
-        }
-
-        // Start sleep/wake ownership before the first affected keyguard frame is drawn.
-        try {
-            Class<?> ks = Xp.findClass("com.android.systemui.keyguard.KeyguardService$2", cl);
-            Xp.hookAll(ks, "onStartedGoingToSleep", chain -> {
-                Object result = chain.proceed();
-                main().post(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (sCoverMode) ClockCollapse.toAod();
-                    }
-                });
-                return result;
-            });
-            Xp.hookAll(ks, "onStartedWakingUp", chain -> {
-                ClockCollapse.noteWaking();
-                main().post(new Runnable() {
-                    @Override
-                    public void run() { MotionTrace.start("wake"); }
-                });
-                Object result = chain.proceed();
-                main().post(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (sCoverMode && ClockCollapse.phase() == ClockCollapse.Phase.AOD
-                                && keyguardShowing()) {
-                            ClockCollapse.enter(true, true);
-                        }
-                    }
-                });
-                return result;
-            });
-        } catch (Throwable t) {
-            Xp.log(TAG + "KeyguardService sleep/wake hooks failed, the clock cuts to and from "
-                    + "the AOD: " + t);
-        }
-
-        try {
-            Xp.hookAll(sContainerCls, "doAnimationToAod", chain -> {
-                Object[] args = chain.getArgs().toArray();
-                boolean toAod = args.length > 0 && Boolean.TRUE.equals(args[0]);
-                if (sCoverMode && toAod) ClockCollapse.toAod();
-                Object result = chain.proceed();
-                if (sCoverMode && !toAod && ClockCollapse.leavingOrOff()) {
-                    ClockCollapse.enter(true, true);
-                }
-                return result;
-            });
-        } catch (Throwable t) {
-            Xp.log(TAG + "AOD animation hook failed: " + t);
-        }
-
-        // The system does re-show the cut-out - verified: it came back right after we restored
-        // cover mode across a SystemUI restart. Re-hide after the OEM's own update instead of
-        // hooking View.setVisibility process-wide, which would tax every view in SystemUI.
-        try {
-            Class<?> depth = Xp.findClass(
-                    "com.android.keyguard.depth.KeyguardDepthInteractor", cl);
-            Xp.hookAll(depth, "updateDeductedImageView", chain -> {
-                Object result = chain.proceed();
-                if (sDepthHidden) {
-                    try {
-                        View d = (View) Xp.getObjectField(chain.getThisObject(),
-                                "deductedImageView");
-                        if (d != null && d.getVisibility() == View.VISIBLE) {
-                            d.setVisibility(View.INVISIBLE);
-                            Xp.log(TAG + "depth re-hidden after updateDeductedImageView");
-                        }
-                    } catch (Throwable ignored) {
-                    }
-                }
-                return result;
-            });
-            Xp.log(TAG + "depth ownership hooked");
-        } catch (Throwable t) {
-            Xp.log(TAG + "depth ownership hook failed: " + t);
-        }
-
-        // The fingerprint ring, when the user has asked for it to go. Two hooks, because the
-        // ring is two things: MiuiGxzwFrameAnimation plays the pulsing circle out of a list of
-        // drawables, and MiuiGxzwIconView holds the static print underneath. Hiding either one
-        // alone leaves the other on screen.
-        //
-        // Both install whatever the setting says and read the flag per call, so the switch takes
-        // effect on the next draw rather than on the next SystemUI restart. And both are on
-        // their own terms: a build that renamed one still gets the other.
-        try {
-            Class<?> anim = Xp.findClass(CLS_FOD_ANIM, cl);
-            Xp.hookAll(anim, "draw", chain -> {
-                Object[] args = chain.getArgs().toArray();
-                // draw(int resId) is the frame. Any other overload is not ours to touch, which
-                // the argument check below says without having to name the signature.
-                if (sHideFp && args.length == 1 && args[0] instanceof Integer
-                        && isFodRing((Integer) args[0])) {
-                    // Substituting the drawable rather than skipping the draw: the animation
-                    // keeps its own timing and its own lifecycle, it just paints nothing. A
-                    // skipped draw would leave whatever the OEM expects to be on that surface.
-                    args[0] = android.R.color.transparent;
-                }
-                return chain.proceed(args);
-            });
-            Xp.log(TAG + "fingerprint animation hooked");
-        } catch (Throwable t) {
-            Xp.log(TAG + "fingerprint animation hook failed, the ring will still pulse: " + t);
-        }
-
-        try {
-            Class<?> iconCls = Xp.findClass(CLS_FOD_ICON, cl);
-            Xp.hookAllConstructors(iconCls, chain -> {
-                Object result = chain.proceed();
-                try {
-                    View v = (View) chain.getThisObject();
-                    sFodIcons.put(v, Boolean.TRUE);
-                    v.setAlpha(sHideFp ? 0f : 1f);
-                } catch (Throwable ignored) {
-                    // A view we cannot dim is a visible print, not a broken keyguard.
-                }
-                return result;
-            });
-            Xp.log(TAG + "fingerprint icon hooked");
-        } catch (Throwable t) {
-            Xp.log(TAG + "fingerprint icon hook failed, the static print will stay: " + t);
-        }
-
-        // Whether the notifications keep clear of that icon. Installed whatever the setting is,
-        // and the mode is read per call, but unlike everything else here a change does not show
-        // up immediately: this value is not one of the seven flows, so the bound is only
-        // recomputed when one of those moves.
-        try {
-            // Fail on the panel rather than on the lambda: "no KeyguardPanelViewController" is a
-            // different build, "no combine lambda" is a different R8 run, and the log should say
-            // which one happened.
-            Xp.findClass(CLS_KG_PANEL, cl);
-            long t0 = android.os.SystemClock.uptimeMillis();
-            Class<?> combine = findAvoidCombine(cl);
-            java.lang.reflect.Method invoke = combine == null ? null : invoke3(combine);
-            if (invoke == null) {
-                Xp.log(TAG + "no nsslLockYPosition combine lambda on this build"
-                        + " - fingerprint avoidance cannot be overridden");
-            } else {
-                Xp.hook(invoke, chain -> {
-                    if (sFpAvoid != 0) {
-                        try {
-                            java.util.List<Object> a = chain.getArgs();
-                            Object second = a.size() > 1 ? a.get(1) : null;
-                            if (second instanceof Object[]) {
-                                Object[] vals = (Object[]) second;
-                                // Exactly seven, or the indices below mean something else. A
-                                // build that combines a different number of flows gets left
-                                // alone rather than having two unknown values overwritten.
-                                if (vals.length == 7) {
-                                    Boolean forced = sFpAvoid == 2;
-                                    // 5 is "fingerprint unlock is on", 6 is "a print is
-                                    // enrolled". Written in place: the array is the one the
-                                    // original will read, so proceed() needs no new arguments.
-                                    vals[5] = forced;
-                                    vals[6] = forced;
-                                }
-                            }
-                        } catch (Throwable ignored) {
-                        }
-                    }
-                    return chain.proceed();
-                });
-                Xp.log(TAG + "fingerprint avoidance hooked on " + combine.getName()
-                        + " in " + (android.os.SystemClock.uptimeMillis() - t0) + "ms");
-            }
-        } catch (Throwable t) {
-            Xp.log(TAG + "fingerprint avoidance hook failed: " + t);
-        }
-
-        // MIUI's own answer to "what kind of wallpaper is this", which beats every heuristic
-        // below it: SystemUI keeps this class unobfuscated and it holds a live
-        // MiuiWallpaperManager, whose getMiuiWallpaperType(which) is the API MIUI itself asks.
-        // Captured from the constructor the same way the wallpaper engine is - it is a Dagger
-        // singleton built during SystemUI startup, so the hook has to be in before that.
-        try {
-            Class<?> wp = Xp.findClass(CLS_KG_WALLPAPER_MANAGER, cl);
-            Xp.hookAllConstructors(wp, chain -> {
-                Object result = chain.proceed();
-                sKgWallpaperMgr = chain.getThisObject();
-                return result;
-            });
-            Xp.log(TAG + "keyguard wallpaper manager hooked");
-        } catch (Throwable t) {
-            Xp.log(TAG + "keyguard wallpaper manager hook failed, falling back to "
-                    + "MIUI's files for the wallpaper type: " + t);
-        }
-
-        // The media card is the switch. Every add, track change and dismissal of the
-        // lockscreen card funnels through this one static - MediaData in means a card is on
-        // screen (and which track), null means it has gone. Playback state never reaches it,
-        // which is exactly what we want: pausing leaves the card up, so it leaves the cover up.
-        try {
-            Class<?> card = Xp.findClass(CLS_MEDIA_CARD, cl);
-            Xp.hookAll(card, "access$setTopMediaData", chain -> {
-                Object result = chain.proceed();
-                java.util.List<Object> args = chain.getArgs();
-                onCardChanged(args.size() > 1 ? args.get(1) : null);
-                return result;
-            });
-            Xp.log(TAG + "media card hooked");
-        } catch (Throwable t) {
-            Xp.log(TAG + "media card hook failed: " + t);
-        }
-
-        // A tap on the cover puts the wallpaper back.
-        //
-        // Hooked on the shade window's dispatch rather than given a view of our own: anything
-        // clickable added over the keyguard swallows the ACTION_DOWN in its region, and
-        // swipe-to-unlock is a drag that begins with exactly that ACTION_DOWN. Here the events
-        // are only observed - the detector's answer is thrown away and proceed() runs
-        // unconditionally - so every gesture still reaches the OEM as it did before.
-        try {
-            Class<?> shade = Xp.findClass(
-                    "com.android.systemui.shade.NotificationShadeWindowView", cl);
-            Xp.hookAll(shade, "dispatchTouchEvent", chain -> {
-                MotionEvent ev = null;
-                try {
-                    java.util.List<Object> a = chain.getArgs();
-                    if (!a.isEmpty() && a.get(0) instanceof MotionEvent) {
-                        ev = (MotionEvent) a.get(0);
-                    }
-                } catch (Throwable ignored) {
-                }
-                if (ev != null) {
-                    // Whether this gesture began on the control centre, decided at the DOWN and
-                    // nowhere else.
-                    //
-                    // onLockTap's own controlCentreUp() guard is evaluated a double-tap window
-                    // later, and by then the centre can be gone: swiping up to dismiss it takes
-                    // the centre out from under the check, so it read false and the tap went
-                    // through as a tap on the cover. Measured symptom - dragging up at the clock
-                    // and date left cover mode instead of closing the centre.
-                    //
-                    // At the DOWN the answer is unambiguous: a finger that lands while the centre
-                    // is open is aimed at the centre, whatever the gesture turns out to be.
-                    if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) {
-                        sGestureOnCentre = controlCenterUp();
-                        if (sGestureOnCentre) cancelPendingTap("gesture began on the control centre");
-                    }
-                    // The one case this hook does more than watch. Returning true without
-                    // proceeding takes the gesture out of the dispatch entirely, which is the
-                    // only way the artwork can mean something other than "open the player".
-                    try {
-                        if (swallowArtTap(ev)) return Boolean.TRUE;
-                    } catch (Throwable ignored) {
-                    }
-                    feedTap(ev);
-                }
-                return chain.proceed();
-            });
-            Xp.log(TAG + "lock screen tap hooked");
-        } catch (Throwable t) {
-            Xp.log(TAG + "lock screen tap hook failed: " + t);
-        }
-
+        } catch (Throwable error) { Xp.log(TAG + "shade context unavailable: " + error); }
         // The shade's cover layer - the album cover behind the notification panel, revealed by
         // a pull-down. Hooked on the CONSTRUCTOR and not on the dispatchTouchEvent above: that
         // hook only fires once a finger is already down, which is far too late to build a view
@@ -1354,179 +974,6 @@ public class Main extends XposedModule {
                     + "the app behind the shade: " + t);
         }
 
-        // The live container, and - on every clock style except the all_in_one family - the
-        // only place the notification Y ever arrives.
-        //
-        // KeyguardClockContainer forwards this straight to
-        // AnimationHelper.mClockAnima.notifStateChange, and each style overrides that with its
-        // own animation. Only AllInOneClockAnimation goes on to
-        // KeyguardClockNotifInteractor.setNotifY. Measured with the classic style selected: zero
-        // setNotifY calls across a full enter and exit of cover mode, so applyCollapse() never
-        // ran and the whole clock half of the module was dead there - not because anything was
-        // broken, but because nobody was driving it.
-        //
-        // `time_group` is the test for which of the two this is, because it is all_in_one's own
-        // id and all_in_one is the only family that reaches setNotifY. Where it is present this
-        // hook does nothing but what it always did: the coercion stays inside setNotifY, where
-        // the OEM's spring reads it back, and moving it out here was measured to change what
-        // ClockBaseAnimation's own "has this y changed" early-out compares against - which
-        // parked the OEM's font animation and rendered the clock at the wrong size.
-        //
-        // Where it is absent there is no setNotifY to do any of that, so the y is learned and
-        // held at this level instead: learned because coverProgress() has nothing else to
-        // measure against (sLastSystemY stays NaN for the life of the process otherwise), and
-        // held because the system's own re-assertions arrive here on these styles and would
-        // otherwise pull the clock back out of the collapse every few frames.
-        try {
-            Xp.hookAll(sContainerCls, "notifStateChange", chain -> {
-                if (IosNotificationCenterPresentation.isHostedClock((View) chain.getThisObject())) {
-                    return chain.proceed();
-                }
-                // Anyone calling this is by definition the live instance.
-                sContainer = (View) chain.getThisObject();
-                if (findClockView(sContainer, "time_group") != null) return chain.proceed();
-                Object[] args = chain.getArgs().toArray();
-                float requested = (Float) args[0];
-                // Not while the clock is being held: on these styles our own spring is what
-                // puts the y here, and recording our own target as "what the system asked for"
-                // would leave coverProgress() measuring against the hold itself.
-                if (sHoldY == null && !sSelfDriving) sLastSystemY = requested;
-                Float hold = sHoldY;
-                if (hold != null && requested != hold) args[0] = hold;
-                return chain.proceed(args);
-            });
-        } catch (Throwable t) {
-            Xp.log(TAG + "notifStateChange hook failed: " + t);
-        }
-
-        // The OEM squeezes the clock through these four setters on TimeView. Scaling
-        // setSizeInternal's argument shrinks the whole clock without touching the animation:
-        // the OEM still computes and drives every frame, we just rescale the last mile.
-        try {
-            Class<?> timeView = Xp.findClass(CLS_TIME_VIEW, cl);
-            XposedInterface.Hooker axisLog = chain -> {
-                String name = chain.getExecutable().getName();
-                Object[] args = chain.getArgs().toArray();
-                boolean scaled = false;
-                if ("setSizeInternal".equals(name) && !Float.isNaN(sSizeScale)) {
-                    args[0] = ((Float) args[0]) * sSizeScale;
-                    scaled = true;
-                }
-                if (sVerbose) {
-                    Xp.log(TAG + "TimeView." + name
-                            + "(" + args[0] + ")" + (scaled ? " [scaled]" : "")
-                            + " on " + viewIdOf((View) chain.getThisObject()));
-                }
-                return chain.proceed(args);
-            };
-            for (String m : new String[]{"setSizeInternal", "setWidth", "setHeight", "setWeight"}) {
-                Xp.hookAll(timeView, m, axisLog);
-            }
-            Xp.hookAll(timeView, "onDraw", chain -> {
-                Object result = chain.proceed();
-                ClockCollapse.onGlyphDrawn((View) chain.getThisObject());
-                return result;
-            });
-
-            // Own the colour the way we own the y, but at the far end of the pipeline.
-            //
-            // Writing glassData and stopping there does nothing: the shader's parameters are
-            // pushed by MiuiBlurUtils.setMiGlass/setGlassEffectMethod when a colour is SET, not
-            // read out of the array when the view draws. The per-draw write that used to be here
-            // was dead for exactly that reason - the OEM's own write of the same array is what
-            // ever made a tint show up.
-            //
-            // So the substitution goes where the OEM's value enters: whichever way SystemUI
-            // arrived at a colour - the wallpaper palette, a colour animation, or our own
-            // updateGlassValue frame - it reaches a glyph through one of these setters, and
-            // none of them has to know anything about the palette.
-            //
-            // The lightness is not touched here, and setBrightness - which carries the material's
-            // own dark/light flag and used to be hooked alongside these - deliberately is not.
-            Xp.hookAll(timeView, "setGlassColor", chain -> {
-                View self = (View) chain.getThisObject();
-                if (!glassStyleFor(self)) return chain.proceed();
-                Object[] args = chain.getArgs().toArray();
-                args[0] = legible(self, (Integer) args[0]);
-                return chain.proceed(args);
-            });
-            Xp.hookAll(timeView, "setTextColor", chain -> {
-                View self = (View) chain.getThisObject();
-                if (!glassStyleFor(self)) return chain.proceed();
-                Object[] args = chain.getArgs().toArray();
-                args[0] = legible(self, (Integer) args[0]);
-                return chain.proceed(args);
-            });
-        } catch (Throwable t) {
-            Xp.log(TAG + "TimeView hook failed: " + t);
-        }
-
-        // The date line above the clock. Same palette, same cover behind it, and its own class:
-        // the glass never touches it and it takes a plain colour, so it needs a hook of its own
-        // rather than riding the TimeView one. Its setter is the only way in - setTextColor
-        // forwards to setDateTextColor, which is where the AOD and blur-blend variants are
-        // chosen, so hooking the outer one covers every path.
-        try {
-            Class<?> textArea = Xp.findClass(CLS_TEXT_AREA, cl);
-            Xp.hookAll(textArea, "setTextColor", chain -> {
-                View self = (View) chain.getThisObject();
-                if (!glassStyleFor(self)) return chain.proceed();
-                Object[] args = chain.getArgs().toArray();
-                args[0] = legible(self, (Integer) args[0]);
-                return chain.proceed(args);
-            });
-        } catch (Throwable t) {
-            Xp.log(TAG + "date colour hook failed: " + t);
-        }
-
-        // The real chokepoint. Everything that squeezes the clock - the OEM's own
-        // notification-Y flow, KeyguardClockContainer.notifStateChange, and our own
-        // per-frame driving - lands here, so this is where ownership is enforced.
-        try {
-            Class<?> interactor = Xp.findClass(CLS_INTERACTOR, cl);
-            Xp.hookAll(interactor, "setNotifY", chain -> {
-                if (IosNotificationCenterPresentation.isDrivingHostedClock()) {
-                    return chain.proceed();
-                }
-                Object[] args = chain.getArgs().toArray();
-                float requested = (Float) args[0];
-                // Only the system's own emissions tell us where the clock really
-                // belongs; our own frames must not be mistaken for that.
-                if (!sSelfDriving) sLastSystemY = requested;
-                Float hold = sHoldY;
-                if (hold != null && requested != hold) args[0] = hold;
-                // The coerced Y has to reach the original, which is what proceed(args) is for:
-                // this is the one hook whose whole purpose is rewriting an argument.
-                Object result = chain.proceed(args);
-                // AFTER proceed, not before, and that is not tidiness - it is the difference
-                // between a date that jitters and one that does not.
-                //
-                // The placement reads the date's position off the screen, and the OEM applies
-                // this frame's own squeeze translation inside the call above. Run before it and
-                // every reading describes the PREVIOUS frame, so the compensation we write is
-                // one frame late and the date comes out at `target + (O_n - O_{n-1})` - it is
-                // displaced by whatever the OEM moved by that frame. Smooth styles move a few
-                // pixels a frame and nobody can see it; the two-row style steps 68px in a single
-                // frame when it swaps layout (measured, oemTrans -16.5 -> -84.2 between p=0.861
-                // and p=0.887), and that reads as the date shaking.
-                //
-                // The notifStateChange hook for every other style has always done it this way
-                // round, which is why the jitter only ever showed on all_in_one.
-                //
-                // It is NECESSARY BUT NOT SUFFICIENT: measured after the move, the rendered date
-                // still steps 26-50px on a frame and reverses 11 times over one entry. The OEM
-                // does not apply its translation synchronously inside proceed - Folme does it
-                // later in the frame - so the reading is still one frame behind. Reading current
-                // geometry needs a pre-draw callback, where every transform for the frame has
-                // already been applied; see the note in HANDOFF section 10.2.
-                if (sVerbose) {
-                    Xp.log(TAG + "setNotifY(" + args[0] + ") -> " + result);
-                }
-                return result;
-            });
-        } catch (Throwable t) {
-            Xp.log(TAG + "interactor hook failed: " + t);
-        }
     }
 
     static void saveState() {
@@ -1585,105 +1032,18 @@ public class Main extends XposedModule {
 
     private static void loadState() {
         if (sAppCtx == null) return;
-        java.io.File f = new java.io.File(sAppCtx.getFilesDir(), STATE_FILE);
-        boolean migratingLegacy = false;
-        if (!f.exists()) {
-            // Preserve settings from versions that shared mc_cover_state with HyperMusicCover.
-            // Read it once, then save only to the namespaced file. The legacy file belongs to
-            // the other module now and must not be deleted or rewritten during an upgrade.
-            java.io.File legacy = new java.io.File(sAppCtx.getFilesDir(), LEGACY_STATE_FILE);
-            if (legacy.exists()) {
-                f = legacy;
-                migratingLegacy = true;
-            }
-        }
-        if (!f.exists()) {
-            resetMusicPresentation("process start without state", false);
-            return;
-        }
-        boolean persistedCover = false;
+        java.io.File file = new java.io.File(sAppCtx.getFilesDir(), STATE_FILE);
+        if (!file.isFile()) return;
         try {
-            byte[] buf = new byte[(int) f.length()];
-            java.io.FileInputStream in = new java.io.FileInputStream(f);
-            int n = in.read(buf);
-            in.close();
-            String body = new String(buf, 0, Math.max(0, n)).trim();
-            // The first version of this file was a bare "1"/"0"; keep reading those so an
-            // upgrade does not silently drop a cover that is still on the phone.
-            if (body.length() <= 1) {
-                persistedCover = "1".equals(body);
-            } else {
-                for (String line : body.split("\n")) {
-                    int eq = line.indexOf('=');
-                    if (eq <= 0) continue;
-                    String k = line.substring(0, eq).trim(), v = line.substring(eq + 1).trim();
-                    if ("cover".equals(k)) persistedCover = "1".equals(v);
-                    // "auto" was a stored setting; following the card is unconditional now.
-                    else if ("bias".equals(k)) sBias = Float.parseFloat(v);
-                    else if ("clock".equals(k)) setClockHeightDp(Float.parseFloat(v));
-                    else if ("clocksize".equals(k)) setClockSize(Float.parseFloat(v));
-                    else if ("clockoff".equals(k)) setClockOffsetDp(Float.parseFloat(v));
-                    else if ("clockfull".equals(k)) ClockCollapse.restoreFullUnit(v);
-                    else if ("glass".equals(k)) sGlassEnd = Float.parseFloat(v);
-                    // Through the setter, the way "clock" is: the clamp and the push to the
-                    // wallpaper process are both part of reading the value back.
-                    else if ("spring".equals(k)) setClockResponse(Float.parseFloat(v));
-                    else if ("mcart".equals(k)) sMcHideArt = "1".equals(v);
-                    else if ("mctext".equals(k)) sMcCenterText = "1".equals(v);
-                    else if ("mctap".equals(k)) sMcTitleTap = "1".equals(v);
-                    else if ("tap".equals(k)) sTapToggle = "1".equals(v);
-                    else if ("fadewp".equals(k)) sFadeWp = "1".equals(v);
-                    else if ("hidefp".equals(k)) sHideFp = "1".equals(v);
-                    else if ("lyrics".equals(k)) LockLyrics.sEnabled = "1".equals(v);
-                    else if ("lyrickeep".equals(k)) LockLyrics.sKeepOn = "1".equals(v);
-                    else if ("lyrichdr".equals(k)) LockLyrics.sHdr = "1".equals(v);
-                    else if ("fpavoid".equals(k)) sFpAvoid = Integer.parseInt(v);
-                    else if (k.startsWith("shade_")) {
-                        // The whole shade settings page, in one prefix - the keys and their
-                        // meaning belong to ShadeLayer.configure.
-                        //
-                        // Parsed in its OWN try, and that is not tidiness. This whole loop sits
-                        // inside one try whose catch RETURNS - so a single unreadable value here
-                        // would take cover mode down with it, silently, and the log would say
-                        // "loadState failed" without ever naming the key. The user would be left
-                        // with a lock screen that had quietly stopped working.
-                        try {
-                            ShadeLayer.configure(k.substring(6), Integer.parseInt(v));
-                        } catch (Throwable ignored) {
-                            Xp.log(TAG + "shade setting unreadable, keeping the default: "
-                                    + k + "=" + v);
-                        }
-                    }
-                    else if ("cardrect".equals(k)) {
-                        String[] r = v.split(",");
-                        // Same sanity check the sampler applies, because a file written before
-                        // it existed can hold a reading taken from the shade.
-                        if (r.length == 4 && Integer.parseInt(r[1]) >= sScreenH / 3) {
-                            sCardL = Integer.parseInt(r[0]); sCardT = Integer.parseInt(r[1]);
-                            sCardW = Integer.parseInt(r[2]); sCardH = Integer.parseInt(r[3]);
-                        }
-                    }
-                    // "offdelay" was the pause timer, before the card became the switch.
+            for (String line : new String(java.nio.file.Files.readAllBytes(file.toPath()),
+                    java.nio.charset.StandardCharsets.UTF_8).split("\n")) {
+                int eq = line.indexOf('=');
+                if (eq > 0 && line.startsWith("shade_")) {
+                    try { ShadeLayer.configure(line.substring(6, eq), Integer.parseInt(line.substring(eq + 1).trim())); }
+                    catch (Throwable error) { Xp.log(TAG + "shade setting unreadable: " + line); }
                 }
             }
-        } catch (Throwable t) {
-            Xp.log(TAG + "loadState failed: " + t);
-            resetMusicPresentation("process start with unreadable state", false);
-            return;
-        }
-        Xp.log(TAG + "state restored: staleCover=" + persistedCover + " bias=" + sBias);
-        // Presentation is process-local and gesture-selected. Persisting it caused a restarted
-        // SystemUI to restore the wallpaper independently of the Kotlin presentation bridge,
-        // producing cover wallpaper + normal media card + lockscreen island at the same time.
-        // Always start from the single normal-lockscreen baseline and invalidate any delayed art
-        // push left over from restoring the state file.
-        resetMusicPresentation("process start", false);
-        if (migratingLegacy) {
-            // Complete the one-way migration after parsing. This writes the exact settings that
-            // HyperChanger understands to its private file and leaves HyperMusicCover's legacy
-            // file untouched for its own upgrade path.
-            saveState();
-        }
+        } catch (Throwable error) { Xp.log(TAG + "shade state unavailable: " + error); }
     }
 
     private static synchronized void registerReceiver(Context ctx) {
@@ -1697,7 +1057,9 @@ public class Main extends XposedModule {
             @Override
             public void onReceive(Context c, Intent i) {
                 String op = i.getStringExtra("op");
-                if (op == null) op = "drive";
+                if (op == null) op = "info";
+                // The old action remains a notification-center settings channel only.
+                if (!java.util.Arrays.asList("shadecfg", "shade", "info", "verbose").contains(op)) return;
                 Xp.log(TAG + "recv op=" + op + " extras=" + i.getExtras());
                 try {
                     boolean anim = i.getBooleanExtra("anim", true);
@@ -1892,7 +1254,7 @@ public class Main extends XposedModule {
                         sHideFp = i.getBooleanExtra("on", !sHideFp);
                         saveState();
                         Xp.log(TAG + "hide fingerprint " + (sHideFp ? "on" : "off"));
-                        applyHideFp();
+                        // Fingerprint visuals remain owned by HyperSystemUiModule.
                     } else if ("fpavoid".equals(op)) {
                         sFpAvoid = i.getIntExtra("mode", 0);
                         saveState();
@@ -2170,36 +1532,8 @@ public class Main extends XposedModule {
         };
         ctx.registerReceiver(r, new IntentFilter(ACTION), Context.RECEIVER_EXPORTED);
         Xp.log(TAG + "receiver registered for " + ACTION);
-        try {
-            ctx.sendBroadcast(wallpaperIntent("hello"));
-        } catch (Throwable t) {
-            Xp.log(TAG + "hello to the wallpaper process failed: " + t);
-        }
         loadState();
-        // The icon views can already exist by now - the file is read when the keyguard attaches,
-        // which is not necessarily before the fingerprint view is built.
-        applyHideFp();
-
-        // Which kind of wallpaper is on the lock screen decides where the cover is drawn, and
-        // cover mode can be restored from disk before any push has had a chance to work it
-        // out. Off the main thread: it reads MIUI's files.
-        final Context appCtx = ctx;
-        worker().post(new Runnable() {
-            @Override
-            public void run() {
-                String k = wallpaperKind(appCtx, "lock");
-                sVideoWallpaper = k != null && !KIND_IMAGE.equals(k);
-                if (sVideoWallpaper && sDepthHidden) main().post(new Runnable() {
-                    @Override
-                    public void run() { setDepthHidden(true); }
-                });
-            }
-        });
-
-        // The keyguard container is NOT always torn down on screen off - verified on device,
-        // onDetachedFromWindow never fired across a full off/on cycle - so detach alone is
-        // not enough to guarantee we let go. Screen off and unlock both end any reason for
-        // us to own the clock, and they are framework signals rather than OEM internals.
+        // This receiver owns notification-shade lifetime only.
         BroadcastReceiver lifecycle = new BroadcastReceiver() {
             @Override
             public void onReceive(Context c, Intent i) {
@@ -2221,30 +1555,8 @@ public class Main extends XposedModule {
                 else if (Intent.ACTION_SCREEN_OFF.equals(a)) {
                     sScreenOn = false;
                     ShadeLayer.reset();
-                    // A tap still waiting out its double tap window was aimed at a screen that
-                    // is gone; whatever was going to cancel it cannot arrive now.
-                    cancelPendingTap("screen off");
                 }
-                if (Intent.ACTION_USER_PRESENT.equals(a)) {
-                    // The same SystemUI process survives unlock. Do not let a presentation chosen
-                    // on the previous keyguard become the starting state of the next lockscreen.
-                    resetMusicPresentation("user present", true);
-                    return;
-                }
-                if (Intent.ACTION_SCREEN_ON.equals(a)) {
-                    if (sCoverMode && ClockCollapse.leavingOrOff() && keyguardShowing()) {
-                        ClockCollapse.enter(true, true);
-                    }
-                    // Waking re-runs the OEM's depth pipeline, and if the keyguard was rebuilt
-                    // while the screen was off the guard went away with the old view.
-                    if (sDepthHidden) setDepthHidden(true);
-                    // A hand-back of the live wallpaper that had to wait for a lock screen.
-                    else if (sVideoWpOwed) setDepthHidden(false);
-                    if (sCoverMode || sStyle2Mode) applyMediaCard();
-                    return;
-                }
-                if (Intent.ACTION_SCREEN_OFF.equals(a) && sCoverMode) ClockCollapse.toAod();
-                else ClockCollapse.release(a);
+
             }
         };
         IntentFilter lf = new IntentFilter();
@@ -6277,6 +5589,23 @@ public class Main extends XposedModule {
                 if (!old.isRecycled()) old.recycle();
             }
         }, 32L);
+    }
+
+    static boolean hasSharedShadeArt() { return sShadeArt != null; }
+
+    static void acceptMusicArt(Bitmap source) {
+        if (source == null) { clearShadeArt(); return; }
+        final Bitmap borrowed = source;
+        int w = sAppCtx == null ? sScreenW : sAppCtx.getResources().getDisplayMetrics().widthPixels;
+        int h = sAppCtx == null ? sScreenH : sAppCtx.getResources().getDisplayMetrics().heightPixels;
+        // shadePicture creates the shade-owned image. Never hand a borrowed source to
+        // setShadeArt, whose delayed retirement recycles its previous bitmap.
+        try {
+            // This bitmap belongs to the shade; the new runtime retains ownership of source.
+            setShadeArt(composeWallpaper(borrowed, w, h, clamp01(sBias + sShadeBiasDelta / 1000f)));
+        } catch (Throwable t) {
+            Xp.log(TAG + "could not compose shared cover artwork: " + t);
+        }
     }
 
     private static void clearShadeArt() {
@@ -10409,7 +9738,7 @@ public class Main extends XposedModule {
     }
 
     static boolean coverModeOn() {
-        return sCoverMode;
+        return btm.m.os4.systemuihook.hypermusiccover.next.Main.coverModeOn();
     }
 
     /**
@@ -10455,7 +9784,7 @@ public class Main extends XposedModule {
      * layer is one more place that has to.
      */
     static boolean releasing() {
-        return ClockCollapse.exiting();
+        return btm.m.os4.systemuihook.hypermusiccover.next.Main.coverExitActive();
     }
 
     /**
