@@ -334,7 +334,7 @@ private fun WelcomePage(next: () -> Unit) {
     Spacer(Modifier.weight(.37f))
     Text(tr("欢迎使用", "欢迎使用"), fontSize = 36.sp, fontWeight = FontWeight.Bold)
     Text("HyperChanger", color = Color(BRAND_BLUE), fontSize = 39.sp, fontWeight = FontWeight.Bold)
-    Text(tr("一个开源的\n面向 HyperOS 4 的\nLSPosed 模块", "一个开源的\n面向 HyperOS 4 的\nLSPosed 模块"), modifier = Modifier.padding(top = 25.dp), fontSize = 27.sp, lineHeight = 38.sp, fontWeight = FontWeight.SemiBold)
+    Text(tr("framework_oobe_intro", "一个开源的\n面向 HyperOS 4 的\nXposed 模块"), modifier = Modifier.padding(top = 25.dp), fontSize = 27.sp, lineHeight = 38.sp, fontWeight = FontWeight.SemiBold)
     Box(
         Modifier.padding(top = 40.dp).size(65.dp)
             .then(highlight.gestureModifier)
@@ -390,7 +390,7 @@ private fun PreparationPage(serviceConnected: Boolean, back: () -> Unit, onLangu
             item { OobeSectionTitle(tr("模块预备工作", "模块预备工作")) }
             item { StatusCard(tr("HyperOS 版本", "HyperOS 版本"), os.ifBlank { tr("未检测到", "未检测到") }, when { os.isBlank() -> -1; os == "4" -> 1; else -> 2 }) }
             item { StatusCard(tr("Android 版本", "Android 版本"), android?.let { "$it / API ${Build.VERSION.SDK_INT}" } ?: tr("未检测到", "未检测到"), when { android == null || android <= 15 -> -1; android == 17 -> 1; else -> 2 }) }
-            item { StatusCard(tr("在 LSPosed 管理器中激活模块", "在 LSPosed 管理器中激活模块"), null, if (serviceConnected) 1 else 2) }
+            item { StatusCard(tr("framework_oobe_activate", "在 Vector 或 LSPosed 管理器中激活模块"), null, if (serviceConnected) 1 else 2) }
             item { StatusCard(tr("给予模块超级用户权限", "给予模块超级用户权限"), null, if (rootGranted) 1 else 2) }
             item { LanguageCard(context, onLanguageChanged) }
         }

@@ -67,6 +67,6 @@ internal fun processReloadOutcomeText(outcome: ProcessReloadOutcome): String = w
     ProcessReloadOutcome.UNSUPPORTED -> tr("hotReloadUnsupported", "当前框架或模块不支持热重载")
     ProcessReloadOutcome.IN_PROGRESS -> tr("hotReloadInProgress", "此进程已有重载请求，请稍后重试")
     ProcessReloadOutcome.PROCESS_DIED -> tr("hotReloadProcessDied", "目标进程已退出")
-    ProcessReloadOutcome.SERVICE_ERROR -> tr("hotReloadServiceError", "框架通信失败，请检查 LSPosed 连接")
+    ProcessReloadOutcome.SERVICE_ERROR -> tr("hotReloadServiceError", "框架通信失败，请检查框架连接")
     ProcessReloadOutcome.TIMED_OUT -> tr("hotReloadTimedOut", "等待结果超时，无法确认是否完成，请勿重复提交")
 }

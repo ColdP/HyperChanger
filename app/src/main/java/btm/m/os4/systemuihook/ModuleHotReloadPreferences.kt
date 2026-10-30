@@ -41,7 +41,7 @@ internal fun ModuleHotReloadPreferences(enabled: Boolean) {
     val scope = rememberCoroutineScope()
     LaunchedEffect(service) {
         service?.let {
-            if (runCatching { store.syncRemote(it) }.isFailure) message = tr("safetySyncFailed", "设置已保存到本地，但框架同步失败。请恢复 LSPosed 连接后重试。")
+            if (runCatching { store.syncRemote(it) }.isFailure) message = tr("safetySyncFailed", "设置已保存到本地，但框架同步失败。请恢复框架连接后重试。")
             checked = store.enabled
         }
     }
@@ -49,19 +49,19 @@ internal fun ModuleHotReloadPreferences(enabled: Boolean) {
         onCheckedChange = { value ->
             val result = runCatching { store.update(service, value) }
             checked = store.enabled
-            if (result.isFailure) message = tr("safetySyncFailed", "设置已保存到本地，但框架同步失败。请恢复 LSPosed 连接后重试。")
+            if (result.isFailure) message = tr("safetySyncFailed", "设置已保存到本地，但框架同步失败。请恢复框架连接后重试。")
         })
     AnimatedVisibility(visible = checked,
         enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
         exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f)) {
         ArrowPreference(title = tr("hotReloadNow", "立即热重载进程"),
-            summary = tr("hotReloadHint", "可能需要 LSPosed API 102 或更高版本"), enabled = enabled && !busy,
+            summary = tr("hotReloadHint", "需要支持进程热重载的 libxposed API 102 或更高版本框架"), enabled = enabled && !busy,
             onClick = {
                 busy = true
                 scope.launch {
                     try {
                         val current = service
-                        if (current == null) message = tr("safetyLsposedDisconnected", "LSPosed 未连接")
+                        if (current == null) message = tr("safetyLsposedDisconnected", "框架未连接")
                         else {
                             val targets = withContext(Dispatchers.IO) {
                                 if (current.apiVersion < XposedService.API_102) throw UnsupportedOperationException()
@@ -88,7 +88,7 @@ internal fun ModuleHotReloadPreferences(enabled: Boolean) {
             scope.launch {
                 try {
                     val current = service
-                    message = if (current == null) tr("safetyLsposedDisconnected", "LSPosed 未连接")
+                    message = if (current == null) tr("safetyLsposedDisconnected", "框架未连接")
                     else reloadModuleProcesses(current, selected).joinToString("\n\n") { (target, outcome) ->
                         tr("hotReloadProcessLabel", "%s (PID %d / UID %d)").format(target.processName, target.pid, target.uid) +
                             "\n" + processReloadOutcomeText(outcome)

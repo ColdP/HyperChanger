@@ -76,7 +76,7 @@ internal fun rememberModuleLogExporter(): ModuleLogExporter {
                     repo.exportZip(environment) to refreshed
                 } }
                 result.onSuccess { (file, refreshed) ->
-                    if (!refreshed) status = tr("safetyLogCachedExport", "未能读取新的 LSPosed 日志，ZIP 包含当前已保存的日志。")
+                    if (!refreshed) status = tr("safetyLogCachedExport", "未能读取新的框架日志，ZIP 包含当前已保存的日志。")
                     val launched = runCatching {
                         if (share) {
                             val uri = FileProvider.getUriForFile(context, "${context.packageName}.modulelogs", file)
@@ -118,8 +118,8 @@ internal fun ModuleLogsPage(back: () -> Unit) {
     LaunchedEffect(Unit) {
         val result = withContext(Dispatchers.IO) { runCatching { repo.refresh() } }
         status = when {
-            result.isFailure -> tr("safetyLogReadFailed", "无法读取 LSPosed 日志，请检查超级用户授权。以下显示已保存的日志。")
-            result.getOrDefault(false).not() -> tr("safetyLogSourceEmpty", "未找到可读取的 LSPosed 日志。")
+            result.isFailure -> tr("safetyLogReadFailed", "无法读取框架日志，请检查超级用户授权。以下显示已保存的日志。")
+            result.getOrDefault(false).not() -> tr("safetyLogSourceEmpty", "未找到可读取的框架日志。")
             else -> null
         }
         revision++
@@ -135,7 +135,7 @@ internal fun ModuleLogsPage(back: () -> Unit) {
         GlassToolbarIconButton(MiuixIcons.Regular.Download, tr("safetySaveLogs", "保存日志")) { if (!exporter.busy) exporter.export(false) }
         GlassToolbarIconButton(Icons.Default.Share, tr("safetyShareLogs", "分享日志")) { if (!exporter.busy) exporter.export(true) }
     }, header = {
-        SoftGlassHeaderTabs(listOf(tr("safetyModuleLogs", "模块日志"), tr("safetyLsposedLogs", "LSPosed 日志")), source) { source = it }
+        SoftGlassHeaderTabs(listOf(tr("safetyModuleLogs", "模块日志"), tr("safetyLsposedLogs", "框架日志")), source) { source = it }
     }) { padding, scroll ->
         AppList(padding, scroll) {
             item {

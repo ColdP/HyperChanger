@@ -35,7 +35,7 @@ internal fun ModuleSafetyPage(openLogs: () -> Unit, onEnterOobe: () -> Unit, bac
     val scope = rememberCoroutineScope()
     val exporter = rememberModuleLogExporter()
     val nativeFailure = tr("safetyNativeFailed", "设置已保存，但桌面原生配置同步失败。请授予超级用户权限后重试，确认成功后再重启设备。")
-    val syncFailure = tr("safetySyncFailed", "设置已保存到本地，但框架同步失败。请恢复 LSPosed 连接后重试。")
+    val syncFailure = tr("safetySyncFailed", "设置已保存到本地，但框架同步失败。请恢复框架连接后重试。")
 
     fun update(change: (ModuleSafetySettings) -> ModuleSafetySettings) {
         if (busy) return
@@ -155,7 +155,7 @@ internal fun ModuleSafetyPage(openLogs: () -> Unit, onEnterOobe: () -> Unit, bac
                 }
                 exporter.status?.let { value -> item { SafetyNote(value) } }
                 if (service == null) {
-                    item { SafetyNote(tr("safetyOffline", "LSPosed 未连接，设置将保存在本地并在连接后同步。")) }
+                    item { SafetyNote(tr("safetyOffline", "框架未连接，设置将保存在本地并在连接后同步。")) }
                 }
             } else {
                 item { ModuleSafetyInformation() }
@@ -248,14 +248,16 @@ private fun ModuleSafetyInformation() {
     val service by HookApplication.service.collectAsStateWithLifecycle()
     var root by remember { mutableStateOf<Boolean?>(null) }
     var zygisk by remember { mutableStateOf<String?>(null) }
-    var lsposedVersion by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val frameworkInfo by produceState<HookFrameworkInfo?>(initialValue = null, service) {
+        value = withContext(Dispatchers.IO) { readHookFrameworkInfo(service) }
+    }
 
     LaunchedEffect(Unit) {
         val detection = withContext(Dispatchers.IO) {
             val probe = runCatching { ModuleRoot.run("id -u", 1024) }.getOrNull()
             val hasRoot = probe?.let { it.code == 0 && it.output.trim() == "0" } ?: false
             var zygiskInfo: String? = null
-            var lsposedInfo: String? = null
 
             if (hasRoot) {
                 zygiskInfo = runCatching {
@@ -276,56 +278,25 @@ private fun ModuleSafetyInformation() {
                         8192
                     ).output.trim().takeIf { it.isNotBlank() }
                 }.getOrNull()
-
-                lsposedInfo = runCatching {
-                    ModuleRoot.run(
-                        """
-                        for directory in /data/adb/modules/*; do
-                            [ -f "${'$'}directory/module.prop" ] || continue
-                            [ -f "${'$'}directory/disable" ] && continue
-                            id=''
-                            name=''
-                            version=''
-                            while IFS='=' read -r key value; do
-                                case "${'$'}key" in
-                                    id) id="${'$'}value" ;;
-                                    name) name="${'$'}value" ;;
-                                    version) version="${'$'}value" ;;
-                                esac
-                            done < "${'$'}directory/module.prop"
-                            case "${'$'}id:${'$'}name" in
-                                *lsposed*|*LSPosed*|*LSPOSED*)
-                                    printf '%s\n' "${'$'}version"
-                                    break
-                                    ;;
-                            esac
-                        done
-                        """.trimIndent(),
-                        8192
-                    ).output.trim().takeIf { it.isNotBlank() }
-                }.getOrNull()
             }
 
-            Triple(hasRoot, zygiskInfo, lsposedInfo)
+            Pair(hasRoot, zygiskInfo)
         }
         root = detection.first
         zygisk = detection.second
-        lsposedVersion = detection.third
     }
 
     val unknown = tr("未检测到", "未检测到")
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Group(tr("safetyFrameworkRoot", "框架与超级用户")) {
-            Column(Modifier.fillMaxWidth().clickable { openLsposedManager(context) }) {
+            Column(Modifier.fillMaxWidth().clickable { scope.launch { openHookFrameworkManager(context) } }) {
                 DeviceInfoItem(
                     if (service != null) {
-                        tr("safetyLsposedConnected", "LSPosed 已连接")
+                        tr("safetyLsposedConnected", "框架已连接")
                     } else {
-                        tr("safetyLsposedDisconnected", "LSPosed 未连接")
+                        tr("safetyLsposedDisconnected", "框架未连接")
                     },
-                    tr("safetyApi", "API %s").format(
-                        runCatching { service?.apiVersion?.toString() }.getOrNull() ?: unknown
-                    ) + "\n" + (lsposedVersion ?: unknown)
+                    hookFrameworkSummary(frameworkInfo)
                 )
             }
             DeviceInfoItem(when (root) {

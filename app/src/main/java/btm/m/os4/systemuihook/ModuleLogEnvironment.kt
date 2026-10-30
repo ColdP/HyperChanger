@@ -5,11 +5,11 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 
-/** Collect at export time so the report reflects LSPosed's current checked scope. */
+/** Collect at export time so the report reflects the connected framework and scope. */
 internal fun collectModuleLogEnvironment(context: Context): String {
     val unknown = tr("logEnvironmentUnknown", "未知")
     val service = HookApplication.service.value
-    val api = runCatching { service?.apiVersion?.toString() }.getOrNull() ?: unknown
+    val framework = readHookFrameworkInfo(service)
     val scopes = runCatching { service?.scope?.toList() }.getOrNull()
     val marketName = OsCompatibility.systemProperty("ro.product.marketname").ifBlank { Build.MODEL }
     val osCode = OsCompatibility.systemProperty("ro.mi.os.version.code").ifBlank { unknown }
@@ -19,12 +19,12 @@ internal fun collectModuleLogEnvironment(context: Context): String {
         tr("logEnvironmentAndroid", "Android %s (SDK %s)").format(Build.VERSION.RELEASE, Build.VERSION.SDK_INT),
         tr("logEnvironmentDevice", "%s (%s)").format(marketName, Build.MODEL),
         Build.SUPPORTED_ABIS.joinToString(", ").ifBlank { unknown },
-        tr("logEnvironmentFramework", "LSPosed API %s / %s").format(api, readLogZygiskVersion()
+        tr("framework_log_environment", "%s / %s").format(hookFrameworkSummary(framework), readLogZygiskVersion()
             ?: tr("safetyZygiskUnknown", "Zygisk (Next)：未检测到版本")),
         tr("logEnvironmentHyperOs", "HyperOS %s / %s").format(osCode, osIncremental),
     )
     if (scopes == null) {
-        lines += tr("logEnvironmentScopeUnavailable", "无法读取 LSPosed 已勾选的作用域")
+        lines += tr("logEnvironmentScopeUnavailable", "无法读取框架已勾选的作用域")
     } else {
         val pm = context.packageManager
         scopes.distinct().sorted().forEach { scope ->

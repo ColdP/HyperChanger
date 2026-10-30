@@ -5010,6 +5010,7 @@ private fun DeviceProfileFieldDialog(
 @Composable
 private fun ServiceCard(service: XposedService?, monetEnabled: Boolean) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val online = service != null
     val cardColor = when {
         !online -> ComposeColor(0xFFF9B9B9)
@@ -5027,7 +5028,6 @@ private fun ServiceCard(service: XposedService?, monetEnabled: Boolean) {
     }
     // Both states share one height; only their color, copy, and illustration change.
     val cardRatio = 2780f / 980f
-    val apiVersion = service?.let { runCatching { it.apiVersion }.getOrNull() }
     val moduleVersion = remember(context) {
         runCatching {
             context.packageManager.getPackageInfo(
@@ -5036,33 +5036,28 @@ private fun ServiceCard(service: XposedService?, monetEnabled: Boolean) {
             ).versionName
         }.getOrNull()?.takeIf(String::isNotBlank) ?: BuildConfig.VERSION_NAME
     }
-    val runtimeInfo by produceState<LsposedRuntimeInfo?>(initialValue = null, service) {
-        value = if (service == null) null else withContext(Dispatchers.IO) { detectLsposedRuntimeInfo(context) }
+    val runtimeInfo by produceState<HookFrameworkInfo?>(initialValue = null, service) {
+        value = withContext(Dispatchers.IO) { readHookFrameworkInfo(service) }
     }
     Card(
         Modifier.fillMaxWidth().aspectRatio(cardRatio),
         cornerRadius = 22.5.dp,
         colors = CardDefaults.defaultColors(cardColor.copy(alpha = .43f)),
         insideMargin = PaddingValues(0.dp),
-        onClick = { openLsposedManager(context) },
+        onClick = { scope.launch { openHookFrameworkManager(context) } },
     ) {
         BoxWithConstraints(Modifier.fillMaxSize().clip(RoundedCornerShape(22.5.dp))) {
             val horizontalPadding = maxWidth * .050f
             val verticalPadding = maxWidth * .050f
             val cardWidth = maxWidth
             val title = tr(
-                if (online) "lsposed_status_connected_title" else "lsposed_status_disconnected_title",
+                if (online) "framework_connected_title" else "framework_disconnected_title",
                 if (online) "已连接" else "未连接",
             )
             val subtitleStyle = MiuixTheme.textStyles.body2.copy(
                 fontWeight = FontWeight.SemiBold,
                 lineHeight = 16.sp,
             )
-            val lsposedVersionText = when {
-                runtimeInfo == null -> tr("加载中......", "加载中......")
-                runtimeInfo?.lsposedVersion != null -> runtimeInfo!!.lsposedVersion!!
-                else -> tr("未检测到", "未检测到")
-            }
             Column(
                 modifier = Modifier.fillMaxSize().padding(horizontalPadding, verticalPadding),
             ) {
@@ -5073,7 +5068,7 @@ private fun ServiceCard(service: XposedService?, monetEnabled: Boolean) {
                     ) {
                         Text(title, style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold, color = contentColor)
                         Text(
-                            "${tr("LSPosed", "LSPosed")} $lsposedVersionText (${tr("lsposed_api", "API")} ${apiVersion ?: 0})",
+                            if (runtimeInfo == null) tr("加载中......", "加载中......") else hookFrameworkSummary(runtimeInfo),
                             style = subtitleStyle,
                             color = contentColor,
                         )
@@ -5100,66 +5095,6 @@ private fun ServiceCard(service: XposedService?, monetEnabled: Boolean) {
             )
         }
     }
-}
-
-private data class LsposedRuntimeInfo(
-    val lsposedVersion: String?,
-)
-
-private fun detectLsposedRuntimeInfo(context: Context): LsposedRuntimeInfo {
-    val output = runCatching {
-        ModuleRoot.run(
-            """
-            for directory in /data/adb/modules/*; do
-                [ -f "${'$'}directory/module.prop" ] || continue
-                [ -f "${'$'}directory/disable" ] && continue
-                id=''; name=''; version=''
-                while IFS='=' read -r key value; do
-                    case "${'$'}key" in
-                        id) id="${'$'}value" ;;
-                        name) name="${'$'}value" ;;
-                        version) version="${'$'}value" ;;
-                    esac
-                done < "${'$'}directory/module.prop"
-                case "${'$'}id:${'$'}name" in
-                    *lsposed*|*LSPosed*|*LSPOSED*) printf 'LSPOSED|%s\n' "${'$'}version" ;;
-                esac
-            done
-            """.trimIndent(),
-            8192,
-        ).output
-    }.getOrDefault("")
-    val lines = output.lineSequence().map(String::trim).filter(String::isNotBlank).toList()
-    val packageVersion = runCatching {
-        context.packageManager.getPackageInfo(
-            "org.lsposed.manager",
-            PackageManager.PackageInfoFlags.of(0),
-        ).versionName?.takeIf(String::isNotBlank)
-    }.getOrNull()
-    val lsposedVersion = lines.firstOrNull { it.startsWith("LSPOSED|") }
-        ?.substringAfter('|')?.takeIf(String::isNotBlank)
-        ?: packageVersion
-    return LsposedRuntimeInfo(lsposedVersion)
-}
-
-internal fun openLsposedManager(context: Context) {
-    val standaloneIntent = runCatching {
-        context.packageManager.getLaunchIntentForPackage("org.lsposed.manager")
-    }.getOrNull() ?: Intent(Intent.ACTION_MAIN).setClassName(
-        "org.lsposed.manager", "org.lsposed.manager.ui.activity.MainActivity",
-    )
-    // LSPosed's parasitic manager uses Shell's activity and this launch category.
-    val parasiticIntent = Intent(Intent.ACTION_MAIN).setClassName(
-        "com.android.shell", "com.android.shell.BugreportWarningActivity",
-    )
-    for (intent in listOf(standaloneIntent, parasiticIntent)) {
-        intent.categories?.toList()?.forEach(intent::removeCategory)
-        intent.addCategory("org.lsposed.manager.LAUNCH_MANAGER")
-        intent.setPackage(intent.component?.packageName)
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        if (runCatching { context.startActivity(intent) }.isSuccess) return
-    }
-    Toast.makeText(context, tr("lsposed_manager_open_failed", "无法打开 LSPosed 管理器，请确认已安装并启用。"), Toast.LENGTH_SHORT).show()
 }
 
 @Composable
