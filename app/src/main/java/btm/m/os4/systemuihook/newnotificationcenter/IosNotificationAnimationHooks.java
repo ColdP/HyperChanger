@@ -13,7 +13,11 @@ final class IosNotificationAnimationHooks {
     private IosNotificationAnimationHooks() {}
 
     private static boolean handlesPanel(Object owner) {
-        if (!ShadeLayer.iosNotificationPanelEnabled()) return false;
+        // The first stock expand animation is scheduled before notifyExpandHeightChanged()
+        // reports a non-zero height. Use the takeover predicate here so that animation is
+        // suppressed before it can queue, while the normal enabled predicate remains the
+        // runtime guard for already-open frames.
+        if (!ShadeLayer.iosNotificationPanelIntercepting()) return false;
         try {
             Object ambient = Xp.getObjectField(owner, "ambientState");
             return !Boolean.TRUE.equals(Xp.callMethod(ambient, "isOnKeyguard"));

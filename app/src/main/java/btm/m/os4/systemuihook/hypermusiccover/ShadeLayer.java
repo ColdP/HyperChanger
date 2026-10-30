@@ -102,6 +102,17 @@ public final class ShadeLayer {
         return sIosEnabled && !IOS.controlCenter && IOS.progress > 0f && effectActive();
     }
 
+    /**
+     * True while the notification panel is owned by the iOS presentation, including the
+     * first native expand callback before the raw height driver has produced a non-zero
+     * progress value. The OEM starts its row animation from that callback; waiting for
+     * {@link #iosNotificationPanelEnabled()} here leaves one stock expand animation queued,
+     * which is why rows appear to jump only after the finger has already finished the pull.
+     */
+    public static boolean iosNotificationPanelIntercepting() {
+        return sIosEnabled && !IOS.controlCenter && !IOS.switching && effectActive();
+    }
+
     public static boolean shouldDeferNotificationHide() {
         return iosNotificationPanelEnabled() && !IOS.switching && IOS.progress > 0f;
     }

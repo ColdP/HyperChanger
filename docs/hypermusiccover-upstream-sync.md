@@ -218,3 +218,22 @@ passed 432 material restore checks. Latest APK:
 `D:/ReverseProject/HyperChanger/app/build/outputs/apk/debug/app-debug.apk`
 (100673442 bytes), SHA-256
 `D77DA83B520AD66F598BE63982A08809F69DD0FB8496322396E03B4BA5F9000B`. Device UI inspection was not performed.
+
+## Notification-center finger-follow animation repair
+
+The OEM schedules `MiuiNotificationPanelAnimControllerImpl`'s row expand animation
+before its first `notifyExpandHeightChanged` callback reaches the iOS progress driver.
+The animation hooks previously waited for a non-zero custom progress, allowing one
+stock Folme entrance animation to run after the finger had already moved. Added an
+early interception predicate for the enabled, unlocked notification-center surface;
+the existing active predicate still controls custom material and row ownership after
+the first frame. This keeps the native cleanup and non-notification animation paths
+unchanged while making notification rows follow the custom sheet position from the
+first drag frame. Device gesture verification remains pending.
+
+Validation for this repair: `tests/ios-shade-material/run.ps1` passed 432 material
+restore checks; `git diff --check` passed; and bare `\.\gradlew.bat :app:assembleDebug`
+completed successfully in 4m 56s. APK:
+`D:/ReverseProject/HyperChanger/app/build/outputs/apk/debug/app-debug.apk`
+(100673442 bytes), SHA-256
+`236D7816CF2374673D76B0AAA06F0852E7975112B757B03A6E475A7A8F56EC87`.
