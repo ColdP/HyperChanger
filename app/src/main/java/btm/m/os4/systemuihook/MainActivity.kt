@@ -55,6 +55,7 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.snap
@@ -107,6 +108,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
@@ -134,6 +136,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.Constraints
 import java.util.UUID
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.lazy.items
@@ -167,6 +170,12 @@ import com.kyant.backdrop.effects.runtimeShaderEffect
 import com.kyant.backdrop.effects.vibrancy
 import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.shadow.Shadow
+import com.kyant.shapes.Capsule
+import top.yukonga.miuix.kmp.blur.LayerBackdrop as MiuixLayerBackdrop
+import top.yukonga.miuix.kmp.blur.ProgressiveBlur
+import top.yukonga.miuix.kmp.blur.layerBackdrop as miuixLayerBackdrop
+import top.yukonga.miuix.kmp.blur.progressiveTextureBlur
+import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop as rememberMiuixLayerBackdrop
 import io.github.libxposed.service.XposedService
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.drawBackdrop
@@ -290,7 +299,7 @@ private enum class PageId {
     GESTURE_HANDLE_STYLE, DESKTOP, DESKTOP_MATERIAL,
     ISLAND, ISLAND_COLLAPSED, ISLAND_EXPANDED, ISLAND_EXPANDED_BACKGROUND, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_HEADER_SETTINGS, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_ADJUSTMENT, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_CAPSULE, LOCKSCREEN_SHORTCUT_BACKGROUND, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
     DEVICE_PROFILE_PRESETS, DEVICE_PROFILE_CLOUD_PRESETS,
-    SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
+    SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, THEME_AND_COLOR, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
     SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, PORTAL_MATERIAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND,
 }
@@ -581,11 +590,16 @@ private fun Root(
     val homeMaterialStore = remember(context) { HomeMaterialSettingsStore(context) }
     var homeMaterialSettings by remember { mutableStateOf(homeMaterialStore.settings) }
     val settingsAppStore = remember(context) { SettingsAppPreferencesStore(context) }
+    val appThemeStore = remember(context) { AppThemeSettingsStore(context) }
     val superXiaoAiStore = remember(context) { SuperXiaoAiPreferencesStore(context) }
     val systemUpdateStore = remember(context) { SystemUpdatePreferencesStore(context) }
     var settingsApp by remember { mutableStateOf(settingsAppStore.settings) }
     var superXiaoAi by remember { mutableStateOf(superXiaoAiStore.settings) }
     var systemUpdate by remember { mutableStateOf(systemUpdateStore.settings) }
+    DisposableEffect(appThemeStore) {
+        val dispose = appThemeStore.observe()
+        onDispose { dispose() }
+    }
     var pendingRestartTargets by remember { mutableStateOf(emptySet<ScopeApplication>()) }
     val markRestartTargets: (Set<ScopeApplication>) -> Unit = { targets ->
         if (targets.isNotEmpty()) pendingRestartTargets = pendingRestartTargets + targets
@@ -878,13 +892,23 @@ private fun Root(
     val requestNotificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { }
-    val controller = remember(settings.themeMode) {
+    val appThemeSettings = appThemeStore.settings
+    val appThemeSeed = appThemeSettings.seedColor(appThemeStore.previewColor)
+    val controller = remember(settings.themeMode, appThemeSettings, appThemeStore.previewColor) {
+        val standardMode = when (settings.themeMode) {
+            "light" -> ColorSchemeMode.Light
+            "dark" -> ColorSchemeMode.Dark
+            else -> ColorSchemeMode.System
+        }
+        val monetMode = when (settings.themeMode) {
+            "light" -> ColorSchemeMode.MonetLight
+            "dark" -> ColorSchemeMode.MonetDark
+            else -> ColorSchemeMode.MonetSystem
+        }
         ThemeController(
-            when (settings.themeMode) {
-                "light" -> ColorSchemeMode.Light
-                "dark" -> ColorSchemeMode.Dark
-                else -> ColorSchemeMode.System
-            }
+            colorSchemeMode = if (appThemeSettings.monetEnabled) monetMode else standardMode,
+            keyColor = appThemeSeed?.let { ComposeColor(it) },
+            paletteStyle = if (appThemeSettings.colorTheme == APP_COLOR_MONO) ThemePaletteStyle.Monochrome else ThemePaletteStyle.TonalSpot,
         )
     }
     LaunchedEffect(service) {
@@ -930,6 +954,7 @@ private fun Root(
                 homeFolderStore.syncRemote(it)
                 homeMaterialStore.syncRemote(it)
                 settingsAppStore.syncRemote(it)
+                appThemeStore.syncRemote(it)
                 SettingsAdvancedColorStyleSettingsStore(context).syncRemote(it)
                 superXiaoAiStore.syncRemote(it)
                 systemUpdateStore.syncRemote(it)
@@ -954,6 +979,11 @@ private fun Root(
     }
     MiuixTheme(controller = controller) {
         ApplySystemBarAppearance()
+        val animatedThemeSurface by animateColorAsState(
+            targetValue = MiuixTheme.colorScheme.surface,
+            animationSpec = tween(420, easing = FastOutSlowInEasing),
+            label = "themeSurfaceTransition",
+        )
         val languagePrefs = remember { context.getSharedPreferences("languages", android.content.Context.MODE_PRIVATE) }
         val strings = remember(languageRevision) { languageStrings(context, languagePrefs) }
         SideEffect { activeLanguageStrings = strings }
@@ -975,7 +1005,7 @@ private fun Root(
                 }
             },
             label = "oobeRootTransition",
-            modifier = Modifier.fillMaxSize().background(MiuixTheme.colorScheme.surface),
+            modifier = Modifier.fillMaxSize().background(animatedThemeSurface),
         ) { oobeVisible ->
         val rootBlurRadius by transition.animateFloat(
             transitionSpec = { tween(560, easing = FastOutSlowInEasing) },
@@ -1001,6 +1031,7 @@ private fun Root(
         Shell(
             settings, navigationSettings, lockscreenCapsuleSettings, cameraSettings, deviceProfile, appearance, musicWhitelist, screenRecorder, airDropSettings,
             dockSettings, homeRecentsSettings, homeFolderSettings, homeMaterialSettings, service,
+            appThemeStore = appThemeStore,
             update = { transform ->
                 val before = hooks.settings
                 hooks.update(service, transform)
@@ -1247,6 +1278,7 @@ private fun Shell(
     homeFolderSettings: HomeFolderSettings,
     homeMaterialSettings: HomeMaterialSettings,
     service: XposedService?,
+    appThemeStore: AppThemeSettingsStore,
     settingsApp: SettingsAppPreferences,
     superXiaoAi: SuperXiaoAiPreferences,
     systemUpdate: SystemUpdatePreferences,
@@ -1418,6 +1450,7 @@ private fun Shell(
                 update, updateLockscreenCapsule, updateDock, updateHomeRecents, updateHomeFolder, updateHomeMaterial, updateCamera,
                 updateDeviceProfile, updateAppearance, updateMusicWhitelist, presetActions, updateAirDrop,
                 settingsApp = settingsApp, updateSettingsApp = updateSettingsApp, superXiaoAi = superXiaoAi, updateSuperXiaoAi = updateSuperXiaoAi, systemUpdate = systemUpdate, updateSystemUpdate = updateSystemUpdate,
+                appThemeStore = appThemeStore, service = service,
                 openPage = openNestedPage, back = dismissPage,
                 onEnterOobe = onEnterOobe, captcha = captcha,
                 onPickRasterImages = onPickRasterImages, onApplyRasterWallpaper = onApplyRasterWallpaper,
@@ -1472,6 +1505,8 @@ private fun Shell(
                         settings,
                         navigationSettings,
                         settingsApp,
+                        appThemeStore,
+                        service,
                         service != null,
                         update,
                         updateNavigation,
@@ -1607,6 +1642,11 @@ private fun BottomBar(
     modifier: Modifier
 ) {
     val view = LocalView.current
+    val monetAccentColor by animateColorAsState(
+        targetValue = MiuixTheme.colorScheme.primary,
+        animationSpec = tween(420, easing = FastOutSlowInEasing),
+        label = "bottomBarMonetAccent",
+    )
     val index = remember { mutableIntStateOf(tab.ordinal) }
     LaunchedEffect(tab) { index.intValue = tab.ordinal }
     val tabs = Tab.entries.mapIndexed { i, item ->
@@ -1630,6 +1670,7 @@ private fun BottomBar(
             navigationStyle = navigationSettings.style,
             advancedMaterial = true,
             colorMode = settings.themeMode,
+            accentColorOverride = monetAccentColor,
             liquidBottomSpacingDp = 0,
             onHostPreDraw = {},
             backdropOverride = backdrop,
@@ -2825,6 +2866,8 @@ private fun SettingsHome(
     settings: HookSettings,
     navigationSettings: ModuleNavigationSettings,
     settingsApp: SettingsAppPreferences,
+    appThemeStore: AppThemeSettingsStore,
+    service: XposedService?,
     online: Boolean,
     update: ((HookSettings) -> HookSettings) -> Unit,
     updateNavigation: ((ModuleNavigationSettings) -> ModuleNavigationSettings) -> Unit,
@@ -2837,7 +2880,7 @@ private fun SettingsHome(
     var editingEntryTitle by remember { mutableStateOf(false) }
     var predictiveProgress by remember(settings.predictiveBackProgress) { mutableFloatStateOf(settings.predictiveBackProgress.toFloat()) }
     AppList(padding, scroll) {
-        item { ServiceCard(online) }
+        item { ServiceCard(service, appThemeStore.settings.monetEnabled) }
         item {
             Group(tr("模块设置", "模块设置")) {
                 ArrowPreference(title = tr("moduleSafety", "模块安全"), onClick = { open(PageId.MODULE_SAFETY) })
@@ -2890,11 +2933,10 @@ private fun SettingsHome(
         }
         item {
             Group(tr("外观", "外观")) {
-                OverlayDropdownPreference(
-                    title = tr("theme_mode", tr("\u4e3b\u9898\u6a21\u5f0f", "\u4e3b\u9898\u6a21\u5f0f")),
-                    items = listOf(tr("followSystem", tr("\u8ddf\u968f\u7cfb\u7edf", "\u8ddf\u968f\u7cfb\u7edf")), tr("light_mode", tr("\u6d45\u8272\u6a21\u5f0f", "\u6d45\u8272\u6a21\u5f0f")), tr("dark_mode", tr("\u6df1\u8272\u6a21\u5f0f", "\u6df1\u8272\u6a21\u5f0f"))),
-                    selectedIndex = listOf("system", "light", "dark").indexOf(settings.themeMode).coerceAtLeast(0),
-                    onSelectedIndexChange = { i -> update { it.copy(themeMode = listOf("system", "light", "dark")[i]) } }
+                ArrowPreference(
+                    title = tr("主题与颜色", "主题与颜色"),
+                    summary = if (appThemeStore.settings.monetEnabled) tr("Monet 取色", "Monet 取色") else tr("theme_mode", "主题模式"),
+                    onClick = { open(PageId.THEME_AND_COLOR) },
                 )
                 val navigationStyles = listOf(
                     NavigationStyle.HYPER_OS_FLOATING,
@@ -2958,6 +3000,92 @@ private fun SettingsHome(
                 editingEntryTitle = false
             },
         )
+    }
+}
+
+@Composable
+private fun ThemeAndColorPage(
+    settings: HookSettings,
+    update: ((HookSettings) -> HookSettings) -> Unit,
+    appThemeStore: AppThemeSettingsStore,
+    service: XposedService?,
+    back: () -> Unit,
+) {
+    val appTheme = appThemeStore.settings
+    val themeModes = listOf("system", "light", "dark")
+    val colorThemeItems = buildList {
+        add(APP_COLOR_SYSTEM)
+        addAll(appColorPresets.map { it.id })
+        add(APP_COLOR_CUSTOM)
+    }
+    val selectedColorTheme = appTheme.colorTheme
+    AppPage(title = tr("主题与颜色", "主题与颜色"), onBack = back) { padding, scroll ->
+        AppList(padding, scroll) {
+            item {
+                Group(tr("主题模式", "主题模式")) {
+                    OverlayDropdownPreference(
+                        title = tr("主题模式", "主题模式"),
+                        items = listOf(
+                            tr("followSystem", "跟随系统"),
+                            tr("light_mode", "浅色模式"),
+                            tr("dark_mode", "深色模式"),
+                        ),
+                        selectedIndex = themeModes.indexOf(settings.themeMode).coerceAtLeast(0),
+                        onSelectedIndexChange = { index -> update { it.copy(themeMode = themeModes[index]) } },
+                    )
+                }
+            }
+            item {
+                Group(tr("颜色", "颜色")) {
+                    SwitchPreference(
+                        title = tr("Monet 取色", "Monet 取色"),
+                        summary = tr("monet_color_summary", "使用 Miuix 动态颜色生成主题色"),
+                        checked = appTheme.monetEnabled,
+                        onCheckedChange = { enabled ->
+                            appThemeStore.update(service, appTheme.copy(monetEnabled = enabled))
+                        },
+                    )
+                    AnimatedVisibility(
+                        visible = appTheme.monetEnabled,
+                        enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                        exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                    ) {
+                        Column {
+                            OverlayDropdownPreference(
+                                title = tr("颜色主题", "颜色主题"),
+                                items = colorThemeItems.map { id ->
+                                    when (id) {
+                                        APP_COLOR_SYSTEM -> tr("followSystem", "跟随系统")
+                                        APP_COLOR_CUSTOM -> tr("custom", "自定义")
+                                        else -> appColorPresets.first { it.id == id }.let { tr(it.labelKey, it.name) }
+                                    }
+                                },
+                                selectedIndex = colorThemeItems.indexOf(selectedColorTheme).coerceAtLeast(0),
+                                onSelectedIndexChange = { index ->
+                                    appThemeStore.previewColor = null
+                                    appThemeStore.update(service, appTheme.copy(colorTheme = colorThemeItems[index]))
+                                },
+                            )
+                            AnimatedVisibility(
+                                visible = selectedColorTheme == APP_COLOR_CUSTOM,
+                                enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                                exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                            ) {
+                                ThemeSeedColorPreference(
+                                    title = tr("选择颜色", "选择颜色"),
+                                    color = appThemeStore.previewColor ?: appTheme.customColor,
+                                    onPreviewColor = { appThemeStore.previewColor = it },
+                                    onDismissPreview = { appThemeStore.previewColor = null },
+                                    onColorChange = { color ->
+                                        appThemeStore.update(service, appTheme.copy(customColor = color, colorTheme = APP_COLOR_CUSTOM))
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -4880,21 +5008,138 @@ private fun DeviceProfileFieldDialog(
 }
 
 @Composable
-private fun ServiceCard(online: Boolean) {
+private fun ServiceCard(service: XposedService?, monetEnabled: Boolean) {
     val context = LocalContext.current
-    val color = if (online) ComposeColor(0xFF38A169) else ComposeColor(0xFFE05353)
+    val online = service != null
+    val cardColor = when {
+        !online -> ComposeColor(0xFFF9B9B9)
+        monetEnabled -> MiuixTheme.colorScheme.primaryContainer
+        else -> ComposeColor(0xFFADE895)
+    }
+    val contentColor = when {
+        !online || !monetEnabled -> ComposeColor.Black
+        else -> MiuixTheme.colorScheme.onPrimaryContainer
+    }
+    val iconColor = when {
+        !online -> ComposeColor(0xFF980000).copy(alpha = .63f)
+        monetEnabled -> MiuixTheme.colorScheme.primary.copy(alpha = .74f)
+        else -> ComposeColor(0xFF01A01B).copy(alpha = .74f)
+    }
+    // Both states share one height; only their color, copy, and illustration change.
+    val cardRatio = 2780f / 980f
+    val apiVersion = service?.let { runCatching { it.apiVersion }.getOrNull() }
+    val moduleVersion = remember(context) {
+        runCatching {
+            context.packageManager.getPackageInfo(
+                context.packageName,
+                PackageManager.PackageInfoFlags.of(0),
+            ).versionName
+        }.getOrNull()?.takeIf(String::isNotBlank) ?: BuildConfig.VERSION_NAME
+    }
+    val runtimeInfo by produceState<LsposedRuntimeInfo?>(initialValue = null, service) {
+        value = if (service == null) null else withContext(Dispatchers.IO) { detectLsposedRuntimeInfo(context) }
+    }
     Card(
-        Modifier.fillMaxWidth(),
+        Modifier.fillMaxWidth().aspectRatio(cardRatio),
         cornerRadius = 22.5.dp,
-        colors = CardDefaults.defaultColors(color.copy(alpha = .14f)),
-        insideMargin = PaddingValues(16.dp),
+        colors = CardDefaults.defaultColors(cardColor.copy(alpha = .43f)),
+        insideMargin = PaddingValues(0.dp),
         onClick = { openLsposedManager(context) },
     ) {
-        Column(Modifier.fillMaxWidth()) {
-            Text("LSPosed", style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold)
-            Text(if (online) tr("\u5df2\u8fde\u63a5", "\u5df2\u8fde\u63a5") else tr("\u672a\u8fde\u63a5", "\u672a\u8fde\u63a5"), style = MiuixTheme.textStyles.body2, color = color, modifier = Modifier.padding(top = 4.dp))
+        BoxWithConstraints(Modifier.fillMaxSize().clip(RoundedCornerShape(22.5.dp))) {
+            val horizontalPadding = maxWidth * .050f
+            val verticalPadding = maxWidth * .050f
+            val cardWidth = maxWidth
+            val title = tr(
+                if (online) "lsposed_status_connected_title" else "lsposed_status_disconnected_title",
+                if (online) "已连接" else "未连接",
+            )
+            val subtitleStyle = MiuixTheme.textStyles.body2.copy(
+                fontWeight = FontWeight.SemiBold,
+                lineHeight = 16.sp,
+            )
+            val lsposedVersionText = when {
+                runtimeInfo == null -> tr("加载中......", "加载中......")
+                runtimeInfo?.lsposedVersion != null -> runtimeInfo!!.lsposedVersion!!
+                else -> tr("未检测到", "未检测到")
+            }
+            Column(
+                modifier = Modifier.fillMaxSize().padding(horizontalPadding, verticalPadding),
+            ) {
+                if (online) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(.72f),
+                        verticalArrangement = Arrangement.spacedBy(cardWidth * .012f),
+                    ) {
+                        Text(title, style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold, color = contentColor)
+                        Text(
+                            "${tr("LSPosed", "LSPosed")} $lsposedVersionText (${tr("lsposed_api", "API")} ${apiVersion ?: 0})",
+                            style = subtitleStyle,
+                            color = contentColor,
+                        )
+                    }
+                } else {
+                    Text(title, style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold, color = contentColor)
+                    Text(
+                        "${tr("HyperChanger", "HyperChanger")} $moduleVersion",
+                        modifier = Modifier.padding(top = cardWidth * .012f),
+                        style = subtitleStyle,
+                        color = contentColor,
+                    )
+                }
+            }
+            Image(
+                painter = painterResource(if (online) R.drawable.lsposed_status_success else R.drawable.lsposed_status_error),
+                contentDescription = null,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .fillMaxWidth(if (online) .3205f else .2953f)
+                    .aspectRatio(if (online) 891f / 787f else 821f / 822f),
+                contentScale = ContentScale.FillBounds,
+                colorFilter = ColorFilter.tint(iconColor),
+            )
         }
     }
+}
+
+private data class LsposedRuntimeInfo(
+    val lsposedVersion: String?,
+)
+
+private fun detectLsposedRuntimeInfo(context: Context): LsposedRuntimeInfo {
+    val output = runCatching {
+        ModuleRoot.run(
+            """
+            for directory in /data/adb/modules/*; do
+                [ -f "${'$'}directory/module.prop" ] || continue
+                [ -f "${'$'}directory/disable" ] && continue
+                id=''; name=''; version=''
+                while IFS='=' read -r key value; do
+                    case "${'$'}key" in
+                        id) id="${'$'}value" ;;
+                        name) name="${'$'}value" ;;
+                        version) version="${'$'}value" ;;
+                    esac
+                done < "${'$'}directory/module.prop"
+                case "${'$'}id:${'$'}name" in
+                    *lsposed*|*LSPosed*|*LSPOSED*) printf 'LSPOSED|%s\n' "${'$'}version" ;;
+                esac
+            done
+            """.trimIndent(),
+            8192,
+        ).output
+    }.getOrDefault("")
+    val lines = output.lineSequence().map(String::trim).filter(String::isNotBlank).toList()
+    val packageVersion = runCatching {
+        context.packageManager.getPackageInfo(
+            "org.lsposed.manager",
+            PackageManager.PackageInfoFlags.of(0),
+        ).versionName?.takeIf(String::isNotBlank)
+    }.getOrNull()
+    val lsposedVersion = lines.firstOrNull { it.startsWith("LSPOSED|") }
+        ?.substringAfter('|')?.takeIf(String::isNotBlank)
+        ?: packageVersion
+    return LsposedRuntimeInfo(lsposedVersion)
 }
 
 internal fun openLsposedManager(context: Context) {
@@ -4961,6 +5206,8 @@ private fun Detail(
     presetActions: ShadePresetActions,
     updateAirDrop: (((AirDropSettings) -> AirDropSettings) -> Unit),
     settingsApp: SettingsAppPreferences,
+    appThemeStore: AppThemeSettingsStore,
+    service: XposedService?,
     superXiaoAi: SuperXiaoAiPreferences,
     systemUpdate: SystemUpdatePreferences,
     updateSettingsApp: ((SettingsAppPreferences) -> SettingsAppPreferences) -> Unit,
@@ -5045,6 +5292,7 @@ private fun Detail(
         PageId.DEVICE_PROFILE_PRESETS -> DeviceProfilePresetsPage(deviceProfile, updateDeviceProfile, { openPage(PageId.DEVICE_PROFILE_CLOUD_PRESETS) }, back)
         PageId.DEVICE_PROFILE_CLOUD_PRESETS -> CloudDeviceProfilePresetsPage(updateDeviceProfile, back)
         PageId.SETTINGS_ENTRY_LABELS -> SettingsEntryLabelsPage(settingsApp, updateSettingsApp, back)
+        PageId.THEME_AND_COLOR -> ThemeAndColorPage(settings, update, appThemeStore, service, back)
         PageId.SETTINGS_APPEARANCE_HOME -> SettingsAppearancePage(APPEARANCE_SLOT_HOME, appearance, updateAppearance, onPickAppearanceHome, onClearAppearanceHome, back)
         PageId.SETTINGS_APPEARANCE_DEVICE -> SettingsAppearancePage(APPEARANCE_SLOT_DEVICE, appearance, updateAppearance, onPickAppearanceDevice, onClearAppearanceDevice, back)
             PageId.TUTORIAL_DEVICE_CARD -> TutorialDeviceCardSettings(appearance, updateAppearance, onPickAppearanceLogo, onClearAppearanceLogo, onPickTutorialDeviceImage, onClearTutorialDeviceImage, onPickCustomDeviceLogo, onClearCustomDeviceLogo, onPickStyle1UpdateBackground, onClearStyle1UpdateBackground, onPickStyle2DeviceImage, onClearStyle2DeviceImage, onPickStyle2DeviceLogo, onClearStyle2DeviceLogo, onPickStyle2UpdateBackground, onClearStyle2UpdateBackground, onColorModeAssetAction, back)
@@ -6375,7 +6623,7 @@ private fun Shade(
 internal fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, onSelected: (Int) -> Unit) {
     val backdrop = LocalToolbarBackdrop.current
     val surface = MiuixTheme.colorScheme.surfaceContainer
-    val shape = RoundedCornerShape(50.dp)
+    val shape = remember { Capsule() }
     val glass = if (backdrop != null && isRuntimeShaderSupported()) Modifier.drawBackdrop(
         backdrop = backdrop,
         shape = { shape },
@@ -6390,12 +6638,11 @@ internal fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, onSelected: 
     BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 8.dp)) {
         Box(
             Modifier.matchParentSize()
-                .graphicsLayer { scaleY = .94f }
                 .clip(shape)
                 .then(glass),
         )
         Row(
-            Modifier.fillMaxWidth().height(53.dp).padding(4.dp),
+            Modifier.fillMaxWidth().height(53.dp * 0.93f * 0.97f).padding(4.dp),
             horizontalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             tabs.forEachIndexed { index, label ->
@@ -9723,14 +9970,15 @@ private fun GlassSegmentedTabs(
     val container = MiuixTheme.colorScheme.surfaceContainer
     val indicator = MiuixTheme.colorScheme.onSurfaceContainer.copy(alpha = 0.08f)
     val backdrop = rememberLayerBackdrop()
+    val shape = remember { Capsule() }
     Row(
         modifier
             .fillMaxWidth()
-            .height(42.dp)
-            .clip(RoundedCornerShape(50.dp))
+            .height(42.dp * 0.93f * 0.97f)
+            .clip(shape)
             .drawBackdrop(
                 backdrop = backdrop,
-                shape = { RoundedCornerShape(50.dp) },
+                shape = { shape },
                 effects = {
                     vibrancy()
                     blur(6.dp.toPx())
@@ -9750,7 +9998,7 @@ private fun GlassSegmentedTabs(
                 Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .clip(RoundedCornerShape(50.dp))
+                    .clip(shape)
                     .then(if (active) Modifier.background(indicator) else Modifier)
                     .clickable { onSelected(index) },
                 contentAlignment = Alignment.Center,
@@ -11364,6 +11612,69 @@ private fun ShortcutBackgroundColorDialog(
 }
 
 @Composable
+private fun ThemeSeedColorPreference(
+    title: String,
+    color: Int,
+    onPreviewColor: (Int) -> Unit,
+    onDismissPreview: () -> Unit,
+    onColorChange: (Int) -> Unit,
+) {
+    var showPicker by remember { mutableStateOf(false) }
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .clickable { showPicker = true }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, modifier = Modifier.weight(1f), style = MiuixTheme.textStyles.body1)
+        Box(
+            Modifier.size(28.dp)
+                .background(MiuixTheme.colorScheme.outline.copy(alpha = .45f), CircleShape)
+                .padding(2.dp)
+                .background(ComposeColor(color), CircleShape),
+        )
+    }
+    var draftColor by remember(showPicker, color) { mutableIntStateOf(color) }
+    WindowDialog(
+        show = showPicker,
+        onDismissRequest = {
+            showPicker = false
+            onDismissPreview()
+        },
+    ) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(title, style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
+            ColorPalette(
+                color = ComposeColor(draftColor or 0xFF000000.toInt()),
+                onColorChanged = { selected ->
+                    draftColor = selected.toArgb() or 0xFF000000.toInt()
+                    onPreviewColor(draftColor)
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GlassDialogButton(
+                    onClick = {
+                        showPicker = false
+                        onDismissPreview()
+                    },
+                    modifier = Modifier.weight(1f),
+                ) { Text(tr("取消", "取消")) }
+                GlassDialogButton(
+                    onClick = {
+                        onColorChange(draftColor)
+                        showPicker = false
+                        onDismissPreview()
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColorsPrimary(),
+                ) { Text(tr("确定", "确定")) }
+            }
+        }
+    }
+}
+
+@Composable
 private fun LockscreenWidgetSignatureColorDialog(
     show: Boolean,
     initialColor: Int,
@@ -12852,6 +13163,10 @@ internal fun AppPage(
     val scroll = MiuixScrollBehavior()
     val backdrop = rememberLayerBackdrop()
     val surface = MiuixTheme.colorScheme.surface
+    val progressiveBackdrop = rememberMiuixLayerBackdrop {
+        drawRect(surface)
+        drawContent()
+    }
     val collapsedFraction = scroll.state.collapsedFraction.coerceIn(0f, 1f)
     val topBarMaterialProgress by animateFloatAsState(
         targetValue = collapsedFraction,
@@ -12864,87 +13179,80 @@ internal fun AppPage(
         LocalDialogBackdrop provides backdrop,
     ) {
     Box(Modifier.fillMaxSize().background(surface)) {
-    pageBackground?.let { Box(Modifier.fillMaxSize().layerBackdrop(backdrop)) { it() } }
+    pageBackground?.let {
+        Box(Modifier.fillMaxSize().layerBackdrop(backdrop)) { it() }
+    }
     Scaffold(
         containerColor = ComposeColor.Transparent,
         floatingToolbar = floatingToolbar,
         floatingToolbarPosition = floatingToolbarPosition,
         topBar = {
-            Column(Modifier.fillMaxWidth()) {
-            Box {
-                if (pageBackground != null) {
-                    ProgressiveBlurLayer(backdrop, topBarMaterialProgress)
-                } else if (isRuntimeShaderSupported()) {
-                    Box(
-                        Modifier.matchParentSize()
-                            .graphicsLayer { alpha = 1f - topBarMaterialProgress }
-                            .drawPlainBackdrop(
-                                backdrop = backdrop,
-                                shape = { androidx.compose.ui.graphics.RectangleShape },
-                                effects = { blur(6.dp.toPx()) },
-                                onDrawSurface = { drawRect(surface.copy(alpha = 0.55f)) }
+            ProgressiveTopBarMaterial(
+                backdrop = progressiveBackdrop,
+                collapsedFraction = topBarMaterialProgress,
+                legacyBackdrop = pageBackground?.let { backdrop },
+            ) {
+                Column(Modifier.fillMaxWidth()) {
+                    if (compactTopBar) {
+                        SmallTopAppBar(
+                            title = title,
+                            color = ComposeColor.Transparent,
+                            navigationIcon = {
+                                navigationIcon?.invoke() ?: onBack?.let { GlassBackButton(backdrop, 1f, it) }
+                            },
+                            actions = {
+                                if (restartScopes.isNotEmpty()) {
+                                    GlassRefreshButton(
+                                        backdrop = backdrop,
+                                        collapsedFraction = 1f,
+                                        enabled = restartEnabled,
+                                    ) { showRestartScopeDialog = true }
+                                }
+                                actions()
+                            },
+                        )
+                    } else {
+                        Box(Modifier.fillMaxWidth()) {
+                            TopAppBar(
+                                title = "",
+                                largeTitle = if (showLargeTitle) title else "",
+                                color = ComposeColor.Transparent,
+                                scrollBehavior = scroll,
+                                navigationIcon = {
+                                    navigationIcon?.invoke() ?: onBack?.let { GlassBackButton(backdrop, collapsedFraction, it) }
+                                },
+                                actions = {
+                                    if (restartScopes.isNotEmpty()) {
+                                        GlassRefreshButton(
+                                            backdrop = backdrop,
+                                            collapsedFraction = collapsedFraction,
+                                            enabled = restartEnabled,
+                                        ) { showRestartScopeDialog = true }
+                                    }
+                                    actions()
+                                },
                             )
-                    )
-                    ProgressiveBlurLayer(backdrop, topBarMaterialProgress)
-                    CollapsedTopBarGradientLayer(surface, topBarMaterialProgress)
-                } else {
-                    Box(Modifier.matchParentSize().background(surface.copy(alpha = 0.82f * (1f - topBarMaterialProgress))))
-                    CollapsedTopBarGradientLayer(surface, topBarMaterialProgress)
-                }
-                if (compactTopBar) {
-                    SmallTopAppBar(
-                        title = title,
-                        color = ComposeColor.Transparent,
-                        navigationIcon = {
-                            navigationIcon?.invoke() ?: onBack?.let { GlassBackButton(backdrop, 1f, it) }
-                        },
-                        actions = {
-                            if (restartScopes.isNotEmpty()) {
-                                GlassRefreshButton(
-                                    backdrop = backdrop,
-                                    collapsedFraction = 1f,
-                                    enabled = restartEnabled,
-                                ) { showRestartScopeDialog = true }
+                            // Overlay the collapsed title without contributing another row's height.
+                            Box(Modifier.matchParentSize()) {
+                                Box(
+                                    Modifier.windowInsetsPadding(WindowInsets.statusBars).height(52.dp).fillMaxWidth()
+                                        .graphicsLayer { alpha = scroll.state.collapsedFraction }
+                                        .padding(horizontal = 64.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(title, style = MiuixTheme.textStyles.title3, maxLines = 1)
+                                }
                             }
-                            actions()
-                        },
-                    )
-                } else {
-                    TopAppBar(
-                        title = "",
-                        largeTitle = if (showLargeTitle) title else "",
-                        color = ComposeColor.Transparent,
-                        scrollBehavior = scroll,
-                        navigationIcon = {
-                            navigationIcon?.invoke() ?: onBack?.let { GlassBackButton(backdrop, collapsedFraction, it) }
-                        },
-                        actions = {
-                            if (restartScopes.isNotEmpty()) {
-                                GlassRefreshButton(
-                                    backdrop = backdrop,
-                                    collapsedFraction = collapsedFraction,
-                                    enabled = restartEnabled,
-                                ) { showRestartScopeDialog = true }
-                            }
-                            actions()
-                        },
-                    )
-                    Box(
-                        Modifier.windowInsetsPadding(WindowInsets.statusBars).height(52.dp).fillMaxWidth()
-                            .graphicsLayer { alpha = scroll.state.collapsedFraction }
-                            .padding(horizontal = 64.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(title, style = MiuixTheme.textStyles.title3, maxLines = 1)
+                        }
                     }
+                    header()
                 }
-            }
-                header()
             }
         }
     ) { padding ->
+        val contentModifier = Modifier.fillMaxSize().layerBackdrop(backdrop)
         Box(
-            Modifier.fillMaxSize().layerBackdrop(backdrop)
+            if (pageBackground == null) contentModifier.miuixLayerBackdrop(progressiveBackdrop) else contentModifier
         ) {
             content(padding, scroll)
         }
@@ -13407,50 +13715,133 @@ private fun saveLanguagePacks(prefs: android.content.SharedPreferences, packs: L
 }
 
 @Composable
-private fun BoxScope.ProgressiveBlurLayer(backdrop: LayerBackdrop, collapsedFraction: Float) {
-    Box(
-        Modifier.matchParentSize()
-            .expandDrawHeight(TOP_BAR_MATERIAL_HEIGHT_FACTOR)
-            .graphicsLayer { alpha = collapsedFraction }
-            .drawPlainBackdrop(
-                backdrop = backdrop,
-                shape = { androidx.compose.ui.graphics.RectangleShape },
-                effects = {
-                    blur(10.dp.toPx())
-                    runtimeShaderEffect(
-                        key = "progressive-blur-alpha-mask",
-                        shaderString = PROGRESSIVE_BLUR_ALPHA_MASK_SHADER,
-                        uniformShaderName = "content"
-                    ) { setFloatUniform("size", size.width, size.height) }
-                }
-            )
-    )
+private fun ProgressiveTopBarMaterial(
+    backdrop: MiuixLayerBackdrop,
+    collapsedFraction: Float,
+    legacyBackdrop: LayerBackdrop? = null,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val density = LocalDensity.current
+    val minimumContentHeightPx = with(density) { PROGRESSIVE_TOP_BAR_MINIMUM_CONTENT_HEIGHT.dp.roundToPx() }
+    SubcomposeLayout(Modifier.fillMaxWidth()) { constraints ->
+        val foreground = subcompose("progressive-top-bar-foreground") {
+            Box(Modifier.fillMaxWidth(), content = content)
+        }.map { measurable -> measurable.measure(constraints.copy(minHeight = 0)) }
+        val width = (foreground.maxOfOrNull { it.width } ?: constraints.minWidth)
+            .coerceIn(constraints.minWidth, constraints.maxWidth)
+        val height = (foreground.maxOfOrNull { it.height } ?: constraints.minHeight)
+            .coerceIn(constraints.minHeight, constraints.maxHeight)
+        // Extend only the Miuix material; keep the title-bar layout height unchanged.
+        val baseMaterialHeight = height.coerceAtLeast(minimumContentHeightPx)
+        val materialHeight = if (legacyBackdrop == null) {
+            (baseMaterialHeight * PROGRESSIVE_TOP_BAR_HEIGHT_FACTOR).toInt()
+        } else {
+            baseMaterialHeight
+        }
+        val background = subcompose("progressive-top-bar-background") {
+            if (legacyBackdrop != null) {
+                LegacyProgressiveTopBarBackground(
+                    backdrop = legacyBackdrop,
+                    progress = collapsedFraction,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                ProgressiveTopBarBackground(
+                    backdrop = backdrop,
+                    progress = collapsedFraction,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }.map { measurable -> measurable.measure(Constraints.fixed(width, materialHeight)) }
+        layout(width, height) {
+            background.forEach { it.placeRelative(0, 0) }
+            foreground.forEach { it.placeRelative(0, 0) }
+        }
+    }
 }
 
 @Composable
-private fun BoxScope.CollapsedTopBarGradientLayer(surface: ComposeColor, progress: Float) {
+private fun LegacyProgressiveTopBarBackground(
+    backdrop: LayerBackdrop,
+    progress: Float,
+    modifier: Modifier = Modifier,
+) {
     if (progress <= 0f) return
-    Box(
-        Modifier
-            .matchParentSize()
-            .expandDrawHeight(TOP_BAR_MATERIAL_HEIGHT_FACTOR)
-            .graphicsLayer { alpha = progress }
-            .background(
+    Box(modifier.graphicsLayer { alpha = progress }) {
+        Box(
+            Modifier.matchParentSize()
+                .expandDrawHeight(TOP_BAR_MATERIAL_HEIGHT_FACTOR)
+                .drawPlainBackdrop(
+                    backdrop = backdrop,
+                    shape = { androidx.compose.ui.graphics.RectangleShape },
+                    effects = {
+                        blur(10.dp.toPx())
+                        runtimeShaderEffect(
+                            key = "about-progressive-blur-alpha-mask",
+                            shaderString = PROGRESSIVE_BLUR_ALPHA_MASK_SHADER,
+                            uniformShaderName = "content",
+                        ) { setFloatUniform("size", size.width, size.height) }
+                    },
+                )
+        )
+    }
+}
+
+@Composable
+private fun ProgressiveTopBarBackground(
+    backdrop: MiuixLayerBackdrop,
+    progress: Float,
+    modifier: Modifier = Modifier,
+) {
+    if (progress <= 0f) return
+    val surface = MiuixTheme.colorScheme.surface
+    Box(modifier.graphicsLayer { alpha = progress }) {
+        Box(
+            Modifier.matchParentSize().progressiveTextureBlur(
+                backdrop = backdrop,
+                shape = androidx.compose.ui.graphics.RectangleShape,
+                blurRadius = PROGRESSIVE_TOP_BAR_BLUR_RADIUS,
+                gradient = ProgressiveBlur.Top.copy(startFraction = PROGRESSIVE_TOP_BAR_BLUR_FADE_START),
+            )
+        )
+        Box(
+            Modifier.matchParentSize().background(
                 Brush.verticalGradient(
-                    0f to surface.copy(alpha = 0.92f),
-                    0.72f to surface.copy(alpha = 0.18f),
+                    0f to surface.copy(alpha = PROGRESSIVE_TOP_BAR_OVERLAY_ALPHA),
+                    PROGRESSIVE_TOP_BAR_OVERLAY_END to ComposeColor.Transparent,
                     1f to ComposeColor.Transparent,
                 )
             )
-    )
+        )
+    }
 }
 
-// Keep the progressive blur and gradient tint aligned to the same extended height.
+private const val PROGRESSIVE_TOP_BAR_BLUR_RADIUS = 14f
+private const val PROGRESSIVE_TOP_BAR_BLUR_FADE_START = 0.60f
+private const val PROGRESSIVE_TOP_BAR_OVERLAY_ALPHA = 0.94f
+private const val PROGRESSIVE_TOP_BAR_OVERLAY_END = 0.80f
+private const val PROGRESSIVE_TOP_BAR_MINIMUM_CONTENT_HEIGHT = 56f
+private const val PROGRESSIVE_TOP_BAR_HEIGHT_FACTOR = 1.22f
 private const val TOP_BAR_MATERIAL_HEIGHT_FACTOR = 1.4926275f
 private const val TOOLBAR_GLASS_SURFACE_ALPHA = .80f
 internal val TOOLBAR_GLASS_BLUR_RADIUS = 2.dp
 private val TOOLBAR_GLASS_LENS_HEIGHT = 16.dp
 private val TOOLBAR_GLASS_LENS_AMOUNT = 32.dp
+
+private const val PROGRESSIVE_BLUR_ALPHA_MASK_SHADER = """
+uniform shader content;
+uniform float2 size;
+half4 main(float2 coord) {
+    float blurAlpha = smoothstep(size.y, size.y * 0.5, coord.y);
+    return content.eval(coord) * blurAlpha;
+}
+"""
+
+private fun Modifier.expandDrawHeight(factor: Float) = layout { measurable, constraints ->
+    val expandedHeight = (constraints.maxHeight * factor).toInt()
+    val placeable = measurable.measure(constraints.copy(minHeight = expandedHeight, maxHeight = expandedHeight))
+    layout(constraints.maxWidth, constraints.maxHeight) { placeable.placeRelative(0, 0) }
+}
 
 internal fun BackdropEffectScope.toolbarGlassLens(progress: Float = 0f) {
     val clampedProgress = progress.coerceIn(0f, 1f)
@@ -13660,21 +14051,6 @@ private fun GlassActionButton(
             contentAlignment = Alignment.Center,
         ) { icon() }
     }
-}
-
-private const val PROGRESSIVE_BLUR_ALPHA_MASK_SHADER = """
-uniform shader content;
-uniform float2 size;
-half4 main(float2 coord) {
-    float blurAlpha = smoothstep(size.y, size.y * 0.5, coord.y);
-    return content.eval(coord) * blurAlpha;
-}
-"""
-
-private fun Modifier.expandDrawHeight(factor: Float) = layout { measurable, constraints ->
-    val expandedHeight = (constraints.maxHeight * factor).toInt()
-    val placeable = measurable.measure(constraints.copy(minHeight = expandedHeight, maxHeight = expandedHeight))
-    layout(constraints.maxWidth, constraints.maxHeight) { placeable.placeRelative(0, 0) }
 }
 
 @Composable
