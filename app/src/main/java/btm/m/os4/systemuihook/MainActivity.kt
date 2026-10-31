@@ -184,6 +184,7 @@ import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.Close as BasicClose
 import top.yukonga.miuix.kmp.icon.extended.ChevronBackward
 import top.yukonga.miuix.kmp.icon.extended.ChevronForward
 import top.yukonga.miuix.kmp.icon.extended.Download
@@ -3011,6 +3012,9 @@ private fun ThemeAndColorPage(
     service: XposedService?,
     back: () -> Unit,
 ) {
+    val context = LocalContext.current
+    var noticeClosedForVisit by remember { mutableStateOf(false) }
+    var noticeResetTaps by remember { mutableIntStateOf(0) }
     val appTheme = appThemeStore.settings
     val themeModes = listOf("system", "light", "dark")
     val colorThemeItems = buildList {
@@ -3019,7 +3023,19 @@ private fun ThemeAndColorPage(
         add(APP_COLOR_CUSTOM)
     }
     val selectedColorTheme = appTheme.colorTheme
-    AppPage(title = tr("主题与颜色", "主题与颜色"), onBack = back) { padding, scroll ->
+    AppPage(
+        title = tr("主题与颜色", "主题与颜色"),
+        onBack = back,
+        onLargeTitleClick = {
+            noticeResetTaps++
+            if (noticeResetTaps == 10) {
+                noticeResetTaps = 0
+                appThemeStore.monetNotice.reset(service)
+                noticeClosedForVisit = false
+                Toast.makeText(context, tr("monet_notice_reset", "提示关闭次数已清零"), Toast.LENGTH_SHORT).show()
+            }
+        },
+    ) { padding, scroll ->
         AppList(padding, scroll) {
             item {
                 Group(tr("主题模式", "主题模式")) {
@@ -3052,30 +3068,6 @@ private fun ThemeAndColorPage(
                     ) {
                         Column {
                             OverlayDropdownPreference(
-                                title = tr("monet_color_spec", "色彩规范"),
-                                items = AppMonetColorSpec.entries.map { tr(it.labelKey, it.label) },
-                                selectedIndex = AppMonetColorSpec.entries.indexOf(appThemeStore.monetColorSpec.effectiveSpec),
-                                onSelectedIndexChange = { index ->
-                                    appThemeStore.monetColorSpec.update(service, AppMonetColorSpec.entries[index])
-                                },
-                            )
-                            if (appThemeStore.monetColorSpec.effectiveSpec == AppMonetColorSpec.EXPRESSIVE) {
-                                Text(
-                                    tr("monet_color_spec_2025_summary", "2025 规范适用于柔和彩调、中性、鲜艳和丰富表现，其余调色盘使用 2021 规范。"),
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                                    style = MiuixTheme.textStyles.body2,
-                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                )
-                            }
-                            OverlayDropdownPreference(
-                                title = tr("monet_palette", "调色盘"),
-                                items = AppMonetPalette.entries.map { tr(it.labelKey, it.label) },
-                                selectedIndex = AppMonetPalette.entries.indexOf(appThemeStore.monetPalette.effectivePalette(appTheme.colorTheme)),
-                                onSelectedIndexChange = { index ->
-                                    appThemeStore.monetPalette.update(service, AppMonetPalette.entries[index])
-                                },
-                            )
-                            OverlayDropdownPreference(
                                 title = tr("颜色主题", "颜色主题"),
                                 items = colorThemeItems.map { id ->
                                     when (id) {
@@ -3088,6 +3080,22 @@ private fun ThemeAndColorPage(
                                 onSelectedIndexChange = { index ->
                                     appThemeStore.previewColor = null
                                     appThemeStore.update(service, appTheme.copy(colorTheme = colorThemeItems[index]))
+                                },
+                            )
+                            OverlayDropdownPreference(
+                                title = tr("monet_palette", "调色盘"),
+                                items = AppMonetPalette.entries.map { tr(it.labelKey, it.label) },
+                                selectedIndex = AppMonetPalette.entries.indexOf(appThemeStore.monetPalette.effectivePalette(appTheme.colorTheme)),
+                                onSelectedIndexChange = { index ->
+                                    appThemeStore.monetPalette.update(service, AppMonetPalette.entries[index])
+                                },
+                            )
+                            OverlayDropdownPreference(
+                                title = tr("monet_color_spec", "色彩规范"),
+                                items = AppMonetColorSpec.entries.map { tr(it.labelKey, it.label) },
+                                selectedIndex = AppMonetColorSpec.entries.indexOf(appThemeStore.monetColorSpec.effectiveSpec),
+                                onSelectedIndexChange = { index ->
+                                    appThemeStore.monetColorSpec.update(service, AppMonetColorSpec.entries[index])
                                 },
                             )
                             AnimatedVisibility(
@@ -3103,6 +3111,45 @@ private fun ThemeAndColorPage(
                                     onColorChange = { color ->
                                         appThemeStore.update(service, appTheme.copy(customColor = color, colorTheme = APP_COLOR_CUSTOM))
                                     },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            item {
+                AnimatedSuggestionVisibility(
+                    visible = appTheme.monetEnabled &&
+                        appThemeStore.monetColorSpec.effectiveSpec == AppMonetColorSpec.EXPRESSIVE &&
+                        appThemeStore.monetNotice.dismissCount < APP_MONET_NOTICE_DISMISS_LIMIT &&
+                        !noticeClosedForVisit,
+                ) {
+                    Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                tr("monet_color_spec_2025_summary", "2025 规范适用于柔和彩调、中性、鲜艳和丰富表现，其余调色盘使用 2021 规范。"),
+                                modifier = Modifier.weight(1f),
+                                style = MiuixTheme.textStyles.body2,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                            IconButton(
+                                onClick = {
+                                    if (!noticeClosedForVisit) {
+                                        noticeClosedForVisit = true
+                                        appThemeStore.monetNotice.dismiss(service)
+                                    }
+                                },
+                                enabled = !noticeClosedForVisit,
+                                modifier = Modifier.size(48.dp),
+                            ) {
+                                Icon(
+                                    imageVector = MiuixIcons.Basic.BasicClose,
+                                    contentDescription = tr("monet_notice_dismiss", "关闭此提示"),
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                 )
                             }
                         }
@@ -3190,30 +3237,14 @@ private fun RestartScopesPage(
         AppList(padding, scroll, 112) {
             if (suggestedTargets.isNotEmpty()) {
                 item {
-                    AnimatedVisibility(
+                    AnimatedSuggestionVisibility(
                         visible = suggestedTargets != hiddenSuggestionTargets,
-                        exit = fadeOut(
-                            animationSpec = tween(320, easing = FastOutSlowInEasing),
-                        ) + slideOutVertically(
-                            animationSpec = tween(380, easing = FastOutSlowInEasing),
-                        ) { height -> -height / 4 } + shrinkVertically(
-                            animationSpec = tween(380, easing = FastOutSlowInEasing),
-                            shrinkTowards = Alignment.Top,
-                        ),
                     ) {
-                        val exitBlurRadius by transition.animateFloat(
-                            transitionSpec = { tween(300, easing = FastOutSlowInEasing) },
-                            label = "restartSuggestionExitBlur",
-                        ) { state ->
-                            if (state == EnterExitState.Visible) 0f else 12f
-                        }
-                        Box(Modifier.blur(exitBlurRadius.dp)) {
-                            RestartSuggestionCard(
-                                targets = suggestedTargets,
-                                onApply = { selectedTargets = selectedTargets + suggestedTargets },
-                                onDismiss = { hiddenSuggestionTargets = suggestedTargets },
-                            )
-                        }
+                        RestartSuggestionCard(
+                            targets = suggestedTargets,
+                            onApply = { selectedTargets = selectedTargets + suggestedTargets },
+                            onDismiss = { hiddenSuggestionTargets = suggestedTargets },
+                        )
                     }
                 }
             }
@@ -3255,6 +3286,29 @@ private fun RestartScopesPage(
             confirmationTargets = null
         },
     )
+}
+
+@Composable
+private fun AnimatedSuggestionVisibility(visible: Boolean, content: @Composable () -> Unit) {
+    AnimatedVisibility(
+        visible = visible,
+        exit = fadeOut(
+            animationSpec = tween(320, easing = FastOutSlowInEasing),
+        ) + slideOutVertically(
+            animationSpec = tween(380, easing = FastOutSlowInEasing),
+        ) { height -> -height / 4 } + shrinkVertically(
+            animationSpec = tween(380, easing = FastOutSlowInEasing),
+            shrinkTowards = Alignment.Top,
+        ),
+    ) {
+        val exitBlurRadius by transition.animateFloat(
+            transitionSpec = { tween(300, easing = FastOutSlowInEasing) },
+            label = "suggestionExitBlur",
+        ) { state ->
+            if (state == EnterExitState.Visible) 0f else 12f
+        }
+        Box(Modifier.blur(exitBlurRadius.dp)) { content() }
+    }
 }
 
 @Composable
@@ -13289,6 +13343,7 @@ internal fun AppPage(
     floatingToolbarPosition: ToolbarPosition = ToolbarPosition.BottomCenter,
     floatingToolbar: @Composable () -> Unit = {},
     showLargeTitle: Boolean = true,
+    onLargeTitleClick: (() -> Unit)? = null,
     pageBackground: (@Composable BoxScope.() -> Unit)? = null,
     header: @Composable () -> Unit = {},
     content: @Composable (PaddingValues, ScrollBehavior) -> Unit,
@@ -13369,6 +13424,21 @@ internal fun AppPage(
                             )
                             // Overlay the collapsed title without contributing another row's height.
                             Box(Modifier.matchParentSize()) {
+                                if (showLargeTitle && onLargeTitleClick != null && collapsedFraction < 1f / 3f) {
+                                    // Restrict taps to the expanded title area, below navigation/actions.
+                                    Box(
+                                        Modifier.matchParentSize()
+                                            .windowInsetsPadding(WindowInsets.statusBars)
+                                            .padding(top = TopAppBarDefaults.CollapsedHeight)
+                                            .padding(horizontal = TopAppBarDefaults.TitlePadding)
+                                            .clickable(
+                                                interactionSource = null,
+                                                indication = null,
+                                                onClickLabel = title,
+                                                onClick = onLargeTitleClick,
+                                            ),
+                                    )
+                                }
                                 Box(
                                     Modifier.windowInsetsPadding(WindowInsets.statusBars).height(52.dp).fillMaxWidth()
                                         .graphicsLayer { alpha = scroll.state.collapsedFraction }

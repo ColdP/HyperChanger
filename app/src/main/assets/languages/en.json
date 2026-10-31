@@ -1872,6 +1872,8 @@
   "monet_palette_fidelity": "Fidelity",
   "monet_palette_content": "Content",
   "monet_color_spec": "Color specification",
+  "monet_notice_dismiss": "Dismiss this notice",
+  "monet_notice_reset": "Notice dismissal count reset",
   "monet_color_spec_2021": "Material 3 (2021)",
   "monet_color_spec_2025": "Expressive (2025)",
   "monet_color_spec_2025_summary": "The 2025 specification applies to Tonal spot, Neutral, Vibrant and Expressive. Other palettes use the 2021 specification.",

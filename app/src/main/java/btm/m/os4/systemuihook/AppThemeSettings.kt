@@ -81,6 +81,7 @@ internal class AppThemeSettingsStore(context: Context) {
     private val local = context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE)
     val monetPalette = AppMonetPaletteSettingsStore(context)
     val monetColorSpec = AppMonetColorSpecSettingsStore(context)
+    val monetNotice = AppMonetNoticeSettingsStore(context)
     var settings by mutableStateOf(readAppThemeSettings(local)); private set
     // Dialog previews are transient; cancel and page disposal restore the saved color.
     var previewColor by mutableStateOf<Int?>(null)
@@ -88,6 +89,7 @@ internal class AppThemeSettingsStore(context: Context) {
     fun observe(): () -> Unit {
         val disposePalette = monetPalette.observe()
         val disposeColorSpec = monetColorSpec.observe()
+        val disposeNotice = monetNotice.observe()
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key == null || key in setOf(KEY_APP_MONET_ENABLED, KEY_APP_COLOR_THEME, KEY_APP_CUSTOM_COLOR)) {
                 settings = readAppThemeSettings(local)
@@ -99,6 +101,7 @@ internal class AppThemeSettingsStore(context: Context) {
             local.unregisterOnSharedPreferenceChangeListener(listener)
             disposePalette()
             disposeColorSpec()
+            disposeNotice()
         }
     }
 
@@ -107,6 +110,7 @@ internal class AppThemeSettingsStore(context: Context) {
         // Read the legacy combined id before palette synchronization normalizes it.
         monetColorSpec.syncRemote(service)
         monetPalette.syncRemote(service)
+        monetNotice.syncRemote(service)
     }
 
     fun update(service: XposedService?, value: AppThemeSettings) {

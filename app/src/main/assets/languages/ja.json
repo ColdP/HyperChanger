@@ -1872,6 +1872,8 @@
   "monet_palette_fidelity": "忠実",
   "monet_palette_content": "コンテンツ",
   "monet_color_spec": "カラー仕様",
+  "monet_notice_dismiss": "この案内を閉じる",
+  "monet_notice_reset": "案内を閉じた回数をリセットしました",
   "monet_color_spec_2021": "Material 3 (2021)",
   "monet_color_spec_2025": "Expressive (2025)",
   "monet_color_spec_2025_summary": "2025 仕様はソフトトーン、ニュートラル、鮮やか、エクスプレッシブに適用されます。その他のパレットは 2021 仕様を使用します。",

@@ -1812,6 +1812,8 @@
   "monet_palette_fidelity": "保真",
   "monet_palette_content": "内容",
   "monet_color_spec": "色彩规范",
+  "monet_notice_dismiss": "关闭此提示",
+  "monet_notice_reset": "提示关闭次数已清零",
   "monet_color_spec_2021": "Material 3 (2021)",
   "monet_color_spec_2025": "Expressive (2025)",
   "monet_color_spec_2025_summary": "2025 规范适用于柔和彩调、中性、鲜艳和丰富表现，其余调色盘使用 2021 规范。",
