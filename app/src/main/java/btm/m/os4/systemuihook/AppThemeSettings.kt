@@ -79,11 +79,15 @@ internal object AppThemePreferences {
 /** App appearance stays separate from HookSettings and its serialization. */
 internal class AppThemeSettingsStore(context: Context) {
     private val local = context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE)
+    val monetPalette = AppMonetPaletteSettingsStore(context)
+    val monetColorSpec = AppMonetColorSpecSettingsStore(context)
     var settings by mutableStateOf(readAppThemeSettings(local)); private set
     // Dialog previews are transient; cancel and page disposal restore the saved color.
     var previewColor by mutableStateOf<Int?>(null)
 
     fun observe(): () -> Unit {
+        val disposePalette = monetPalette.observe()
+        val disposeColorSpec = monetColorSpec.observe()
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key == null || key in setOf(KEY_APP_MONET_ENABLED, KEY_APP_COLOR_THEME, KEY_APP_CUSTOM_COLOR)) {
                 settings = readAppThemeSettings(local)
@@ -91,11 +95,18 @@ internal class AppThemeSettingsStore(context: Context) {
         }
         local.registerOnSharedPreferenceChangeListener(listener)
         settings = readAppThemeSettings(local)
-        return { local.unregisterOnSharedPreferenceChangeListener(listener) }
+        return {
+            local.unregisterOnSharedPreferenceChangeListener(listener)
+            disposePalette()
+            disposeColorSpec()
+        }
     }
 
     fun syncRemote(service: XposedService) {
         settings = AppThemePreferences.sync(local, service.getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+        // Read the legacy combined id before palette synchronization normalizes it.
+        monetColorSpec.syncRemote(service)
+        monetPalette.syncRemote(service)
     }
 
     fun update(service: XposedService?, value: AppThemeSettings) {

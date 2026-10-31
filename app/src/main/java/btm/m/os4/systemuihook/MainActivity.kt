@@ -886,8 +886,14 @@ private fun Root(
         ActivityResultContracts.RequestPermission(),
     ) { }
     val appThemeSettings = appThemeStore.settings
+    val appMonetPalette = appThemeStore.monetPalette.effectivePalette(appThemeSettings.colorTheme)
+    val appMonetColorSpec = appThemeStore.monetColorSpec.effectiveSpec
     val appThemeSeed = appThemeSettings.seedColor(appThemeStore.previewColor)
-    val controller = remember(settings.themeMode, appThemeSettings, appThemeStore.previewColor) {
+        // Miuix ignores palette/spec when keyColor is null; explicit choices use the system accent.
+        ?: if (appThemeStore.monetPalette.selection != null || appThemeStore.monetColorSpec.selection != null) {
+            context.getColor(android.R.color.system_accent1_500)
+        } else null
+    val controller = remember(settings.themeMode, appThemeSettings, appThemeSeed, appMonetPalette, appMonetColorSpec) {
         val standardMode = when (settings.themeMode) {
             "light" -> ColorSchemeMode.Light
             "dark" -> ColorSchemeMode.Dark
@@ -901,7 +907,8 @@ private fun Root(
         ThemeController(
             colorSchemeMode = if (appThemeSettings.monetEnabled) monetMode else standardMode,
             keyColor = appThemeSeed?.let { ComposeColor(it) },
-            paletteStyle = if (appThemeSettings.colorTheme == APP_COLOR_MONO) ThemePaletteStyle.Monochrome else ThemePaletteStyle.TonalSpot,
+            paletteStyle = appMonetPalette.style,
+            colorSpec = appMonetColorSpec.spec,
         )
     }
     LaunchedEffect(service) {
@@ -3044,6 +3051,30 @@ private fun ThemeAndColorPage(
                         exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
                     ) {
                         Column {
+                            OverlayDropdownPreference(
+                                title = tr("monet_color_spec", "色彩规范"),
+                                items = AppMonetColorSpec.entries.map { tr(it.labelKey, it.label) },
+                                selectedIndex = AppMonetColorSpec.entries.indexOf(appThemeStore.monetColorSpec.effectiveSpec),
+                                onSelectedIndexChange = { index ->
+                                    appThemeStore.monetColorSpec.update(service, AppMonetColorSpec.entries[index])
+                                },
+                            )
+                            if (appThemeStore.monetColorSpec.effectiveSpec == AppMonetColorSpec.EXPRESSIVE) {
+                                Text(
+                                    tr("monet_color_spec_2025_summary", "2025 规范适用于柔和彩调、中性、鲜艳和丰富表现，其余调色盘使用 2021 规范。"),
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                    style = MiuixTheme.textStyles.body2,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                )
+                            }
+                            OverlayDropdownPreference(
+                                title = tr("monet_palette", "调色盘"),
+                                items = AppMonetPalette.entries.map { tr(it.labelKey, it.label) },
+                                selectedIndex = AppMonetPalette.entries.indexOf(appThemeStore.monetPalette.effectivePalette(appTheme.colorTheme)),
+                                onSelectedIndexChange = { index ->
+                                    appThemeStore.monetPalette.update(service, AppMonetPalette.entries[index])
+                                },
+                            )
                             OverlayDropdownPreference(
                                 title = tr("颜色主题", "颜色主题"),
                                 items = colorThemeItems.map { id ->
