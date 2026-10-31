@@ -513,6 +513,8 @@ private data class ShadePresetActions(
 
 private data class QrShareRequest(val name: String, val payload: String)
 
+private enum class ModulePresetExportMode { JSON, ZIP }
+
 private fun suggestedScopesForHookChange(before: HookSettings, after: HookSettings): Set<ScopeApplication> {
     if (before == after) return emptySet()
     val changedNames = runCatching {
@@ -719,7 +721,11 @@ private fun Root(
         if (selected.size > 4) Toast.makeText(context, tr("最多选择 4 个素材", "最多选择 4 个素材"), Toast.LENGTH_SHORT).show()
     }
     var pendingJsonExport by remember { mutableStateOf<ShadePreset?>(null) }
-    var pendingModulePresetExport by remember { mutableStateOf<String?>(null) }
+    var pendingModulePresetExport by remember { mutableStateOf<ByteArray?>(null) }
+    var showModulePresetExportDialog by remember { mutableStateOf(false) }
+    var showModulePresetResetDialog by remember { mutableStateOf(false) }
+    var pendingModulePresetImport by remember { mutableStateOf<ByteArray?>(null) }
+    var showModulePresetImportDialog by remember { mutableStateOf(false) }
     var qrShareRequest by remember { mutableStateOf<QrShareRequest?>(null) }
     var pendingQrSave by remember { mutableStateOf<QrShareRequest?>(null) }
     val exportPreset = rememberLauncherForActivityResult(
@@ -761,14 +767,14 @@ private fun Root(
             Toast.makeText(context, tr("导入失败", "导入失败"), Toast.LENGTH_SHORT).show()
         }
     }
-    val exportModulePreset = rememberLauncherForActivityResult(
+    val exportModulePresetJson = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json"),
     ) { uri ->
         val payload = pendingModulePresetExport ?: return@rememberLauncherForActivityResult
         pendingModulePresetExport = null
         if (uri == null) return@rememberLauncherForActivityResult
         runCatching {
-            context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(payload) }
+            context.contentResolver.openOutputStream(uri)?.use { it.write(payload) }
                 ?: error(tr("无法写入文件", "无法写入文件"))
         }.onSuccess {
             Toast.makeText(context, tr("预设已导出", "预设已导出"), Toast.LENGTH_SHORT).show()
@@ -776,7 +782,22 @@ private fun Root(
             Toast.makeText(context, tr("导出失败", "导出失败"), Toast.LENGTH_SHORT).show()
         }
     }
-    fun importModulePresetPayload(payload: String) {
+    val exportModulePresetZip = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri ->
+        val payload = pendingModulePresetExport ?: return@rememberLauncherForActivityResult
+        pendingModulePresetExport = null
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.openOutputStream(uri)?.use { it.write(payload) }
+                ?: error(tr("无法写入文件", "无法写入文件"))
+        }.onSuccess {
+            Toast.makeText(context, tr("预设已导出", "预设已导出"), Toast.LENGTH_SHORT).show()
+        }.onFailure {
+            Toast.makeText(context, tr("导出失败", "导出失败"), Toast.LENGTH_SHORT).show()
+        }
+    }
+    fun importModulePresetPayload(payload: ByteArray) {
         val previousNotificationSettings = context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE).toNotificationIslandSettings()
         val previousWidthSettings = readIslandWidthSettings(context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE))
         val previousSettings = hooks.settings
@@ -791,7 +812,7 @@ private fun Root(
         val previousHomeFolderSettings = homeFolderStore.settings
         val previousHomeMaterialSettings = homeMaterialStore.settings
         runCatching {
-            ModulePresetCodec.import(context, service, payload)
+            ModulePresetCodec.importBytes(context, service, payload)
             hooks.reload()
             lockscreenCapsules.reload()
             cameras.reload()
@@ -852,9 +873,12 @@ private fun Root(
     val importModulePreset = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         runCatching {
-            context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                 ?: error(tr("无法读取文件", "无法读取文件"))
-        }.onSuccess(::importModulePresetPayload).onFailure {
+        }.onSuccess {
+            pendingModulePresetImport = it
+            showModulePresetImportDialog = true
+        }.onFailure {
             Toast.makeText(context, tr("导入失败", "导入失败"), Toast.LENGTH_SHORT).show()
         }
     }
@@ -1150,10 +1174,49 @@ private fun Root(
             },
             suggestedRestartTargets = pendingRestartTargets,
             onRestartedTargets = { restarted -> pendingRestartTargets = pendingRestartTargets - restarted },
-            onImportModulePreset = { importModulePreset.launch(arrayOf("application/json", "text/json", "text/plain")) },
+            onImportModulePreset = { importModulePreset.launch(arrayOf("*/*")) },
             onExportModulePreset = {
-                pendingModulePresetExport = ModulePresetCodec.export(context)
-                exportModulePreset.launch(defaultModulePresetFileName())
+                showModulePresetExportDialog = true
+            },
+            onResetModulePreset = { showModulePresetResetDialog = true },
+            modulePresetImportDialog = showModulePresetImportDialog,
+            onDismissModulePresetImportDialog = {
+                showModulePresetImportDialog = false
+                pendingModulePresetImport = null
+            },
+            onConfirmModulePresetImport = {
+                pendingModulePresetImport?.let { payload ->
+                    showModulePresetImportDialog = false
+                    pendingModulePresetImport = null
+                    importModulePresetPayload(payload)
+                }
+            },
+            modulePresetExportDialog = showModulePresetExportDialog,
+            onDismissModulePresetExportDialog = { showModulePresetExportDialog = false },
+            onModulePresetExport = { mode ->
+                showModulePresetExportDialog = false
+                pendingModulePresetExport = when (mode) {
+                    ModulePresetExportMode.JSON -> ModulePresetCodec.exportJson(context).toByteArray(Charsets.UTF_8)
+                    ModulePresetExportMode.ZIP -> ModulePresetCodec.exportZip(context)
+                }
+                when (mode) {
+                    ModulePresetExportMode.JSON -> exportModulePresetJson.launch(defaultModulePresetFileName())
+                    ModulePresetExportMode.ZIP -> exportModulePresetZip.launch(defaultModulePresetFileName().removeSuffix(".json") + ".zip")
+                }
+            },
+            modulePresetResetDialog = showModulePresetResetDialog,
+            onDismissModulePresetResetDialog = { showModulePresetResetDialog = false },
+            onConfirmModulePresetReset = {
+                showModulePresetResetDialog = false
+                ModulePresetCodec.reset(context, service)
+                hooks.reload(); lockscreenCapsules.reload(); cameras.reload(); deviceProfiles.reload(); appearances.reload()
+                musicStore.reload(); dockStore.reload(); homeRecentsStore.reload(); homeMultiSplitStore.reload(); homeFolderStore.reload(); homeMaterialStore.reload()
+                settings = hooks.settings; lockscreenCapsuleSettings = lockscreenCapsules.settings; cameraSettings = cameras.settings
+                deviceProfile = deviceProfiles.settings; appearance = appearances.settings; musicWhitelist = musicStore.apps
+                dockSettings = dockStore.settings; homeRecentsSettings = homeRecentsStore.settings; homeMultiSplitSettings = homeMultiSplitStore.settings
+                homeFolderSettings = homeFolderStore.settings; homeMaterialSettings = homeMaterialStore.settings
+                Toast.makeText(context, tr("已恢复默认配置", "已恢复默认配置"), Toast.LENGTH_SHORT).show()
+                markRestartTargets(ScopeApplication.entries.toSet())
             },
             presetActions = ShadePresetActions(
                 userPresets = userPresets,
@@ -1305,6 +1368,16 @@ private fun Shell(
     onRestartedTargets: (Set<ScopeApplication>) -> Unit,
     onImportModulePreset: () -> Unit,
     onExportModulePreset: () -> Unit,
+    onResetModulePreset: () -> Unit,
+    modulePresetImportDialog: Boolean,
+    onDismissModulePresetImportDialog: () -> Unit,
+    onConfirmModulePresetImport: () -> Unit,
+    modulePresetExportDialog: Boolean,
+    onDismissModulePresetExportDialog: () -> Unit,
+    onModulePresetExport: (ModulePresetExportMode) -> Unit,
+    modulePresetResetDialog: Boolean,
+    onDismissModulePresetResetDialog: () -> Unit,
+    onConfirmModulePresetReset: () -> Unit,
     presetActions: ShadePresetActions,
     onPickRasterImages: () -> Unit,
     onApplyRasterWallpaper: () -> Unit,
@@ -1517,6 +1590,7 @@ private fun Shell(
                         openRootPage,
                         onImportModulePreset,
                         onExportModulePreset,
+                        onResetModulePreset,
                     )
                 }
             }
@@ -1629,6 +1703,18 @@ private fun Shell(
                 startupUpdatePending = null
                 openRootPage(PageId.SOFTWARE_UPDATE)
             },
+        )
+        if (modulePresetExportDialog) ModulePresetExportDialog(
+            onDismiss = onDismissModulePresetExportDialog,
+            onExport = onModulePresetExport,
+        )
+        if (modulePresetImportDialog) ModulePresetImportDialog(
+            onDismiss = onDismissModulePresetImportDialog,
+            onConfirm = onConfirmModulePresetImport,
+        )
+        if (modulePresetResetDialog) ModulePresetResetDialog(
+            onDismiss = onDismissModulePresetResetDialog,
+            onConfirm = onConfirmModulePresetReset,
         )
     }
     }
@@ -2878,6 +2964,7 @@ private fun SettingsHome(
     open: (PageId) -> Unit,
     onImportModulePreset: () -> Unit,
     onExportModulePreset: () -> Unit,
+    onResetModulePreset: () -> Unit,
 ) = AppPage(tr("settings", tr("设置", "设置"))) { padding, scroll ->
     val context = LocalContext.current
     var editingEntryTitle by remember { mutableStateOf(false) }
@@ -2931,8 +3018,9 @@ private fun SettingsHome(
                     )
                     SettingsModuleEntryIconPreference()
                 }
-                ArrowPreference(title = tr("导入预设", "导入预设"), onClick = onImportModulePreset)
-                ArrowPreference(title = tr("导出预设", "导出预设"), onClick = onExportModulePreset)
+                ArrowPreference(title = tr("preference-导入模块预设", "导入模块预设"), onClick = onImportModulePreset)
+                ArrowPreference(title = tr("preference-导出模块预设", "导出模块预设"), onClick = onExportModulePreset)
+                ArrowPreference(title = tr("preference-恢复默认配置", "恢复默认配置"), onClick = onResetModulePreset)
             }
         }
         item {
@@ -7609,6 +7697,96 @@ private fun ImportPresetDialog(show: Boolean, onDismiss: () -> Unit, onJson: () 
             Text(tr("导入预设", "导入预设"), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
             GlassDialogButton(onJson, Modifier.fillMaxWidth()) { Text(tr("JSON", "JSON")) }
             GlassDialogButton(onQr, Modifier.fillMaxWidth()) { Text(tr("二维码", "二维码")) }
+            GlassDialogButton(onDismiss, Modifier.fillMaxWidth()) { Text(tr("取消", "取消")) }
+        }
+    }
+}
+
+@Composable
+private fun ModulePresetExportDialog(
+    onDismiss: () -> Unit,
+    onExport: (ModulePresetExportMode) -> Unit,
+) {
+    WindowDialog(show = true, onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                tr("模块预设导出类型", "导出类型"),
+                style = MiuixTheme.textStyles.title3,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                GlassDialogButton(
+                    onClick = { onExport(ModulePresetExportMode.ZIP) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColorsPrimary(),
+                ) { Text(tr("导出配置和资源", "导出配置和资源")) }
+                GlassDialogButton(
+                    onClick = { onExport(ModulePresetExportMode.JSON) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(tr("仅导出配置", "仅导出配置")) }
+            }
+            GlassDialogButton(onDismiss, Modifier.fillMaxWidth()) {
+                Text(tr("取消", "取消"))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModulePresetImportDialog(
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    WindowDialog(show = true, onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                tr("导入模块预设", "导入模块预设"),
+                style = MiuixTheme.textStyles.title3,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(tr("导入模块预设确认", "导入后将覆盖当前模块设置，是否继续？"))
+            GlassDialogButton(
+                onClick = onConfirm,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColorsPrimary(),
+            ) { Text(tr("确认导入", "确认导入")) }
+            GlassDialogButton(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(tr("取消", "取消")) }
+        }
+    }
+}
+
+@Composable
+private fun ModulePresetResetDialog(
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    var firstConfirmed by remember { mutableStateOf(false) }
+    var firstSeconds by remember { mutableIntStateOf(3) }
+    var secondSeconds by remember { mutableIntStateOf(5) }
+    LaunchedEffect(firstConfirmed) {
+        if (!firstConfirmed) {
+            firstSeconds = 3
+            while (firstSeconds > 0) { delay(1_000); firstSeconds-- }
+        } else {
+            secondSeconds = 5
+            while (secondSeconds > 0) { delay(1_000); secondSeconds-- }
+        }
+    }
+    WindowDialog(show = true, onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(tr("恢复默认配置", "恢复默认配置"), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
+            Text(if (!firstConfirmed) tr("恢复默认配置确认一", "恢复默认配置将清除模块设置，确定继续吗？") else tr("恢复默认配置确认二", "确认恢复默认配置？此操作不可撤销。"))
+            GlassDialogButton(
+                onClick = { if (!firstConfirmed) firstConfirmed = true else onConfirm() },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = if (!firstConfirmed) firstSeconds == 0 else secondSeconds == 0,
+                colors = ButtonDefaults.buttonColorsPrimary(),
+            ) { Text(if (!firstConfirmed) tr("继续", "继续") + "（${firstSeconds}s）" else tr("恢复默认", "恢复默认") + "（${secondSeconds}s）") }
             GlassDialogButton(onDismiss, Modifier.fillMaxWidth()) { Text(tr("取消", "取消")) }
         }
     }
