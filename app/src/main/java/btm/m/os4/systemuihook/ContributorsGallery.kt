@@ -13,7 +13,6 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.VectorConverter
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
@@ -414,13 +413,25 @@ private fun ContributorHoneycomb(
         }
         val name = tr(contributors[centeredIndex].name, contributors[centeredIndex].name)
         val targetNameWidth = with(density) { textMeasurer.measure(name, style = nameStyle).size.width.toDp() } + 32.dp
-        val capsuleWidth by animateDpAsState(
-            targetNameWidth.coerceAtMost(capsuleMaxWidth),
-            spring(dampingRatio = .9f, stiffness = 260f), label = "contributorNameCapsuleWidth",
-        )
+        val targetCapsuleWidth = targetNameWidth.coerceAtMost(capsuleMaxWidth)
+        val capsuleWidth = remember(contributors) { Animatable(targetCapsuleWidth.value) }
+        val nameVisibility = remember(contributors) { Animatable(1f) }
+        var displayedName by remember(contributors) { mutableStateOf(name) }
+        // Bound the resize duration instead of waiting for a spring's long tail.
+        // Rapid selections continue from the current width without replaying a hidden fade.
+        LaunchedEffect(name, targetCapsuleWidth, contributors) {
+            if (displayedName != name || capsuleWidth.value != targetCapsuleWidth.value) {
+                if (nameVisibility.value > 0f) nameVisibility.animateTo(0f, tween(70))
+                if (capsuleWidth.value != targetCapsuleWidth.value) {
+                    capsuleWidth.animateTo(targetCapsuleWidth.value, tween(170))
+                }
+                displayedName = name
+            }
+            nameVisibility.animateTo(1f, tween(130))
+        }
         Box(Modifier.fillMaxWidth().offset(y = maxHeight * .48f + avatarSize / 2 + 13.dp), contentAlignment = Alignment.TopCenter) {
-            // One persistent glass shell; only the text crossfades/blurs while its width springs.
-            Box(Modifier.width(capsuleWidth).height(34.dp)
+            // One persistent glass shell; text stays hidden while its width changes.
+            Box(Modifier.width(capsuleWidth.value.dp).height(34.dp)
                 .clip(capsuleShape).drawBackdrop(
                     ambientBackdrop, shape = { capsuleShape },
                     effects = { lens(14.dp.toPx(), 26.dp.toPx(), depthEffect = true, chromaticAberration = true) },
@@ -428,14 +439,15 @@ private fun ContributorHoneycomb(
                     shadow = null, innerShadow = null,
                     onDrawSurface = { drawRect(capsuleTint) },
                 ).padding(horizontal = 16.dp, vertical = 7.dp)) {
-                ContributorCrossfade(centeredIndex, Modifier.fillMaxSize(), Alignment.Center) { index, blur ->
-                    BackdropBlurredText(blur, Modifier.fillMaxSize()) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text(
-                                tr(contributors[index].name, contributors[index].name),
-                                style = nameStyle, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            )
-                        }
+                BackdropBlurredText(
+                    (1f - nameVisibility.value) * 3f,
+                    Modifier.fillMaxSize().graphicsLayer { alpha = nameVisibility.value },
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            displayedName,
+                            style = nameStyle, maxLines = 1, overflow = TextOverflow.Clip,
+                        )
                     }
                 }
             }

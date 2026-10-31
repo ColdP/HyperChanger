@@ -5226,7 +5226,7 @@ private fun Detail(
         PageId.SETTINGS_APPEARANCE_HOME -> SettingsAppearancePage(APPEARANCE_SLOT_HOME, appearance, updateAppearance, onPickAppearanceHome, onClearAppearanceHome, back)
         PageId.SETTINGS_APPEARANCE_DEVICE -> SettingsAppearancePage(APPEARANCE_SLOT_DEVICE, appearance, updateAppearance, onPickAppearanceDevice, onClearAppearanceDevice, back)
             PageId.TUTORIAL_DEVICE_CARD -> TutorialDeviceCardSettings(appearance, updateAppearance, onPickAppearanceLogo, onClearAppearanceLogo, onPickTutorialDeviceImage, onClearTutorialDeviceImage, onPickCustomDeviceLogo, onClearCustomDeviceLogo, onPickStyle1UpdateBackground, onClearStyle1UpdateBackground, onPickStyle2DeviceImage, onClearStyle2DeviceImage, onPickStyle2DeviceLogo, onClearStyle2DeviceLogo, onPickStyle2UpdateBackground, onClearStyle2UpdateBackground, onColorModeAssetAction, back)
-        PageId.ABOUT -> About(back, openPage)
+        PageId.ABOUT -> About(back, openPage, appThemeStore.settings.monetEnabled)
         PageId.LEGAL_DISCLAIMER -> LegalDocument(PageId.LEGAL_DISCLAIMER, back)
         PageId.LEGAL_PRIVACY -> LegalDocument(PageId.LEGAL_PRIVACY, back)
         PageId.LEGAL_USER_AGREEMENT -> LegalDocument(PageId.LEGAL_USER_AGREEMENT, back)
@@ -12850,7 +12850,7 @@ internal fun DeviceInfoItem(title: String, summary: String) {
 }
 
 @Composable
-private fun About(back: () -> Unit, openPage: (PageId) -> Unit) = AppPage(tr("\u5173\u4e8e", "\u5173\u4e8e"), back, showLargeTitle = false, pageBackground = { AboutMaterialBackground(Modifier.matchParentSize()) }) { padding, scroll ->
+private fun About(back: () -> Unit, openPage: (PageId) -> Unit, monetEnabled: Boolean) = AppPage(tr("\u5173\u4e8e", "\u5173\u4e8e"), back, showLargeTitle = false, pageBackground = { AboutMaterialBackground(Modifier.matchParentSize(), monetEnabled) }) { padding, scroll ->
     val context = LocalContext.current
     val unavailable = tr("未检测到", "未检测到")
     val marketName = remember { OsCompatibility.systemProperty("ro.product.marketname").ifBlank { unavailable } }

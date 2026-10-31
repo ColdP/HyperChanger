@@ -3,6 +3,8 @@ package btm.m.os4.systemuihook
 
 import android.graphics.Paint
 import android.graphics.RuntimeShader
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -13,14 +15,41 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import kotlinx.coroutines.isActive
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun AboutMaterialBackground(modifier: Modifier = Modifier) {
-    val dark = MiuixTheme.colorScheme.surface.luminance() < .5f
+internal fun AboutMaterialBackground(modifier: Modifier = Modifier, monetEnabled: Boolean = false) {
+    val scheme = MiuixTheme.colorScheme
+    val dark = scheme.surface.luminance() < .5f
+    val colors = if (monetEnabled) {
+        // Use the resolved theme so wallpaper, presets, custom and monochrome colors
+        // all follow the same palette and light/dark mode as the rest of the app.
+        val targets = listOf(
+            lerp(scheme.surface, scheme.primary, if (dark) .64f else .42f),
+            lerp(scheme.surface, scheme.primaryContainer, .90f),
+            lerp(scheme.surface, scheme.secondaryVariant, .86f),
+            lerp(scheme.surface, scheme.primary, if (dark) .40f else .22f),
+        )
+        val animated = targets.mapIndexed { index, target ->
+            animateColorAsState(target, tween(600), label = "aboutMonetColor$index").value
+        }
+        remember(animated) {
+            FloatArray(16).apply {
+                animated.forEachIndexed { index, color ->
+                    this[index * 4] = color.red
+                    this[index * 4 + 1] = color.green
+                    this[index * 4 + 2] = color.blue
+                    this[index * 4 + 3] = 1f
+                }
+            }
+        }
+    } else {
+        if (dark) ABOUT_DARK_COLORS else ABOUT_LIGHT_COLORS
+    }
     val shader = remember { RuntimeShader(ABOUT_BACKGROUND_SHADER) }
     val paint = remember { Paint(Paint.ANTI_ALIAS_FLAG).apply { this.shader = shader } }
     var animationTime by remember { mutableFloatStateOf(0f) }
@@ -38,7 +67,7 @@ internal fun AboutMaterialBackground(modifier: Modifier = Modifier) {
         shader.setFloatUniform("uResolution", size.width, size.height)
         shader.setFloatUniform("uAnimTime", animationTime)
         shader.setFloatUniform("uPoints", ABOUT_POINTS)
-        shader.setFloatUniform("uColors", if (dark) ABOUT_DARK_COLORS else ABOUT_LIGHT_COLORS)
+        shader.setFloatUniform("uColors", colors)
         shader.setFloatUniform("uNoiseScale", 1.5f)
         shader.setFloatUniform("uPointOffset", if (dark) .4f else .2f)
         shader.setFloatUniform("uSaturateOffset", if (dark) .17f else .2f)
