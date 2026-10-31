@@ -440,6 +440,7 @@ public final class ClockCollapse {
 
     /** @param src which route took this entry, for the log - see noteEntry. */
     static void enter(boolean animate, boolean wake, String src) {
+        if (!btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.sceneLayoutAllowed()) return;
         if (!Main.screenOn() && !sWaking) {
             // The AOD shows the full clock; the wake brings it in.
             toAod();

@@ -9479,58 +9479,102 @@ private fun MusicLockscreenPage(
     back: () -> Unit,
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    val store = remember(context) { MusicLockscreenSettingsStore(context) }
+    val changed = LocalNotificationSettingsChanged.current
+    val conflicts = rememberMusicLockscreenConflicts()
+    var masterEnabled by remember { mutableStateOf(store.enabled) }
+    val visible = masterEnabled && !conflicts.musicBlocked
+    LaunchedEffect(service) {
+        service?.let { store.syncRemote(it); masterEnabled = store.enabled }
+    }
     AppPage(
         tr("音乐锁屏", "音乐锁屏"), back,
         restartScopes = setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.WALLPAPER),
         header = {
-            SoftGlassHeaderTabs(
-                listOf(tr("音乐锁屏", "音乐锁屏"), tr("锁屏歌词", "锁屏歌词")),
-                tab, { tab = it },
-            )
+            AnimatedVisibility(
+                visible = visible,
+                enter = expandVertically(tween(220)) + fadeIn(tween(180)),
+                exit = shrinkVertically(tween(180)) + fadeOut(tween(120)),
+            ) {
+                SoftGlassHeaderTabs(
+                    listOf(tr("音乐锁屏", "音乐锁屏"), tr("锁屏歌词", "锁屏歌词")),
+                    tab, { tab = it },
+                )
+            }
         },
     ) { padding, scroll ->
         AppList(padding, scroll, 28) {
-            if (tab == 0) {
-                item {
-                    Group(tr("音乐锁屏", "音乐锁屏")) {
-                        SwitchPreference(
-                            title = tr("音乐锁屏", "音乐锁屏"),
-                            summary = tr("需要同时重启“系统界面”和“壁纸”应用", "需要同时重启“系统界面”和“壁纸”应用"),
-                            checked = s.lockscreenMusicLockscreenEnabled,
-                            onCheckedChange = { value -> update { it.copy(lockscreenMusicLockscreenEnabled = value) } },
-                        )
-                        AnimatedVisibility(visible = s.lockscreenMusicLockscreenEnabled) {
-                            HyperMusicCoverOptions(HyperMusicCoverSection.COVER)
-                        }
-                    }
+            item {
+                Group(tr("musicMaster", "音乐锁屏总开关")) {
+                    SwitchPreference(
+                        title = tr("musicMaster", "音乐锁屏总开关"),
+                        summary = when {
+                            conflicts.musicBlocked -> tr("musicHmcAllConflict", "检测到 HMC 已启用音乐锁屏和歌词，已自动停用对应功能")
+                            conflicts.coverConflict -> tr("musicHmcCoverConflict", "检测到 HMC 已启用音乐锁屏，已停用本模块封面和壁纸替换")
+                            conflicts.lyricsConflict -> tr("musicHmcLyricsConflict", "检测到 HMC 已启用锁屏歌词，已停用本模块锁屏歌词")
+                            else -> tr("musicMasterSummary", "统一控制音乐锁屏和锁屏歌词；关闭后隐藏下方设置")
+                        },
+                        checked = visible,
+                        enabled = !conflicts.musicBlocked,
+                        onCheckedChange = { value ->
+                            store.update(service, value)
+                            masterEnabled = value
+                            changed()
+                        },
+                    )
                 }
-            } else {
-                item {
-                    Group(tr("锁屏歌词", "锁屏歌词")) {
-                        SwitchPreference(
-                            title = tr("锁屏歌词", "锁屏歌词"),
-                            summary = tr("hmcLyricsSummary", "支持歌词库、播放器歌词、词幕和在线歌词"),
-                            checked = s.lockscreenMusicLyricsEnabled,
-                            onCheckedChange = { value -> update { it.copy(lockscreenMusicLyricsEnabled = value) } },
-                        )
-                        AnimatedVisibility(visible = s.lockscreenMusicLyricsEnabled) {
-                            Column {
-                                HyperMusicCoverOptions(HyperMusicCoverSection.LYRICS)
-                                SwitchPreference(
-                                    title = tr("HDR 高光歌词", "HDR 高光歌词"),
-                                    summary = tr("长音结尾发光时在 HDR 屏幕上以更高亮度显示", "长音结尾发光时在 HDR 屏幕上以更高亮度显示"),
-                                    checked = s.lockscreenMusicLyricsHdrEnabled,
-                                    onCheckedChange = { value -> update { it.copy(lockscreenMusicLyricsHdrEnabled = value) } },
-                                )
-                                SwitchPreference(
-                                    title = tr("播放歌词时屏幕常亮", "播放歌词时屏幕常亮"),
-                                    summary = tr("锁屏显示歌词且正在播放时不自动息屏，暂停后恢复", "锁屏显示歌词且正在播放时不自动息屏，暂停后恢复"),
-                                    checked = s.lockscreenMusicLyricsKeepScreenOn,
-                                    onCheckedChange = { value -> update { it.copy(lockscreenMusicLyricsKeepScreenOn = value) } },
-                                )
+            }
+            item {
+                AnimatedVisibility(
+                    visible = visible,
+                    enter = expandVertically(tween(220)) + fadeIn(tween(180)),
+                    exit = shrinkVertically(tween(180)) + fadeOut(tween(120)),
+                ) {
+                    if (tab == 0) {
+                        Group(tr("音乐锁屏", "音乐锁屏")) {
+                            SwitchPreference(
+                                title = tr("音乐锁屏", "音乐锁屏"),
+                                summary = if (conflicts.coverConflict) tr("musicHmcCoverConflict", "检测到 HMC 已启用音乐锁屏，已停用本模块封面和壁纸替换")
+                                    else tr("需要同时重启“系统界面”和“壁纸”应用", "需要同时重启“系统界面”和“壁纸”应用"),
+                                checked = s.lockscreenMusicLockscreenEnabled && !conflicts.coverConflict,
+                                enabled = !conflicts.coverConflict,
+                                onCheckedChange = { value -> update { it.copy(lockscreenMusicLockscreenEnabled = value) } },
+                            )
+                            AnimatedVisibility(visible = s.lockscreenMusicLockscreenEnabled && !conflicts.coverConflict) {
+                                HyperMusicCoverOptions(HyperMusicCoverSection.COVER)
                             }
                         }
-                        ArrowPreference(title = tr("歌词库", "歌词库"), onClick = { open(PageId.LYRIC_LIBRARY) })
+                    } else {
+                        Group(tr("锁屏歌词", "锁屏歌词")) {
+                            SwitchPreference(
+                                title = tr("锁屏歌词", "锁屏歌词"),
+                                summary = if (conflicts.lyricsConflict) tr("musicHmcLyricsConflict", "检测到 HMC 已启用锁屏歌词，已停用本模块锁屏歌词")
+                                    else tr("hmcLyricsSummary", "支持歌词库、播放器歌词、词幕和在线歌词"),
+                                checked = s.lockscreenMusicLyricsEnabled && !conflicts.lyricsConflict,
+                                enabled = !conflicts.lyricsConflict,
+                                onCheckedChange = { value -> update { it.copy(lockscreenMusicLyricsEnabled = value) } },
+                            )
+                            AnimatedVisibility(visible = s.lockscreenMusicLyricsEnabled && !conflicts.lyricsConflict) {
+                                Column {
+                                    HyperMusicCoverOptions(HyperMusicCoverSection.LYRICS)
+                                    SwitchPreference(
+                                        title = tr("HDR 高光歌词", "HDR 高光歌词"),
+                                        summary = tr("长音结尾发光时在 HDR 屏幕上以更高亮度显示", "长音结尾发光时在 HDR 屏幕上以更高亮度显示"),
+                                        checked = s.lockscreenMusicLyricsHdrEnabled,
+                                        onCheckedChange = { value -> update { it.copy(lockscreenMusicLyricsHdrEnabled = value) } },
+                                    )
+                                    SwitchPreference(
+                                        title = tr("播放歌词时屏幕常亮", "播放歌词时屏幕常亮"),
+                                        summary = tr("锁屏显示歌词且正在播放时不自动息屏，暂停后恢复", "锁屏显示歌词且正在播放时不自动息屏，暂停后恢复"),
+                                        checked = s.lockscreenMusicLyricsKeepScreenOn,
+                                        onCheckedChange = { value -> update { it.copy(lockscreenMusicLyricsKeepScreenOn = value) } },
+                                    )
+                                }
+                            }
+                            ArrowPreference(title = tr("歌词库", "歌词库"), onClick = { open(PageId.LYRIC_LIBRARY) })
+                        }
                     }
                 }
             }
@@ -10130,6 +10174,8 @@ private fun LockscreenCapsule(
     update: ((LockscreenCapsuleSettings) -> LockscreenCapsuleSettings) -> Unit,
     back: () -> Unit,
 ) {
+    val conflicts = rememberMusicLockscreenConflicts()
+    val capsuleEnabled = capsule.enabled && !conflicts.capsuleConflict
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val context = LocalContext.current
     val glassStore = remember(context) { LockscreenCapsuleGlassSettingsStore(context) }
@@ -10146,10 +10192,16 @@ private fun LockscreenCapsule(
         tr("锁屏胶囊", "锁屏胶囊"), back,
         restartScopes = setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.AOD),
         header = {
-            SoftGlassHeaderTabs(
-                listOf(tr("hmcAppearanceTab", "外观"), tr("hmcFeaturesTab", "功能")),
-                tab, { tab = it },
-            )
+            AnimatedVisibility(
+                visible = capsuleEnabled,
+                enter = expandVertically(tween(220)) + fadeIn(tween(180)),
+                exit = shrinkVertically(tween(180)) + fadeOut(tween(120)),
+            ) {
+                SoftGlassHeaderTabs(
+                    listOf(tr("hmcAppearanceTab", "外观"), tr("hmcFeaturesTab", "功能")),
+                    tab, { tab = it },
+                )
+            }
         },
     ) { p, scroll ->
         AppList(p, scroll, 28) {
@@ -10157,16 +10209,22 @@ private fun LockscreenCapsule(
                 Group(tr("锁屏胶囊", "锁屏胶囊")) {
                     SwitchPreference(
                         title = tr("开启锁屏胶囊", "开启锁屏胶囊"),
-                        summary = tr("显示在底部快捷按钮之间，跟随当前媒体会话", "显示在底部快捷按钮之间，跟随当前媒体会话"),
-                        checked = capsule.enabled,
+                        summary = if (conflicts.capsuleConflict) tr("musicHmcCapsuleConflict", "检测到 HMC 已启用锁屏胶囊，已停用本模块锁屏胶囊")
+                            else tr("显示在底部快捷按钮之间，跟随当前媒体会话", "显示在底部快捷按钮之间，跟随当前媒体会话"),
+                        checked = capsuleEnabled,
+                        enabled = !conflicts.capsuleConflict,
                         onCheckedChange = { value -> update { it.copy(enabled = value) } },
                     )
                 }
             }
             if (tab == 0) {
                 item {
-                    Group(tr("hmcAppearanceTab", "外观")) {
-                        AnimatedVisibility(visible = capsule.enabled) {
+                    AnimatedVisibility(
+                        visible = capsuleEnabled,
+                        enter = expandVertically(tween(220)) + fadeIn(tween(180)),
+                        exit = shrinkVertically(tween(180)) + fadeOut(tween(120)),
+                    ) {
+                        Group(tr("hmcAppearanceTab", "外观")) {
                             Column {
                                 HyperMusicCoverOptions(HyperMusicCoverSection.CAPSULE_APPEARANCE)
                                 FloatSlide(tr("锁屏胶囊宽度 (dp)", "锁屏胶囊宽度 (dp)"), capsule.width, 160f..360f, defaultValue = 240f) { value -> update { it.copy(width = value) } }
@@ -10177,25 +10235,26 @@ private fun LockscreenCapsule(
                     }
                 }
                 item {
-                    Group(tr("背景材质", "背景材质")) {
-                        AnimatedVisibility(visible = capsule.enabled) {
-                            Column {
-                                OverlayDropdownPreference(
-                                    title = tr("锁屏胶囊背景", "锁屏胶囊背景"),
-                                    items = listOf(tr("跟随快捷功能背景", "跟随快捷功能背景"), tr("纯色", "纯色"), tr("高级材质", "高级材质"), tr("柔光玻璃", "柔光玻璃")),
-                                    selectedIndex = capsule.backgroundMode,
-                                    onSelectedIndexChange = { value -> update { it.copy(backgroundMode = value) } },
-                                )
-                            }
-                        }
-                        AnimatedVisibility(visible = capsule.enabled && capsule.backgroundMode == 1) {
+                    AnimatedVisibility(
+                        visible = capsuleEnabled,
+                        enter = expandVertically(tween(220)) + fadeIn(tween(180)),
+                        exit = shrinkVertically(tween(180)) + fadeOut(tween(120)),
+                    ) {
+                        Group(tr("背景材质", "背景材质")) {
+                            OverlayDropdownPreference(
+                                title = tr("锁屏胶囊背景", "锁屏胶囊背景"),
+                                items = listOf(tr("跟随快捷功能背景", "跟随快捷功能背景"), tr("纯色", "纯色"), tr("高级材质", "高级材质"), tr("柔光玻璃", "柔光玻璃")),
+                                selectedIndex = capsule.backgroundMode,
+                                onSelectedIndexChange = { value -> update { it.copy(backgroundMode = value) } },
+                            )
+                        AnimatedVisibility(visible = capsule.backgroundMode == 1) {
                             ShortcutBackgroundColorPreference(
                                 title = tr("锁屏胶囊背景颜色", "锁屏胶囊背景颜色"),
                                 color = capsule.pureColor,
                                 onColorChange = { value -> update { it.copy(pureColor = value) } },
                             )
                         }
-                        AnimatedVisibility(visible = capsule.enabled && capsule.backgroundMode == 2) {
+                        AnimatedVisibility(visible = capsule.backgroundMode == 2) {
                             Column {
                                 ShortcutBackgroundColorPreference(
                                     title = tr("锁屏胶囊混色颜色", "锁屏胶囊混色颜色"),
@@ -10212,7 +10271,7 @@ private fun LockscreenCapsule(
                             }
                         }
                         AnimatedVisibility(
-                            visible = capsule.enabled && capsule.backgroundMode == 3,
+                            visible = capsule.backgroundMode == 3,
                             enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
                             exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
                         ) {
@@ -10234,12 +10293,17 @@ private fun LockscreenCapsule(
                                 }
                             }
                         }
+                        }
                     }
                 }
             } else {
                 item {
-                    Group(tr("hmcFeaturesTab", "功能")) {
-                        AnimatedVisibility(visible = capsule.enabled) {
+                    AnimatedVisibility(
+                        visible = capsuleEnabled,
+                        enter = expandVertically(tween(220)) + fadeIn(tween(180)),
+                        exit = shrinkVertically(tween(180)) + fadeOut(tween(120)),
+                    ) {
+                        Group(tr("hmcFeaturesTab", "功能")) {
                             Column {
                                 HyperMusicCoverOptions(HyperMusicCoverSection.CAPSULE_FEATURES)
                                 SwitchPreference(

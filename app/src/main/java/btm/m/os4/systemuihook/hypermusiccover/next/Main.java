@@ -794,6 +794,36 @@ public final class Main {
         }
     }
 
+    /** Shared clock/card yield without closing an unrelated local cover or lyric window. */
+    public static void releaseHostLayout() {
+        CoverMorphLayer.cancel();
+        if (sCoverHeld) {
+            sCoverHeld = false;
+            LockHold.give(LockHold.Owner.COVER, false);
+        }
+        MediaCard.releaseHostLayout();
+    }
+
+    public static void updateHostFeatures(boolean music, boolean lyrics, boolean layout) {
+        if (sAppCtx == null) return;
+        if (sCoverMode && ((!music && !lyrics) || (!music && !keepsWallpaper()))) {
+            CoverMorphLayer.cancel();
+            setCoverEnabled(false, false);
+        }
+        if (!lyrics && LockLyrics.sEnabled) LockLyrics.setEnabled(false, sTrackKey, sWatched);
+        if (!layout) {
+            if (sCoverHeld) {
+                sCoverHeld = false;
+                LockHold.give(LockHold.Owner.COVER, false);
+            }
+            MediaCard.releaseCardGuard();
+        }
+    }
+
+    public static void resumeHostScene() {
+        setCoverEnabled(true, false, false);
+    }
+
     public static void installWallpaper(io.github.libxposed.api.XposedInterface api, ClassLoader cl) {
         Xp.attach(api);
         WallpaperProbe.install(cl);
@@ -2605,7 +2635,8 @@ public final class Main {
             main().post(() -> syncCoverHold(animate));
             return;
         }
-        boolean want = sCoverMode && (!keepsWallpaper() || LockLyrics.wantsAttached());
+        boolean want = btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.sceneLayoutAllowed()
+                && sCoverMode && (!keepsWallpaper() || LockLyrics.wantsAttached());
         if (want == sCoverHeld) return;
         sCoverHeld = want;
         if (want) {
@@ -4286,12 +4317,15 @@ public final class Main {
     static void setCoverEnabled(final boolean on, final boolean animate,
                                         final boolean fresh) {
         // The one door every way into the cover goes through, so the master switch is kept here.
-        if (on && !sCoverFeatureOn) return;
+        if (on && (!sCoverFeatureOn || !(btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.coverAllowed()
+                || btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.lyricsAllowed()))) return;
         CoverPush.pushArtAsync(on, on && fresh);
         Runnable r = new Runnable() {
             @Override
             public void run() {
                 if (on) {
+                    if (!(btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.coverAllowed()
+                            || btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.lyricsAllowed())) return;
                     enterCoverMode(animate && screenOn());
                     // With the lyrics' frost decided now (LockLyrics.attach), the kept cover.
                     CoverPush.sendKeptFirst();

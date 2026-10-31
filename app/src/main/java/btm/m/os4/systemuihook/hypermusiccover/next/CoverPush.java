@@ -80,6 +80,7 @@ public final class CoverPush {
     }
 
     private static void pushArtToWallpaper(Context ctx, boolean on, Bitmap art) {
+        if (on && !btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.coverAllowed()) return;
         long t0 = android.os.SystemClock.uptimeMillis();
         // 保留壁纸: the wallpaper is the user's own throughout. Sent as the way out, so a cover
         // already up - the style switched with cover mode on - fades back to the wallpaper, and
@@ -1509,6 +1510,7 @@ public final class CoverPush {
     }
 
     static void pushArtAsync(final boolean on, final boolean fresh) {
+        if (on && !btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.coverAllowed()) return;
         final Context ctx = Main.sAppCtx;
         if (ctx == null) return;
         final int gen = ++Main.sPushGen;

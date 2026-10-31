@@ -187,11 +187,13 @@ final class AodColour {
      * setter hooks are what make them come out legible.
      */
     static void recolorClock() {
+        if (!btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.sceneLayoutAllowed()) return;
         final View v = Main.sContainer;
         if (v == null) return;
         Gen.postOn(v, new Runnable() {
             @Override
             public void run() {
+                if (!btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.sceneLayoutAllowed()) return;
                 for (View root : Main.clockRoots()) {
                     try {
                         if (!(root instanceof ViewGroup)) continue;

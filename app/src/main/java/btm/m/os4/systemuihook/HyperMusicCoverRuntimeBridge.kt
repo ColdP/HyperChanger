@@ -28,9 +28,46 @@ object HyperMusicCoverRuntimeBridge {
     @JvmStatic fun automaticCoverEntryEnabled(): Boolean = autoCoverEntry
     @JvmStatic fun musicCoverEnabled(): Boolean = musicEnabled
 
+    @JvmStatic fun coverAllowed(): Boolean = preferences?.let {
+        HmcConflictMonitor.policy.cover(musicLockscreenMaster(it), it.getBoolean("lockscreen_music_lockscreen_enabled", false))
+    } == true
+    @JvmStatic fun lyricsAllowed(): Boolean = preferences?.let {
+        HmcConflictMonitor.policy.lyrics(musicLockscreenMaster(it),
+            it.getBoolean("lockscreen_music_lyrics_enabled", false) || it.getBoolean("lockscreen_mini_player_lyrics_enabled", false))
+    } == true
+    @JvmStatic fun capsuleAllowed(): Boolean = preferences?.let {
+        HmcConflictMonitor.policy.capsule(it.getBoolean("lockscreen_mini_player_enabled", false))
+    } == true
+    @JvmStatic fun sceneLayoutAllowed(): Boolean = HmcConflictMonitor.policy.sceneLayout && (coverAllowed() || lyricsAllowed())
+
+    /** Groups follow their consumers: lifecycle captures remain live; mutations yield. */
+    @JvmStatic fun allowsHook(id: String): Boolean = when {
+        id.startsWith("sysui.clock.container_") || id.startsWith("sysui.wallpaper.manager_ctor") ||
+            id.startsWith("sysui.mini.shortcut_views") || id.startsWith("wall.app.create") ||
+            id.startsWith("wall.engine.") -> true
+        id.startsWith("wall.") -> coverAllowed()
+        id.startsWith("sysui.mini.") || id.startsWith("sysui.island.") ||
+            id.startsWith("sysui.numstate.") || id.startsWith("sysui.datestatus.") ||
+            id.startsWith("sysui.notif.presence") -> capsuleAllowed()
+        id.startsWith("sysui.clock.") || id.startsWith("sysui.depth.") ||
+            id.startsWith("sysui.notif.state_change") || id.startsWith("sysui.aod.") ||
+            id.startsWith("sysui.palette.") || id.startsWith("sysui.charge.") ||
+            id.startsWith("sysui.wallpaper.black") || id.startsWith("sysui.screen.") -> sceneLayoutAllowed()
+        id.startsWith("sysui.wallpaper.unlock_fade") -> coverAllowed()
+        id.startsWith("sysui.lyrics.") -> lyricsAllowed()
+        id.startsWith("sysui.mediacard.") || id.startsWith("sysui.transport.") ||
+            id.startsWith("sysui.taps.") -> coverAllowed() || lyricsAllowed() || capsuleAllowed()
+        else -> true
+    }
+
+    internal fun beforePolicyChange(old: MusicLockscreenPolicy, next: MusicLockscreenPolicy) {
+        if (context != null && old.sceneLayout && !next.sceneLayout) Main.releaseHostLayout()
+    }
+
     /** The new controller remains the sole owner of native media visibility. */
     @JvmStatic fun suppressNativeMedia(dynamicSuppression: Boolean): Boolean =
-        if (musicEnabled) dynamicSuppression else when (mediaMode) {
+        if (HmcConflictMonitor.policy.coverConflict || HmcConflictMonitor.policy.lyricsConflict) false
+        else if (musicEnabled) dynamicSuppression else when (mediaMode) {
             LOCKSCREEN_MEDIA_NOTIFICATION_ALWAYS_HIDE -> true
             LOCKSCREEN_MEDIA_NOTIFICATION_DYNAMIC -> dynamicSuppression
             else -> false
@@ -39,6 +76,7 @@ object HyperMusicCoverRuntimeBridge {
     private var preferences: SharedPreferences? = null
     private var context: Context? = null
     private var installed = false
+    private var wallpaperProcess = false
     private val handler = Handler(Looper.getMainLooper())
     private val refresh = Runnable { applySettings() }
     private val sentSettings = HashMap<String, String>()
@@ -54,16 +92,21 @@ object HyperMusicCoverRuntimeBridge {
                          material: (ImageView, ClassLoader) -> Unit) {
         if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN) ||
             !ModuleSafetyRuntime.allows(SafetySection.NOTIFICATIONS)) return
+        if (preferences == null && pkg in setOf("com.android.systemui", "com.miui.miwallpaper")) {
+            preferences = module.getRemotePreferences(REMOTE_PREFERENCE_GROUP).also {
+                it.registerOnSharedPreferenceChangeListener(listener)
+            }
+        }
         when (pkg) {
-            "com.miui.miwallpaper" -> Main.installWallpaper(module, loader)
+            "com.miui.miwallpaper" -> {
+                wallpaperProcess = true
+                Main.installWallpaper(module, loader)
+            }
             "com.apple.android.music" -> Main.installApple(module, loader)
             "com.autonavi.minimap" -> if (ModuleSafetyRuntime.allows(SafetySection.ISLAND)) Main.installAmap(module, loader)
             "com.android.systemui" -> {
                 if (installed) return
                 installed = true
-                preferences = module.getRemotePreferences(REMOTE_PREFERENCE_GROUP).also {
-                    it.registerOnSharedPreferenceChangeListener(listener)
-                }
                 MiniPlayerRuntime.hostMaterial = material
                 Main.install(module, loader)
             }
@@ -72,8 +115,15 @@ object HyperMusicCoverRuntimeBridge {
 
     @JvmStatic fun onRuntimeReady(appContext: Context) {
         context = appContext.applicationContext
+        HmcConflictMonitor.startNow(appContext) { applySettings() }
         sentSettings.clear()
         applySettings()
+    }
+
+    @JvmStatic fun onWallpaperReady(appContext: Context) {
+        HmcConflictMonitor.startNow(appContext) {
+            btm.m.os4.systemuihook.hypermusiccover.next.WallpaperProbe.hostPolicyChanged(coverAllowed())
+        }
     }
 
     private fun send(op: String, configure: Intent.() -> Unit = {}) {
@@ -88,12 +138,15 @@ object HyperMusicCoverRuntimeBridge {
 
     private fun applySettings() {
         val prefs = preferences ?: return
+        if (wallpaperProcess) {
+            btm.m.os4.systemuihook.hypermusiccover.next.WallpaperProbe.hostPolicyChanged(coverAllowed())
+            return
+        }
         val ctx = context ?: return
         val s = readHyperMusicCoverSettings(prefs)
-        val music = prefs.getBoolean("lockscreen_music_lockscreen_enabled", false)
-        val lyrics = prefs.getBoolean("lockscreen_music_lyrics_enabled", false) ||
-            prefs.getBoolean("lockscreen_mini_player_lyrics_enabled", false)
-        val island = prefs.getBoolean("lockscreen_mini_player_enabled", false) &&
+        val music = coverAllowed()
+        val lyrics = lyricsAllowed()
+        val island = capsuleAllowed() &&
             ModuleSafetyRuntime.allows(SafetySection.ISLAND)
         val mode = if (prefs.contains(KEY_LOCKSCREEN_MINI_PLAYER_MEDIA_NOTIFICATION_MODE))
             prefs.getInt(KEY_LOCKSCREEN_MINI_PLAYER_MEDIA_NOTIFICATION_MODE, 0).coerceIn(0, 2)
@@ -102,6 +155,8 @@ object HyperMusicCoverRuntimeBridge {
         musicEnabled = music
         mediaMode = if (island) mode else LOCKSCREEN_MEDIA_NOTIFICATION_DO_NOT_HIDE
         autoCoverEntry = music && s.autoEnter
+        val wasScene = Main.coverModeOn()
+        Main.updateHostFeatures(music, lyrics, sceneLayoutAllowed())
         val config = JSONObject(MiniPlayerConfig.defaultJson()).apply {
             put(MiniPlayerConfig.ENABLED, island)
             put(MiniPlayerConfig.WIDTH, prefs.getFloat("lockscreen_mini_player_width", 240f))
@@ -110,7 +165,7 @@ object HyperMusicCoverRuntimeBridge {
             put(MiniPlayerConfig.MEDIA_COLLAPSED_DEFAULT, mode != LOCKSCREEN_MEDIA_NOTIFICATION_DO_NOT_HIDE)
             put(MiniPlayerConfig.STYLE, s.islandStyle)
             put(MiniPlayerConfig.ADAPTIVE_WIDTH, s.adaptiveWidth)
-            put(MiniPlayerConfig.NORMALS_IN_STACK, !s.ordinaryNotifications)
+            put(MiniPlayerConfig.NORMALS_IN_STACK, !island || !s.ordinaryNotifications)
             put(MiniPlayerConfig.GROUP_NOTIFICATIONS_BY_APP, s.groupByApp)
             put(MiniPlayerConfig.STATUS_AT_DATE, s.statusAtDate)
             put(MiniPlayerConfig.FOD_LIFT, s.fingerprintLift)
@@ -139,5 +194,6 @@ object HyperMusicCoverRuntimeBridge {
             putExtra("on", music || lyrics || island)
             putExtra("hostAutoEntry", autoCoverEntry)
         }
+        if (wasScene && (music || lyrics) && !Main.coverModeOn()) Main.resumeHostScene()
     }
 }

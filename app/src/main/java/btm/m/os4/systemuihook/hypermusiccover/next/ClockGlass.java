@@ -107,10 +107,12 @@ final class ClockGlass {
      * exit, which otherwise leaves the cover's answer on the wallpaper until the next doze.
      */
     static void applyGlassBrightness() {
+        if (!btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.sceneLayoutAllowed()) return;
         final Boolean want = Main.sCoverMode ? Main.sBrightCover : Main.sBrightOutside;
         final View v = Main.sContainer;
         if (want == null || v == null) return;
         Gen.postOn(v, () -> {
+            if (!btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.sceneLayoutAllowed()) return;
             for (View root : Main.clockRoots()) {
                 for (String id : new String[]{"hour_view", "minute_view", "colon_view"}) {
                     try {

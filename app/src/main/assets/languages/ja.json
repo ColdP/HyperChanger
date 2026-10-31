@@ -1741,7 +1741,13 @@
     "hmcUnit_minute": "%1$d分",
     "hmcUnit_second": "%1$d秒",
     "hmcAppearanceTab": "外観",
-    "hmcFeaturesTab": "機能"
+    "hmcFeaturesTab": "機能",
+    "musicMaster": "音楽ロック画面のマスタースイッチ",
+    "musicMasterSummary": "音楽ロック画面とロック画面の歌詞をまとめて制御します。オフにすると設定を非表示にします。",
+    "musicHmcCoverConflict": "HyperMusicCover の音楽ロック画面が有効です。HyperChanger のカバーと壁紙置換を無効にしました。",
+    "musicHmcLyricsConflict": "HyperMusicCover のロック画面歌詞が有効です。HyperChanger のロック画面歌詞を無効にしました。",
+    "musicHmcAllConflict": "HyperMusicCover の音楽ロック画面と歌詞が有効です。対応する HyperChanger 機能を無効にしました。",
+    "musicHmcCapsuleConflict": "HyperMusicCover のロック画面カプセルが有効です。HyperChanger のカプセルを無効にしました。"
   },
   "Xiaomi 18 Pro 系列 AI 背屏": "Xiaomi 18 Pro シリーズ AI 背面画面",
   "解锁 AI 功能": "AI 機能を解放",

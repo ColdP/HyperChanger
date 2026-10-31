@@ -1741,7 +1741,13 @@
     "hmcUnit_minute": "%1$d min ",
     "hmcUnit_second": "%1$d s",
     "hmcAppearanceTab": "Appearance",
-    "hmcFeaturesTab": "Features"
+    "hmcFeaturesTab": "Features",
+    "musicMaster": "Music lockscreen master switch",
+    "musicMasterSummary": "Controls the music lockscreen and lockscreen lyrics. Turn it off to hide their settings.",
+    "musicHmcCoverConflict": "HyperMusicCover music lockscreen is active. HyperChanger cover and wallpaper replacement are disabled.",
+    "musicHmcLyricsConflict": "HyperMusicCover lockscreen lyrics are active. HyperChanger lockscreen lyrics are disabled.",
+    "musicHmcAllConflict": "HyperMusicCover music lockscreen and lyrics are active. The matching HyperChanger features are disabled.",
+    "musicHmcCapsuleConflict": "HyperMusicCover lockscreen capsule is active. HyperChanger capsule is disabled."
   },
   "Xiaomi 18 Pro 系列 AI 背屏": "Xiaomi 18 Pro Series AI Rear Screen",
   "解锁 AI 功能": "Unlock AI features",

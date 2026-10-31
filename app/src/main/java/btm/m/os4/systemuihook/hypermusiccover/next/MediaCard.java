@@ -141,9 +141,14 @@ public final class MediaCard {
     }
 
     static void applyMediaCard(final int attempt) {
+        if (!btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.sceneLayoutAllowed()) {
+            releaseCardGuard();
+            return;
+        }
         Main.main().post(new Runnable() {
             @Override
             public void run() {
+                if (!btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.sceneLayoutAllowed()) return;
                 View card = Main.findSysuiView("mi_media_controls");
                 if (card == null) {
                     // Only worth waiting for while something still wants something from the
@@ -186,6 +191,7 @@ public final class MediaCard {
      * pre-draw listener is a traversal loop.
      */
     static void assertMediaCard(View card) {
+        if (!btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.sceneLayoutAllowed()) return;
         // The lock screen and the shade share one media card view, so "is the keyguard up" has
         // to be part of the condition rather than just cover mode: without it, pulling the shade
         // down on an unlocked phone would show the same restyled card, and these two settings
@@ -473,6 +479,18 @@ public final class MediaCard {
         Gen.preDraw(card, sCardGuard);
         sCardGuarded = card;
         Xp.log(Main.TAG + "media card guard installed");
+    }
+
+    /** Restore only a card this generation had taken, before publishing the ownership gate. */
+    static void releaseHostLayout() {
+        if (sCardGuarded != null) {
+            sCardP = 0f;
+            boolean forced = Main.sCardForced;
+            Main.sCardForced = false;
+            try { assertMediaCard(sCardGuarded); }
+            finally { Main.sCardForced = forced; }
+        }
+        releaseCardGuard();
     }
 
     static void releaseCardGuard() {

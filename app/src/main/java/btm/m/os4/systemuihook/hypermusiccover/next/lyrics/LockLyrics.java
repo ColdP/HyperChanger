@@ -442,7 +442,8 @@ public final class LockLyrics {
 
     /** Whether the view belongs in the keyguard right now. */
     public static boolean wantsAttached() {
-        return wanted() && Main.coverModeOn() && hasLyrics();
+        return btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.lyricsAllowed()
+                && wanted() && Main.coverModeOn() && hasLyrics();
     }
 
     /**

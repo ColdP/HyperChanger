@@ -220,7 +220,8 @@ public final class Xp {
         // every hooker it installed is a pass-through. Neither flag is set yet, so this is a
         // boolean today; it is what closes the window between retirement and adoption.
         XposedInterface.Hooker guarded =
-                chain -> Gen.live() ? hooker.intercept(chain) : chain.proceed();
+                chain -> Gen.live() && btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.allowsHook(id)
+                        ? hooker.intercept(chain) : chain.proceed();
         XposedInterface.HookHandle old = HotReload.takeOld(id, target);
         if (old != null) {
             try {

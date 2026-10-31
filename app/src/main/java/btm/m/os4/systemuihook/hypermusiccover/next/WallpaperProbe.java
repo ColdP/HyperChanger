@@ -310,6 +310,7 @@ public class WallpaperProbe {
      * here, which is also what stops it once the art arrives.
      */
     private static void askForArt(String why) {
+        if (!btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.coverAllowed()) return;
         Context c = sCtx;
         if (c == null || sAsks >= ASK_TRIES) return;
         long now = SystemClock.uptimeMillis();
@@ -2209,14 +2210,55 @@ public class WallpaperProbe {
         return out;
     }
 
+    private static Boolean sHostCoverAllowed;
+
+    /** Drop this module's pending work and return only resources it had taken. Main thread. */
+    public static void hostPolicyChanged(boolean allowed) {
+        if (sCtx == null || Boolean.valueOf(allowed).equals(sHostCoverAllowed)) return;
+        sHostCoverAllowed = allowed;
+        if (allowed) {
+            askForArt("host feature enabled");
+            return;
+        }
+        boolean hadCover = sArt != null || sTexShowsCover;
+        sSrcSeq++;
+        sArtSeq++;
+        sMsgSeq++;
+        cancelFade();
+        GpuFade gpu = sGpuFade;
+        if (gpu != null) gpu.finished = true;
+        sGpuFade = null;
+        sUploadOverride = null;
+        boostForFade(false);
+        sKeepPumping = false;
+        KEEP_MAIN.removeCallbacks(KEEP_PUMP);
+        WallpaperVideo.stop("host cover disabled");
+        boolean wasVideo = sCoverVideoActive;
+        videoWindowTakeover(true);
+        sArt = null;
+        sFitted = null;
+        sFittedOf = null;
+        sComposed = null;
+        sLyricBlur = sLyricBlurWant = false;
+        sTexShowsCover = false;
+        dropFrosted();
+        synchronized (sScreenArts) { sScreenArts.clear(); sScreenArtOf = null; }
+        new File(sCtx.getFilesDir(), ART_FILE).delete();
+        new File(sCtx.getFilesDir(), SRC_FILE).delete();
+        new File(sCtx.getFilesDir(), "hyperchanger_hmc_next_card_mode").delete();
+        if (hadCover && !wasVideo) reloadTexture();
+    }
+
     private static synchronized void register(Context ctx) {
         if (sRegistered) return;
         sRegistered = true;
         sCtx = ctx.getApplicationContext();
+        btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.onWallpaperReady(ctx);
+        hostPolicyChanged(btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.coverAllowed());
         checkTakeoverCrash(ctx);
         // A hot reload hands the cover over instead, and re-reading it from disk would compose
         // it again on this thread for a picture the texture already shows.
-        if (sArt == null) loadArt(ctx);
+        if (sArt == null && btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.coverAllowed()) loadArt(ctx);
         // Restored from disk or not: either way the cover that belongs on screen is the one
         // SystemUI holds, and SystemUI has no way to learn ours is missing.
         //
@@ -2235,6 +2277,9 @@ public class WallpaperProbe {
             public void onReceive(Context c, Intent i) {
                 if (!ProbeGuard.admit(this, i)) return;
                 String op = i.getStringExtra("op");
+                if (!btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.coverAllowed()
+                        && !"hello".equals(op) && !"state".equals(op)
+                        && !("art".equals(op) && i.getBooleanExtra("off", false))) return;
                 byte[] carried = i.getByteArrayExtra("jpg");
                 Xp.d(TAG + "recv op=" + op
                         + (carried == null ? " " + i.getExtras() : " jpg=" + carried.length + "B"));
@@ -3087,6 +3132,7 @@ public class WallpaperProbe {
      * Main thread.
      */
     private static void applyArt(Bitmap b, boolean reload, boolean fade) {
+        if (!btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.coverAllowed()) return;
         sTmMain = SystemClock.uptimeMillis();
         // Read before sArt moves: on the way into cover mode this is the lock wallpaper, and on
         // a track change it is the album that is on screen right now.
@@ -3370,6 +3416,7 @@ public class WallpaperProbe {
      * to wait in. Nothing when it is not here or not this one; the push behind brings it then.
      */
     private static void applyKept(String preKey, boolean reload, boolean fade) {
+        if (!btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.coverAllowed()) return;
         Composed c = sComposed;
         int w = sReportedW, h = sReportedH;
         if (c == null || preKey == null || !preKey.equals(c.preKey) || c.sharp.isRecycled()
@@ -4861,6 +4908,8 @@ public class WallpaperProbe {
      * to change - because SystemUI holds its own half of the transition until it hears it.
      */
     private static boolean videoWindowTakeover(boolean on) {
+        // In this OEM bridge true means give back, false means take over.
+        if (!on && !btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.coverAllowed()) return false;
         final int gen = sTakeoverGen.incrementAndGet();
         if (on) {
             sFadeFrom = null;

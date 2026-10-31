@@ -1681,7 +1681,13 @@
     "hmcUnit_minute": "%1$d min ",
     "hmcUnit_second": "%1$d s",
     "hmcAppearanceTab": "Appearance",
-    "hmcFeaturesTab": "Features"
+    "hmcFeaturesTab": "Features",
+    "musicMaster": "音乐锁屏总开关",
+    "musicMasterSummary": "统一控制音乐锁屏和锁屏歌词；关闭后隐藏下方设置",
+    "musicHmcCoverConflict": "检测到 HMC 已启用音乐锁屏，已停用本模块封面和壁纸替换",
+    "musicHmcLyricsConflict": "检测到 HMC 已启用锁屏歌词，已停用本模块锁屏歌词",
+    "musicHmcAllConflict": "检测到 HMC 已启用音乐锁屏和歌词，已自动停用对应功能",
+    "musicHmcCapsuleConflict": "检测到 HMC 已启用锁屏胶囊，已停用本模块锁屏胶囊"
   },
   "Xiaomi 18 Pro 系列 AI 背屏": "Xiaomi 18 Pro Series AI Rear Screen",
   "解锁 AI 功能": "Unlock AI features",
