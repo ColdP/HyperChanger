@@ -44,6 +44,8 @@ internal fun restartRecommendationSnapshot(group: String, preferences: SharedPre
     p.toNotificationIslandSettings()
     readNotificationStackBlurSettings(p)
     readSettingsAppPreferences(p)
+    readSettingsEntryIconRevision(p)
+    readSettingsModuleEntryIconSettings(p)
     readSettingsAdvancedColorStyleSettings(p)
     readSettingsAppScopePreferences(p)
     readMiSettingsPreferences(p)

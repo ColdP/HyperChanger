@@ -1149,6 +1149,9 @@ class HyperSystemUiModule : XposedModule() {
             runCatching {
                 othersHooks.installSettingsEntryLabelHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
             }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install Settings entry label hook", error) }
+            runCatching {
+                othersHooks.installSettingsEntryIconHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+            }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install Settings entry icon hook", error) }
             return
         }
         if (param.packageName == AIRDROP_PACKAGE) {

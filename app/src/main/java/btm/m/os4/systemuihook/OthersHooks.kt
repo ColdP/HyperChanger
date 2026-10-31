@@ -526,6 +526,10 @@ internal class OthersHooks(
         }
     }
 
+    fun installSettingsEntryIconHook(loader: ClassLoader, prefs: SharedPreferences) {
+        SettingsEntryIconHooks().install(module, loader, prefs)
+    }
+
     fun installSettingsEntryLabelHook(loader: ClassLoader, prefs: SharedPreferences) {
         val adapter = runCatching { loader.loadClass(MIUI_SETTINGS_HEADER_ADAPTER) }.getOrNull() ?: return
         val bind = adapter.declaredMethods.firstOrNull {
@@ -1973,7 +1977,7 @@ internal class OthersHooks(
 
     companion object {
         private const val AIRDROP_AVAILABILITY_CLASS = "com.miui.mishare.connectivity.c"
-        private const val SETTINGS_HEADER_ID = 0x4843_0001L
+        private const val SETTINGS_HEADER_ID = SETTINGS_MODULE_ENTRY_HEADER_ID
         private const val MIUI_SETTINGS_HEADER_ADAPTER = "com.android.settings.MiuiSettings\$HeaderAdapter"
         @Volatile private var settingsModuleResourcesLoader: ResourcesLoader? = null
         private const val REAR_SCREEN_APP_WIDGET_PROPERTY = "persist.sys.app.widget.enable"
