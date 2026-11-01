@@ -1,34 +1,40 @@
-HyperChanger Legal Disclaimer
+HyperChanger Disclaimer
 
-Effective date: September 19, 2026
-Last revised: September 19, 2026
+Effective date: November 1, 2026
+Last revised: November 1, 2026
 
-Please read this notice before installing or enabling HyperChanger. It is an independent, experimental, open-source community project. It is not made, maintained, endorsed, sponsored, or authorized by Xiaomi Corporation or any Xiaomi affiliate.
+Back up important data and ensure you can disable the module and recover your device before use. System modifications may cause failures, boot problems, or data loss. Full compatibility is not guaranteed even on HyperOS 4.
 
-1. Supported environment
+## 1. Independent project and compatibility
 
-HyperChanger is designed only for the specific Xiaomi HyperOS 4 builds for which the project is released, including selected beta or developer builds. It is not intended for MIUI, HyperOS 1, 2, or 3, other manufacturers' systems, AOSP, or third-party ROMs. Private classes, methods, resources, and process behavior can change between builds. Running the module outside the supported environment may cause crashes, boot loops, an unusable System UI, or a device that cannot boot.
+1.1 HyperChanger is an independent third-party open-source project with no official authorization from or affiliation with Xiaomi or its affiliates. It does not replace official updates, warranties, or support.
 
-2. Root and framework risks
+1.2 The module targets specific HyperOS 4 builds. System patches, app versions, other modules, and scopes can affect results. Other environments are unsupported; do not force activation.
 
-The module requires an unlocked bootloader, root access, and a compatible LSPosed/Xposed environment. System-level hooks can cause repeated System UI crashes, a black or unresponsive lock screen, broken notifications, launcher failure, excessive battery use, overheating, or loss of other module functionality. Unlocking the bootloader or obtaining root may reduce device security, prevent banking applications from working, and affect the manufacturer's warranty.
+## 2. Possible risks
 
-3. Data and hardware risk
+2.1 Stability and boot: System UI, the launcher, or target apps may crash. Notifications, Control Center, lockscreen, media, and other features may fail. Severe failures may cause bootloops or prevent the system from starting.
 
-You are responsible for maintaining complete, independent backups before installation or configuration. Recovery, reflashing, formatting, storage failure, or a software fault may permanently destroy photos, documents, contacts, messages, keys, and other data. Unusual rendering or always-on features may increase heat, power consumption, display wear, or battery wear. Do not use this software on a device whose failure could endanger people or critical operations.
+2.2 Data and recovery: Failures and subsequent recovery, flashing, or formatting may cause data loss. Keep backups in a reliable separate location. Maintainers cannot guarantee recovery of unbacked-up data.
 
-4. No warranty; limitation of liability
+2.3 Performance and hardware: Blur, animations, always-on display, and continuous rendering may increase heat and battery use. Prolonged static content may increase burn-in risk. Effects depend on the device, settings, and usage.
 
-The software and documentation are provided AS IS and AS AVAILABLE, without warranties of any kind, express, implied, or statutory, including fitness for a particular purpose, merchantability, accuracy, availability, security, or error-free operation. To the maximum extent permitted by law, the maintainers and contributors are not liable for any direct, indirect, incidental, special, punitive, or consequential loss, including device damage, property damage, business interruption, data loss, or loss of access, arising from use, misuse, or inability to use the software.
+2.4 Security and services: Unlocking and root may affect security, integrity checks, payment services, and warranty conditions. Actual consequences depend on provider policies and applicable law; loss of all warranty rights is not automatic.
 
-5. Third-party services
+## 3. As-is provision and liability limits
 
-Optional lyric lookup services, update checks, GitHub, LRCLIB, AMLL TTML, and other third-party interfaces are controlled by their respective providers. The maintainers do not guarantee their availability, accuracy, legality, continuity, or content, and are not responsible for disputes or losses arising from them.
+3.1 Software and documentation are provided AS IS and AS AVAILABLE. To the extent permitted by law, error-free operation, continuous availability, fitness for a particular purpose, and compatibility with future versions are not guaranteed.
 
-6. Support and reports
+3.2 To the extent permitted by law, maintainers and contributors are not liable for device damage, data loss, business interruption, or other losses arising from use, misuse, or inability to use the software. This does not exclude non-excludable liability or limit mandatory consumer protections or open-source license rights.
 
-The project does not promise one-to-one remote recovery or repair. A useful issue report should include a redacted Logcat, device model, exact HyperOS build, module version, enabled scope, and reproducible steps. Remove personal data, tokens, notification text, and account information before publishing logs. Reports from unsupported systems or reports without enough evidence may be closed.
+## 4. Third-party content and services
 
-7. Acceptance
+4.1 Lyrics, artwork, transit images, cloud rules, updates, and other resources come from external platforms. Maintainers cannot control their availability, accuracy, copyright status, or privacy practices. Outages, rate limits, or interface changes may disable features.
 
-By installing, activating, configuring, or otherwise using HyperChanger, you acknowledge these risks and accept responsibility for your device, data, and use of the software. If you do not accept them, do not install or enable the module.
+4.2 Third-party resources are not warranties or endorsements by maintainers. Verify download sources and content permissions. External links, public submissions, and network services are also subject to the relevant platform's rules.
+
+## 5. Reports and support
+
+5.1 Include the device model, exact system version, module version, scopes, reproduction steps, and necessary logs in reports. Missing information may prevent diagnosis. No repair deadline, remote recovery, or per-device adaptation is promised.
+
+5.2 Logs and screenshots may contain notifications, accounts, phone numbers, locations, and credentials. Share only what is necessary and redact it before publication. Do not publish complete personal datasets to report a problem.

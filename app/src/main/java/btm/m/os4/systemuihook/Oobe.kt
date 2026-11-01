@@ -45,9 +45,6 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
@@ -564,35 +561,14 @@ internal fun LegalDocumentPage(
     val content = when (page) { LegalPage.AGREEMENT -> tr("oobe_user_agreement_content", fallback); LegalPage.DISCLAIMER -> tr("oobe_disclaimer_content", fallback); LegalPage.PRIVACY -> tr("oobe_privacy_content", fallback) }
     AppPage(title, back) { padding, scroll ->
         AppList(padding, scroll, 28) {
-            item {
-                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(18.dp)) {
-                    LegalDocumentText(content)
-                    if (showVerificationCode) {
-                        Text(tr("本次验证码：", "本次验证码：") + captcha, color = Color(BRAND_BLUE), modifier = Modifier.padding(top = 24.dp), style = MiuixTheme.textStyles.body2, fontWeight = FontWeight.Bold)
-                        Text(tr("阅读完成后返回上一页输入此验证码。", "阅读完成后返回上一页输入此验证码。"), color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 4.dp), style = MiuixTheme.textStyles.body2)
+            legalDocumentItems(content)
+            if (showVerificationCode) {
+                item {
+                    LegalReadingCard {
+                        Text(tr("本次验证码：", "本次验证码：") + captcha, color = Color(BRAND_BLUE), style = MiuixTheme.textStyles.title4, fontWeight = FontWeight.Bold)
+                        Text(tr("阅读完成后返回上一页输入此验证码。", "阅读完成后返回上一页输入此验证码。"), color = MiuixTheme.colorScheme.onSurfaceVariantSummary, style = MiuixTheme.textStyles.body2)
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun LegalDocumentText(content: String) {
-    val lines = content.lines()
-    Column(Modifier.fillMaxWidth()) {
-        lines.forEachIndexed { index, rawLine ->
-            val line = rawLine.trim()
-            when {
-                line.isEmpty() -> Spacer(Modifier.height(10.dp))
-                index == 0 -> Text(line, style = MiuixTheme.textStyles.title2, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 6.dp))
-                line.startsWith("生效日期") || line.startsWith("最近修订") -> Text(line, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                Regex("^[一二三四五六七八九十]+、").containsMatchIn(line) -> Text(line, style = MiuixTheme.textStyles.title4, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
-                Regex("^\\d+\\.\\d+").containsMatchIn(line) -> {
-                    val prefix = Regex("^\\d+\\.\\d+").find(line)?.value.orEmpty()
-                    Text(buildAnnotatedString { withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(prefix) }; append(line.removePrefix(prefix)) }, style = MiuixTheme.textStyles.body1, modifier = Modifier.padding(bottom = 6.dp))
-                }
-                else -> Text(line, style = MiuixTheme.textStyles.body1, modifier = Modifier.padding(bottom = 6.dp))
             }
         }
     }

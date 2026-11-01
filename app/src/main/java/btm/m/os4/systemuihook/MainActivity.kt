@@ -13125,20 +13125,6 @@ private fun aboutCardColors() = CardDefaults.defaultColors(
     ),
 )
 
-private fun legalLanguage(context: Context): String {
-    val prefs = context.getSharedPreferences("languages", Context.MODE_PRIVATE)
-    val selected = prefs.getString("selected", "system") ?: "system"
-    return when {
-        selected == "en" || selected == "ja" || selected == "zh" -> selected
-        selected == "system" -> when (systemLanguage(context)) {
-            "en" -> "en"
-            "ja" -> "ja"
-            else -> "zh"
-        }
-        else -> "zh"
-    }
-}
-
 private fun setLauncherIconVisible(context: Context, visible: Boolean) {
     runCatching {
         context.packageManager.setComponentEnabledSetting(
@@ -13150,38 +13136,14 @@ private fun setLauncherIconVisible(context: Context, visible: Boolean) {
     }
 }
 
-private fun legalAssetName(page: PageId): String = when (page) {
-    PageId.LEGAL_PRIVACY -> "privacy.txt"
-    PageId.LEGAL_USER_AGREEMENT -> "user_agreement.txt"
-    else -> "disclaimer.txt"
-}
-
 @Composable
 private fun LegalDocument(page: PageId, back: () -> Unit) {
-    val context = LocalContext.current
-    val language = legalLanguage(context)
-    val title = when (page) {
-        PageId.LEGAL_PRIVACY -> tr("隐私政策", "隐私政策")
-        PageId.LEGAL_USER_AGREEMENT -> tr("用户协议", "用户协议")
-        else -> tr("免责声明", "免责声明")
+    val legalPage = when (page) {
+        PageId.LEGAL_PRIVACY -> LegalPage.PRIVACY
+        PageId.LEGAL_USER_AGREEMENT -> LegalPage.AGREEMENT
+        else -> LegalPage.DISCLAIMER
     }
-    val content = remember(page, language) {
-        val file = legalAssetName(page)
-        runCatching {
-            context.assets.open("legal/$language/$file").bufferedReader().use { it.readText() }
-        }.getOrElse {
-            context.assets.open("legal/zh/$file").bufferedReader().use { it.readText() }
-        }
-    }
-    AppPage(title, back) { padding, scroll ->
-        AppList(padding, scroll, 28) {
-            item {
-                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(18.dp)) {
-                    Text(content, style = MiuixTheme.textStyles.body1)
-                }
-            }
-        }
-    }
+    LegalDocumentPage(legalPage, captcha = "", showVerificationCode = false, back = back)
 }
 
 @Composable
@@ -13309,17 +13271,8 @@ private fun OsMissingDialog(show: Boolean, seconds: Int, preview: Boolean, onExi
 }
 
 @Composable
-private fun Disclaimer(back: () -> Unit, captcha: String) = AppPage("免责声明", back) { padding, scroll ->
-    AppList(padding, scroll, 28) {
-        item {
-            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(18.dp)) {
-                Text("HyperChanger 使用免责声明", style = MiuixTheme.textStyles.title2, fontWeight = FontWeight.Bold)
-                Text("本模块通过 Xposed API 调整系统界面与相关应用的显示和行为，仅面向 HyperOS 4 环境设计。由于系统组件版本、厂商实现和第三方模块可能存在差异，非 HyperOS 4 设备上可能出现界面异常、功能失效、应用崩溃或数据丢失。\n\n使用本模块前，请确认你已完成必要的数据备份，并理解启用系统级 Hook 可能带来的风险。由模块导致的任何直接或间接损失由使用者自行承担。模块作者不承诺兼容所有设备、地区版本或未来系统更新。\n\n你可以随时在设置中关闭相关功能，并在出现异常时卸载模块或恢复系统环境。继续使用即表示你已阅读并接受以上条款。", style = MiuixTheme.textStyles.body1, modifier = Modifier.padding(top = 12.dp))
-                Text("本次验证码：$captcha", style = MiuixTheme.textStyles.body2, fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = .58f), modifier = Modifier.padding(top = 20.dp))
-                Text("阅读完成后返回上一页输入此验证码。", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = .68f))
-            }
-        }
-    }
+private fun Disclaimer(back: () -> Unit, captcha: String) {
+    LegalDocumentPage(LegalPage.DISCLAIMER, captcha = captcha, showVerificationCode = true, back = back)
 }
 
 @Composable
@@ -14186,7 +14139,7 @@ private fun LegacyProgressiveTopBarBackground(
                     backdrop = backdrop,
                     shape = { androidx.compose.ui.graphics.RectangleShape },
                     effects = {
-                        blur(10.dp.toPx())
+                        blur(8.dp.toPx())
                         runtimeShaderEffect(
                             key = "about-progressive-blur-alpha-mask",
                             shaderString = PROGRESSIVE_BLUR_ALPHA_MASK_SHADER,
@@ -14227,7 +14180,7 @@ private fun ProgressiveTopBarBackground(
     }
 }
 
-private const val PROGRESSIVE_TOP_BAR_BLUR_RADIUS = 14f
+private const val PROGRESSIVE_TOP_BAR_BLUR_RADIUS = 3.6f
 private const val PROGRESSIVE_TOP_BAR_BLUR_FADE_START = 0.60f
 private const val PROGRESSIVE_TOP_BAR_OVERLAY_ALPHA = 0.94f
 private const val PROGRESSIVE_TOP_BAR_OVERLAY_END = 0.80f

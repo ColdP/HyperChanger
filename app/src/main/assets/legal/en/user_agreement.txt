@@ -1,38 +1,44 @@
 HyperChanger User Agreement
 
-Effective date: September 19, 2026
-Last revised: September 19, 2026
+Effective date: November 1, 2026
+Last revised: November 1, 2026
 
-This agreement governs your use of HyperChanger, an open-source LSPosed system-modification module for Android. Installing, activating, configuring, or running the software means that you have read and accepted this agreement. If you do not agree, do not use the software and remove it from your device.
+Welcome to HyperChanger (the software), an open-source LSPosed module that changes system and application interfaces and behavior on Xiaomi HyperOS 4. Before enabling it, read this agreement, the Disclaimer, and the Privacy Policy, especially the compatibility, data handling, and device recovery information.
 
-1. Eligibility and prerequisites
+## 1. Reading and acceptance
 
-You must use a compatible Xiaomi HyperOS 4 build, an unlocked bootloader, root access, and a compatible LSPosed/Xposed framework. You are responsible for understanding bootloader unlocking, root, module scopes, Fastboot, Recovery, backups, and how to disable or remove a module if Android cannot boot. Do not use this software if you cannot recover your device independently.
+1.1 Decide whether to use the software after understanding these documents. The setup checkbox and verification code confirm reading; they grant no additional permissions and do not waive rights that cannot legally be waived. If you disagree, do not enable the module; disable an active module before uninstalling it if needed.
 
-2. Supported system and safe use
+1.2 Installing the app does not enable every feature. Operation depends on the framework, scopes, and individual settings. Some changes require the target process to reload.
 
-The module is not licensed or intended for MIUI, HyperOS 1-3, other manufacturers' systems, AOSP, or unsupported custom ROMs. Select only the scopes required for the features you use. Do not enable every system package indiscriminately. Review changes after system updates and disable the module before troubleshooting a crash.
+## 2. Environment and safe use
 
-3. License and intellectual property
+2.1 The software targets specific HyperOS 4 builds. Compatibility is not guaranteed for every device, regional build, beta, or future update. MIUI, HyperOS 1–3, other manufacturers' systems, AOSP, and unverified custom ROMs are unsupported.
 
-The project is distributed under the GNU Affero General Public License, version 3 or, at your option, any later version (AGPL-3.0-or-later). Your rights to copy, modify, and redistribute the code are subject to the chosen license version and its notices, including corresponding-source obligations when distributing the software or allowing users to interact with a modified version over a network. The full license is included in the app and in the repository LICENSE file. Components from other open-source projects retain their original licenses and copyrights. Xiaomi, HyperOS, MIUI, and other marks belong to their respective owners and are referenced only to describe compatibility; no endorsement or affiliation is implied.
+2.2 Module features require a compatible LSPosed framework and environment, generally involving bootloader unlocking and root. Understand scopes, backups, disabling modules, and recovery. Do not enable the module if you cannot handle startup failures independently.
 
-4. Prohibited conduct
+2.3 Enable only the scopes you need. Back up important data before changes and recheck compatibility after system updates. If problems occur, disable the relevant feature or module before investigating conflicts.
 
-You must not use the module to violate law or another person's rights, obtain unauthorized data, interfere with communications or network security, or distribute harmful content. You must not repackage the software with malware, spyware, forced advertising, or unrelated plugins. You must not misrepresent this free open-source project as an official Xiaomi product or sell it as a proprietary paid product.
+## 3. Open-source license and intellectual property
 
-5. Third-party content and services
+3.1 This project is licensed under AGPL-3.0-or-later. You may copy, modify, and redistribute it, including commercial uses permitted by the license, while meeting copyright notice, license retention, and corresponding-source obligations. This agreement does not reduce rights granted by the license. See LICENSE in the repository for full terms.
 
-Optional lyric providers, GitHub, update servers, and other external services have their own terms and privacy policies. You are responsible for lawful use of content returned by them, including copyright compliance. The maintainers do not control or guarantee third-party services.
+3.2 Third-party components retain their respective licenses and copyrights; see the app's open-source notices and the repository NOTICE. Xiaomi, HyperOS, MIUI, and other marks belong to their owners. References describe compatibility and imply no official authorization, partnership, or endorsement.
 
-6. Availability and changes
+## 4. Conduct and third-party services
 
-This is a volunteer project. The maintainers do not promise continuous availability, compatibility with every device, support for future builds, or one-to-one technical assistance. They may modify, remove, suspend, or discontinue features or the project when technical, safety, resource, or legal circumstances require it.
+4.1 Do not use the software to obtain data unlawfully, infringe others' rights, or compromise system or network security. Do not insert malicious code, impersonate official releases, or conceal modifications. Import presets, media, and script-like content only from trusted sources.
 
-7. Disclaimer and governing law
+4.2 Online lyrics, artwork, transit assets, updates, device presets, and other resources are subject to their providers' terms and copyright rules. Use content with appropriate permission, and do not publicly share settings or logs containing other people's information or sensitive data.
 
-The separate Legal Disclaimer and Privacy Policy form part of the information governing use of the software. The software is provided AS IS. This agreement is governed by the laws of the People's Republic of China, without limiting any mandatory consumer rights that cannot lawfully be waived. If one provision is invalid, the remaining provisions remain effective.
+## 5. Maintenance and changes
 
-8. Acceptance
+5.1 This community project is provided as is. Continuous updates, universal compatibility, and individual technical assistance are not promised. Features may change or stop due to system, interface, resource, or legal constraints. Read release notes before updating.
 
-By continuing to use HyperChanger, you confirm that you understand the technical risks, have made appropriate backups, and accept this agreement.
+5.2 Material changes to terms or data handling will update these documents and revision dates with the release. Read them before using a new version. You may stop using the software if you disagree, without losing rights protected by law.
+
+## 6. Liability, law, and contact
+
+6.1 See the Disclaimer for device and data risks, third-party limitations, and liability boundaries. All liability limits apply only where permitted by law and do not exclude liability that cannot lawfully be excluded.
+
+6.2 This agreement is governed by the laws of the People's Republic of China, without affecting applicable mandatory protections. If a provision is invalid, the remainder remains effective. Report issues at https://github.com/ColdP/HyperChanger after removing sensitive personal information from public submissions.

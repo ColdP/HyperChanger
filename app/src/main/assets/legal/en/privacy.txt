@@ -1,39 +1,58 @@
-HyperChanger Privacy and Data Protection Policy
+HyperChanger Privacy Policy
 
-Effective date: September 19, 2026
-Last revised: September 19, 2026
+Effective date: November 1, 2026
+Last revised: November 1, 2026
 
-This policy explains how HyperChanger handles information. The project follows local-first processing, data minimization, and transparency principles.
+This policy explains data use, local storage, network access, and available controls. HyperChanger requires no account and does not build user profiles for advertising or commercial behavioral analytics. Network features still send requests and necessary parameters to their providers.
 
-1. Local storage
+## 1. Settings and local files
 
-HyperChanger does not operate a central service that collects device fingerprints, identity numbers, or usage behavior. Settings, appearance choices, material values, widget configuration, and other preferences are stored in the app's private Android storage. Imported images, videos, logos, JSON presets, and lyric files remain on the device unless you deliberately export or share them. The app does not silently upload these files.
+1.1 Interface settings, scope-related configuration, images, videos, lyrics, presets, downloaded resources, and caches are mainly stored on the device. Necessary settings and assets are shared with enabled target processes through framework remote preferences or local interfaces to run selected features. Remote preferences here mean communication between local processes, not cloud synchronization.
 
-2. Optional network communication
+1.2 Imports, exports, and sharing use files, QR codes, or system sharing channels you select. The software does not automatically upload local settings or personal assets as cloud backups. Recipient apps and cloud storage services you choose may have separate data policies.
 
-Core hooks and configuration work offline. Network access is limited to features that you enable or request:
+## 2. Data used by features
 
-• Online lyric lookup sends the currently playing title, artist, and album to the selected public lyric service over HTTPS. It does not intentionally send IMEI, MEID, MAC address, Android ID, OAID, ICCID, location, contacts, or account credentials.
-• Update checking requests release metadata, notes, and download links from GitHub or the configured update service. Normal network information such as IP address and User-Agent is handled by the network provider. The project does not use it to identify or profile you.
+2.1 Enabled notification, island, lockscreen, and media features may read notification content, app information, media titles, artists, albums, duration, artwork, playback state, and transit or pickup card information within target processes for display, matching, and interaction. Content may appear on the lockscreen or other visible surfaces; control visibility as needed.
 
-You may disable online lyric lookup and automatic update checks. The app can then operate without these network requests.
+2.2 With calendar permission and the corresponding schedule display enabled, the software reads necessary event information such as titles, start times, and all-day status for local display. App lists support scopes, app selection, and related configuration; they are not uploaded for advertising profiles.
 
-3. Permissions and privileged access
+2.3 Enhanced OCR passes images through a local interface to the software's local recognition engine and returns results to Portal. Downloading models does not require uploading recognition images. The target app's original recognition flow and services you subsequently use remain subject to their own policies.
 
-Root access is used only for user-initiated scope restart or related configuration actions. The app does not use root to silently search private storage, alter unrelated app data, weaken security controls, or install a persistent backdoor. File and media access is limited to files you select for import, export, preview, or sharing. Network permission is used only for the services described above.
+## 3. Network: music and dynamic content
 
-4. No advertising or analytics
+3.1 Enabled online music features send matching parameters such as title, artist, album, duration, song identifier, or resource URL to selected lyric, track information, or artwork providers. Providers may include NetEase Cloud Music, QQ Music, Kugou, Kuwo, LRCLIB, AMLL/TTML repositories, Apple Music/iTunes, MusicBrainz, and their CDNs or mirrors. Actual requests depend on enabled features and sources.
 
-The open-source project does not include advertising SDKs, commercial analytics, credit-scoring components, or behavioral tracking libraries. The maintainers do not sell, rent, trade, or share app data with data brokers, advertisers, or unrelated third parties.
+3.2 Transit card images and optional cloud pickup rules may access HeyTap/ColorOS resource services. Transit asset paths may contain the selected city or landmark name, potentially revealing an area associated with a journey. Cloud rule requests may include client information such as the Android API version. These requests should not be considered fully anonymous.
 
-5. Logs and user-submitted content
+## 4. Network: updates, resources, and links
 
-Android logs may contain notification text, package names, clipboard fragments, account names, addresses, tokens, or other sensitive information. Before submitting a log to GitHub or another public place, you are responsible for reviewing and redacting personal data. Information you voluntarily post publicly may be visible to others and is governed by that service's policy.
+4.1 Update checks, update package downloads, contributor lists and avatars, online device presets, and OCR model downloads access GitHub Pages, GitHub/GitHub Raw, Gitee, or the service hosting the resource URL.
 
-6. Control and deletion
+4.2 App startup refreshes the BOSE device support list, trying GitHub Pages first and Gitee on failure. This downloads a public device list without needing to upload the local device codename. Disabling lyrics or update checks does not disable all app network activity.
 
-You can turn off optional online functions at any time. Clearing the app's storage removes its local preferences and private files. Uninstalling removes app-private data, except files you deliberately exported to shared storage or another service. You control whether those exported files remain.
+4.3 Repository, website, group, and support links open a browser or another app whose service governs its network and data processing. Preset contributions, Issues, and shared logs may make the content you choose to send public.
 
-7. Changes and contact
+## 5. Connection information and third parties
 
-This policy may change when HyperOS, project features, or legal requirements change. The current version is included with the application and release notes. Questions or privacy concerns may be raised through the project's public GitHub repository.
+5.1 Services, intermediary CDNs, and mirrors can observe the source IP, access time, request path, query parameters, and User-Agent. Some requests include the module or Android API version. IP is connection information rather than an identity field added by this software. Providers may retain logs or process data in different regions under their policies.
+
+5.2 Resource requests are not intended to collect IMEI, Android ID, contacts, or account passwords. The software includes no commercial advertising or behavioral analytics SDK and does not sell personal data. This does not mean third parties do not log access and does not cover files or feedback you actively submit.
+
+## 6. Permissions and system capabilities
+
+6.1 Root and framework capabilities support environment checks, applying settings, target process operations, log access, and user-selected installation, among other functions; they are not limited to restarting scopes. Enabling the module allows hooks in selected target processes. Grant scopes and superuser access carefully.
+
+6.2 File selection supports selected images, videos, lyrics, and preset import/export. Wallpaper permission supports wallpaper features; app queries support app selection; notifications support relevant status messages; calendar access supports schedules; package installation supports updates you initiate; boot events support relevant initialization. The system controls availability and revocation of permissions.
+
+## 7. Logs, retention, and deletion
+
+7.1 Diagnostic logs may be generated locally. Logs you access, export, or share may contain notifications, package names, media information, and other sensitive data. Review and remove credentials, accounts, contact details, and journeys before choosing recipients. Public Issues may be indexed or copied; do not submit secrets there.
+
+7.2 Settings and imported files generally remain until changed, deleted, cleared, or uninstalled; the system may also clear caches. Clearing app data or uninstalling usually removes private app data but does not guarantee physical unrecoverability. Exported public files, other target apps' caches, framework copies, and third-party records are not automatically deleted and must be managed separately.
+
+## 8. Choices and policy updates
+
+8.1 Disable unwanted features, revoke permissions, disable scopes, or uninstall the software. To block all connections, use system network controls or work offline, accepting that network features will be unavailable. A single feature switch does not immediately stop other features or requests already sent.
+
+8.2 This policy is updated as features change, with a revision date on this page. Raise privacy questions through Issues at https://github.com/ColdP/HyperChanger. This channel is normally public; do not include sensitive personal information.
