@@ -69,7 +69,7 @@ object ModulePresetCodec {
         MODULE_PRESET_GROUPS.forEach { groupName ->
             val values = JSONObject()
             context.getSharedPreferences(groupName, Context.MODE_PRIVATE).all
-                .filterKeys(::isExcludedFromModulePreset)
+                .filterKeys { !isExcludedFromModulePreset(it) }
                 .forEach { (key, value) ->
                     value ?: return@forEach
                     values.put(key, encodeValue(value))

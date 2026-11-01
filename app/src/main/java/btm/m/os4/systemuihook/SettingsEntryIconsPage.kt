@@ -35,7 +35,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 private fun SettingsEntryIconEntry.label() = tr("settingsIcon_$id", title)
 
 @Composable
-internal fun SettingsEntryIconsPage(back: () -> Unit) {
+internal fun SettingsEntryIconsPage(openAppearance: () -> Unit, back: () -> Unit) {
     val context = LocalContext.current
     val store = remember(context) { SettingsEntryIconStore(context) }
     val service by HookApplication.service.collectAsStateWithLifecycle()
@@ -72,6 +72,10 @@ internal fun SettingsEntryIconsPage(back: () -> Unit) {
                         title = tr("settingsIconsBatchImport", "批量导入"),
                         enabled = loaded && !busy,
                         onClick = { showImport = true },
+                    )
+                    ArrowPreference(
+                        title = tr("settingsEntryAppearance", "系统设置首页入口外观调整"),
+                        onClick = openAppearance,
                     )
                     if (saved.icons.isNotEmpty()) ArrowPreference(
                         title = tr("settingsIconsResetAll", "全部恢复默认"),

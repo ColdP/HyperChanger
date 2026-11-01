@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 class HookApplication : Application(), XposedServiceHelper.OnServiceListener {
+    internal val nativeBoseSupport by lazy { NativeBoseSupportStore(this) }
+
     override fun onCreate() {
         super.onCreate()
         ModuleLogger.attachApp(this)
@@ -18,6 +20,8 @@ class HookApplication : Application(), XposedServiceHelper.OnServiceListener {
     }
 
     override fun onServiceBind(service: XposedService) {
+        runCatching { nativeBoseSupport.syncRemote(service) }
+            .onFailure { ModuleLog.w("NativeBose", "Could not sync native BOSE device list", it) }
         runCatching { PortalSettings.syncRemote(this, service) }
             .onFailure { ModuleLog.w("Portal", "Could not sync Portal settings", it) }
         runCatching { ContactsDialerSettings.syncRemote(this, service) }
@@ -38,6 +42,7 @@ class HookApplication : Application(), XposedServiceHelper.OnServiceListener {
     }
 
     override fun onServiceDied(service: XposedService) {
+        nativeBoseSupport.onServiceDied(service)
         if (serviceState.value === service) serviceState.value = null
     }
 

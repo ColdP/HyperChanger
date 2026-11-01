@@ -74,7 +74,7 @@ The project is still in testing and primarily targets **HyperOS 4 (Android 17)**
 ### Settings and rear screen
 
 - Customize Settings home and device pages with backgrounds, device cards, logos, device images, and displayed specifications; add a module shortcut.
-- Customize Settings entry labels, unlock additional auto-lock and refresh-rate options, show Google services and saved Wi-Fi passwords, and configure BOSE audio effects and badges.
+- Customize Settings entry labels, icons, module entries, and sound-effect badges; adjust home-page entry icon and text scaling and row spacing; add more auto-lock and refresh-rate options, show Google services entries and saved Wi-Fi passwords, and configure BOSE audio effects and badges.
 - Unlock selected rear-screen AI features, manage imported rear-screen apps, and choose apps for the rear-screen music widget.
 - Swipe left from the rear screen's right edge to launch a selected app, and optionally allow all Activities to open on the rear screen. Apps may still need their own adaptations.
 - Customize the rear-screen wallpaper count limit and fix conflicts between theme modifications and rear-screen theme/wallpaper authorization. These options require the Themes scope.

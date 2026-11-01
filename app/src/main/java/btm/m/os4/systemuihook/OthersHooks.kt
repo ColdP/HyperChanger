@@ -559,25 +559,33 @@ internal class OthersHooks(
 
     /** Sound effect support for com.miui.misound: unlock BOSE and rebrand its badge. */
     fun installSoundEffectHooks(loader: ClassLoader, prefs: SharedPreferences) {
-        runCatching {
-            val getBoolean = Class.forName("android.os.SystemProperties").getDeclaredMethod(
-                "getBoolean", String::class.java, Boolean::class.javaPrimitiveType,
-            )
-            module.hook(getBoolean)
-                .setExceptionMode(ExceptionMode.PROTECTIVE)
-                .setId("hyperchanger:sound-effect-props")
-                .intercept { chain ->
-                    val key = chain.getArg(0) as? String
-                    if (key == AUDIO_PROP_BOSE) readSoundEffectPreferences(prefs).boseEnabled else chain.proceed()
-                }
-        }
-        runCatching {
-            val gate = loader.loadClass("z.m")
-            gate.methods.firstOrNull { it.name == "B" && it.parameterCount == 0 }?.let { target ->
-                hookDeoptimized(target)
+        val nativeBosePrefs = module.getRemotePreferences(NATIVE_BOSE_PREFERENCES)
+        if (!isNativeBoseDevice(nativeBosePrefs)) {
+            runCatching {
+                val getBoolean = Class.forName("android.os.SystemProperties").getDeclaredMethod(
+                    "getBoolean", String::class.java, Boolean::class.javaPrimitiveType,
+                )
+                module.hook(getBoolean)
                     .setExceptionMode(ExceptionMode.PROTECTIVE)
-                    .setId("hyperchanger:sound-effect-gate")
-                    .intercept { readSoundEffectPreferences(prefs).boseEnabled }
+                    .setId("hyperchanger:sound-effect-props")
+                    .intercept { chain ->
+                        val key = chain.getArg(0) as? String
+                        if (key == AUDIO_PROP_BOSE && !isNativeBoseDevice(nativeBosePrefs)) {
+                            readSoundEffectPreferences(prefs).boseEnabled
+                        } else chain.proceed()
+                    }
+            }
+            runCatching {
+                val gate = loader.loadClass("z.m")
+                gate.methods.firstOrNull { it.name == "B" && it.parameterCount == 0 }?.let { target ->
+                    hookDeoptimized(target)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("hyperchanger:sound-effect-gate")
+                        .intercept { chain ->
+                            if (isNativeBoseDevice(nativeBosePrefs)) chain.proceed()
+                            else readSoundEffectPreferences(prefs).boseEnabled
+                        }
+                }
             }
         }
         runCatching {
@@ -645,7 +653,7 @@ internal class OthersHooks(
     /** Badge drawable for the selected mode, or null to leave the stock one alone. */
     private fun audioLogoDrawable(res: Resources, id: Int, prefs: SharedPreferences): Drawable? {
         val settings = readSoundEffectPreferences(prefs)
-        if (!settings.boseEnabled) return null
+        if (!settings.supportsBose(isNativeBoseDevice(module.getRemotePreferences(NATIVE_BOSE_PREFERENCES)))) return null
         if (settings.logoMode == AUDIO_LOGO_NONE || settings.logoMode == AUDIO_LOGO_BOSE) return null
         var cached = boseLogoResId.get()
         if (cached <= 0) {
@@ -680,7 +688,8 @@ internal class OthersHooks(
     /** Adds the badge as a bottom-aligned view on the regular sound page when BOSE is off. */
     private fun attachAudioBadge(fragment: Any?, root: android.view.ViewGroup, prefs: SharedPreferences) {
         val settings = readSoundEffectPreferences(prefs)
-        if (settings.boseEnabled || settings.logoMode == AUDIO_LOGO_NONE) return
+        if (settings.supportsBose(isNativeBoseDevice(module.getRemotePreferences(NATIVE_BOSE_PREFERENCES))) ||
+            settings.logoMode == AUDIO_LOGO_NONE) return
         if (fragment == null) return
         val screen = runCatching {
             fragment.javaClass.getMethod("getPreferenceScreen").invoke(fragment)

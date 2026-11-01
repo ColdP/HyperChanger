@@ -143,6 +143,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.core.view.WindowCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import androidx.core.graphics.createBitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -235,6 +236,11 @@ class MainActivity : ComponentActivity() {
         window.navigationBarColor = Color.TRANSPARENT
         setContent { Root(hookStore, navigationStore, lockscreenCapsuleStore, cameraStore, deviceProfileStore, appearanceStore, airDropStore) }
     }
+
+    override fun onStart() {
+        super.onStart()
+        lifecycleScope.launch { (application as HookApplication).nativeBoseSupport.refresh() }
+    }
 }
 
 private enum class Tab { CATEGORY, SETTINGS }
@@ -300,7 +306,7 @@ private enum class PageId {
     GESTURE_HANDLE_STYLE, DESKTOP, DESKTOP_MATERIAL,
     ISLAND, ISLAND_COLLAPSED, ISLAND_EXPANDED, ISLAND_EXPANDED_BACKGROUND, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_HEADER_SETTINGS, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_ADJUSTMENT, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_MUSIC, LOCKSCREEN_CAPSULE, LOCKSCREEN_SHORTCUT_BACKGROUND, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
     DEVICE_PROFILE_PRESETS, DEVICE_PROFILE_CLOUD_PRESETS, CUSTOM_DEPTH_WALLPAPER,
-    SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, SETTINGS_ENTRY_ICONS, THEME_AND_COLOR, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
+    SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, SETTINGS_ENTRY_ICONS, SETTINGS_ENTRY_APPEARANCE, THEME_AND_COLOR, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
     SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, PORTAL_MATERIAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND,
 }
@@ -981,6 +987,7 @@ private fun Root(
                 settingsAppStore.syncRemote(it)
                 SettingsEntryIconStore(context).syncRemote(it)
                 SettingsModuleEntryIconStore(context).syncRemote(it)
+                SettingsEntryAppearanceSettingsStore(context).syncRemote(it)
                 appThemeStore.syncRemote(it)
                 SettingsAdvancedColorStyleSettingsStore(context).syncRemote(it)
                 superXiaoAiStore.syncRemote(it)
@@ -4086,6 +4093,9 @@ private fun SystemSettings(
     }
     val soundEffectStore = remember(cpuIconContext) { SoundEffectPreferencesStore(cpuIconContext) }
     var soundEffect by remember { mutableStateOf(soundEffectStore.settings) }
+    val nativeBoseSupported by (cpuIconContext.applicationContext as HookApplication)
+        .nativeBoseSupport.supported.collectAsStateWithLifecycle()
+    val boseSupported = soundEffect.supportsBose(nativeBoseSupported)
     LaunchedEffect(soundEffectService) {
         soundEffectService?.let {
             soundEffectStore.syncRemote(it)
@@ -4123,17 +4133,19 @@ private fun SystemSettings(
     AppList(padding, scroll) {
         item {
             Group(tr("音效设置", "音效设置")) {
-                SwitchPreference(
-                    title = tr("启用 BOSE 音效", "启用 BOSE 音效"),
-                    summary = tr("在音效设置中启用 BOSE 调音。仅解锁系统隐藏的调音方案，不保证对音质有提升作用。", "在音效设置中启用 BOSE 调音。仅解锁系统隐藏的调音方案，不保证对音质有提升作用。"),
-                    checked = soundEffect.boseEnabled,
-                    onCheckedChange = { value ->
-                        soundEffectStore.update(soundEffectService) { it.copy(boseEnabled = value) }
-                        soundEffect = soundEffectStore.settings
-                    },
-                )
+                if (!nativeBoseSupported) {
+                    SwitchPreference(
+                        title = tr("启用 BOSE 音效", "启用 BOSE 音效"),
+                        summary = tr("在音效设置中启用 BOSE 调音。仅解锁系统隐藏的调音方案，不保证对音质有提升作用。", "在音效设置中启用 BOSE 调音。仅解锁系统隐藏的调音方案，不保证对音质有提升作用。"),
+                        checked = soundEffect.boseEnabled,
+                        onCheckedChange = { value ->
+                            soundEffectStore.update(soundEffectService) { it.copy(boseEnabled = value) }
+                            soundEffect = soundEffectStore.settings
+                        },
+                    )
+                }
                 Column(Modifier.fillMaxWidth()) {
-                    val logoItems = if (soundEffect.boseEnabled) {
+                    val logoItems = if (boseSupported) {
                         listOf(
                             tr("BOSE", "BOSE"),
                             tr("Xiaomi", "Xiaomi"),
@@ -4152,7 +4164,7 @@ private fun SystemSettings(
                         )
                     }
                     // Without BOSE the badge is an extra element, so "hide it" is a valid choice.
-                    val logoOffset = if (soundEffect.boseEnabled) 1 else 0
+                    val logoOffset = if (boseSupported) 1 else 0
                     OverlayDropdownPreference(
                         title = tr("音效徽标", "音效徽标"),
                         items = logoItems,
@@ -5402,7 +5414,8 @@ private fun Detail(
         PageId.DEVICE_PROFILE_PRESETS -> DeviceProfilePresetsPage(deviceProfile, updateDeviceProfile, { openPage(PageId.DEVICE_PROFILE_CLOUD_PRESETS) }, back)
         PageId.DEVICE_PROFILE_CLOUD_PRESETS -> CloudDeviceProfilePresetsPage(updateDeviceProfile, back)
         PageId.SETTINGS_ENTRY_LABELS -> SettingsEntryLabelsPage(settingsApp, updateSettingsApp, back)
-        PageId.SETTINGS_ENTRY_ICONS -> SettingsEntryIconsPage(back)
+        PageId.SETTINGS_ENTRY_ICONS -> SettingsEntryIconsPage({ openPage(PageId.SETTINGS_ENTRY_APPEARANCE) }, back)
+        PageId.SETTINGS_ENTRY_APPEARANCE -> SettingsEntryAppearancePage(back)
         PageId.THEME_AND_COLOR -> ThemeAndColorPage(settings, update, appThemeStore, service, back)
         PageId.SETTINGS_APPEARANCE_HOME -> SettingsAppearancePage(APPEARANCE_SLOT_HOME, appearance, updateAppearance, onPickAppearanceHome, onClearAppearanceHome, back)
         PageId.SETTINGS_APPEARANCE_DEVICE -> SettingsAppearancePage(APPEARANCE_SLOT_DEVICE, appearance, updateAppearance, onPickAppearanceDevice, onClearAppearanceDevice, back)

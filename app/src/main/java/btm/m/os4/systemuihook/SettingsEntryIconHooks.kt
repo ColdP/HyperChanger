@@ -11,10 +11,14 @@ import android.os.Binder
 import android.os.ParcelFileDescriptor
 import android.os.Process
 import android.view.View
+import android.view.ViewGroup
 import android.widget.ImageView
+import android.widget.TextView
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 import io.github.libxposed.api.XposedModule
 import java.io.File
+import java.util.WeakHashMap
+import kotlin.math.roundToInt
 
 /** One cache owner per Settings installation, independent of the existing label hook. */
 internal class SettingsEntryIconHooks {
@@ -22,6 +26,15 @@ internal class SettingsEntryIconHooks {
     private var icons: Map<String, Bitmap> = emptyMap()
     private var moduleRevision = Long.MIN_VALUE
     private var moduleIcon: Bitmap? = null
+    private val originalRowSpacing = WeakHashMap<View, RowSpacing>()
+
+    private data class RowSpacing(
+        val leftPadding: Int,
+        val topPadding: Int,
+        val rightPadding: Int,
+        val bottomPadding: Int,
+        val margins: IntArray?,
+    )
 
     fun install(module: XposedModule, loader: ClassLoader, prefs: SharedPreferences) {
         val adapter = loader.loadClass("com.android.settings.MiuiSettings\$HeaderAdapter")
@@ -38,8 +51,10 @@ internal class SettingsEntryIconHooks {
                 runCatching {
                     val nextRevision = readSettingsEntryIconRevision(prefs)
                     val moduleSettings = readSettingsModuleEntryIconSettings(prefs)
-                    if (nextRevision == 0L && !moduleSettings.enabled) return@runCatching
+                    val appearance = readSettingsEntryAppearanceSettings(prefs)
+                    if (nextRevision == 0L && !moduleSettings.enabled && !appearance.anyEnabled) return@runCatching
                     val holder = chain.getArg(0) ?: return@runCatching
+                    applySettingsEntryAppearance(holder, appearance)
                     val icon = holder.javaClass.getField("icon").get(holder) as? ImageView ?: return@runCatching
                     if (icon.visibility != View.VISIBLE) return@runCatching
                     val header = getItem.invoke(chain.thisObject, chain.getArg(1)) ?: return@runCatching
@@ -76,6 +91,57 @@ internal class SettingsEntryIconHooks {
                 }
                 result
             }
+    }
+
+    private fun applySettingsEntryAppearance(holder: Any, settings: SettingsEntryAppearanceSettings) {
+        val icon = runCatching { holder.javaClass.getField("icon").get(holder) as? ImageView }.getOrNull()
+        val title = runCatching { holder.javaClass.getField("title").get(holder) as? TextView }.getOrNull()
+        val itemView = runCatching { holder.javaClass.getField("itemView").get(holder) as? View }.getOrNull()
+        val iconScale = if (settings.iconScaleEnabled) 1f + settings.iconScale / 100f else 1f
+        val textScale = if (settings.textScaleEnabled) 1f + settings.textScale / 100f else 1f
+        icon?.let {
+            it.scaleX = iconScale.coerceIn(0f, 2f)
+            it.scaleY = iconScale.coerceIn(0f, 2f)
+        }
+        title?.let {
+            it.scaleX = textScale.coerceIn(0f, 2f)
+            it.scaleY = textScale.coerceIn(0f, 2f)
+        }
+        itemView?.let {
+            applyRowSpacing(it, settings)
+        }
+    }
+
+    private fun applyRowSpacing(view: View, settings: SettingsEntryAppearanceSettings) {
+        val original = originalRowSpacing.getOrPut(view) {
+            RowSpacing(
+                leftPadding = view.paddingLeft,
+                topPadding = view.paddingTop,
+                rightPadding = view.paddingRight,
+                bottomPadding = view.paddingBottom,
+                margins = (view.layoutParams as? ViewGroup.MarginLayoutParams)?.let {
+                    intArrayOf(it.leftMargin, it.topMargin, it.rightMargin, it.bottomMargin)
+                },
+            )
+        }
+        val factor = if (settings.rowSpacingEnabled) {
+            (1f + settings.rowSpacing / 100f).coerceIn(0f, 2f)
+        } else 1f
+        view.setPadding(
+            original.leftPadding,
+            (original.topPadding * factor).roundToInt(),
+            original.rightPadding,
+            (original.bottomPadding * factor).roundToInt(),
+        )
+        val margins = original.margins
+        val layoutParams = view.layoutParams
+        if (margins != null && layoutParams is ViewGroup.MarginLayoutParams) {
+            layoutParams.leftMargin = margins[0]
+            layoutParams.topMargin = (margins[1] * factor).roundToInt()
+            layoutParams.rightMargin = margins[2]
+            layoutParams.bottomMargin = (margins[3] * factor).roundToInt()
+            view.layoutParams = layoutParams
+        }
     }
 }
 
