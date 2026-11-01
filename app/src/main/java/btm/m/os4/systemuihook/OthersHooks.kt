@@ -746,7 +746,7 @@ internal class OthersHooks(
         }
     }
 
-    /** Restore the full color-style page using HyperLight's simplified-mode gate override. */
+    /** Restore the full color-style page using the simplified-mode gate override. */
     fun installSettingsAdvancedColorStyleHook(loader: ClassLoader, prefs: SharedPreferences) {
         if (!readSettingsAdvancedColorStyleSettings(prefs).enabled) return
         val target = loader.loadClass("com.android.settings.display.ScreenEffectFragment")

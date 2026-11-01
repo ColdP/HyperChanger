@@ -224,7 +224,7 @@ Issue には、端末モデル、Android / HyperOS のバージョン、モジ�
 
 ## ソースコードからのビルド
 
-必要な環境は、JDK 21（CI と同じ）、Android SDK 37、NDK r28c（28.2.13676358）、CMake 3.22.1、および Android Gradle Plugin 9.2.1 に対応する Android Studio またはプロジェクトの Gradle Wrapper（9.6.1）です。[app/build.gradle.kts](app/build.gradle.kts) の NDK パスはリポジトリ内の `.build-tmp/android-ndk-r28c` に固定されています。そこに NDK を配置するか、インストール済み NDK へのディレクトリリンクを作成してください。[CI 設定](.github/workflows/android.yml) も参照できます。
+必要な環境は、JDK 21（CI と同じ）、Android SDK 37、NDK r30（30.0.16248370）、CMake 3.22.1、および Android Gradle Plugin 9.2.1 に対応する Android Studio またはプロジェクトの Gradle Wrapper（9.6.1）です。[app/build.gradle.kts](app/build.gradle.kts) の NDK パスはリポジトリ内の `.build-tmp/android-ndk-r30` に固定されています。そこに NDK を配置するか、インストール済み NDK へのディレクトリリンクを作成してください。[CI 設定](.github/workflows/android.yml) も参照できます。
 
 ```bash
 git clone https://github.com/ColdP/HyperChanger.git

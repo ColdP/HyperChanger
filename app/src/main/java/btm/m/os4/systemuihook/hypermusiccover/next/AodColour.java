@@ -227,28 +227,6 @@ final class AodColour {
         });
     }
 
-    /**
-     * Counter-hook for HyperLight's "统一柔光玻璃" (its SoftGlassMaterialHook).
-     *
-     * HyperLight hooks {@code View.setMiGlass(float[])} and, for any view its classifier admits,
-     * rewrites the whole 42-float MiGlass array to its soft-glass preset - indices 0..36, and
-     * [34] and [36] in particular. Index 36 is the liquid-glass channel this module drives
-     * through {@code updateGlassValue -> glassData[36]}; rewriting it is what turns the clock
-     * from 液态玻璃 into plain glass ("非液态").
-     *
-     * Its classifier (gu1.o) admits a view whose setMiGlass happens with a
-     * notification/shade/control-centre frame on the stack, which is exactly the media-card ->
-     * cover-mode transition - which is why the clock comes up liquid after a restart and loses it
-     * a moment after music starts, rather than immediately.
-     *
-     * The crucial asymmetry: HyperLight rewrites the COPY handed to setMiGlass, never the view's
-     * own {@code glassData} field, so the field still holds the OEM's liquid values. Handing the
-     * field back for the clock's own glyphs is the whole fix.
-     *
-     * Armed from the clock container's onAttachedToWindow rather than at onPackageLoaded - that
-     * event reliably fires after both modules are loaded, so this hook registers AFTER HyperLight's
-     * and runs last in the chain, where the last writer to args[0] is what the original receives.
-     */
     /** Rec. 709 luminance of a glass colour triple, which is what an even grey has to match. */
     static float luminance(float r, float g, float b) {
         return 0.2126f * r + 0.7152f * g + 0.0722f * b;

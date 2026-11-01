@@ -23,10 +23,10 @@ jobs:
           distribution: temurin
           cache: gradle
 
-      - name: Install Android NDK r28c
+      - name: Install Android NDK r30
         uses: android-actions/setup-android@v3
         with:
-          packages: 'ndk;28.2.13676358'
+          packages: 'ndk;30.0.16248370'
 
       - name: Verify Android NDK
         shell: bash
@@ -39,7 +39,7 @@ jobs:
             echo "Android SDK path is not set."
             exit 1
           fi
-          NDK_DIR="$SDK_ROOT/ndk/28.2.13676358"
+          NDK_DIR="$SDK_ROOT/ndk/30.0.16248370"
           test -f "$NDK_DIR/source.properties"
           cat "$NDK_DIR/source.properties"
 
@@ -48,11 +48,11 @@ jobs:
         run: |
           set -euo pipefail
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-          NDK_DIR="$SDK_ROOT/ndk/28.2.13676358"
+          NDK_DIR="$SDK_ROOT/ndk/30.0.16248370"
           mkdir -p .build-tmp
-          rm -rf .build-tmp/android-ndk-r28c
-          ln -s "$NDK_DIR" .build-tmp/android-ndk-r28c
-          test -f .build-tmp/android-ndk-r28c/source.properties
+          rm -rf .build-tmp/android-ndk-r30
+          ln -s "$NDK_DIR" .build-tmp/android-ndk-r30
+          test -f .build-tmp/android-ndk-r30/source.properties
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew

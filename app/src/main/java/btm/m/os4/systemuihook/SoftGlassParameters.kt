@@ -3,7 +3,6 @@ package btm.m.os4.systemuihook
 
 import kotlin.math.roundToInt
 
-/** Verified against HyperLight q32.c / p72.m and SystemUI's 42-slot MiGlass recipes. */
 internal data class SoftGlassParameter(
     val key: String,
     val title: String,
@@ -68,16 +67,16 @@ internal fun tuneSoftGlass(
             val delta = if (definition.key == "edge_feather") -selected else selected
             if (delta != 0) {
                 val base = original[definition.slot]
-                // HyperLight scales nonzero defaults. Limit the zero fallback to hundredths,
-                // avoiding its abrupt full-unit jump when a theme's original value is zero.
+                // Limit the zero fallback to hundredths, avoiding an abrupt full-unit jump
+                // when a theme's original value is zero.
                 val adjusted = if (base == 0f) delta / 100f else base * (1f + delta / 100f)
                 this[definition.slot] = adjusted.coerceIn(definition.bounds)
             }
         }
         if (contextBrightness != 0f) {
-            // HyperLight raises the unified notification/volume backdrop brightness after
-            // applying the global slots. Those surfaces otherwise retain their darker native
-            // token even though the same global recipe is selected.
+            // Raise the unified notification/volume backdrop brightness after applying the
+            // global slots. Those surfaces otherwise retain their darker native token even
+            // though the same global recipe is selected.
             this[34] = (this[34] + contextBrightness).coerceIn(-1f, 1f)
         }
     }

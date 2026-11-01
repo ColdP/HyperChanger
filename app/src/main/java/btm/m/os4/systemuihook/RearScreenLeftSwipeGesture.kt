@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 package btm.m.os4.systemuihook
 
-/** Direction and distance policy from HyperLight, isolated from Android event dispatch. */
 internal class RearScreenLeftSwipeGesture {
     private var startX = 0f
     private var startY = 0f

@@ -417,8 +417,7 @@ public final class HotReload {
             install(proc, cl);
             if ("com.android.systemui".equals(proc)) {
                 // Arming here rather than from the attach path: the container may be gone
-                // while the phone is unlocked, and HyperLight's own hook is already in place
-                // (it is not reloaded), so the order this guard depends on still holds.
+                // while the phone is unlocked, so the order this guard depends on still holds.
                 ClockGlass.armMiGlassGuard();
                 backfill(cl, param.getOldHookHandles());
                 final Object[] fpq = feature(state, "fpq");

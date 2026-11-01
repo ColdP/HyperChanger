@@ -224,7 +224,7 @@ HyperChanger 是面向小米 HyperOS 4 的现代 Xposed 模块，通过配套应
 
 ## 从源码构建
 
-环境要求：JDK 21（与 CI 一致）、Android SDK 37、NDK r28c（28.2.13676358）、CMake 3.22.1，以及支持 Android Gradle Plugin 9.2.1 的 Android Studio 或项目 Gradle Wrapper（9.6.1）。[app/build.gradle.kts](app/build.gradle.kts) 将 NDK 路径固定为仓库内的 `.build-tmp/android-ndk-r28c`；构建前需在该路径准备 NDK，或建立指向已安装 NDK 的目录链接。可参考 [CI 配置](.github/workflows/android.yml)。
+环境要求：JDK 21（与 CI 一致）、Android SDK 37、NDK r30（30.0.16248370）、CMake 3.22.1，以及支持 Android Gradle Plugin 9.2.1 的 Android Studio 或项目 Gradle Wrapper（9.6.1）。[app/build.gradle.kts](app/build.gradle.kts) 将 NDK 路径固定为仓库内的 `.build-tmp/android-ndk-r30`；构建前需在该路径准备 NDK，或建立指向已安装 NDK 的目录链接。可参考 [CI 配置](.github/workflows/android.yml)。
 
 ```bash
 git clone https://github.com/ColdP/HyperChanger.git

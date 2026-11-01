@@ -224,7 +224,7 @@ When opening an issue, include the device model, Android / HyperOS versions, mod
 
 ## Build from source
 
-Requirements: JDK 21 (matching CI), Android SDK 37, NDK r28c (28.2.13676358), CMake 3.22.1, and Android Studio with Android Gradle Plugin 9.2.1 support or the project Gradle Wrapper (9.6.1). [app/build.gradle.kts](app/build.gradle.kts) fixes the NDK path to `.build-tmp/android-ndk-r28c` inside the repository. Place the NDK there or create a directory link to an installed copy before building; see the [CI configuration](.github/workflows/android.yml).
+Requirements: JDK 21 (matching CI), Android SDK 37, NDK r30 (30.0.16248370), CMake 3.22.1, and Android Studio with Android Gradle Plugin 9.2.1 support or the project Gradle Wrapper (9.6.1). [app/build.gradle.kts](app/build.gradle.kts) fixes the NDK path to `.build-tmp/android-ndk-r30` inside the repository. Place the NDK there or create a directory link to an installed copy before building; see the [CI configuration](.github/workflows/android.yml).
 
 ```bash
 git clone https://github.com/ColdP/HyperChanger.git

@@ -8,8 +8,7 @@ import java.lang.reflect.Method;
 
 /**
  * The liquid-glass clock styles: which styles draw glass, the glass morph that follows the
- * collapse, the AOD's captured glass and its brightness, and the guard that keeps HyperLight
- * from clobbering it.
+ * collapse, the AOD's captured glass and its brightness.
  *
  * Carved out of Main as it was (2026-10-14, after MediaCard): every member moved whole with its
  * comments, references across the line prefixed with Main. or ClockGlass., nothing else changed.
@@ -33,7 +32,6 @@ final class ClockGlass {
      */
     static volatile boolean sGlassSettled;
 
-    /** Armed once the HyperLight (统一柔光玻璃) counter-hook is installed; see armMiGlassGuard(). */
     static volatile boolean sMiGlassGuardArmed;
 
     /** How many times the counter-hook actually fired on a clock glyph, for the one-line proof. */

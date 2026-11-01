@@ -963,9 +963,8 @@ public final class Main {
         sContainer = container;
         captureScreenSize(sContainer);
         // The clock container attach is the first reliably-fired event after both
-        // modules' onPackageLoaded, so arming the HyperLight counter-hook here - not
-        // from setGlassColor, which this build never calls on the all_in_one clock -
-        // guarantees it registers after HyperLight's own View.setMiGlass hook.
+        // modules' onPackageLoaded, so arming the counter-hook here - not from setGlassColor,
+        // which this build never calls on the all_in_one clock - keeps registration ordered.
         ClockGlass.armMiGlassGuard();
         Xp.log(TAG + "clock container attached: " + sContainer);
         try {

@@ -94,3 +94,6 @@ hyperos4-glass-blur-main/
 # Python inspection caches
 __pycache__/
 *.py[cod]
+
+# Local test sources and fixtures
+/tests/

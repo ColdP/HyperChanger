@@ -55,7 +55,6 @@ internal class NotificationStackBlurSettingsStore(context: Context) {
     }
 }
 
-/** HyperLight-compatible progress curve, capped to keep the front card crisp. */
 internal fun notificationStackBlurRadius(progress: Float, landscape: Boolean, offset: Int = 0): Float {
     val threshold = if (landscape) .45f else .2f
     if (!progress.isFinite() || progress < threshold) return 0f

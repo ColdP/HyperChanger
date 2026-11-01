@@ -4128,9 +4128,6 @@ class HyperSystemUiModule : XposedModule() {
                         }
                         val cache = synchronized(softGlassBaselines) { volumeGlobalRecipes.getOrPut(view) { SoftGlassRecipeCache() } }
                         val previous = cache.baseline
-                        // HyperLight's unified path uses the normal glass recipe for volume
-                        // surfaces before applying global slots. This avoids carrying the
-                        // darker collapsed volume token into the shared material.
                         val unified = normalNotificationGlassParams(view) ?: original
                         val tuned = cache.tune(
                             unified,
@@ -11055,8 +11052,6 @@ class HyperSystemUiModule : XposedModule() {
                 }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.DEBUG, TAG, "Volume native material dispatch unavailable", it) }
             }
             "com.android.systemui.miui.volume.Util" -> {
-                // HyperLight r71.q: enable only the volume material branch. No sizing,
-                // visibility, dialog-motion or global feature-flag hooks are imported.
                 targetClass.declaredMethods.filter {
                     it.name in setOf("isBionicsAdvancedMaterialEnabled", "isAdvancedMaterialEffective") &&
                         it.returnType == Boolean::class.javaPrimitiveType &&

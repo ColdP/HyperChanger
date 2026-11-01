@@ -737,7 +737,7 @@ public final class LockLyrics {
      * between the clock and the card and the block is centred in it, so an answer that moves by a
      * card's height moves the lyrics by half of one. The other two routes used to answer the
      * card's BOTTOM, deliberately: with no card drawn the band took the whole block the card would
-     * have filled. That was for HyperLight's music capsule, which hooks
+     * have filled. That was for a music capsule, which hooks
      * MiuiMediaHeaderView.setVisibility and rewrites the OEM's VISIBLE into GONE (measured
      * 2026-09-21) - and the lyrics used to give up entirely there, the band being unmeasurable.
      *

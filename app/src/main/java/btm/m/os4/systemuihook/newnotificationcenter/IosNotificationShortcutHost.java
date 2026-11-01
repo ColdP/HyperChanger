@@ -1,6 +1,8 @@
 package btm.m.os4.systemuihook.newnotificationcenter;
 
 import android.content.Context;
+import android.graphics.RenderEffect;
+import android.graphics.Shader;
 import android.graphics.Rect;
 import android.os.Bundle;
 import android.view.MotionEvent;
@@ -34,6 +36,7 @@ final class IosNotificationShortcutHost extends FrameLayout {
     private float downX, downY;
     private MotionEvent lastTouch;
     private final int touchSlop;
+    private int lastBlur = -1;
 
     private IosNotificationShortcutHost(Context context) {
         super(context);
@@ -113,7 +116,19 @@ final class IosNotificationShortcutHost extends FrameLayout {
         }
         IosNotificationShortcutHost current = overlay;
         if (current == null) return;
-        if (current.getAlpha() != progress) current.setAlpha(progress);
+        // Keep shortcut buttons on the same visual curve and blur envelope as the hosted
+        // clock and notification stack. The raw expansion fraction is intentionally retained
+        // for lifecycle/interaction gating, while this smooth value drives presentation only.
+        float visual = progress * progress * (3f - 2f * progress);
+        if (current.getAlpha() != visual) current.setAlpha(visual);
+        int blur = Math.round(28f * panel.getResources().getDisplayMetrics().density
+                * (1f - visual));
+        blur = (blur + 1) / 2 * 2;
+        if (blur != current.lastBlur) {
+            current.setRenderEffect(blur == 0 ? null
+                    : RenderEffect.createBlurEffect(blur, blur, Shader.TileMode.CLAMP));
+            current.lastBlur = blur;
+        }
         float x = sheet == null ? 0f : sheet.getTranslationX();
         float y = sheet == null ? 0f : sheet.getTranslationY();
         if (current.getTranslationX() != x) current.setTranslationX(x);

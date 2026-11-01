@@ -20,7 +20,6 @@ import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.max
 
-/** AOD plugin gesture injection, following HyperLight t5/ex0/dx0/vy0. */
 internal class LockscreenShortcutGestureHooks(
     private val module: HyperSystemUiModule,
     private val logTag: String,
@@ -75,7 +74,7 @@ internal class LockscreenShortcutGestureHooks(
                         val incoming = chain.getArg(0) as? View.OnTouchListener
                         if (listener != null && incoming !== listener) {
                             // Keep the replacement Folme listener as the stock delegate, while
-                            // retaining our listener exactly as HyperLight's ex0.e guard does.
+                            // retaining our listener exactly as the stock guard does.
                             listener.original = incoming
                             chain.proceedWith(chain.thisObject, arrayOf(listener))
                         } else chain.proceed()
@@ -165,7 +164,6 @@ internal class LockscreenShortcutGestureHooks(
                 MotionEvent.ACTION_UP -> {
                     val inside = view.width <= 0 || view.height <= 0 ||
                         hypot(event.x - view.width / 2f, event.y - view.height / 2f) <= max(view.width, view.height) / 2f
-                    // HyperLight checks elapsed time and the circular hit area on release.
                     val longPress = tracking && inside && SystemClock.uptimeMillis() - downAt >= ViewConfiguration.getLongPressTimeout()
                     tracking = false
                     view.isPressed = false

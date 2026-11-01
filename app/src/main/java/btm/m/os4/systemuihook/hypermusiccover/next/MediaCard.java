@@ -520,7 +520,7 @@ public final class MediaCard {
      *
      * The card disappearing has three unrelated causes and the module can only see one of them
      * directly. The OEM dropping its media data arrives here, at onCardChanged(null), and is
-     * recorded. A third party hiding the VIEW - HyperLight's music capsule rewrites
+     * recorded. A third party hiding the VIEW by rewriting
      * MiuiMediaHeaderView's VISIBLE into GONE, measured 2026-09-21 - never reaches any hook of
      * ours at all, so it leaves no event: what names it is the live snapshot `op card` takes
      * before printing this, where our own state still says the card is up while the view on
