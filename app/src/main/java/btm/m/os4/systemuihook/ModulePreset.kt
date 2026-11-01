@@ -61,6 +61,12 @@ private fun isExcludedFromModulePreset(key: String): Boolean =
 
 object ModulePresetCodec {
     data class ExportedFile(val name: String, val bytes: ByteArray)
+    data class PreviewGroup(val name: String, val keys: List<String>)
+    data class Preview(
+        val version: Int,
+        val groups: List<PreviewGroup>,
+        val resources: List<String>,
+    )
 
     fun export(context: Context): String = exportJson(context)
 
@@ -74,6 +80,7 @@ object ModulePresetCodec {
                     value ?: return@forEach
                     values.put(key, encodeValue(value))
                 }
+            if (groupName == REMOTE_PREFERENCE_GROUP) completeStackedMobileCornerPreset(values)
             groups.put(groupName, values)
         }
         return JSONObject()
@@ -101,6 +108,40 @@ object ModulePresetCodec {
     fun isZip(bytes: ByteArray): Boolean = bytes.size >= 4 &&
         bytes[0] == 'P'.code.toByte() && bytes[1] == 'K'.code.toByte() &&
         bytes[2] == 3.toByte() && bytes[3] == 4.toByte()
+
+    fun preview(bytes: ByteArray): Preview {
+        val entries = if (isZip(bytes)) readZip(bytes) else emptyMap()
+        val payload = if (entries.isEmpty()) {
+            bytes.toString(Charsets.UTF_8)
+        } else {
+            val preset = entries[MODULE_PRESET_JSON] ?: error("预设压缩包缺少配置文件")
+            preset.toString(Charsets.UTF_8)
+        }
+        val root = JSONObject(payload)
+        require(root.optString("format") == MODULE_PRESET_FORMAT) { "不支持的预设文件" }
+        val version = root.optInt("version", 0)
+        require(version in 1..MODULE_PRESET_VERSION) { "不支持的预设版本" }
+        val groups = root.optJSONObject("groups") ?: error("预设内容为空")
+        val previewGroups = MODULE_PRESET_GROUPS.mapNotNull { groupName ->
+            val values = groups.optJSONObject(groupName) ?: return@mapNotNull null
+            if (groupName == REMOTE_PREFERENCE_GROUP) completeStackedMobileCornerPreset(values)
+            PreviewGroup(
+                groupName,
+                values.keys().asSequence()
+                    .filterNot(::isExcludedFromModulePreset)
+                    .sorted()
+                    .toList(),
+            )
+        }
+        return Preview(
+            version = version,
+            groups = previewGroups,
+            resources = entries.keys
+                .filter { it.startsWith(MODULE_PRESET_RESOURCE_ROOT) }
+                .map { it.removePrefix(MODULE_PRESET_RESOURCE_ROOT) }
+                .sorted(),
+        )
+    }
 
     fun importBytes(context: Context, service: XposedService?, bytes: ByteArray) {
         if (!isZip(bytes)) {
@@ -133,6 +174,7 @@ object ModulePresetCodec {
         val groups = root.optJSONObject("groups") ?: error("预设内容为空")
         MODULE_PRESET_GROUPS.forEach { groupName ->
             val values = groups.optJSONObject(groupName) ?: return@forEach
+            if (groupName == REMOTE_PREFERENCE_GROUP) completeStackedMobileCornerPreset(values)
             applyValues(context.getSharedPreferences(groupName, Context.MODE_PRIVATE), values, replace = true)
             service?.getRemotePreferences(groupName)?.let { applyValues(it, values, replace = true) }
         }

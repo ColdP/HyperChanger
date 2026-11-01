@@ -73,6 +73,8 @@ private class StackedMobilePresentation(
     var savedSystemMobileTypeEndMargin: Int? = null
     var savedSystemMobileTypeTopMargin: Int? = null
     var networkTypeSource: Any? = null
+    var signalColorSource: Any? = null
+    var nativeTextColor: Int? = null
     var dualContainer: FrameLayout? = null
     var dualSignal: ImageView? = null
     var savedDualTranslationY: Float? = null
@@ -97,6 +99,7 @@ private class StackedMobilePresentation(
 private class StackedMobileDrawable(
     private val upperLevel: Int,
     private val lowerLevel: Int,
+    private val cornerRadiusPx: Float?,
 ) : Drawable() {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private var drawableAlpha = 0xFF
@@ -117,7 +120,7 @@ private class StackedMobileDrawable(
         val topRowTops = floatArrayOf(0.4635f, 0.3907f, 0.288f, 0.1987f)
         val lowerRowTop = 0.6661f
         val lowerRowBottom = 0.8013f
-        val corner = minOf(width * 0.027f, height * 0.027f)
+        val corner = cornerRadiusPx ?: minOf(width * 0.027f, height * 0.027f)
         paint.color = tint?.getColorForState(state, Color.WHITE) ?: Color.WHITE
         paint.colorFilter = drawableColorFilter
 
@@ -153,7 +156,8 @@ private class StackedMobileDrawable(
             val right = left + columnWidth * width
             val rowBottom = bounds.top + bottom * height
             paint.alpha = if (column < level.coerceIn(0, 4)) drawableAlpha else (drawableAlpha * 0.35f).toInt()
-            canvas.drawRoundRect(left, top, right, rowBottom, corner, corner, paint)
+            val radius = minOf(corner, (right - left) / 2f, (rowBottom - top) / 2f)
+            canvas.drawRoundRect(left, top, right, rowBottom, radius, radius, paint)
         }
     }
 
@@ -1251,6 +1255,8 @@ internal class StatusBarHooks(
                     KEY_MOBILE_NETWORK_TYPE_CUSTOM_TEXT,
                     KEY_MOBILE_NETWORK_TYPE_SHRINK_5GA_A,
                     KEY_MOBILE_NETWORK_TYPE_BOLD,
+                    KEY_STACKED_MOBILE_CORNER_ENABLED,
+                    KEY_STACKED_MOBILE_CORNER_RADIUS,
                     -> refreshStackedMobilePresentations(enabled)
                 }
             }
@@ -1341,6 +1347,10 @@ internal class StatusBarHooks(
                         if (presentationRequired()) {
                             registerStackedMobilePresentation(root, enabled)
                             captureMobileNetworkTypeSource(root, chain.getArg(2))
+                            synchronized(stackedMobileSignalLock) {
+                                stackedMobilePresentations[root]?.signalColorSource =
+                                    readInheritedField(result, "\$tintLightColorFlow")
+                            }
                             refreshStackedMobilePresentations(enabled)
                         }
                     }
@@ -1539,9 +1549,9 @@ internal class StatusBarHooks(
             btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.DEBUG, logTag, "Mobile network type text hook unavailable", error)
         }
 
-        // SystemUI may apply the resolved dark/light color directly to the independent
-        // TextView after the signal callback. Re-apply the signal's effective color after either
-        // TextView.setTextColor overload so that late framework updates cannot overwrite it.
+        // In resource-variant mode SystemUI clears the signal's tint, but still supplies the
+        // resolved color to mobile_type_single. Accept that update instead of overwriting it
+        // with a white fallback. Keep it for builds without the native binding color flow.
         runCatching {
             TextView::class.java.methods
                 .filter { it.name == "setTextColor" }
@@ -1556,16 +1566,13 @@ internal class StatusBarHooks(
                             if (sourceView != null && stackedMobileApplying.get() != true) {
                                 val presentation = synchronized(stackedMobileSignalLock) {
                                     stackedMobilePresentations.values.firstOrNull {
-                                        it.independentType === sourceView
+                                        it.networkTypeView === sourceView
+                                    }?.also {
+                                        it.nativeTextColor = sourceView.currentTextColor
                                     }
                                 }
                                 if (presentation != null) {
-                                    stackedMobileApplying.set(true)
-                                    try {
-                                        sourceView.setTextColor(resolveMobileSignalColor(presentation.signal))
-                                    } finally {
-                                        stackedMobileApplying.remove()
-                                    }
+                                    scheduleStackedMobilePresentationRefresh(presentation, enabled)
                                 }
                             }
                             result
@@ -1574,6 +1581,41 @@ internal class StatusBarHooks(
             hookCount++
         }.onFailure { error ->
             btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.DEBUG, logTag, "Independent mobile network type color hook unavailable", error)
+        }
+
+        // These callbacks update the binding flow even when image tint stays null or its
+        // collectors are stopped. Read the current flow on the queued render/next attach;
+        // never share a resolved color between status-bar and lockscreen roots.
+        runCatching {
+            val modernClass = loadFirstClass(classLoader, MODERN_MOBILE_VIEW_CLASSES)
+            val colorCallbacks = modernClass.methods.filter { method ->
+                when (method.name) {
+                    "onDarkChangedWithContrast", "onLightDarkTintChanged" -> method.parameterCount == 3
+                    "setStaticDrawableColor" -> method.parameterTypes.contentEquals(
+                        arrayOf(Int::class.javaPrimitiveType, Int::class.javaPrimitiveType),
+                    )
+                    else -> false
+                }
+            }
+            if (colorCallbacks.isEmpty()) error("Modern mobile color callbacks were not found")
+            colorCallbacks.forEachIndexed { index, method ->
+                hookDeoptimized(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("status-bar:stacked-mobile-dark-color-$index")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        val presentation = synchronized(stackedMobileSignalLock) {
+                            stackedMobilePresentations[chain.thisObject]
+                        }
+                        if (presentation != null) {
+                            scheduleStackedMobilePresentationRefresh(presentation, enabled)
+                        }
+                        result
+                    }
+            }
+            hookCount += colorCallbacks.size
+        }.onFailure { error ->
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.DEBUG, logTag, "Mobile dark color callbacks unavailable", error)
         }
 
         // The modern view assigns its subscription id after inflation. This also covers builds
@@ -1693,6 +1735,8 @@ internal class StatusBarHooks(
             findViewByEntryName(presentation.root, "mobile_signal_container") as? ViewGroup
         presentation.systemMobileType =
             findViewByEntryName(presentation.root, "mobile_type") as? ImageView
+        presentation.networkTypeView =
+            findViewByEntryName(presentation.root, "mobile_type_single") as? TextView
     }
 
     private fun resolveDataSim(subscriptionId: Int, fallback: Boolean?): Boolean? {
@@ -1943,8 +1987,12 @@ internal class StatusBarHooks(
                     stackedMobileApplying.remove()
                 }
                 applyIndependentMobileTypeTypeface(presentation)
-                val color = resolveMobileSignalColor(presentation.signal)
-                textView.setTextColor(color)
+                stackedMobileApplying.set(true)
+                try {
+                    textView.setTextColor(resolveMobileSignalColor(presentation))
+                } finally {
+                    stackedMobileApplying.remove()
+                }
                 setStackedMobileViewVisibility(
                     textView,
                     if (shouldShow && displayText.isNotEmpty()) View.VISIBLE else View.GONE,
@@ -2350,11 +2398,21 @@ internal class StatusBarHooks(
             (leftMargin * density).roundToInt(),
             (rightMargin * density).roundToInt(),
         )
-        val sourceTint = presentation.signal.imageTintList
+        val nativeColor = resolveNativeMobileSignalColor(presentation)
+        val sourceTint = nativeColor?.let { ColorStateList.valueOf(it) }
+            ?: presentation.signal.imageTintList
             ?: resolveDrawableTintList(presentation.signal.drawable)
-        val sourceColorFilter = resolveMobileSignalColorFilter(presentation.signal)
+            ?: ColorStateList.valueOf(resolveMobileSignalColor(presentation))
+        val sourceColorFilter = if (nativeColor == null) {
+            resolveMobileSignalColorFilter(presentation.signal)
+        } else null
+        val cornerSettings = stackedMobilePreferences?.let(::readStackedMobileCornerSettings)
         dualSignal.setImageDrawable(
-            StackedMobileDrawable(upperSubscription.signalLevel, lowerSubscription.signalLevel).apply {
+            StackedMobileDrawable(
+                upperSubscription.signalLevel,
+                lowerSubscription.signalLevel,
+                cornerSettings?.takeIf { it.enabled }?.radiusDp?.times(density),
+            ).apply {
                 alpha = presentation.signal.imageAlpha
                 setTintList(sourceTint)
                 state = presentation.signal.drawableState
@@ -2601,17 +2659,25 @@ internal class StatusBarHooks(
     }
 
     /**
-     * Resolves the color currently rendered by the stock signal view. Depending on the
-     * SystemUI generation, dark-icon transitions arrive as a stateful image tint, a
-     * PorterDuff filter, or a tint/filter installed directly on the source drawable.
+     * Read the binding's current region-resolved color, including resource-variant mode
+     * where the stock signal intentionally has no tint/filter. Read fields through the
+     * existing helper because SystemUI's Kotlin classes have a different ClassLoader.
      */
-    private fun resolveMobileSignalColor(signal: ImageView): Int {
+    private fun resolveNativeMobileSignalColor(presentation: StackedMobilePresentation): Int? {
+        val value = readCurrentFlowValue(presentation.signalColorSource) ?: return null
+        return (readInheritedField(value, "third") as? Number)?.toInt()
+    }
+
+    private fun resolveMobileSignalColor(presentation: StackedMobilePresentation): Int {
+        resolveNativeMobileSignalColor(presentation)?.let { return it }
+        val signal = presentation.signal
         val state = signal.drawableState
         val tint = signal.imageTintList ?: resolveDrawableTintList(signal.drawable)
         val tintedColor = tint?.getColorForState(state, tint.defaultColor)
         val filter = signal.colorFilter ?: signal.drawable?.colorFilter
         val filteredColor = resolveColorFilterColor(filter)
-        return filteredColor ?: tintedColor ?: Color.WHITE
+        return filteredColor ?: tintedColor ?: presentation.nativeTextColor
+            ?: presentation.networkTypeView?.currentTextColor ?: Color.WHITE
     }
 
     private fun resolveMobileSignalColorFilter(signal: ImageView): ColorFilter? =

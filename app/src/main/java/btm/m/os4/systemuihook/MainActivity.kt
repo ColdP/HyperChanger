@@ -308,7 +308,8 @@ private enum class PageId {
     DEVICE_PROFILE_PRESETS, DEVICE_PROFILE_CLOUD_PRESETS, CUSTOM_DEPTH_WALLPAPER,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, SETTINGS_ENTRY_ICONS, SETTINGS_ENTRY_APPEARANCE, THEME_AND_COLOR, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
-    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, PORTAL_MATERIAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND,
+    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, PORTAL_MATERIAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND, MODULE_PRESET_IMPORT_PREVIEW,
+    STATUS_MOBILE_NETWORK_TYPE_TUNING,
 }
 
 private data class CategorySearchItem(
@@ -731,7 +732,7 @@ private fun Root(
     var showModulePresetExportDialog by remember { mutableStateOf(false) }
     var showModulePresetResetDialog by remember { mutableStateOf(false) }
     var pendingModulePresetImport by remember { mutableStateOf<ByteArray?>(null) }
-    var showModulePresetImportDialog by remember { mutableStateOf(false) }
+    var pendingModulePresetPreview by remember { mutableStateOf<ModulePresetCodec.Preview?>(null) }
     var qrShareRequest by remember { mutableStateOf<QrShareRequest?>(null) }
     var pendingQrSave by remember { mutableStateOf<QrShareRequest?>(null) }
     val exportPreset = rememberLauncherForActivityResult(
@@ -876,14 +877,25 @@ private fun Root(
             Toast.makeText(context, tr("导入失败", "导入失败"), Toast.LENGTH_SHORT).show()
         }
     }
+    val confirmModulePresetImport: () -> Unit = {
+        pendingModulePresetImport?.let { payload ->
+            pendingModulePresetImport = null
+            pendingModulePresetPreview = null
+            importModulePresetPayload(payload)
+        }
+    }
+    val cancelModulePresetImport: () -> Unit = {
+        pendingModulePresetImport = null
+        pendingModulePresetPreview = null
+    }
     val importModulePreset = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         runCatching {
             context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                 ?: error(tr("无法读取文件", "无法读取文件"))
-        }.onSuccess {
-            pendingModulePresetImport = it
-            showModulePresetImportDialog = true
+        }.map { bytes -> ModulePresetCodec.preview(bytes) to bytes }.onSuccess { (preview, bytes) ->
+            pendingModulePresetPreview = preview
+            pendingModulePresetImport = bytes
         }.onFailure {
             Toast.makeText(context, tr("导入失败", "导入失败"), Toast.LENGTH_SHORT).show()
         }
@@ -965,6 +977,7 @@ private fun Root(
                 IslandWidthSettingsStore(context).syncRemote(it)
                 StatusBarAdjustmentSettingsStore(context).syncRemote(it)
                 StatusBarIconSpacingSettingsStore(context).syncRemote(it)
+                StackedMobileCornerSettingsStore(context).syncRemote(it)
                 StatusBarIconImportStore(context).syncRemote(it)
                 NotificationIslandSettingsStore(context).syncRemote(it)
                 ExpandedIslandGlassSettingsStore(context).syncRemote(it)
@@ -1186,18 +1199,9 @@ private fun Root(
                 showModulePresetExportDialog = true
             },
             onResetModulePreset = { showModulePresetResetDialog = true },
-            modulePresetImportDialog = showModulePresetImportDialog,
-            onDismissModulePresetImportDialog = {
-                showModulePresetImportDialog = false
-                pendingModulePresetImport = null
-            },
-            onConfirmModulePresetImport = {
-                pendingModulePresetImport?.let { payload ->
-                    showModulePresetImportDialog = false
-                    pendingModulePresetImport = null
-                    importModulePresetPayload(payload)
-                }
-            },
+            modulePresetImportPreview = pendingModulePresetPreview,
+            onConfirmModulePresetImport = confirmModulePresetImport,
+            onCancelModulePresetImport = cancelModulePresetImport,
             modulePresetExportDialog = showModulePresetExportDialog,
             onDismissModulePresetExportDialog = { showModulePresetExportDialog = false },
             onModulePresetExport = { mode ->
@@ -1376,15 +1380,15 @@ private fun Shell(
     onImportModulePreset: () -> Unit,
     onExportModulePreset: () -> Unit,
     onResetModulePreset: () -> Unit,
-    modulePresetImportDialog: Boolean,
-    onDismissModulePresetImportDialog: () -> Unit,
-    onConfirmModulePresetImport: () -> Unit,
     modulePresetExportDialog: Boolean,
     onDismissModulePresetExportDialog: () -> Unit,
     onModulePresetExport: (ModulePresetExportMode) -> Unit,
     modulePresetResetDialog: Boolean,
     onDismissModulePresetResetDialog: () -> Unit,
     onConfirmModulePresetReset: () -> Unit,
+    modulePresetImportPreview: ModulePresetCodec.Preview?,
+    onConfirmModulePresetImport: () -> Unit,
+    onCancelModulePresetImport: () -> Unit,
     presetActions: ShadePresetActions,
     onPickRasterImages: () -> Unit,
     onApplyRasterWallpaper: () -> Unit,
@@ -1480,6 +1484,11 @@ private fun Shell(
             if (target == PageId.DISCLAIMER) disclaimerRead = true
         }
     }
+    LaunchedEffect(modulePresetImportPreview) {
+        if (modulePresetImportPreview != null && pageStack.lastOrNull() != PageId.MODULE_PRESET_IMPORT_PREVIEW) {
+            openNestedPage(PageId.MODULE_PRESET_IMPORT_PREVIEW)
+        }
+    }
     val dismissPage: () -> Unit = {
         val leavingDisclaimer = pageStack.lastOrNull() == PageId.DISCLAIMER
         if (pageStack.size > 1) {
@@ -1535,6 +1544,9 @@ private fun Shell(
                 settingsApp = settingsApp, updateSettingsApp = updateSettingsApp, superXiaoAi = superXiaoAi, updateSuperXiaoAi = updateSuperXiaoAi, systemUpdate = systemUpdate, updateSystemUpdate = updateSystemUpdate,
                 appThemeStore = appThemeStore, service = service,
                 openPage = openNestedPage, back = dismissPage,
+                modulePresetImportPreview = modulePresetImportPreview,
+                onConfirmModulePresetImport = { onConfirmModulePresetImport(); dismissPage() },
+                onCancelModulePresetImport = { onCancelModulePresetImport(); dismissPage() },
                 onEnterOobe = onEnterOobe, captcha = captcha,
                 onPickRasterImages = onPickRasterImages, onApplyRasterWallpaper = onApplyRasterWallpaper,
                 onPickAppearanceHome = onPickAppearanceHome, onPickAppearanceDevice = onPickAppearanceDevice,
@@ -1714,10 +1726,6 @@ private fun Shell(
         if (modulePresetExportDialog) ModulePresetExportDialog(
             onDismiss = onDismissModulePresetExportDialog,
             onExport = onModulePresetExport,
-        )
-        if (modulePresetImportDialog) ModulePresetImportDialog(
-            onDismiss = onDismissModulePresetImportDialog,
-            onConfirm = onConfirmModulePresetImport,
         )
         if (modulePresetResetDialog) ModulePresetResetDialog(
             onDismiss = onDismissModulePresetResetDialog,
@@ -5362,7 +5370,10 @@ private fun Detail(
     suggestedRestartTargets: Set<ScopeApplication>,
     onRestartedTargets: (Set<ScopeApplication>) -> Unit,
     openPage: (PageId) -> Unit,
-    back: () -> Unit
+    back: () -> Unit,
+    modulePresetImportPreview: ModulePresetCodec.Preview?,
+    onConfirmModulePresetImport: () -> Unit,
+    onCancelModulePresetImport: () -> Unit,
 ) {
     when (page) {
         PageId.MODULE_SAFETY -> ModuleSafetyPage(
@@ -5392,7 +5403,8 @@ private fun Detail(
         PageId.STATUS -> Status(settings, update, openPage, back)
         PageId.STATUS_ADJUSTMENT -> StatusAdjustment(settings, update, back)
         PageId.STATUS_SIGNAL_CUSTOMIZATION -> StatusSignalCustomization(settings, update, openPage, back)
-        PageId.STATUS_SIGNAL_TUNING -> StatusSignalTuning(settings, update, back)
+        PageId.STATUS_SIGNAL_TUNING -> StatusStackedSignalTuning(settings, update, back)
+        PageId.STATUS_MOBILE_NETWORK_TYPE_TUNING -> StatusMobileNetworkTypeTuning(settings, update, back)
         PageId.CONTROL -> Control(back)
         PageId.LOCK -> Lock(settings, lockscreenCapsuleSettings, update, openPage, back)
         PageId.CUSTOM_DEPTH_WALLPAPER -> CustomDepthWallpaperPage(back)
@@ -5456,6 +5468,12 @@ private fun Detail(
             updateMusicWhitelist,
             onRequestNotificationPermission,
             back,
+        )
+        PageId.MODULE_PRESET_IMPORT_PREVIEW -> ModulePresetImportPreviewPage(
+            preview = modulePresetImportPreview,
+            monetEnabled = appThemeStore.settings.monetEnabled,
+            onConfirm = onConfirmModulePresetImport,
+            onCancel = onCancelModulePresetImport,
         )
     }
 }
@@ -7747,28 +7765,116 @@ private fun ModulePresetExportDialog(
 }
 
 @Composable
-private fun ModulePresetImportDialog(
-    onDismiss: () -> Unit,
+private fun ModulePresetImportPreviewPage(
+    preview: ModulePresetCodec.Preview?,
+    monetEnabled: Boolean,
     onConfirm: () -> Unit,
+    onCancel: () -> Unit,
 ) {
-    WindowDialog(show = true, onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(
-                tr("导入模块预设", "导入模块预设"),
-                style = MiuixTheme.textStyles.title3,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Text(tr("导入模块预设确认", "导入后将覆盖当前模块设置，是否继续？"))
-            GlassDialogButton(
-                onClick = onConfirm,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColorsPrimary(),
-            ) { Text(tr("确认导入", "确认导入")) }
-            GlassDialogButton(
-                onClick = onDismiss,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text(tr("取消", "取消")) }
+    val data = preview ?: return
+    AppPage(
+        title = tr("模块预设配置预览", "模块预设配置预览"),
+        onBack = onCancel,
+        floatingToolbarPosition = ToolbarPosition.BottomCenter,
+        floatingToolbar = {
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                UpdateToolbarButton(
+                    onClick = onConfirm,
+                    text = tr("确认导入", "确认导入"),
+                    modifier = Modifier.fillMaxWidth(),
+                    primary = true,
+                    surfaceColor = if (monetEnabled) MiuixTheme.colorScheme.primary else ComposeColor(0xFF0088FF),
+                    primaryContentColor = if (monetEnabled) MiuixTheme.colorScheme.onPrimary else ComposeColor.White,
+                )
+                UpdateToolbarButton(
+                    onClick = onCancel,
+                    text = tr("取消", "取消"),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+    ) { padding, scroll ->
+        AppList(padding, scroll, bottom = 148) {
+            item {
+                Card(
+                    Modifier.fillMaxWidth(),
+                    cornerRadius = 22.5.dp,
+                    insideMargin = PaddingValues(16.dp),
+                ) {
+                    Text(
+                        tr("导入模块预设确认", "导入后将覆盖当前模块设置，是否继续？"),
+                        style = MiuixTheme.textStyles.body1,
+                    )
+                    Text(
+                        tr("模块预设版本 %d", "模块预设版本 %d").format(data.version),
+                        style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    Text(
+                        tr("包含 %d 个设置分组", "包含 %d 个设置分组").format(data.groups.size),
+                        style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+            }
+            data.groups.forEach { group ->
+                item {
+                    Card(
+                        Modifier.fillMaxWidth(),
+                        cornerRadius = 22.5.dp,
+                        insideMargin = PaddingValues(16.dp),
+                    ) {
+                        Text(group.name, style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
+                        if (group.keys.isEmpty()) {
+                            Text(
+                                tr("无可导入设置", "无可导入设置"),
+                                style = MiuixTheme.textStyles.body2,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                modifier = Modifier.padding(top = 10.dp),
+                            )
+                        } else {
+                            Text(
+                                group.keys.joinToString("\n"),
+                                style = MiuixTheme.textStyles.body2,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                maxLines = 8,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(top = 10.dp),
+                            )
+                        }
+                    }
+                }
+            }
+            if (data.resources.isNotEmpty()) {
+                item {
+                    Card(
+                        Modifier.fillMaxWidth(),
+                        cornerRadius = 22.5.dp,
+                        insideMargin = PaddingValues(16.dp),
+                    ) {
+                        Text(tr("随预设导入的资源", "随预设导入的资源"), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
+                        Text(
+                            tr("包含 %d 个资源文件", "包含 %d 个资源文件").format(data.resources.size),
+                            style = MiuixTheme.textStyles.body2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                        Text(
+                            data.resources.joinToString("\n"),
+                            style = MiuixTheme.textStyles.body2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            maxLines = 8,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 10.dp),
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -8616,11 +8722,11 @@ private fun Status(
     }
     AppList(p, scroll, 28) {
         item { Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-            ArrowPreference(title = tr("状态栏调整", "状态栏调整"), onClick = { open(PageId.STATUS_ADJUSTMENT) })
             StatusBarIconImportPreference()
         } }
         item {
             Group(tr("\u72b6\u6001\u680f\u663e\u793a", "\u72b6\u6001\u680f\u663e\u793a")) {
+                ArrowPreference(title = tr("状态栏调整", "状态栏调整"), onClick = { open(PageId.STATUS_ADJUSTMENT) })
                 SwitchPreference(
                     title = tr("\u9690\u85cf\u72b6\u6001\u680f\u7535\u6c60\u5185\u6587\u672c", "\u9690\u85cf\u72b6\u6001\u680f\u7535\u6c60\u5185\u6587\u672c"),
                     checked = s.hideStatusBarClockText,
@@ -8918,10 +9024,12 @@ private fun StatusSignalCustomization(
                     checked = s.stackedMobileSignalEnabled,
                     onCheckedChange = { enabled -> update { it.copy(stackedMobileSignalEnabled = enabled) } },
                 )
-                ArrowPreference(
-                    title = tr("\u4fe1\u53f7\u4e0e\u7f51\u7edc\u7c7b\u578b\u8c03\u6574", "\u4fe1\u53f7\u4e0e\u7f51\u7edc\u7c7b\u578b\u8c03\u6574"),
-                    onClick = { open(PageId.STATUS_SIGNAL_TUNING) },
-                )
+                AnimatedVisibility(visible = s.stackedMobileSignalEnabled) {
+                    ArrowPreference(
+                        title = tr("双排信号参数调整", "双排信号参数调整"),
+                        onClick = { open(PageId.STATUS_SIGNAL_TUNING) },
+                    )
+                }
 OverlayDropdownPreference(
                     title = tr("\u9690\u85cf\u7cfb\u7edf\u9ed8\u8ba4\u4fe1\u53f7\u56fe\u6807", "\u9690\u85cf\u7cfb\u7edf\u9ed8\u8ba4\u4fe1\u53f7\u56fe\u6807"),
                     items = listOf(tr("\u4e0d\u9690\u85cf", "\u4e0d\u9690\u85cf"), tr("\u9690\u85cf\u975e\u4e0a\u7f51\u5361", "\u9690\u85cf\u975e\u4e0a\u7f51\u5361"), tr("\u5168\u90e8\u9690\u85cf", "\u5168\u90e8\u9690\u85cf")),
@@ -8943,6 +9051,10 @@ OverlayDropdownPreference(
                 )
                 AnimatedVisibility(visible = s.mobileNetworkTypeMode == 1) {
                     Column {
+                        ArrowPreference(
+                            title = tr("移动网络类型参数调整", "移动网络类型参数调整"),
+                            onClick = { open(PageId.STATUS_MOBILE_NETWORK_TYPE_TUNING) },
+                        )
 OverlayDropdownPreference(
                             title = tr("\u72ec\u7acb\u79fb\u52a8\u7f51\u7edc\u7c7b\u578b\u663e\u793a\u903b\u8f91", "\u72ec\u7acb\u79fb\u52a8\u7f51\u7edc\u7c7b\u578b\u663e\u793a\u903b\u8f91"),
                             items = listOf(tr("\u59cb\u7ec8\u663e\u793a", "\u59cb\u7ec8\u663e\u793a"), tr("\u4f7f\u7528\u79fb\u52a8\u7f51\u7edc\u65f6\u663e\u793a", "\u4f7f\u7528\u79fb\u52a8\u7f51\u7edc\u65f6\u663e\u793a")),
@@ -9033,18 +9145,30 @@ OverlayDropdownPreference(
 }
 
 @Composable
-private fun StatusSignalTuning(
+private fun StatusStackedSignalTuning(
     s: HookSettings,
     update: ((HookSettings) -> HookSettings) -> Unit,
     back: () -> Unit,
 ) = AppPage(
-    tr("\u4fe1\u53f7\u4e0e\u7f51\u7edc\u7c7b\u578b\u8c03\u6574", "\u4fe1\u53f7\u4e0e\u7f51\u7edc\u7c7b\u578b\u8c03\u6574"),
+    tr("双排信号参数调整", "双排信号参数调整"),
     back,
     restartScopes = setOf(ScopeApplication.SYSTEM_UI),
 ) { p, scroll ->
+    val context = LocalContext.current
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    val cornerStore = remember(context) { StackedMobileCornerSettingsStore(context) }
+    var cornerSettings by remember { mutableStateOf(cornerStore.settings) }
+    LaunchedEffect(service) {
+        service?.let(cornerStore::syncRemote)
+        cornerSettings = cornerStore.settings
+    }
+    fun updateCorners(transform: (StackedMobileCornerSettings) -> StackedMobileCornerSettings) {
+        cornerStore.update(service, transform)
+        cornerSettings = cornerStore.settings
+    }
     AppList(p, scroll, 28) {
         item {
-            Group(tr("调整双排信号", "调整双排信号")) {
+            Group(tr("双排信号参数调整", "双排信号参数调整")) {
                 StatusSignalTuningSlider(
                     title = tr("缩放", "缩放"),
                     value = s.stackedMobileSignalScale,
@@ -9077,10 +9201,39 @@ private fun StatusSignalTuning(
                     suffix = "dp",
                     onValueChangeFinished = { value -> update { it.copy(stackedMobileSignalRightMargin = value) } },
                 )
+                SwitchPreference(
+                    title = tr("自定义信号柱圆角", "自定义信号柱圆角"),
+                    checked = cornerSettings.enabled,
+                    onCheckedChange = { enabled -> updateCorners { it.copy(enabled = enabled) } },
+                )
+                AnimatedVisibility(visible = cornerSettings.enabled) {
+                    StatusSignalTuningSlider(
+                        title = tr("信号柱圆角半径", "信号柱圆角半径"),
+                        value = cornerSettings.radiusDp,
+                        defaultValue = STACKED_MOBILE_CORNER_DEFAULT_RADIUS,
+                        range = STACKED_MOBILE_CORNER_RADIUS_RANGE,
+                        suffix = "dp",
+                        onValueChangeFinished = { value -> updateCorners { it.copy(radiusDp = value) } },
+                    )
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun StatusMobileNetworkTypeTuning(
+    s: HookSettings,
+    update: ((HookSettings) -> HookSettings) -> Unit,
+    back: () -> Unit,
+) = AppPage(
+    tr("移动网络类型参数调整", "移动网络类型参数调整"),
+    back,
+    restartScopes = setOf(ScopeApplication.SYSTEM_UI),
+) { p, scroll ->
+    AppList(p, scroll, 28) {
         item {
-            Group(tr("调整移动网络类型", "调整移动网络类型")) {
+            Group(tr("移动网络类型参数调整", "移动网络类型参数调整")) {
                 StatusSignalTuningSlider(
                     title = tr("缩放", "缩放"),
                     value = s.mobileNetworkTypeScale,
@@ -12980,6 +13133,7 @@ internal fun UpdateToolbarButton(
     backdrop: LayerBackdrop? = LocalToolbarBackdrop.current,
     shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(50.dp),
     surfaceColor: ComposeColor? = null,
+    primaryContentColor: ComposeColor? = null,
     blurRadius: Dp = TOOLBAR_GLASS_BLUR_RADIUS,
     leadingIcon: (@Composable () -> Unit)? = null,
     allowDrag: Boolean = true,
@@ -13027,7 +13181,7 @@ internal fun UpdateToolbarButton(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
             leadingIcon?.let { it(); Spacer(Modifier.width(9.dp)) }
-            Text(text, color = if (primary) ComposeColor.White else MiuixTheme.colorScheme.onSurface, style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold)
+            Text(text, color = if (primary) primaryContentColor ?: ComposeColor.White else MiuixTheme.colorScheme.onSurface, style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold)
         }
     }
 }
