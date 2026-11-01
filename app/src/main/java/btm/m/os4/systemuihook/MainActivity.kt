@@ -302,7 +302,7 @@ private enum class PageId {
     SHADE_PRESETS,
     SOFT_GLASS_PARAMETERS,
     SOFT_GLASS_PRESETS,
-    IOS_NOTIFICATION_CLOCK_GLASS, CONTROL_CENTER_TOP_BUTTONS,
+    IOS_NOTIFICATION_CLOCK_GLASS, CONTROL_CENTER_TOP_BUTTONS, CONTROL_CENTER_TILE_LAYOUT,
     GESTURE_HANDLE_STYLE, DESKTOP, DESKTOP_MATERIAL,
     ISLAND, ISLAND_COLLAPSED, ISLAND_EXPANDED, ISLAND_EXPANDED_BACKGROUND, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_HEADER_SETTINGS, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_ADJUSTMENT, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_MUSIC, LOCKSCREEN_CAPSULE, LOCKSCREEN_SHORTCUT_BACKGROUND, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
     DEVICE_PROFILE_PRESETS, DEVICE_PROFILE_CLOUD_PRESETS, CUSTOM_DEPTH_WALLPAPER,
@@ -983,6 +983,7 @@ private fun Root(
                 ExpandedIslandGlassSettingsStore(context).syncRemote(it)
                 NotificationStackBlurSettingsStore(context).syncRemote(it)
                 ControlCenterHeaderHeightSettingsStore(context).syncRemote(it)
+                ControlCenterTileLayoutSettingsStore(context).syncRemote(it)
                 IosNotificationBottomOffsetSettingsStore(context).syncRemote(it)
                 ControlCenterCarrierSettingsStore(context).syncRemote(it)
                 ControlCenterClockSettingsStore(context).syncRemote(it)
@@ -5400,6 +5401,7 @@ private fun Detail(
         PageId.NOTIFICATION_RESTRICTIONS -> NotificationRestrictions(back)
         PageId.NOTIFICATION_MEDIA_CARD -> NotificationMediaCard(back)
         PageId.CONTROL_CENTER_TOP_BUTTONS -> ControlCenterTopButtonsPage(back)
+        PageId.CONTROL_CENTER_TILE_LAYOUT -> ControlCenterTileLayoutPage(back)
         PageId.STATUS -> Status(settings, update, openPage, back)
         PageId.STATUS_ADJUSTMENT -> StatusAdjustment(settings, update, back)
         PageId.STATUS_SIGNAL_CUSTOMIZATION -> StatusSignalCustomization(settings, update, openPage, back)
@@ -8746,6 +8748,10 @@ private fun Status(
         }
         item {
             Group(tr("\u63a7\u5236\u4e2d\u5fc3", "\u63a7\u5236\u4e2d\u5fc3")) {
+                ArrowPreference(
+                    title = tr("cc_layout_title", "控制中心磁贴布局自定义"),
+                    onClick = { open(PageId.CONTROL_CENTER_TILE_LAYOUT) },
+                )
                 OverlayDropdownPreference(
                     title = tr("控制中心中电池百分比显示", "控制中心中电池百分比显示"),
                     items = batteryPercentageModeLabels(),
@@ -13345,11 +13351,11 @@ private fun About(back: () -> Unit, openPage: (PageId) -> Unit, monetEnabled: Bo
         }
         item {
             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, colors = aboutCardColors()) {
-                Row(Modifier.fillMaxWidth().clickable { openUrl(context, "https://btm-m.site") }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().clickable { openUrl(context, "https://coldp.github.io/OfficialSite") }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                     Image(painterResource(R.drawable.btm_m_avatar), "btm_m", Modifier.size(52.dp).clip(androidx.compose.foundation.shape.CircleShape), contentScale = ContentScale.Crop)
                     Column(Modifier.padding(start = 14.dp).weight(1f)) {
                         Text("btm_m", style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold)
-                        Text("https://btm-m.site", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 3.dp))
+                        Text(tr("officialWebsiteUrl", "coldp.github.io/OfficialSite"), style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 3.dp))
                     }
                     Image(MiuixIcons.Regular.ChevronForward, null, Modifier.size(22.dp), colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary))
                 }

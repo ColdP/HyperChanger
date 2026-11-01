@@ -26,6 +26,7 @@ internal class ControlCenterHooks(
     private val controlCenterHeaderHeightHook by lazy { ControlCenterHeaderHeightHook(module) }
     private val controlCenterCarrierHook by lazy { ControlCenterCarrierHook(module) }
     private val controlCenterClockHook by lazy { ControlCenterClockHook(module) }
+    private val controlCenterTileLayoutHook by lazy { ControlCenterTileLayoutHook(module) }
 
     private var customTileHookInstalled = false
     private var customPluginTileHookInstalled = false
@@ -36,6 +37,7 @@ internal class ControlCenterHooks(
         controlCenterHeaderHeightHook.install(classLoader, preferences)
         controlCenterCarrierHook.install(classLoader, preferences)
         controlCenterClockHook.install(classLoader, preferences)
+        controlCenterTileLayoutHook.install(classLoader, preferences)
     }
 
     fun onHeaderClassLoaded(loadedClass: Class<*>, preferences: SharedPreferences) {
@@ -43,6 +45,7 @@ internal class ControlCenterHooks(
         controlCenterHeaderHeightHook.onClassLoaded(loadedClass, preferences)
         controlCenterCarrierHook.onClassLoaded(loadedClass, preferences)
         controlCenterClockHook.onClassLoaded(loadedClass, preferences)
+        controlCenterTileLayoutHook.onClassLoaded(loadedClass, preferences)
     }
 
     /** Clears the "force new control center" flag so the legacy shade comes back. */

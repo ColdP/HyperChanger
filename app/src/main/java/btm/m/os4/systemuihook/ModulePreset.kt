@@ -80,7 +80,10 @@ object ModulePresetCodec {
                     value ?: return@forEach
                     values.put(key, encodeValue(value))
                 }
-            if (groupName == REMOTE_PREFERENCE_GROUP) completeStackedMobileCornerPreset(values)
+            if (groupName == REMOTE_PREFERENCE_GROUP) {
+                completeStackedMobileCornerPreset(values)
+                completeCcTileLayoutPreset(values)
+            }
             groups.put(groupName, values)
         }
         return JSONObject()
@@ -124,7 +127,10 @@ object ModulePresetCodec {
         val groups = root.optJSONObject("groups") ?: error("预设内容为空")
         val previewGroups = MODULE_PRESET_GROUPS.mapNotNull { groupName ->
             val values = groups.optJSONObject(groupName) ?: return@mapNotNull null
-            if (groupName == REMOTE_PREFERENCE_GROUP) completeStackedMobileCornerPreset(values)
+            if (groupName == REMOTE_PREFERENCE_GROUP) {
+                completeStackedMobileCornerPreset(values)
+                completeCcTileLayoutPreset(values)
+            }
             PreviewGroup(
                 groupName,
                 values.keys().asSequence()
@@ -174,7 +180,10 @@ object ModulePresetCodec {
         val groups = root.optJSONObject("groups") ?: error("预设内容为空")
         MODULE_PRESET_GROUPS.forEach { groupName ->
             val values = groups.optJSONObject(groupName) ?: return@forEach
-            if (groupName == REMOTE_PREFERENCE_GROUP) completeStackedMobileCornerPreset(values)
+            if (groupName == REMOTE_PREFERENCE_GROUP) {
+                completeStackedMobileCornerPreset(values)
+                completeCcTileLayoutPreset(values)
+            }
             applyValues(context.getSharedPreferences(groupName, Context.MODE_PRIVATE), values, replace = true)
             service?.getRemotePreferences(groupName)?.let { applyValues(it, values, replace = true) }
         }
