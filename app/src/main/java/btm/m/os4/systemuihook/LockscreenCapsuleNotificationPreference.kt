@@ -19,32 +19,40 @@ import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun LockscreenCapsuleNotificationPreference() {
+internal fun LockscreenCapsuleNotificationPreference(automatic: Boolean = false) {
     val context = LocalContext.current
     val service by HookApplication.service.collectAsStateWithLifecycle()
     val store = remember(context) { LockscreenCapsuleNotificationSettingsStore(context) }
-    var types by remember { mutableIntStateOf(store.types) }
+    val behavior = remember(context) { LockscreenCapsuleBehaviorSettingsStore(context) }
+    var types by remember { mutableIntStateOf(if (automatic) behavior.types else store.types) }
     var show by rememberSaveable { mutableStateOf(false) }
     val changed = LocalNotificationSettingsChanged.current
-    LaunchedEffect(service) { service?.let { store.syncRemote(it); types = store.types } }
+    LaunchedEffect(service) { service?.let {
+        if (automatic) { behavior.syncRemote(it); types = behavior.types }
+        else { store.syncRemote(it); types = store.types }
+    } }
     val items = listOf(
-        CAPSULE_NOTIFICATION_MEDIA to tr("capsuleTypeMedia", "音乐通知"),
-        CAPSULE_NOTIFICATION_FOCUS to tr("capsuleTypeFocus", "焦点通知"),
+        CAPSULE_NOTIFICATION_MEDIA to tr("capsuleTypeMedia", "媒体通知"),
+        CAPSULE_NOTIFICATION_FOCUS to tr("capsuleTypeFocus", "超级岛"),
         CAPSULE_NOTIFICATION_ORDINARY to tr("capsuleTypeOrdinary", "普通通知"),
     )
+    val title = if (automatic) tr("capsuleAutoCollapse", "自动收起为锁屏胶囊的通知类型")
+        else tr("capsuleNotificationTypes", "加入锁屏胶囊的通知类型")
     ArrowPreference(
-        title = tr("capsuleNotificationTypes", "加入锁屏胶囊的通知类型"),
+        title = title,
         summary = items.filter { (bit, _) -> types and bit != 0 }.joinToString("、") { it.second }
-            .ifEmpty { tr("capsuleTypeNone", "不加入任何通知") },
+            .ifEmpty { if (automatic) tr("capsuleAutoCollapseNone", "不自动收起任何通知")
+                else tr("capsuleTypeNone", "不加入任何通知") },
         onClick = { show = true },
     )
     if (show) {
         var selected by rememberSaveable { mutableIntStateOf(types) }
         WindowDialog(show = true, onDismissRequest = { show = false }) {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(tr("capsuleNotificationTypes", "加入锁屏胶囊的通知类型"),
+                Text(title,
                     style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
-                Text(tr("capsuleNotificationTypesHint", "仅选中的通知类型会转换为锁屏胶囊，未选中的通知保持系统原样。"),
+                Text(if (automatic) tr("capsuleAutoCollapseHint", "仅选中的通知类型会自动收起，未选中的类型需要手动下滑。仅对允许加入锁屏胶囊的类型生效。")
+                    else tr("capsuleNotificationTypesHint", "仅选中的通知类型会转换为锁屏胶囊，未选中的通知保持系统原样。"),
                     style = MiuixTheme.textStyles.body2)
                 items.forEach { (bit, title) ->
                     val toggle = { selected = selected xor bit }
@@ -59,8 +67,8 @@ internal fun LockscreenCapsuleNotificationPreference() {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     GlassDialogButton({ show = false }, Modifier.weight(1f)) { Text(tr("取消", "取消")) }
                     GlassDialogButton({
-                        store.update(service, selected)
-                        types = store.types
+                        if (automatic) { behavior.update(service, selected); types = behavior.types }
+                        else { store.update(service, selected); types = store.types }
                         changed()
                         show = false
                     }, Modifier.weight(1f), colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("保存", "保存")) }

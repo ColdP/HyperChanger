@@ -128,7 +128,9 @@ object MiniPlayerRuntime {
             !config.optBoolean(MiniPlayerConfig.NORMALS_IN_STACK, true) &&
             config.optInt(MiniPlayerConfig.STYLE) == MiniPlayerConfig.STYLE_STACK &&
             config.optBoolean(MiniPlayerConfig.GROUP_NOTIFICATIONS_BY_APP))
-        LockIslands.setAutoCollapse(config.optBoolean(MiniPlayerConfig.AUTO_COLLAPSE, true))
+        LockIslands.setAutoCollapse(
+            config.optBoolean(MiniPlayerConfig.FOCUS_AUTO_COLLAPSE, true),
+            config.optBoolean(MiniPlayerConfig.ORDINARY_AUTO_COLLAPSE, true))
     }
 
     /** The old state file is migration data; current preferences must win on every restart. */

@@ -8,46 +8,52 @@ import org.json.JSONObject
 
 /** Settings for how notifications enter the lockscreen capsule. */
 internal const val KEY_LOCKSCREEN_CAPSULE_AUTO_COLLAPSE = "lockscreen_capsule_auto_collapse"
+internal const val KEY_LOCKSCREEN_CAPSULE_AUTO_COLLAPSE_TYPES = "lockscreen_capsule_auto_collapse_types_v1"
 
-internal fun readLockscreenCapsuleAutoCollapse(preferences: SharedPreferences): Boolean =
-    preferences.getBoolean(KEY_LOCKSCREEN_CAPSULE_AUTO_COLLAPSE, true)
+internal fun readLockscreenCapsuleAutoCollapseTypes(preferences: SharedPreferences): Int =
+    preferences.getInt(KEY_LOCKSCREEN_CAPSULE_AUTO_COLLAPSE_TYPES,
+        if (preferences.getBoolean(KEY_LOCKSCREEN_CAPSULE_AUTO_COLLAPSE, true)) CAPSULE_NOTIFICATION_ALL else 0
+    ) and CAPSULE_NOTIFICATION_ALL
 
 internal fun completeLockscreenCapsuleBehaviorPreset(values: JSONObject) {
-    if (!values.has(KEY_LOCKSCREEN_CAPSULE_AUTO_COLLAPSE)) {
-        values.put(KEY_LOCKSCREEN_CAPSULE_AUTO_COLLAPSE, JSONObject()
-            .put("type", "boolean")
-            .put("value", true))
+    if (!values.has(KEY_LOCKSCREEN_CAPSULE_AUTO_COLLAPSE_TYPES)) {
+        val legacy = values.optJSONObject(KEY_LOCKSCREEN_CAPSULE_AUTO_COLLAPSE)?.optBoolean("value", true) ?: true
+        values.put(KEY_LOCKSCREEN_CAPSULE_AUTO_COLLAPSE_TYPES, JSONObject()
+            .put("type", "int")
+            .put("value", if (legacy) CAPSULE_NOTIFICATION_ALL else 0))
     }
 }
 
-internal class LockscreenCapsuleBehaviorSettingsStore(context: Context) {
-    private val local = context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE)
+internal class LockscreenCapsuleBehaviorSettingsStore(private val local: SharedPreferences) {
+    constructor(context: Context) : this(context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE))
 
-    var autoCollapse: Boolean = readLockscreenCapsuleAutoCollapse(local)
+    var types: Int = readLockscreenCapsuleAutoCollapseTypes(local)
         private set
 
-    fun syncRemote(service: XposedService) {
-        val remote = service.getRemotePreferences(REMOTE_PREFERENCE_GROUP)
-        autoCollapse = when {
-            local.contains(KEY_LOCKSCREEN_CAPSULE_AUTO_COLLAPSE) -> readLockscreenCapsuleAutoCollapse(local)
-            remote.contains(KEY_LOCKSCREEN_CAPSULE_AUTO_COLLAPSE) -> readLockscreenCapsuleAutoCollapse(remote)
-            else -> true
+    fun syncRemote(service: XposedService) = syncPreferences(service.getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+
+    internal fun syncPreferences(remote: SharedPreferences) {
+        types = when {
+            local.contains(KEY_LOCKSCREEN_CAPSULE_AUTO_COLLAPSE_TYPES) -> readLockscreenCapsuleAutoCollapseTypes(local)
+            remote.contains(KEY_LOCKSCREEN_CAPSULE_AUTO_COLLAPSE_TYPES) -> readLockscreenCapsuleAutoCollapseTypes(remote)
+            local.contains(KEY_LOCKSCREEN_CAPSULE_AUTO_COLLAPSE) -> readLockscreenCapsuleAutoCollapseTypes(local)
+            else -> readLockscreenCapsuleAutoCollapseTypes(remote)
         }
         write(local)
         write(remote)
     }
 
-    fun update(service: XposedService?, value: Boolean) {
-        autoCollapse = value
+    fun update(service: XposedService?, value: Int) {
+        types = value and CAPSULE_NOTIFICATION_ALL
         write(local)
         service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.let(::write)
     }
 
     fun reload() {
-        autoCollapse = readLockscreenCapsuleAutoCollapse(local)
+        types = readLockscreenCapsuleAutoCollapseTypes(local)
     }
 
     private fun write(preferences: SharedPreferences) {
-        preferences.edit().putBoolean(KEY_LOCKSCREEN_CAPSULE_AUTO_COLLAPSE, autoCollapse).apply()
+        preferences.edit().putInt(KEY_LOCKSCREEN_CAPSULE_AUTO_COLLAPSE_TYPES, types).apply()
     }
 }

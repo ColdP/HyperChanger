@@ -2,8 +2,10 @@
 // Copyright 2026 btm_m
 package btm.m.os4.systemuihook
 
+internal data class DockRevealConfig(val enabled: Boolean = true)
+
 /** Root transport: the launcher-owned file is required; the shared mirror is optional. */
-internal fun buildHomeLauncherStageCommand(launcherDataDir: String, expectedSize: Int, maxStages: Int = 3, safetyFlags: Int? = null): String {
+internal fun buildHomeLauncherStageCommand(launcherDataDir: String, expectedSize: Int, maxStages: Int = 3, safetyFlags: Int? = null, dockReveal: DockRevealConfig? = null): String {
     require(maxStages in 3..6)
     require(safetyFlags == null || safetyFlags in 0..7)
     fun quote(value: String) = "'" + value.replace("'", "'\\''") + "'"
@@ -37,7 +39,8 @@ internal fun buildHomeLauncherStageCommand(launcherDataDir: String, expectedSize
         fi
         launcher_staged=${'$'}(run_stage temporary-file mktemp "${'$'}launcher_files/hyperpatch.bin.XXXXXX")
         launcher_safety_staged=''
-        trap 'rm -f "${'$'}launcher_staged"; if [ -n "${'$'}launcher_safety_staged" ]; then rm -f "${'$'}launcher_safety_staged"; fi' EXIT
+        launcher_reveal_staged=''
+        trap 'rm -f "${'$'}launcher_staged"; if [ -n "${'$'}launcher_safety_staged" ]; then rm -f "${'$'}launcher_safety_staged"; fi; if [ -n "${'$'}launcher_reveal_staged" ]; then rm -f "${'$'}launcher_reveal_staged"; fi' EXIT
         launcher_target="${'$'}launcher_files/hyperpatch.bin"
         # Stream from the caller: su need not open the module's private data directory.
         run_stage write cat > "${'$'}launcher_staged"
@@ -56,6 +59,18 @@ internal fun buildHomeLauncherStageCommand(launcherDataDir: String, expectedSize
         run_stage safety-label chcon "${'$'}launcher_context" "${'$'}launcher_safety_staged"
         run_stage safety-publish mv -f "${'$'}launcher_safety_staged" "${'$'}launcher_safety"
         """.trimIndent() else ""}
+        ${when (dockReveal?.enabled) {
+            null -> ""
+            false -> "run_stage reveal-disable rm -f \"${'$'}launcher_files/hyperdock-reveal-duration\""
+            else -> """
+        launcher_reveal_staged=${'$'}(run_stage reveal-temporary-file mktemp "${'$'}launcher_files/hyperdock-reveal-duration.XXXXXX")
+        run_stage reveal-write sh -c 'printf "%s" "follow" > "${'$'}1"' sh "${'$'}launcher_reveal_staged"
+        run_stage reveal-owner chown "${'$'}launcher_owner" "${'$'}launcher_reveal_staged"
+        run_stage reveal-mode chmod 600 "${'$'}launcher_reveal_staged"
+        run_stage reveal-label chcon "${'$'}launcher_context" "${'$'}launcher_reveal_staged"
+        run_stage reveal-publish mv -f "${'$'}launcher_reveal_staged" "${'$'}launcher_files/hyperdock-reveal-duration"
+            """.trimIndent()
+        }}
         # Launcher 8.01.02.7748 observes this secure setting and uses it as the
         # resolved upper bound for multiple split stages. Keep stock behavior at 3.
         run_stage max-stages settings put secure miui_multiple_split_resolved_max_stages ${quote(maxStages.toString())}

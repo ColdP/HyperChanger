@@ -141,7 +141,10 @@ internal fun stageHomeRecentsNativeConfig(
     val launcherDataDir = context.packageManager.getApplicationInfo(
         "com.miui.home", PackageManager.ApplicationInfoFlags.of(0),
     ).dataDir ?: error("Launcher data directory unavailable")
-    val command = buildHomeLauncherStageCommand(launcherDataDir, blob.size, if (desktopAllowed && multiSplitSettings.enabled) 6 else 3, moduleSafetyNativeFlags(local))
+    val reveal = DockRevealConfig(
+        enabled = desktopAllowed && nativeDock.enabled && nativeDock.glass && local.getBoolean(KEY_DOCK_ENTRY_ANIMATION, true),
+    )
+    val command = buildHomeLauncherStageCommand(launcherDataDir, blob.size, if (desktopAllowed && multiSplitSettings.enabled) 6 else 3, moduleSafetyNativeFlags(local), reveal)
     // Android app-data isolation hides other apps' directories in our mount
     // namespace, even after gaining UID 0. Magisk/KernelSU -M uses the global one.
     val process = ProcessBuilder("su", "-M", "-c", command).redirectErrorStream(true).start()

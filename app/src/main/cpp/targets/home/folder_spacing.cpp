@@ -421,8 +421,8 @@ void publish_full_glass(const EffectSlot &slot, const folder_spacing::MaterialSe
 void install_full_glass(uintptr_t v7, const std::vector<nhk::ExecutableMapping> &generation,
         const folder_spacing::MaterialSettings &settings) {
     using namespace home_full_glass;
-    if (v7 < kV7Rva) return;
-    const uintptr_t base = v7 - kV7Rva;
+    uintptr_t base = 0;
+    const Profile *selected = nullptr;
     const auto verify = [&](uintptr_t rva, const auto &shape) {
         std::vector<uint32_t> live(shape.size());
         if (!source_at(generation, base+rva) || !nhk::safe_read(base+rva, std::as_writable_bytes(std::span(live)))) return false;
@@ -434,18 +434,28 @@ void install_full_glass(uintptr_t v7, const std::vector<nhk::ExecutableMapping> 
         }
         return home_full_glass::matches(live,shape);
     };
-    if (!verify(kConstructorRva,kConstructorShape) || !verify(0x117a1cc,kFactoryTailShape)
-        || !verify(0x1179948,kDarkCallShape) || !verify(0x117acd8,kLightCallShape)) return;
+    for (const auto &candidate : kProfiles) {
+        if (v7 < candidate.v7) continue;
+        base = v7 - candidate.v7;
+        if (verify(candidate.constructor,kConstructorShape) && verify(candidate.factory_tail,kFactoryTailShape)
+            && verify(candidate.dark_call,candidate.dark_shape) && verify(candidate.light_call,candidate.light_shape)) {
+            if (selected) return; // Refuse an ambiguous profile.
+            selected = &candidate;
+        }
+    }
+    if (!selected) return;
+    const auto &profile = *selected;
+    base = v7 - profile.v7;
     // Confirm both Dock builders call this factory, and the factory this exact
     // constructor. A BL-shaped instruction alone is not an ABI proof.
     for (const auto &[rva, target] : std::array<std::pair<uintptr_t,uintptr_t>,3>{{
-            {kDarkReturnRva-4,0x1179990}, {kLightReturnRva-4,0x1179990}, {kFactoryCallRva,kConstructorRva}}}) {
+            {profile.dark_return-4,profile.factory}, {profile.light_return-4,profile.factory}, {profile.factory_call,profile.constructor}}}) {
         uint32_t call=0;
         if (!nhk::safe_read(base+rva,std::as_writable_bytes(std::span(&call,1)))
             || home_native_dock::call_target(base+rva,call) != base+target) return;
     }
     for (const auto &field : kFields) {
-        const uintptr_t address=base+kConstructorRva+field.index*4;
+        const uintptr_t address=base+profile.constructor+field.index*4;
         const auto source=source_at(generation,address);
         if (!source || full_glass_slots.size() >= 60 || std::ranges::any_of(full_glass_slots,[&](const EffectSlot &s) {
                 return s.address==address && s.source==*source;
@@ -455,9 +465,9 @@ void install_full_glass(uintptr_t v7, const std::vector<nhk::ExecutableMapping> 
             || live!=kConstructorShape[field.index]) continue;
         auto slot=make_effect(address,*source,live,field.parameter,field.reg,false,false,5);
         if (!slot) continue;
-        __atomic_store_n(slot->data+10,uint64_t{base+kDarkReturnRva},__ATOMIC_RELEASE);
-        __atomic_store_n(slot->data+11,uint64_t{base+kLightReturnRva},__ATOMIC_RELEASE);
-        __atomic_store_n(slot->data+12,uint64_t{base+kFactoryCallRva+4},__ATOMIC_RELEASE);
+        __atomic_store_n(slot->data+10,uint64_t{base+profile.dark_return},__ATOMIC_RELEASE);
+        __atomic_store_n(slot->data+11,uint64_t{base+profile.light_return},__ATOMIC_RELEASE);
+        __atomic_store_n(slot->data+12,uint64_t{base+profile.factory_call+4},__ATOMIC_RELEASE);
         publish_full_glass(*slot,settings);
         full_glass_slots.push_back(*slot);
         if (source_at(inventory(),address)==source) write_effect(*slot,true);
@@ -505,6 +515,7 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
         std::vector<uintptr_t> release8583_supports;
         std::vector<uintptr_t> release8583_strategies, release8583_glass_radii,
             release8583_advanced_radii, release8583_paddings;
+        std::vector<uintptr_t> release8593_strategies, release8593_glass_radii, release8593_advanced_radii;
         for (const auto &mapping : generation) {
             std::vector<uint32_t> code((mapping.end - mapping.begin) / 4);
             if (!nhk::safe_read(mapping.begin, std::as_writable_bytes(std::span(code)))) continue;
@@ -543,6 +554,9 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
                     if(home_native_dock::matches(candidate,home_native_dock::kRelease8583GlassRadiusShape)) release8583_glass_radii.push_back(mapping.begin+i*4);
                     if(home_native_dock::matches(candidate,home_native_dock::kRelease8583AdvancedRadiusShape)) release8583_advanced_radii.push_back(mapping.begin+i*4);
                     if(home_native_dock::matches(candidate,home_native_dock::kRelease8583PaddingShape)) release8583_paddings.push_back(mapping.begin+i*4);
+                    if(home_native_dock::matches(candidate,home_native_dock::kRelease8593StrategyShape)) release8593_strategies.push_back(mapping.begin+i*4);
+                    if(home_native_dock::matches(candidate,home_native_dock::kRelease8593GlassRadiusShape)) release8593_glass_radii.push_back(mapping.begin+i*4);
+                    if(home_native_dock::matches(candidate,home_native_dock::kRelease8593AdvancedRadiusShape)) release8593_advanced_radii.push_back(mapping.begin+i*4);
                 }
             }
         }
@@ -735,65 +749,95 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
             add_gate(base + selected->position, 0x372000a0,
                 home_native_dock::kNoLabelFallthrough, "no-label-position", home_native_dock::kNoLabelPositionShape);
         }
-        // 8.01.02.8583 has a distinct support predicate load and a fresh AOT
-        // layout. Require exactly one release signature, then validate every
-        // Dock-only branch against its live instruction before patching.
+        // 8583 and 8593 share the support bytes. Choose exactly one complete
+        // layout; a shared predicate alone must never select another image's RVAs.
+        bool release8593 = false;
         if (need_native && release8583_supports.size() == 1) {
-            if (release8583_supports[0] < home_native_dock::kRelease8583SupportRva) continue;
-            const uintptr_t base = release8583_supports[0] - home_native_dock::kRelease8583SupportRva;
-            const std::array<std::pair<uintptr_t, uint32_t>, 4> checks{{
-                {base + home_native_dock::kRelease8583BackgroundGateRva, 0x37200101},
-                {base + home_native_dock::kRelease8583NoLabelLayoutGateRva, 0x37200220},
-                {base + home_native_dock::kRelease8583NoLabelOffsetGateRva, 0x37200160},
-                {base + home_native_dock::kRelease8583NoLabelPositionGateRva, 0x372000a0},
-            }};
-            bool valid = true;
-            for (const auto &[address, expected] : checks) {
-                uint32_t live = 0;
-                if (!source_at(generation, address)
-                    || source_at(inventory(), address) != source_at(generation, address)
-                    || !nhk::safe_read(address, std::as_writable_bytes(std::span(&live, 1)))) {
-                    valid = false;
-                    break;
+            struct Layout {
+                uintptr_t support, background, layout, offset, position;
+                const char *name;
+                bool is8593;
+            };
+            const std::array layouts{
+                Layout{home_native_dock::kRelease8583SupportRva,
+                    home_native_dock::kRelease8583BackgroundGateRva,
+                    home_native_dock::kRelease8583NoLabelLayoutGateRva,
+                    home_native_dock::kRelease8583NoLabelOffsetGateRva,
+                    home_native_dock::kRelease8583NoLabelPositionGateRva, "8.01.02.8583", false},
+                Layout{home_native_dock::kRelease8593SupportRva,
+                    home_native_dock::kRelease8593BackgroundGateRva,
+                    home_native_dock::kRelease8593NoLabelLayoutGateRva,
+                    home_native_dock::kRelease8593NoLabelOffsetGateRva,
+                    home_native_dock::kRelease8593NoLabelPositionGateRva, "8.01.02.8593", true},
+            };
+            const Layout *selected = nullptr;
+            for (const auto &candidate : layouts) {
+                if (release8583_supports[0] < candidate.support) continue;
+                const uintptr_t base = release8583_supports[0] - candidate.support;
+                const std::array<std::pair<uintptr_t, uint32_t>, 4> checks{{
+                    {base + candidate.background, 0x37200101},
+                    {base + candidate.layout, 0x37200220},
+                    {base + candidate.offset, 0x37200160},
+                    {base + candidate.position, 0x372000a0},
+                }};
+                bool valid = true;
+                for (const auto &[address, expected] : checks) {
+                    uint32_t live = 0;
+                    if (!source_at(generation, address)
+                        || source_at(inventory(), address) != source_at(generation, address)
+                        || !nhk::safe_read(address, std::as_writable_bytes(std::span(&live, 1)))) {
+                        valid = false;
+                        break;
+                    }
+                    // A previous pass may have installed only some targets. Accept
+                    // only our own replacement with the same image ownership so
+                    // material-island allocation can retry after gates are active.
+                    for (const auto &gate : native_gates)
+                        if (gate.address == address && source_at(generation, address) == gate.source
+                            && live == gate.replacement) live = gate.original;
+                    if (live != expected) { valid = false; break; }
                 }
-                // A previous pass may have installed only some targets. Accept
-                // only our own replacement with the same image ownership so
-                // material-island allocation can retry after gates are active.
-                for (const auto &gate : native_gates)
-                    if (gate.address == address && source_at(generation, address) == gate.source
-                        && live == gate.replacement) live = gate.original;
-                if (live != expected) { valid = false; break; }
+                if (valid) {
+                    if (selected) { selected = nullptr; break; }
+                    selected = &candidate;
+                }
             }
-            if (!valid) {
+            if (!selected) {
                 __android_log_print(ANDROID_LOG_WARN, kTag,
-                    "Native Dock 8.01.02.8583 support matched but layout targets failed validation at %p",
+                    "Native Dock 8583/8593 support matched but layout validation failed at %p",
                     reinterpret_cast<void *>(release8583_supports[0]));
                 continue;
             }
+            const uintptr_t base = release8583_supports[0] - selected->support;
+            release8593 = selected->is8593;
             __android_log_print(ANDROID_LOG_INFO, kTag,
-                "Native Dock layout variant 8.01.02.8583 validated (base=%p)",
+                "Native Dock layout variant %s validated (base=%p)", selected->name,
                 reinterpret_cast<void *>(base));
             add_gate(release8583_supports[0] + 8, home_native_dock::kRelease8583SupportShape[2],
                 0x14000001, "support");
-            add_gate(base + home_native_dock::kRelease8583BackgroundGateRva, 0x37200101,
-                0x14000008, "background");
-            add_gate(base + home_native_dock::kRelease8583NoLabelLayoutGateRva, 0x37200220,
+            add_gate(base + selected->background, 0x37200101, 0x14000008, "background");
+            add_gate(base + selected->layout, 0x37200220,
                 home_native_dock::kNoLabelFallthrough, "no-label-layout", home_native_dock::kNoLabelLayoutShape);
-            add_gate(base + home_native_dock::kRelease8583NoLabelOffsetGateRva, 0x37200160,
+            add_gate(base + selected->offset, 0x37200160,
                 home_native_dock::kNoLabelFallthrough, "no-label-offset", home_native_dock::kNoLabelOffsetShape);
-            add_gate(base + home_native_dock::kRelease8583NoLabelPositionGateRva, 0x372000a0,
+            add_gate(base + selected->position, 0x372000a0,
                 home_native_dock::kNoLabelFallthrough, "no-label-position", home_native_dock::kNoLabelPositionShape);
         }
         const bool release8583 = release8583_supports.size() == 1;
-        if (release8583) {
+        if (release8593) {
+            strategies = std::move(release8593_strategies);
+            glass_radii = std::move(release8593_glass_radii);
+            advanced_radii = std::move(release8593_advanced_radii);
+            paddings = std::move(release8583_paddings);
+        } else if (release8583) {
             strategies = std::move(release8583_strategies);
             glass_radii = std::move(release8583_glass_radii);
             advanced_radii = std::move(release8583_advanced_radii);
             paddings = std::move(release8583_paddings);
         }
-        const auto &strategy_shape = release8583 ? home_native_dock::kRelease8583StrategyShape : home_native_dock::kStrategyShape;
-        const auto &glass_shape = release8583 ? home_native_dock::kRelease8583GlassRadiusShape : home_native_dock::kGlassRadiusShape;
-        const auto &advanced_shape = release8583 ? home_native_dock::kRelease8583AdvancedRadiusShape : home_native_dock::kAdvancedRadiusShape;
+        const auto &strategy_shape = release8593 ? home_native_dock::kRelease8593StrategyShape : release8583 ? home_native_dock::kRelease8583StrategyShape : home_native_dock::kStrategyShape;
+        const auto &glass_shape = release8593 ? home_native_dock::kRelease8593GlassRadiusShape : release8583 ? home_native_dock::kRelease8583GlassRadiusShape : home_native_dock::kGlassRadiusShape;
+        const auto &advanced_shape = release8593 ? home_native_dock::kRelease8593AdvancedRadiusShape : release8583 ? home_native_dock::kRelease8583AdvancedRadiusShape : home_native_dock::kAdvancedRadiusShape;
         const auto &padding_shape = release8583 ? home_native_dock::kRelease8583PaddingShape : home_native_dock::kPaddingShape;
         if (need_native && gates.size()==1 && strategies.size()==1 && glass_radii.size()==1 && advanced_radii.size()==1 && paddings.size()==1) {
             std::array<uint32_t,109> strategy{};

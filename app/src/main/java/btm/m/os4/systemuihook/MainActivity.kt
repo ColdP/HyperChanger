@@ -3801,6 +3801,13 @@ private fun Desktop(
                 exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
             ) {
                 Group(tr("Dock 背景材质", "Dock 背景材质")) {
+                    if (settings.material != 1) {
+                        SwitchPreference(
+                            title = tr("dockUnlockEntryAnimation", "解锁入场动画"),
+                            checked = settings.entryAnimation,
+                            onCheckedChange = { value -> update { it.copy(entryAnimation = value) } },
+                        )
+                    }
                     OverlayDropdownPreference(
                         title = tr("Dock 背景材质", "Dock 背景材质"),
                         items = listOf(tr("纯色", "纯色"), tr("高级材质", "高级材质"), tr("柔光玻璃", "柔光玻璃")),

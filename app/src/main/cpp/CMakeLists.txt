@@ -13,6 +13,8 @@ target_link_libraries(hyperchanger_dock PRIVATE android binder_ndk log dl)
 
 add_library(hyperchanger_folder SHARED
     folder_entry.cpp
+    targets/home/dock_native_reveal.cpp
+    targets/home/dock_reveal_capture_arm64.S
     targets/home/folder_spacing.cpp
     targets/home/folder_spacing_arm64.S)
 target_include_directories(hyperchanger_folder PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

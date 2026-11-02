@@ -1960,8 +1960,8 @@
     "settingsEntryAppearanceDefault": "0%（システム標準）",
     "capsuleNotificationTypes": "ロック画面カプセルに入れる通知の種類",
     "capsuleNotificationTypesHint": "選択した通知だけがロック画面カプセルになり、他の通知はシステムの動作を維持します。",
-    "capsuleTypeMedia": "音楽通知",
-    "capsuleTypeFocus": "フォーカス通知",
+    "capsuleTypeMedia": "メディア通知",
+    "capsuleTypeFocus": "スーパーアイランド",
     "capsuleTypeOrdinary": "通常の通知",
     "capsuleTypeNone": "通知を追加しない",
     "capsuleAutoCollapse": "ロック画面カプセルへ自動的に折りたたむ",
@@ -1980,6 +1980,10 @@
     "cloudControlNoticeIntro": "マスタースイッチは下のアプリ別スイッチを有効にします。アプリ別スイッチはマスタースイッチがオンのときだけ有効で、オフにするとすべてのクラウドコントロール遮断が直ちに無効になります。",
     "cloudControlNoticeRisk": "クラウドコントロールを遮断すると、対象アプリのクラウド機能やデータ同期に影響する場合があります。意図した動作であることを確認してから続行してください。本機能は現状のまま提供され、将来のシステムバージョンとの互換性は保証されません。",
     "cloudControlNoticeIssue": "問題が発生した場合は ColdP/HyperChanger の GitHub リポジトリで Issue を作成し、モジュールログ、問題の説明、再現手順、端末のモデル、システムとモジュールのバージョンを添付してください。投稿前にログから個人情報を削除してください。"
+    "capsuleAutoCollapse": "ロック画面カプセルへ自動的に折りたたむ通知の種類",
+    "capsuleAutoCollapseNone": "通知を自動的に折りたたまない",
+    "capsuleAutoCollapseHint": "選択した種類は自動的に折りたたまれます。その他の種類は手動で下にスワイプしてください。ロック画面カプセルへの追加を許可した種類にのみ適用されます。",
+    "锁屏胶囊图标圆角 (dp)": "ロック画面カプセルのアイコン角丸半径（dp）"
   },
   "Xiaomi 18 Pro 系列 AI 背屏": "Xiaomi 18 Pro シリーズ AI 背面画面",
   "解锁 AI 功能": "AI 機能を解放",
@@ -2125,5 +2129,6 @@
   "iosNotificationStagedExpansion": "段階的な展開アニメーション",
   "iosNotificationStagedExpansionSummary": "スワイプに合わせて角丸のリキッドガラスを広げ、完全に開いてから壁紙を表示します。上スワイプで逆再生し、壁紙を表示しない場合はガラス背景を維持します。",
   "iosNotificationBottomRefraction": "下端のガラス屈折",
-  "iosNotificationBottomRefractionSummary": "段階的な展開中に、下端の角丸部分にガラスの屈折を表示します。オフにしても背景のぼかしと細い枠線は維持されます。"
+  "iosNotificationBottomRefractionSummary": "段階的な展開中に、下端の角丸部分にガラスの屈折を表示します。オフにしても背景のぼかしと細い枠線は維持されます。",
+  "dockUnlockEntryAnimation": "ロック解除時の表示アニメーション"
 }

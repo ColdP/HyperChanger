@@ -90,6 +90,7 @@ object ModulePresetCodec {
                 completeLockscreenCapsuleBehaviorPreset(values)
                 completeIosNotificationExpansionPreset(values)
                 completeIosNotificationRefractionPreset(values)
+                completeDockRevealPreset(values)
             }
             groups.put(groupName, values)
         }
@@ -142,6 +143,7 @@ object ModulePresetCodec {
                 completeLockscreenCapsuleBehaviorPreset(values)
                 completeIosNotificationExpansionPreset(values)
                 completeIosNotificationRefractionPreset(values)
+                completeDockRevealPreset(values)
             }
             PreviewGroup(
                 groupName,
@@ -200,6 +202,7 @@ object ModulePresetCodec {
                 completeLockscreenCapsuleBehaviorPreset(values)
                 completeIosNotificationExpansionPreset(values)
                 completeIosNotificationRefractionPreset(values)
+                completeDockRevealPreset(values)
             }
             applyValues(context.getSharedPreferences(groupName, Context.MODE_PRIVATE), values, replace = true)
             service?.getRemotePreferences(groupName)?.let { applyValues(it, values, replace = true) }
