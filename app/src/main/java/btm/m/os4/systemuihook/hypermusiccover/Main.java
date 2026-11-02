@@ -69,6 +69,7 @@ public class Main extends XposedModule {
 
     static final String TAG = "[MCProbe] ";
     private static final String ACTION = "btm.m.os4.systemuihook.hypermusiccover.PROBE";
+    private static final String ACTION_USER_SWITCHED = "android.intent.action.USER_SWITCHED";
 
     private static final String CLS_CONTAINER =
             "com.android.keyguard.clock.KeyguardClockContainer";
@@ -749,6 +750,26 @@ public class Main extends XposedModule {
         Xp.attach(this);
         final ClassLoader cl = param.getDefaultClassLoader();
         IosShadeMaterial.install();
+        try {
+            Class<?> wallpaperManager = Xp.findClass(CLS_KG_WALLPAPER_MANAGER, cl);
+            Xp.hookAllConstructors(wallpaperManager, chain -> {
+                Object result = chain.proceed();
+                sKgWallpaperMgr = chain.getThisObject();
+                return result;
+            });
+            Xp.hookAll(wallpaperManager, "initKeyguardWallpaperManager", chain -> {
+                Object result = chain.proceed();
+                sKgWallpaperMgr = chain.getThisObject();
+                // An earlier shade request may have run before the OEM preview service.
+                main().post(() -> {
+                    invalidateShadeWallpaper();
+                    if (ShadeLayer.iosWallpaperEnabled()) requestShadeWallpaper();
+                });
+                return result;
+            });
+        } catch (Throwable error) {
+            Xp.log("[IOSShade] wallpaper preview capture unavailable: " + error);
+        }
         try {
             Class<?> glass = Xp.findClass(
                     "com.android.systemui.statusbar.notification.style.vieweffect.MediaViewGlassEffect", param.getDefaultClassLoader());
@@ -1543,7 +1564,7 @@ public class Main extends XposedModule {
                 // Every one of these three changes the answer to one of the two cached readings,
                 // so the timer below is not what anyone waits on at the moments that matter.
                 forgetSysReads();
-                if (Intent.ACTION_WALLPAPER_CHANGED.equals(a)) {
+                if (Intent.ACTION_WALLPAPER_CHANGED.equals(a) || ACTION_USER_SWITCHED.equals(a)) {
                     // Nothing else in this receiver is about the wallpaper, so this is the whole
                     // of it: drop the cached copy the shade shows in mode 1. It reloads on the
                     // next pull-down that wants it.
@@ -1566,6 +1587,7 @@ public class Main extends XposedModule {
         // notice that it is no longer the right picture - the user can change it from Settings,
         // a theme or the wallpaper carousel, and nothing else this module hooks is involved.
         lf.addAction(Intent.ACTION_WALLPAPER_CHANGED);
+        lf.addAction(ACTION_USER_SWITCHED);
         ctx.registerReceiver(lifecycle, lf, Context.RECEIVER_NOT_EXPORTED);
         Xp.log(TAG + "lifecycle receiver registered (screen off / user present)");
     }
@@ -5611,19 +5633,7 @@ public class Main extends XposedModule {
         setShadeArt(null);
     }
 
-    /**
-     * What the shade reveals in mode 1 when cover mode is off: the wallpaper that is actually
-     * behind it.
-     *
-     * The HOME wallpaper and not the lock one. The ported module used
-     * `MiuiKeyguardWallPaperManager.getKeyguardWallPaperPreview()`, which is the lock screen's -
-     * but the notification shade is pulled down over the desktop, where the wallpaper is a
-     * different picture most of the time. Revealing the lock wallpaper there would swap the
-     * thing the user is looking at for an unrelated photo.
-     *
-     * Owned by the same rules as sShadeArt: setShadeWallpaper() is the only writer and the only
-     * recycler.
-     */
+    /** Selected notification wallpaper. Only setShadeWallpaper owns/retires these bitmaps. */
     private static volatile Bitmap sShadeWallpaper;
     private static volatile Bitmap sShadeWallpaperRetired;
     /** One load in flight at a time; the shade asks on every frame it has no picture. */
@@ -5646,11 +5656,14 @@ public class Main extends XposedModule {
                 Bitmap b = null;
                 try {
                     String kind = wallpaperKind(ctx, lock ? "lock" : "home");
-                    if (kind == null || KIND_IMAGE.equals(kind)) {
+                    // The system preview also represents depth/video wallpapers. Reading it
+                    // does not replace the wallpaper service or consume its foreground layer.
+                    if (lock) b = shadeLockPreview(ctx);
+                    if (b == null && (kind == null || KIND_IMAGE.equals(kind))) {
                         android.app.WallpaperManager wm = (android.app.WallpaperManager)
                                 ctx.getSystemService(Context.WALLPAPER_SERVICE);
                         if (wm != null) b = shadeWallpaper(wm, lock);
-                    } else {
+                    } else if (b == null) {
                         Xp.log(TAG + "shade wallpaper: selected " + (lock ? "lock" : "home")
                                 + " wallpaper is " + kind + "; keeping the platform background");
                     }
@@ -5665,6 +5678,7 @@ public class Main extends XposedModule {
                         sShadeWpLoading = false;
                         if (generation != sShadeWpGeneration) {
                             if (result != null && !result.isRecycled()) result.recycle();
+                            if (ShadeLayer.iosWallpaperEnabled()) requestShadeWallpaper();
                             return;
                         }
                         if (result == null) {
@@ -5710,8 +5724,13 @@ public class Main extends XposedModule {
         android.os.ParcelFileDescriptor file = wm.getWallpaperFile(lock
                 ? android.app.WallpaperManager.FLAG_LOCK : android.app.WallpaperManager.FLAG_SYSTEM);
         // A shared home/lock wallpaper has no separate lock file.
-        if (file == null && lock) file = wm.getWallpaperFile(android.app.WallpaperManager.FLAG_SYSTEM);
+        if (file == null && lock && KIND_IMAGE.equals(wallpaperKind(sAppCtx, "lock"))) {
+            file = wm.getWallpaperFile(android.app.WallpaperManager.FLAG_SYSTEM);
+        }
         if (file == null) {
+            // A separate lock wallpaper may have no exported file. Do not substitute the
+            // desktop for it when the OEM has explicitly identified a non-static source.
+            if (lock && !KIND_IMAGE.equals(wallpaperKind(sAppCtx, "lock"))) return null;
             Bitmap borrowed = homeWallpaper(wm);
             // Cache retirement must never recycle WallpaperManager's own bitmap.
             return borrowed == null ? null : borrowed.copy(Bitmap.Config.ARGB_8888, false);
@@ -5720,6 +5739,26 @@ public class Main extends XposedModule {
             android.graphics.BitmapFactory.Options options = new android.graphics.BitmapFactory.Options();
             options.inPreferredConfig = Bitmap.Config.ARGB_8888;
             return android.graphics.BitmapFactory.decodeStream(in, null, options);
+        }
+    }
+
+    private static Bitmap shadeLockPreview(Context context) {
+        Object manager = sKgWallpaperMgr;
+        if (manager == null) return null;
+        try {
+            Object preview = Xp.callMethod(manager, "getKeyguardWallPaperPreview", context);
+            if (!(preview instanceof BitmapDrawable)) return null;
+            Bitmap source = ((BitmapDrawable) preview).getBitmap();
+            if (source == null || source.isRecycled()) return null;
+            // Bound pixel count to the display while preserving the complete preview's aspect
+            // ratio. ImageView keeps the existing crop, including after rotation, aligned with
+            // the independently hosted depth foreground. Never recycle the OEM bitmap.
+            android.util.DisplayMetrics metrics = context.getResources().getDisplayMetrics();
+            return btm.m.os4.systemuihook.newnotificationcenter.IosShadeWallpaper.copyPreview(
+                    source, metrics.widthPixels, metrics.heightPixels);
+        } catch (Throwable error) {
+            Xp.log("[IOSShade] lock preview unavailable: " + error);
+            return null;
         }
     }
 
@@ -10292,9 +10331,9 @@ public class Main extends XposedModule {
                 }
                 return chain.proceed(args);
             });
-            Xp.log(TAG + "HyperLight setMiGlass guard armed");
+            Xp.log(TAG + "setMiGlass guard armed");
         } catch (Throwable t) {
-            Xp.log(TAG + "HyperLight setMiGlass guard unavailable: " + t);
+            Xp.log(TAG + "setMiGlass guard unavailable: " + t);
         }
     }
 

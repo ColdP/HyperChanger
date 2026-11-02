@@ -280,9 +280,9 @@ public final class ShadeLayer {
         int blur = landscape
                 ? Math.round((22f + 14f * (1f - visual)) * density)
                 : Math.round(28f * density * (1f - visual));
+        blur = (blur + 1) / 2 * 2;
         if (sWp != null && sLastWpBlur != blur) {
-            sWp.setRenderEffect(blur == 0 ? null : android.graphics.RenderEffect.createBlurEffect(
-                    blur, blur, android.graphics.Shader.TileMode.CLAMP));
+            sWp.setRenderEffect(btm.m.os4.systemuihook.newnotificationcenter.IosShadeBlurEffects.blur(blur));
             sLastWpBlur = blur;
         }
         applyCurtain(IOS.progress);
@@ -637,6 +637,9 @@ public final class ShadeLayer {
      * so the filter is on the caller - see Main's install.
      */
     static void onExpansion(float f) {
+        // The imported flowing-light shade experiment is retired. Only the iOS notification
+        // center owns this legacy state now; ordinary notification-center pulls must stay OEM.
+        if (!sIosEnabled) return;
         if (f < 0f) f = 0f;
         if (f > 1f) f = 1f;
         sFrames++;
@@ -709,14 +712,7 @@ public final class ShadeLayer {
             if (sWallpaper == null) Main.requestShadeWallpaper();
             return sWallpaper != null && !sWallpaper.isRecycled();
         }
-        if (sMode < 0 || sMode > 2) return false;
-        // The album cover is the lockscreen wallpaper, never an unlocked notification-centre
-        // background. The imported shade experiment normally reveals sArt in mode 0; keeping
-        // it out here prevents an active music session from replacing the desktop's shade
-        // wallpaper while preserving the lockscreen cover and its native glass sampling.
-        if (Main.coverModeOn() || Main.releasing()) return false;
-        if (sMode == 0) return false;
-        return true;
+        return false;
     }
 
     /**
@@ -835,11 +831,7 @@ public final class ShadeLayer {
 
     /** Which behaviour is selected: 0 cover-only, 1 always with a wallpaper fallback, 2 feel. */
     static void setMode(int mode) {
-        sMode = mode;
-        // Mode 1 is the only one that ever wants a wallpaper, so asking here is what keeps the
-        // second full-screen bitmap off the heap for everyone on 0 or 2.
-        if (mode == 1) Main.requestShadeWallpaper();
-        Xp.log(TAG + "shade mode = " + mode);
+        sMode = 0;
     }
 
     static int mode() {
@@ -908,7 +900,8 @@ public final class ShadeLayer {
      */
     static void configure(String key, int v) {
         if (key == null) return;
-        if ("mode".equals(key)) setMode(clampInt(v, 0, 2));
+        if (!sIosEnabled) return;
+        if ("mode".equals(key)) setMode(0);
         else if ("gate".equals(key)) sGateOn = v != 0;
         else if ("cardblur".equals(key)) sCardBlurOn = v != 0;
         else if ("cardradius".equals(key)) sCardBlurRadius = clampInt(v, 0, 200);

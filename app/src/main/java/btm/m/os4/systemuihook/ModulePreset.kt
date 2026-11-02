@@ -81,8 +81,11 @@ object ModulePresetCodec {
                     values.put(key, encodeValue(value))
                 }
             if (groupName == REMOTE_PREFERENCE_GROUP) {
+                completeModuleNavigationPreset(values)
                 completeStackedMobileCornerPreset(values)
                 completeCcTileLayoutPreset(values)
+                completeCapsuleNotificationPreset(values)
+                completeLockscreenCapsuleBehaviorPreset(values)
             }
             groups.put(groupName, values)
         }
@@ -128,8 +131,11 @@ object ModulePresetCodec {
         val previewGroups = MODULE_PRESET_GROUPS.mapNotNull { groupName ->
             val values = groups.optJSONObject(groupName) ?: return@mapNotNull null
             if (groupName == REMOTE_PREFERENCE_GROUP) {
+                completeModuleNavigationPreset(values)
                 completeStackedMobileCornerPreset(values)
                 completeCcTileLayoutPreset(values)
+                completeCapsuleNotificationPreset(values)
+                completeLockscreenCapsuleBehaviorPreset(values)
             }
             PreviewGroup(
                 groupName,
@@ -181,8 +187,11 @@ object ModulePresetCodec {
         MODULE_PRESET_GROUPS.forEach { groupName ->
             val values = groups.optJSONObject(groupName) ?: return@forEach
             if (groupName == REMOTE_PREFERENCE_GROUP) {
+                completeModuleNavigationPreset(values)
                 completeStackedMobileCornerPreset(values)
                 completeCcTileLayoutPreset(values)
+                completeCapsuleNotificationPreset(values)
+                completeLockscreenCapsuleBehaviorPreset(values)
             }
             applyValues(context.getSharedPreferences(groupName, Context.MODE_PRIVATE), values, replace = true)
             service?.getRemotePreferences(groupName)?.let { applyValues(it, values, replace = true) }

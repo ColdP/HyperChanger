@@ -36,6 +36,10 @@ class HookApplication : Application(), XposedServiceHelper.OnServiceListener {
             .onFailure { ModuleLog.w("CustomDepthWallpaper", "Could not sync custom depth wallpaper settings", it) }
         runCatching { HyperMusicCoverSettingsStore(this).syncRemote(service) }
             .onFailure { ModuleLog.w("HyperMusicCover", "Could not sync music settings", it) }
+        runCatching { LockscreenCapsuleNotificationSettingsStore(this).syncRemote(service) }
+            .onFailure { ModuleLog.w("HyperMusicCover", "Could not sync capsule notification types", it) }
+        runCatching { LockscreenCapsuleBehaviorSettingsStore(this).syncRemote(service) }
+            .onFailure { ModuleLog.w("HyperMusicCover", "Could not sync capsule behavior", it) }
         runCatching { MusicLockscreenSettingsStore(this).syncRemote(service) }
             .onFailure { ModuleLog.w("HyperMusicCover", "Could not sync music lockscreen master", it) }
         serviceState.value = service

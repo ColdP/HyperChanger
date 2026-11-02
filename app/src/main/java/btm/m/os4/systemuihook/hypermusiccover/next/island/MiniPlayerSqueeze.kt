@@ -196,7 +196,8 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
             (view.parent as? android.view.ViewGroup)?.removeView(view)
             addView(view, LayoutParams(0, 0))
             view.alpha = icon?.alpha ?: 1f
-            view.clipToOutline = false
+            view.outlineProvider = iconShape
+            view.clipToOutline = true
             view.transitionAlpha = if (iconHidden) 0f else 1f
         }
         icon?.let { it.visibility = if (view != null) View.INVISIBLE else if (it.drawable == null) View.GONE else View.VISIBLE }
@@ -214,7 +215,7 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
     fun setIconBare(bare: Boolean) {
         iconBare = bare
         icon?.let { v ->
-            v.clipToOutline = !bare
+            v.clipToOutline = !bare || iconRadiusDp != null
             v.scaleType = if (bare) ImageView.ScaleType.FIT_CENTER else ImageView.ScaleType.CENTER_CROP
         }
     }
@@ -222,11 +223,13 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
     private var iconBare = false
     private var iconRadiusDp: Float? = null
 
-    /** Only music artwork follows the host radius; notification icons retain their shape. */
+    /** Every capsule icon follows the host radius, including focus animations and live views. */
     fun setIconRadius(radiusDp: Float?) {
         if (iconRadiusDp == radiusDp) return
         iconRadiusDp = radiusDp
+        icon?.clipToOutline = !iconBare || radiusDp != null
         icon?.invalidateOutline()
+        live?.invalidateOutline()
     }
 
     private val iconShape = object : ViewOutlineProvider() {
@@ -242,7 +245,7 @@ internal class ShortcutDisc(context: Context) : FrameLayout(context) {
     fun setIcon(drawable: Drawable?) {
         val view = icon ?: ImageView(context).apply {
             scaleType = if (iconBare) ImageView.ScaleType.FIT_CENTER else ImageView.ScaleType.CENTER_CROP
-            clipToOutline = !iconBare
+            clipToOutline = !iconBare || iconRadiusDp != null
             outlineProvider = iconShape
             icon = this
             addView(this, LayoutParams(0, 0))

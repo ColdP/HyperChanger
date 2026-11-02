@@ -57,6 +57,8 @@ internal fun restartRecommendationSnapshot(group: String, preferences: SharedPre
     readSoftGlassSettings(p)
     readLockscreenShortcutBackgroundSettings(p)
     readLockscreenCapsuleGlassSettings(p)
+    readCapsuleNotificationTypes(p)
+    readLockscreenCapsuleAutoCollapse(p)
     readExpandedIslandGlassSettings(p)
     volumePanelUsesGlobalGlass(p)
     readNotificationTextColorSettings(p)

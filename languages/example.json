@@ -1907,7 +1907,16 @@
     "settingsEntryIconScale": "入口图标缩放",
     "settingsEntryTextScale": "入口文本缩放",
     "settingsEntryRowSpacing": "入口行间距",
-    "settingsEntryAppearanceDefault": "0%（系统默认）"
+    "settingsEntryAppearanceDefault": "0%（系统默认）",
+    "capsuleNotificationTypes": "Notification types in lockscreen capsules",
+    "capsuleNotificationTypesHint": "Only selected notification types become lockscreen capsules; others keep the system behavior.",
+    "capsuleTypeMedia": "Music notifications",
+    "capsuleTypeFocus": "Focus notifications",
+    "capsuleTypeOrdinary": "Ordinary notifications",
+    "capsuleTypeNone": "Do not add notifications",
+    "capsuleAutoCollapse": "自动收起为锁屏胶囊",
+    "capsuleAutoCollapseHint": "关闭后需要手动下滑通知，才会转换为锁屏胶囊",
+    "锁屏胶囊图标圆角 (dp)": "锁屏胶囊图标圆角 (dp)"
   },
   "Xiaomi 18 Pro 系列 AI 背屏": "Xiaomi 18 Pro Series AI Rear Screen",
   "解锁 AI 功能": "Unlock AI features",

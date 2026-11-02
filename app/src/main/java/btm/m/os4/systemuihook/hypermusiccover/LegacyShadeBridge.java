@@ -12,7 +12,7 @@ public final class LegacyShadeBridge {
     public static String dumpCfg() { return ShadeLayer.dumpCfg(); }
     public static int mode() { return ShadeLayer.mode(); }
     public static float expansion() { return ShadeLayer.ratio(); }
-    public static boolean hasArt() { return Main.hasSharedShadeArt(); }
+    public static boolean hasArt() { return false; }
     public static boolean keepsArt() { return false; }
-    public static void setArt(Bitmap borrowed) { Main.acceptMusicArt(borrowed); }
+    public static void setArt(Bitmap borrowed) { }
 }

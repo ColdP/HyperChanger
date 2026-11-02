@@ -411,7 +411,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
         if (artworkBare == bare) return
         artworkBare = bare
         if (lastHeightRadiusDp > 0f) updateGeometry(lastHeightRadiusDp)
-        slot.clipToOutline = !bare
+        slot.clipToOutline = true
         slot.background = if (bare) null else rounded(Color.rgb(55, 55, 55), artworkRadiusPx)
         artwork.scaleType = if (bare) ImageView.ScaleType.FIT_CENTER else ImageView.ScaleType.CENTER_CROP
     }
@@ -1058,8 +1058,7 @@ internal class MiniPlayerView(context: Context) : FrameLayout(context) {
     }
 
     /**
-     * The pill's bits follow its height; music artwork retains the host's chosen corner radius.
-     * Bare focus-template pictures keep their existing shape.
+     * The pill's bits follow its height; every capsule icon uses the host's chosen corner radius.
      */
     private fun updateGeometry(heightRadiusDp: Float) {
         lastHeightRadiusDp = heightRadiusDp

@@ -784,7 +784,7 @@ internal class MiniPlayerController(
                 note?.text ?: metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST).orEmpty())
         } else view.setCardText(null, null)
         view.setIconBare(note != null)
-        view.setIconRadius(if (key == MUSIC_ISLAND) config.getDouble(MiniPlayerConfig.ART_RADIUS).toFloat() else null)
+        view.setIconRadius(config.getDouble(MiniPlayerConfig.ART_RADIUS).toFloat())
         // The pill's own Lottie, not the plugin's smaller one for its small island: the two
         // files draw at different sizes on their canvases, and in the same box the small island's
         // stopwatch came out smaller than the pill's (2026-09-25).
@@ -1642,7 +1642,7 @@ internal class MiniPlayerController(
         if (stackedStyle()) disc.copyCardTextFrom(smallIsland)
         else disc.setCardText(null, null)
         disc.setIconBare(key != MUSIC_ISLAND)
-        disc.setIconRadius(if (key == MUSIC_ISLAND) config.getDouble(MiniPlayerConfig.ART_RADIUS).toFloat() else null)
+        disc.setIconRadius(config.getDouble(MiniPlayerConfig.ART_RADIUS).toFloat())
         disc.setIcon(when (picture) {
             is Bitmap -> android.graphics.drawable.BitmapDrawable(context.resources, picture)
             is android.graphics.drawable.Drawable -> picture
@@ -3291,6 +3291,7 @@ internal class MiniPlayerController(
 
     /** A pull down on the media card brings the music home as a flight (musicFlies). */
     fun musicCollapses(): Boolean = config.getBoolean(MiniPlayerConfig.ENABLED) &&
+        config.optBoolean(MiniPlayerConfig.MEDIA_IN_CAPSULE, true) &&
         musicFlies() && musicCarded() && morph == null && exchange == null && noteMorphKey == null &&
         spread == null
 
@@ -5809,6 +5810,7 @@ internal class MiniPlayerController(
                 "morph=${morph != null} exchange=${exchange != null}")
             return false
         }
+        if (!LockIslands.autoCollapseEnabled() && !LockIslands.captureManually(key)) return false
         val row = nativeFor(key) ?: run {
             MiniPlayerRuntime.noteTouch("collapse refused: no row")
             return false
@@ -6415,7 +6417,9 @@ internal class MiniPlayerController(
     /** A released notification's row under a point on screen, by key. */
     fun releasedRowAt(x: Float, y: Float): String? {
         val xy = IntArray(2)
-        for (key in LockIslands.releasedKeys()) {
+        val keys = if (LockIslands.autoCollapseEnabled()) LockIslands.releasedKeys()
+            else LockIslands.manualCandidateKeys()
+        for (key in keys) {
             // The stack island's rows are all its: the one under the finger leads it home.
             for (member in LockIslands.membersOf(key)) {
                 val row = findRow(member)?.first ?: continue
@@ -7684,6 +7688,7 @@ internal class MiniPlayerController(
     /** The dynamic switch can be pulled from this end right now. */
     fun canDrag(fromNative: Boolean, small: Boolean = false): Boolean {
         if (!config.getBoolean(MiniPlayerConfig.ENABLED) || morph != null || spread != null) return false
+        if (!config.optBoolean(MiniPlayerConfig.MEDIA_IN_CAPSULE, true)) return false
         // With other islands in the row the music goes out and back as a flight, as they do.
         if (musicFlies() || exchange != null) return false
         // Only the music island has a card to open into - in the pill, or as the small island.
@@ -7760,7 +7765,8 @@ internal class MiniPlayerController(
     fun takesRows(): Boolean = config.getBoolean(MiniPlayerConfig.ENABLED) && LockIslands.notes.isNotEmpty()
 
     fun wantsCardSwipe(): Boolean {
-        if (!config.getBoolean(MiniPlayerConfig.ENABLED)) return false
+        if (!config.getBoolean(MiniPlayerConfig.ENABLED) ||
+            !config.optBoolean(MiniPlayerConfig.MEDIA_IN_CAPSULE, true)) return false
         // Out as the stack's list, a pull down on the media card is the list's to fold, the
         // whole row coming home with it; taken as the card's, it was cancelled out from under
         // the stack and nothing folded.
@@ -7968,6 +7974,7 @@ internal class MiniPlayerController(
         val music = traced("MC r.music") {
             controller?.takeIf(::isUsable)?.takeIf { Main.miniPlayerMediaCardPresent() || musicMoving }
         }
+        if (music != null) trackMusic(music)
         val notes = traced("MC r.notes") { LockIslands.notes }
         // One island out as its card, the rest in the row (the super island's expanded state):
         // the music out as the media card leaves the row to the notifications. Alone, it keeps
@@ -7978,7 +7985,8 @@ internal class MiniPlayerController(
             (MiniPlayerRuntime.nativeRequested(music.sessionToken) || Main.coverModeOn())
         val others = notes.isNotEmpty() || returning.isNotEmpty() || exchange != null ||
             noteMorphKey.let { it != null && it != MUSIC_ISLAND }
-        val musicInRow = music != null && (!carded || !others || musicMoving)
+        val mediaInCapsule = config.optBoolean(MiniPlayerConfig.MEDIA_IN_CAPSULE, true)
+        val musicInRow = mediaInCapsule && music != null && (!carded || !others || musicMoving)
         // The row in the super island's order: the focus islands that take the big place from
         // the music (高德's navigation, islandProperty 1 against the music's 2) ahead of it, then
         // the music, then the rest in LockIslands' order. The music used to be first whatever
@@ -8090,7 +8098,6 @@ internal class MiniPlayerController(
             host.addView(it, lockScreenLayerIndex(), ViewGroup.LayoutParams(1, 1))
             Gen.ownView(host, it)
         }
-        if (music != null) trackMusic(music)
         // A notification let out and on its way home to the pill is not among the notes yet - nor
         // for a run of the pipeline after it has landed (returning). Looked up in the notes
         // alone, the pill took the music for those frames: the music flashed in the pill right

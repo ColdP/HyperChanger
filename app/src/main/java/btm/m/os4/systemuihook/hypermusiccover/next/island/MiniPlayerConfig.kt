@@ -26,6 +26,9 @@ object MiniPlayerConfig {
     /** Always on and no longer a setting; see normalizedJson. */
     const val NOTIFICATION_MATERIAL = "notificationMaterial"
     const val MEDIA_COLLAPSED_DEFAULT = "mediaCollapsedDefault"
+    const val AUTO_COLLAPSE = "autoCollapse"
+    const val MEDIA_IN_CAPSULE = "mediaInCapsule"
+    const val FOCUS_IN_CAPSULE = "focusInCapsule"
     const val GROUP_NOTIFICATIONS_BY_APP = "groupNotificationsByApp"
     /** Ordinary notifications stay in the OEM list; focus notifications still become islands. */
     const val NORMALS_IN_STACK = "normalsInStack"
@@ -62,6 +65,9 @@ object MiniPlayerConfig {
         HIDE_AOD_SHORTCUTS to true,
         NOTIFICATION_MATERIAL to true,
         MEDIA_COLLAPSED_DEFAULT to false,
+        AUTO_COLLAPSE to true,
+        MEDIA_IN_CAPSULE to true,
+        FOCUS_IN_CAPSULE to true,
         GROUP_NOTIFICATIONS_BY_APP to false,
         NORMALS_IN_STACK to true,
         STYLE to STYLE_ROW,
@@ -91,7 +97,7 @@ object MiniPlayerConfig {
                 runCatching { input.getInt(key) }.getOrDefault(STYLE_ROW)
                     .takeIf { it == STYLE_ROW || it == STYLE_STACK } ?: STYLE_ROW
             } else if (key == ENABLED || key == ADAPTIVE_WIDTH ||
-                key == MEDIA_COLLAPSED_DEFAULT ||
+                key == MEDIA_COLLAPSED_DEFAULT || key == AUTO_COLLAPSE || key == MEDIA_IN_CAPSULE || key == FOCUS_IN_CAPSULE ||
                 key == GROUP_NOTIFICATIONS_BY_APP || key in switches) {
                 runCatching { input.getBoolean(key) }.getOrDefault(fallback)
             } else {

@@ -32,10 +32,16 @@ public final class IosShadeMaterial {
     private static final WeakHashMap<View, Boolean> CONTAIN_REQUESTS = new WeakHashMap<>();
     private static final WeakHashMap<View, Boolean> MEDIA = new WeakHashMap<>();
     private static final WeakHashMap<View, Boolean> GROUP_CONTROLS = new WeakHashMap<>();
+    private static final WeakHashMap<View, int[]> GLASS_REQUESTS = new WeakHashMap<>();
+    private static final WeakHashMap<View, int[]> SAVED_GLASS = new WeakHashMap<>();
+    private static Method glassRadius;
+    private static int glassSmallRadius;
+    private static int glassBigRadius;
     private static final ThreadLocal<Boolean> WRITING = new ThreadLocal<>();
     private static boolean active;
     private static ViewGroup root;
     private static View clockRoot;
+    private static boolean clockRegistered;
     private static ViewTreeObserver observer;
     private static boolean loggedFailure;
     private static final ViewTreeObserver.OnGlobalLayoutListener LAYOUT = () -> {
@@ -43,6 +49,27 @@ public final class IosShadeMaterial {
     };
 
     public static void install() {
+        try {
+            glassRadius = View.class.getDeclaredMethod("setMiGlassBlurRadius", int.class, int.class);
+            glassRadius.setAccessible(true);
+            Xp.api().hook(glassRadius)
+                    .setExceptionMode(io.github.libxposed.api.XposedInterface.ExceptionMode.PROTECTIVE)
+                    .intercept(chain -> {
+                        View view = (View) chain.getThisObject();
+                        if (Boolean.TRUE.equals(WRITING.get()) || isPanel(view) || !target(view)) {
+                            return chain.proceed();
+                        }
+                        int[] requested = {(Integer) chain.getArgs().get(0), (Integer) chain.getArgs().get(1)};
+                        GLASS_REQUESTS.put(view, requested);
+                        if (!active || view.getRootView() != root) return chain.proceed();
+                        SAVED_GLASS.put(view, requested);
+                        return chain.proceed(new Object[]{
+                                requested[0] > 0 ? requested[0] : glassSmallRadius,
+                                requested[1] > 0 ? requested[1] : glassBigRadius});
+                    });
+        } catch (Throwable error) {
+            Xp.log("[IOSShade] glass sampling radius unavailable: " + error);
+        }
         for (int index = 0; index < SETTERS.length; index++) {
             final int slot = index;
             try {
@@ -105,14 +132,29 @@ public final class IosShadeMaterial {
         root = window;
         active = enabled && window != null;
         if (!active) return;
+        glassSmallRadius = dimension(window, "notification_glass_small_blur_max_radius", 36);
+        glassBigRadius = dimension(window, "notification_glass_big_blur_max_radius", 500);
         observer = window.getViewTreeObserver();
         observer.addOnGlobalLayoutListener(LAYOUT);
         scan(window);
     }
 
     public static void registerClock(View view) {
+        if (view == clockRoot && clockRegistered) return;
         clockRoot = view;
-        if (active && view != null) scanClock(view);
+        if (active && view != null) {
+            scanClock(view);
+            clockRegistered = true;
+        }
+    }
+
+    private static int dimension(View view, String name, int fallback) {
+        try {
+            int id = view.getResources().getIdentifier(name, "dimen", "com.android.systemui");
+            return id == 0 ? fallback : view.getResources().getDimensionPixelSize(id);
+        } catch (Throwable ignored) {
+            return fallback;
+        }
     }
 
     private static boolean isClock(View view) {
@@ -262,7 +304,10 @@ public final class IosShadeMaterial {
 
     private static void scan(View view) {
         captureGroupControls(view);
-        if (view == clockRoot) scanClock(view);
+        if (view == clockRoot) {
+            scanClock(view);
+            return;
+        }
         if (view.getClass().getName().equals(
                 "com.android.systemui.statusbar.notification.mediacontrol.MiuiMediaHeaderView")) registerMedia(view);
         if (target(view) && view.isShown() && !SAVED.containsKey(view)) apply(view);
@@ -323,6 +368,16 @@ public final class IosShadeMaterial {
                         || saved[4] == null)) continue;
                 if (METHODS[slot] != null) METHODS[slot].invoke(view, wanted(view, slot, saved));
             }
+            if (!isPanel(view) && glassRadius != null) {
+                // Native consumers inherit these radii from NotificationPanelView. Once a
+                // consumer owns a local provider it also needs both glass sampling textures;
+                // background radius alone only supplies the ordinary blur layer.
+                int[] requested = GLASS_REQUESTS.get(view);
+                if (requested == null) requested = new int[]{0, 0};
+                SAVED_GLASS.put(view, requested);
+                glassRadius.invoke(view, requested[0] > 0 ? requested[0] : glassSmallRadius,
+                        requested[1] > 0 ? requested[1] : glassBigRadius);
+            }
         } catch (Throwable error) {
             if (!loggedFailure) {
                 loggedFailure = true;
@@ -336,10 +391,18 @@ public final class IosShadeMaterial {
     private static void restore() {
         active = false;
         clockRoot = null;
+        clockRegistered = false;
         if (observer != null && observer.isAlive()) observer.removeOnGlobalLayoutListener(LAYOUT);
         observer = null;
         WRITING.set(true);
         try {
+            for (Map.Entry<View, int[]> entry : new ArrayList<>(SAVED_GLASS.entrySet())) {
+                if (entry.getKey() == null || glassRadius == null) continue;
+                try {
+                    int[] requested = entry.getValue();
+                    glassRadius.invoke(entry.getKey(), requested[0], requested[1]);
+                } catch (Throwable ignored) {}
+            }
             for (Map.Entry<View, Object[]> entry : new ArrayList<>(SAVED.entrySet())) {
                 View view = entry.getKey();
                 Object[] values = entry.getValue();
@@ -354,6 +417,7 @@ public final class IosShadeMaterial {
             }
         } finally {
             SAVED.clear();
+            SAVED_GLASS.clear();
             WRITING.remove();
         }
     }

@@ -150,7 +150,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import btm.m.liquidglass.LabelMode
-import btm.m.liquidglass.NavigationStyle
 import btm.m.liquidglass.ScopedSettings
 import btm.m.liquidglass.hook.DampedDragAnimation
 import btm.m.liquidglass.hook.CustomNavigation
@@ -245,7 +244,7 @@ class MainActivity : ComponentActivity() {
 
 private enum class Tab { CATEGORY, SETTINGS }
 
-private val LocalNotificationSettingsChanged = compositionLocalOf<() -> Unit> { {} }
+internal val LocalNotificationSettingsChanged = compositionLocalOf<() -> Unit> { {} }
 private val LocalDesktopSettingsChanged = compositionLocalOf<() -> Unit> { {} }
 private val LocalXiaoAiSettingsChanged = compositionLocalOf<() -> Unit> { {} }
 private val LocalPageBackSuppressed = compositionLocalOf<(Boolean) -> Unit> { {} }
@@ -821,6 +820,7 @@ private fun Root(
         runCatching {
             ModulePresetCodec.importBytes(context, service, payload)
             hooks.reload()
+            navigation.reload()
             lockscreenCapsules.reload()
             cameras.reload()
             deviceProfiles.reload()
@@ -832,6 +832,7 @@ private fun Root(
             homeFolderStore.reload()
             homeMaterialStore.reload()
             settings = hooks.settings
+            navigationSettings = navigation.settings
             lockscreenCapsuleSettings = lockscreenCapsules.settings
             cameraSettings = cameras.settings
             deviceProfile = deviceProfiles.settings
@@ -1221,6 +1222,8 @@ private fun Root(
             onConfirmModulePresetReset = {
                 showModulePresetResetDialog = false
                 ModulePresetCodec.reset(context, service)
+                navigation.reload()
+                navigationSettings = navigation.settings
                 hooks.reload(); lockscreenCapsules.reload(); cameras.reload(); deviceProfiles.reload(); appearances.reload()
                 musicStore.reload(); dockStore.reload(); homeRecentsStore.reload(); homeMultiSplitStore.reload(); homeFolderStore.reload(); homeMaterialStore.reload()
                 settings = hooks.settings; lockscreenCapsuleSettings = lockscreenCapsules.settings; cameraSettings = cameras.settings
@@ -3046,12 +3049,7 @@ private fun SettingsHome(
                     summary = if (appThemeStore.settings.monetEnabled) tr("Monet 取色", "Monet 取色") else tr("theme_mode", "主题模式"),
                     onClick = { open(PageId.THEME_AND_COLOR) },
                 )
-                val navigationStyles = listOf(
-                    NavigationStyle.HYPER_OS_FLOATING,
-                    NavigationStyle.HYPER_OS,
-                    NavigationStyle.HARMONY_OS_FLOATING,
-                    NavigationStyle.LIQUID_GLASS,
-                )
+                val navigationStyles = ModuleNavigationStyle.entries
                 OverlayDropdownPreference(
                     title = tr("navigation_style", tr("\u5e95\u90e8\u5bfc\u822a\u680f\u6837\u5f0f", "\u5e95\u90e8\u5bfc\u822a\u680f\u6837\u5f0f")),
                     items = navigationStyles.map { style -> tr(style.displayName, style.displayName) },
@@ -10672,7 +10670,7 @@ private fun LockscreenCapsule(
                                 HyperMusicCoverOptions(HyperMusicCoverSection.CAPSULE_APPEARANCE)
                                 FloatSlide(tr("锁屏胶囊宽度 (dp)", "锁屏胶囊宽度 (dp)"), capsule.width, 160f..360f, defaultValue = 240f) { value -> update { it.copy(width = value) } }
                                 FloatSlide(tr("锁屏胶囊高度 (dp)", "锁屏胶囊高度 (dp)"), capsule.height, 10f..60f, defaultValue = 36f) { value -> update { it.copy(height = value) } }
-                                FloatSlide(tr("媒体封面圆角 (dp)", "媒体封面圆角 (dp)"), capsule.artworkCornerRadius, 0f..60f, defaultValue = 12f) { value -> update { it.copy(artworkCornerRadius = value) } }
+                                FloatSlide(tr("锁屏胶囊图标圆角 (dp)", "锁屏胶囊图标圆角 (dp)"), capsule.artworkCornerRadius, 0f..60f, defaultValue = 12f) { value -> update { it.copy(artworkCornerRadius = value) } }
                             }
                         }
                     }
@@ -14749,7 +14747,8 @@ private fun HyperMusicCoverOptions(section: HyperMusicCoverSection) {
                 SwitchPreference(title = tr("hmcFingerprintLift", "避让低位屏下指纹"), checked = state.fingerprintLift, onCheckedChange = { value -> update { it.copy(fingerprintLift = value) } })
             }
             HyperMusicCoverSection.CAPSULE_FEATURES -> {
-                SwitchPreference(title = tr("hmcOrdinary", "普通通知加入胶囊"), checked = state.ordinaryNotifications, onCheckedChange = { value -> update { it.copy(ordinaryNotifications = value) } })
+                LockscreenCapsuleNotificationPreference()
+                LockscreenCapsuleAutoCollapsePreference()
                 SwitchPreference(title = tr("hmcGroupByApp", "按应用分组通知"), checked = state.groupByApp, onCheckedChange = { value -> update { it.copy(groupByApp = value) } })
                 SwitchPreference(title = tr("hmcNavigationKeepOn", "锁屏导航时保持屏幕常亮"), checked = state.navigationKeepOn, onCheckedChange = { value -> update { it.copy(navigationKeepOn = value) } })
             }

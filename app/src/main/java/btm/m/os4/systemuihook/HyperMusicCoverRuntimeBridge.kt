@@ -144,6 +144,7 @@ object HyperMusicCoverRuntimeBridge {
         }
         val ctx = context ?: return
         val s = readHyperMusicCoverSettings(prefs)
+        val notificationTypes = readCapsuleNotificationTypes(prefs)
         val music = coverAllowed()
         val lyrics = lyricsAllowed()
         val island = capsuleAllowed() &&
@@ -153,7 +154,8 @@ object HyperMusicCoverRuntimeBridge {
         else if (prefs.getBoolean(KEY_LOCKSCREEN_MINI_PLAYER_HIDE_MEDIA_NOTIFICATION, false))
             LOCKSCREEN_MEDIA_NOTIFICATION_ALWAYS_HIDE else LOCKSCREEN_MEDIA_NOTIFICATION_DO_NOT_HIDE
         musicEnabled = music
-        mediaMode = if (island) mode else LOCKSCREEN_MEDIA_NOTIFICATION_DO_NOT_HIDE
+        mediaMode = if (island && notificationTypes and CAPSULE_NOTIFICATION_MEDIA != 0) mode
+            else LOCKSCREEN_MEDIA_NOTIFICATION_DO_NOT_HIDE
         autoCoverEntry = music && s.autoEnter
         val wasScene = Main.coverModeOn()
         Main.updateHostFeatures(music, lyrics, sceneLayoutAllowed())
@@ -163,9 +165,12 @@ object HyperMusicCoverRuntimeBridge {
             put(MiniPlayerConfig.HEIGHT_RADIUS, prefs.readMiniPlayerHeightRadius())
             put(MiniPlayerConfig.ART_RADIUS, prefs.getFloat("lockscreen_mini_player_artwork_corner_radius", 12f))
             put(MiniPlayerConfig.MEDIA_COLLAPSED_DEFAULT, mode != LOCKSCREEN_MEDIA_NOTIFICATION_DO_NOT_HIDE)
+            put(MiniPlayerConfig.AUTO_COLLAPSE, readLockscreenCapsuleAutoCollapse(prefs))
+            put(MiniPlayerConfig.MEDIA_IN_CAPSULE, notificationTypes and CAPSULE_NOTIFICATION_MEDIA != 0)
+            put(MiniPlayerConfig.FOCUS_IN_CAPSULE, notificationTypes and CAPSULE_NOTIFICATION_FOCUS != 0)
             put(MiniPlayerConfig.STYLE, s.islandStyle)
             put(MiniPlayerConfig.ADAPTIVE_WIDTH, s.adaptiveWidth)
-            put(MiniPlayerConfig.NORMALS_IN_STACK, !island || !s.ordinaryNotifications)
+            put(MiniPlayerConfig.NORMALS_IN_STACK, !island || notificationTypes and CAPSULE_NOTIFICATION_ORDINARY == 0)
             put(MiniPlayerConfig.GROUP_NOTIFICATIONS_BY_APP, s.groupByApp)
             put(MiniPlayerConfig.STATUS_AT_DATE, s.statusAtDate)
             put(MiniPlayerConfig.FOD_LIFT, s.fingerprintLift)

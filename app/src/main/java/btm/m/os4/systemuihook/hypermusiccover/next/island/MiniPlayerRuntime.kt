@@ -65,6 +65,7 @@ object MiniPlayerRuntime {
     private var lastRoot: WeakReference<View>? = null
     private var lastShortcutController: WeakReference<Any>? = null
     private var hooksInstalled = false
+    @Volatile private var autoCollapse = true
 
     private fun prefs(context: Context): SharedPreferences = prefs
         ?: context.applicationContext.getSharedPreferences("hyperchanger_hmc_next_mini", Context.MODE_PRIVATE)
@@ -77,6 +78,8 @@ object MiniPlayerRuntime {
         if (context == null) return false
         val config = JSONObject(configJson(context))
         return config.optBoolean(MiniPlayerConfig.ENABLED) &&
+            config.optBoolean(MiniPlayerConfig.AUTO_COLLAPSE, true) &&
+            config.optBoolean(MiniPlayerConfig.MEDIA_IN_CAPSULE, true) &&
             config.optBoolean(MiniPlayerConfig.MEDIA_COLLAPSED_DEFAULT)
     }
 
@@ -101,6 +104,11 @@ object MiniPlayerRuntime {
 
     @JvmStatic fun applyConfig(context: Context, raw: String?) {
         val saved = MiniPlayerConfig.apply(prefs(context), raw)
+        val nextAutoCollapse = JSONObject(saved).optBoolean(MiniPlayerConfig.AUTO_COLLAPSE, true)
+        if (autoCollapse != nextAutoCollapse) {
+            autoCollapse = nextAutoCollapse
+            resetDynamicChoice("automatic collapse changed")
+        }
         DateStatus.configChanged()
         val keep = JSONObject(saved).optBoolean(MiniPlayerConfig.NAV_KEEP_ON)
         if (keep != navKeepOnSaved) {
@@ -115,10 +123,12 @@ object MiniPlayerRuntime {
     private fun syncNotificationGrouping(context: Context) {
         val config = JSONObject(configJson(context))
         LockIslands.setNormalsInStack(config.optBoolean(MiniPlayerConfig.NORMALS_IN_STACK, true))
+        LockIslands.setFocusInCapsule(config.optBoolean(MiniPlayerConfig.FOCUS_IN_CAPSULE, true))
         LockIslands.setGroupByApp(config.optBoolean(MiniPlayerConfig.ENABLED) &&
             !config.optBoolean(MiniPlayerConfig.NORMALS_IN_STACK, true) &&
             config.optInt(MiniPlayerConfig.STYLE) == MiniPlayerConfig.STYLE_STACK &&
             config.optBoolean(MiniPlayerConfig.GROUP_NOTIFICATIONS_BY_APP))
+        LockIslands.setAutoCollapse(config.optBoolean(MiniPlayerConfig.AUTO_COLLAPSE, true))
     }
 
     /** The old state file is migration data; current preferences must win on every restart. */
@@ -2069,11 +2079,15 @@ object MiniPlayerRuntime {
     @JvmStatic fun cardTrackChanged() = live().forEach { it.cardTrackChanged() }
 
     internal fun observeSession(token: Any, packageName: String): Boolean {
-        val changed = synchronized(selectionLock) { sessionSelection.observe(token) }
+        val changed = synchronized(selectionLock) {
+            sessionSelection.observe(token).also { changed ->
+                if (changed && !autoCollapse) sessionSelection.requestNative(token)
+            }
+        }
         if (changed) {
             restoreScene = false
             Xp.log("MCMini: media session -> $packageName@${Integer.toHexString(token.hashCode())}; " +
-                "dynamic choice reset to mini")
+                "dynamic choice reset to ${if (autoCollapse) "mini" else "native"}")
         }
         return changed
     }
@@ -2120,8 +2134,8 @@ object MiniPlayerRuntime {
     }
 
     internal fun resetDynamicChoice(reason: String) {
-        val changed = synchronized(selectionLock) { sessionSelection.resetChoice() }
-        if (changed) Xp.log("MCMini: dynamic choice reset to mini ($reason)")
+        val changed = synchronized(selectionLock) { sessionSelection.resetChoice(nativeByDefault = !autoCollapse) }
+        if (changed) Xp.log("MCMini: dynamic choice reset to ${if (autoCollapse) "mini" else "native"} ($reason)")
     }
 
     internal fun endSession(token: Any, reason: String) {

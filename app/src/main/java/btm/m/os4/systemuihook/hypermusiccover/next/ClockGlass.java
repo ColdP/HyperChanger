@@ -277,9 +277,9 @@ final class ClockGlass {
                 }
                 return chain.proceed(args);
             });
-            Xp.log(Main.TAG + "HyperLight setMiGlass guard armed");
+            Xp.log(Main.TAG + "setMiGlass guard armed");
         } catch (Throwable t) {
-            Xp.w(Main.TAG + "HyperLight setMiGlass guard unavailable: " + t);
+            Xp.w(Main.TAG + "setMiGlass guard unavailable: " + t);
         }
     }
 

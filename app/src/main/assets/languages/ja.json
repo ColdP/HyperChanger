@@ -1957,7 +1957,16 @@
     "settingsEntryIconScale": "項目アイコンの拡大縮小",
     "settingsEntryTextScale": "項目テキストの拡大縮小",
     "settingsEntryRowSpacing": "項目の行間隔",
-    "settingsEntryAppearanceDefault": "0%（システム標準）"
+    "settingsEntryAppearanceDefault": "0%（システム標準）",
+    "capsuleNotificationTypes": "ロック画面カプセルに入れる通知の種類",
+    "capsuleNotificationTypesHint": "選択した通知だけがロック画面カプセルになり、他の通知はシステムの動作を維持します。",
+    "capsuleTypeMedia": "音楽通知",
+    "capsuleTypeFocus": "フォーカス通知",
+    "capsuleTypeOrdinary": "通常の通知",
+    "capsuleTypeNone": "通知を追加しない",
+    "capsuleAutoCollapse": "ロック画面カプセルへ自動的に折りたたむ",
+    "capsuleAutoCollapseHint": "オフにすると、通知を手動で下にスワイプしたときだけロック画面カプセルになります。",
+    "锁屏胶囊图标圆角 (dp)": "ロック画面カプセルのアイコン角丸半径（dp）"
   },
   "Xiaomi 18 Pro 系列 AI 背屏": "Xiaomi 18 Pro シリーズ AI 背面画面",
   "解锁 AI 功能": "AI 機能を解放",

@@ -72,9 +72,9 @@ internal class MiniPlayerSessionSelection {
         return true
     }
 
-    fun resetChoice(): Boolean {
-        if (!nativeRequested) return false
-        nativeRequested = false
+    fun resetChoice(nativeByDefault: Boolean = false): Boolean {
+        if (nativeRequested == nativeByDefault) return false
+        nativeRequested = nativeByDefault
         return true
     }
 

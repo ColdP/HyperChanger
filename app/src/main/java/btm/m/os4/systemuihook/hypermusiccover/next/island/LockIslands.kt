@@ -207,6 +207,7 @@ internal object LockIslands {
      * opened went back into its island each time). Gone, a notification leaves it ([dropRemoved]).
      */
     private fun clearReleased() {
+        if (!autoCollapse) return
         val keep = sceneKey
         released.retainAll { it == keep || !isAppGroup(it) && lastRead[it]?.focus == true }
         if (keep != null) released.add(keep)
@@ -226,7 +227,9 @@ internal object LockIslands {
         removedAt[key] = now
         Gen.postDelayed({
             val gone = removedAt[key] == now && (postedAt[key] ?: 0L) < now
-            if (gone) removedAt -= key
+            if (gone) {
+                removedAt -= key
+            }
             if (gone && key != sceneKey && released.remove(key)) invalidate("released $key removed")
             postedAt.keys.retainAll { it in released }
         }, SCENE_GONE_MS)
@@ -313,7 +316,7 @@ internal object LockIslands {
     fun setGroupByApp(value: Boolean) {
         if (groupByApp == value) return
         groupByApp = value
-        stackOut = false
+        stackOut = !autoCollapse
         released.removeAll(::isAppGroup)
         if (NumState.available) NumState.setFolding(nativeStack && active)
         if (value) buildAppGroups(stackFrom) else {
@@ -330,11 +333,43 @@ internal object LockIslands {
 
     /** Persisted by MiniPlayerConfig; the probe may override it until settings are reread. */
     @Volatile private var normalsInStack = true
+    @Volatile private var focusInCapsule = true
+    @Volatile private var autoCollapse = true
+    @JvmStatic fun autoCollapseEnabled(): Boolean = autoCollapse
+
+    fun manualCandidateKeys(): List<String> = lastRead.values.filter { note ->
+        if (note.focus) focusInCapsule else !normalsInStack
+    }.map { it.key }
+
+    fun captureManually(key: String): Boolean {
+        if (autoCollapse || key !in manualCandidateKeys()) return false
+        if (!released.add(key)) return true
+        publish()
+        invalidate("manual capture $key")
+        return true
+    }
+
+    @JvmStatic fun setAutoCollapse(on: Boolean) {
+        if (autoCollapse == on) return
+        autoCollapse = on
+        released.clear()
+        stackOut = !on
+        NumState.setFolding(nativeStack && active)
+        invalidate("automatic capsule collapse ${if (on) "on" else "off"}")
+    }
+
+    @JvmStatic fun setFocusInCapsule(on: Boolean) {
+        if (focusInCapsule == on) return
+        focusInCapsule = on
+        released.removeAll { it != STACK_KEY && !isAppGroup(it) }
+        publish()
+        invalidate("focus notifications ${if (on) "in" else "out of"} capsule")
+    }
 
     @JvmStatic fun setNormalsInStack(on: Boolean) {
         if (normalsInStack == on) return
         normalsInStack = on
-        stackOut = false
+        stackOut = !autoCollapse
         released.removeAll(::isAppGroup)
         // Restore the OEM fold and count with its ordinary rows. Keeping our forced fold
         // after removing the aggregate island would leave those rows hidden.
@@ -353,7 +388,7 @@ internal object LockIslands {
      *
      * Only with NumState's hooks in; without them, the old way.
      */
-    private val nativeStack get() = NumState.available && !groupByApp && !normalsInStack
+    private val nativeStack get() = autoCollapse && NumState.available && !groupByApp && !normalsInStack
 
     /** For the controller: the stack island opens as the stack's list (openStack), no flight. */
     fun foldsNatively(): Boolean = nativeStack
@@ -409,6 +444,7 @@ internal object LockIslands {
         scene = null
         sceneMissingSince = 0L
         released.clear()
+        stackOut = !autoCollapse
         stackMembers = emptyList()
         focusShown = emptyList()
         setActive(false)
@@ -739,7 +775,7 @@ internal object LockIslands {
             // Unlocked: what a tap put back is an island again on the next lock screen - all but
             // the focus ones, which stay open as 高德's map stays up (clearReleased).
             clearReleased()
-            if (!nativeStack) stackOut = false
+            if (!nativeStack && autoCollapse) stackOut = false
             // Unlocking, the keyguard is "not locked" from the first frame of its fade-out,
             // while the row is still drawn on it: letting the islands go then put every one
             // of them in the fading stack at once - a flash of rows on each unlock (filmed
@@ -756,7 +792,13 @@ internal object LockIslands {
         }
         lockedRun = true
         val note = read(entry, redacted(filterObject, entry)) ?: return false
+        if (note.focus && !focusInCapsule) return false
         if (!note.focus && normalsInStack) return false
+        if (!autoCollapse && note.key !in released) {
+            pending[note.key] = note
+            pendingEntries[note.key] = entry
+            return false
+        }
         // Folded natively, an ordinary notification is read for the stack island and left in
         // the stack: the stack's own fold hides it.
         if (!note.focus && nativeStack) {
@@ -1012,7 +1054,7 @@ internal object LockIslands {
         stackMembers = members.map { it.key }
         stackNote = aggregate(members)
         if (groupByApp) buildAppGroups(members)
-        focusShown = shown.filter { it.focus && it.key !in released }
+        focusShown = shown.filter { it.focus && if (autoCollapse) it.key !in released else it.key in released }
         if (nativeStack) {
             // The stack said nothing yet this lock screen: read where it is.
             stackOut = !stackFolded()
@@ -1030,7 +1072,8 @@ internal object LockIslands {
     /** The islands put together from the last run: the focus ones and the stack island. */
     private fun publish() {
         val stack = stackNote?.takeIf { !stackOut }
-        val ordinary = if (normalsInStack) emptyList()
+        val ordinary = if (!autoCollapse) stackFrom.filter { !it.focus && it.key in released }
+            else if (normalsInStack) emptyList()
             else if (groupByApp) appGroupNotes.values.filter { it.key !in released }
             else listOfNotNull(stack)
         // App-group islands replace the count too. The OEM may enter NUMBER during a
@@ -1241,14 +1284,13 @@ internal object LockIslands {
         val picture = template?.let { focusPicture(n, sbn, entry, it.pics + islandPics(island)) }
         val icon = picture?.icon ?: iconOf(sbn, shown ?: n, redacted)
         val iconFrom = picture?.from ?: lastIconFrom
-        val round = roundIcon(icon)
         return Note(
             key = sbn.key,
             pkg = sbn.packageName,
             title = template?.title?.takeIf { it.isNotEmpty() || template.timer != null } ?: title,
             text = template?.text ?: text,
-            icon = round ?: icon,
-            iconFrom = if (round != null) "$iconFrom/round" else iconFrom,
+            icon = icon,
+            iconFrom = iconFrom,
             timer = template?.timer,
             buttons = if (template != null) focusButtons(n, sbn, entry) else emptyList(),
             anim = picture?.anim,

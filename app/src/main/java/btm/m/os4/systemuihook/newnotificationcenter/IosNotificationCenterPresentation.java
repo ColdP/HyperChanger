@@ -8,8 +8,6 @@ import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.Rect;
-import android.graphics.RenderEffect;
-import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.animation.ValueAnimator;
@@ -112,6 +110,15 @@ public final class IosNotificationCenterPresentation {
     private static Boolean keyguardLockedOverride;
     private static int lastBlur = -1;
     private static int lastStatusBlur = -1;
+    private static int lastHeaderBlur = -1;
+    private static final int[] SHEET_POINT = new int[2];
+    private static final int[] PANEL_POINT = new int[2];
+    private static final int[] STACK_POINT = new int[2];
+    private static final int[] ROOT_POINT = new int[2];
+    private static final int[] VIEW_POINT = new int[2];
+    private static final int[] INFO_POINT = new int[2];
+    private static final int[] CLOCK_POINT = new int[2];
+    private static final int[] HEADER_POINT = new int[2];
     private static boolean switching;
     private static boolean gestureActive;
     private static boolean wallpaperEnabled = true;
@@ -352,15 +359,15 @@ public final class IosNotificationCenterPresentation {
             if (container != null) container.setAlpha(containerTarget * amount);
             if (customBar != null) {
                 customBar.setAlpha(customBarTarget * (1f - amount));
-                customBar.setRenderEffect(amount >= 0.999f ? null : RenderEffect.createBlurEffect(
-                        radius * (1f - amount), radius * (1f - amount), Shader.TileMode.CLAMP));
+                customBar.setRenderEffect(amount >= 0.999f ? null : IosShadeBlurEffects.blur(radius * (1f - amount)));
+                // An interrupted exit can reuse this bar at the same progress as before.
+                lastHeaderBlur = -1;
             }
             for (int i = 0; views != null && i < views.length; i++) {
                 View view = views[i];
                 if (view == null) continue;
                 view.setAlpha((targets == null ? 1f : targets[i]) * amount);
-                view.setRenderEffect(amount >= 0.999f ? null : RenderEffect.createBlurEffect(
-                        radius * (1f - amount), radius * (1f - amount), Shader.TileMode.CLAMP));
+                view.setRenderEffect(amount >= 0.999f ? null : IosShadeBlurEffects.blur(radius * (1f - amount)));
             }
         });
         headerExitAnimator.addListener(new android.animation.AnimatorListenerAdapter() {
@@ -690,8 +697,8 @@ public final class IosNotificationCenterPresentation {
         if (host == null || panel == null || progress <= 0f) return;
         View sheet = wallpaperSheet;
         if (sheet != null && sheet.isAttachedToWindow()) {
-            int[] sheetPoint = new int[2];
-            int[] panelPoint = new int[2];
+            int[] sheetPoint = SHEET_POINT;
+            int[] panelPoint = PANEL_POINT;
             sheet.getLocationInWindow(sheetPoint);
             panel.getLocationInWindow(panelPoint);
             float x = sheetPoint[0] - panelPoint[0];
@@ -735,20 +742,17 @@ public final class IosNotificationCenterPresentation {
         // subpixel finger deltas while keeping the transition visually smooth.
         blur = (blur + 1) / 2 * 2;
         if (blur != lastBlur) {
-            host.setRenderEffect(blur == 0 ? null : RenderEffect.createBlurEffect(
-                    blur, blur, Shader.TileMode.CLAMP));
+            host.setRenderEffect(blur == 0 ? null : IosShadeBlurEffects.blur(blur));
             lastBlur = blur;
         }
         if (stack != null && blur != lastStackBlur) {
-            stack.setRenderEffect(blur == 0 ? null : RenderEffect.createBlurEffect(
-                    blur, blur, Shader.TileMode.CLAMP));
+            stack.setRenderEffect(blur == 0 ? null : IosShadeBlurEffects.blur(blur));
             lastStackBlur = blur;
         }
         int statusBlur = Math.round(12f * panel.getResources().getDisplayMetrics().density * (1f - progress));
         statusBlur = (statusBlur + 1) / 2 * 2;
         if (status != null && statusBlur != lastStatusBlur) {
-            status.setRenderEffect(statusBlur == 0 ? null : RenderEffect.createBlurEffect(
-                    statusBlur, statusBlur, Shader.TileMode.CLAMP));
+            status.setRenderEffect(statusBlur == 0 ? null : IosShadeBlurEffects.blur(statusBlur));
             lastStatusBlur = statusBlur;
         }
         syncNotificationHeader();
@@ -982,6 +986,7 @@ public final class IosNotificationCenterPresentation {
         }
         notificationHeaderBar = null;
         notificationHeaderHasContent = false;
+        lastHeaderBlur = -1;
     }
 
     private static void syncNotificationHeader() {
@@ -991,7 +996,7 @@ public final class IosNotificationCenterPresentation {
         }
         ensureNotificationHeader();
         if (notificationHeaderBar == null || stack.getHeight() == 0) return;
-        int[] panelPoint = new int[2];
+        int[] panelPoint = PANEL_POINT;
         panel.getLocationInWindow(panelPoint);
         int width = landscapeLayout ? landscapeStackWidth(stack) : ViewGroup.LayoutParams.MATCH_PARENT;
         ViewGroup.LayoutParams params = notificationHeaderBar.getLayoutParams();
@@ -1001,7 +1006,7 @@ public final class IosNotificationCenterPresentation {
         }
         float x = 0f;
         if (landscapeLayout) {
-            int[] stackPoint = new int[2];
+            int[] stackPoint = STACK_POINT;
             stack.getLocationInWindow(stackPoint);
             x = stackPoint[0] - panelPoint[0] - notificationHeaderBar.getLeft();
         }
@@ -1018,9 +1023,12 @@ public final class IosNotificationCenterPresentation {
         notificationHeaderBar.setTranslationY(y);
         animateNotificationHeader(true, progress * progress * (3f - 2f * progress));
         float visual = progress * progress * (3f - 2f * progress);
-        float blur = 28f * panel.getResources().getDisplayMetrics().density * (1f - visual);
-        notificationHeaderBar.setRenderEffect(blur <= 0f ? null
-                : RenderEffect.createBlurEffect(blur, blur, Shader.TileMode.CLAMP));
+        int blur = Math.round(28f * panel.getResources().getDisplayMetrics().density * (1f - visual));
+        blur = (blur + 1) / 2 * 2;
+        if (blur != lastHeaderBlur) {
+            notificationHeaderBar.setRenderEffect(IosShadeBlurEffects.blur(blur));
+            lastHeaderBlur = blur;
+        }
     }
 
     private static void animateNotificationHeader(boolean show, float targetAlpha) {
@@ -1120,8 +1128,8 @@ public final class IosNotificationCenterPresentation {
         if (root == null || view == null || view.getVisibility() != View.VISIBLE) return 0f;
         if (!(view instanceof ViewGroup) || ((ViewGroup) view).getChildCount() == 0) {
             if (view.getHeight() <= 0) return 0f;
-            int[] rootPoint = new int[2];
-            int[] viewPoint = new int[2];
+            int[] rootPoint = ROOT_POINT;
+            int[] viewPoint = VIEW_POINT;
             root.getLocationInWindow(rootPoint);
             view.getLocationInWindow(viewPoint);
             return viewPoint[1] - rootPoint[1] + view.getHeight();
@@ -1138,8 +1146,8 @@ public final class IosNotificationCenterPresentation {
         if (root == null || view == null || view.getVisibility() != View.VISIBLE) return 0f;
         if (!(view instanceof ViewGroup) || ((ViewGroup) view).getChildCount() == 0) {
             if (view.getWidth() <= 0) return 0f;
-            int[] rootPoint = new int[2];
-            int[] viewPoint = new int[2];
+            int[] rootPoint = ROOT_POINT;
+            int[] viewPoint = VIEW_POINT;
             root.getLocationInWindow(rootPoint);
             view.getLocationInWindow(viewPoint);
             return viewPoint[0] - rootPoint[0] + view.getWidth();
@@ -1221,8 +1229,8 @@ public final class IosNotificationCenterPresentation {
             Object value = clock.getClass().getMethod("getNotificationClockTop").invoke(clock);
             if (value instanceof Number) top = ((Number) value).floatValue();
         } catch (Throwable ignored) {}
-        int[] infoPoint = new int[2];
-        int[] clockPoint = new int[2];
+        int[] infoPoint = INFO_POINT;
+        int[] clockPoint = CLOCK_POINT;
         clockInfo.getLocationInWindow(infoPoint);
         clock.getLocationInWindow(clockPoint);
         float density = clock.getResources().getDisplayMetrics().density;
@@ -1424,8 +1432,8 @@ public final class IosNotificationCenterPresentation {
             }
             // Evaluate with the full sheet width, so its right corners stay at the screen edge.
             sheet.getOutlineProvider().getOutline(sheet, outline);
-            int[] sheetPoint = new int[2];
-            int[] clockPoint = new int[2];
+            int[] sheetPoint = SHEET_POINT;
+            int[] clockPoint = CLOCK_POINT;
             sheet.getLocationInWindow(sheetPoint);
             view.getLocationInWindow(clockPoint);
             outline.offset(sheetPoint[0] - clockPoint[0], sheetPoint[1] - clockPoint[1]);
@@ -1502,8 +1510,8 @@ public final class IosNotificationCenterPresentation {
             }
             // NSSL can live in a nested ConstraintLayout whose start/end constraints override
             // absolute margins. Align its actual window position with the panel's right column.
-            int[] panelPoint = new int[2];
-            int[] stackPoint = new int[2];
+            int[] panelPoint = PANEL_POINT;
+            int[] stackPoint = STACK_POINT;
             panel.getLocationInWindow(panelPoint);
             stack.getLocationInWindow(stackPoint);
             float deltaX = panelPoint[0] + rightLeft - stackPoint[0];
@@ -1567,8 +1575,8 @@ public final class IosNotificationCenterPresentation {
         // notification baseline too, until a cancelled exit reaches the open endpoint.
         // Native padding/scroll geometry below no longer describes those retained cards.
         if (IosNotificationExitState.isHolding() && !Float.isNaN(lastNotificationY)) return;
-        int[] panelPoint = new int[2];
-        int[] stackPoint = new int[2];
+        int[] panelPoint = PANEL_POINT;
+        int[] stackPoint = STACK_POINT;
         panel.getLocationInWindow(panelPoint);
         currentStack.getLocationInWindow(stackPoint);
         float nativeTop = 0f;
@@ -1599,7 +1607,7 @@ public final class IosNotificationCenterPresentation {
         // clamp replaces our edge on the next frame and the clock only sees the row.
         if (notificationHeaderEnabled && notificationHeaderBar != null
                 && notificationHeaderHasContent) {
-            int[] headerPoint = new int[2];
+            int[] headerPoint = HEADER_POINT;
             notificationHeaderBar.getLocationInWindow(headerPoint);
             float headerTop = headerPoint[1] - panelPoint[1] - host.getTranslationY();
             notificationY = Math.min(notificationY, headerTop);
@@ -1645,7 +1653,7 @@ public final class IosNotificationCenterPresentation {
         if (!(currentStack instanceof ViewGroup)) return Float.NaN;
         ViewGroup group = (ViewGroup) currentStack;
         float top = Float.NaN;
-        int[] point = new int[2];
+        int[] point = VIEW_POINT;
         for (int i = 0; i < group.getChildCount(); i++) {
             View child = group.getChildAt(i);
             String name = child.getClass().getName();
@@ -1735,6 +1743,8 @@ public final class IosNotificationCenterPresentation {
         wallpaperSheet = null;
         lastBlur = -1;
         lastStatusBlur = -1;
+        lastHeaderBlur = -1;
+        IosShadeBlurEffects.clear();
     }
 
     private static void allowBackdropSampling(View view) {
