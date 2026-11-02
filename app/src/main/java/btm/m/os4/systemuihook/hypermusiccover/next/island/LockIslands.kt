@@ -207,7 +207,6 @@ internal object LockIslands {
      * opened went back into its island each time). Gone, a notification leaves it ([dropRemoved]).
      */
     private fun clearReleased() {
-        if (!autoCollapse) return
         val keep = sceneKey
         released.retainAll { it == keep || !isAppGroup(it) && lastRead[it]?.focus == true }
         if (keep != null) released.add(keep)
@@ -230,8 +229,12 @@ internal object LockIslands {
             if (gone) {
                 removedAt -= key
             }
-            if (gone && key != sceneKey && released.remove(key)) invalidate("released $key removed")
-            postedAt.keys.retainAll { it in released }
+            if (gone && key != sceneKey) {
+                val releasedGone = released.remove(key)
+                val capturedGone = manuallyCaptured.remove(key)
+                if (releasedGone || capturedGone) invalidate("notification $key removed")
+            }
+            postedAt.keys.retainAll { it in released || it in manuallyCaptured }
         }, SCENE_GONE_MS)
     }
 
@@ -316,7 +319,7 @@ internal object LockIslands {
     fun setGroupByApp(value: Boolean) {
         if (groupByApp == value) return
         groupByApp = value
-        stackOut = !autoCollapse
+        stackOut = !ordinaryAutoCollapse
         released.removeAll(::isAppGroup)
         if (NumState.available) NumState.setFolding(nativeStack && active)
         if (value) buildAppGroups(stackFrom) else {
@@ -334,33 +337,42 @@ internal object LockIslands {
     /** Persisted by MiniPlayerConfig; the probe may override it until settings are reread. */
     @Volatile private var normalsInStack = true
     @Volatile private var focusInCapsule = true
-    @Volatile private var autoCollapse = true
-    @JvmStatic fun autoCollapseEnabled(): Boolean = autoCollapse
+    @Volatile private var focusAutoCollapse = true
+    @Volatile private var ordinaryAutoCollapse = true
+    /** Manual captures are independent of rows explicitly released from a capsule. */
+    private val manuallyCaptured = HashSet<String>()
 
     fun manualCandidateKeys(): List<String> = lastRead.values.filter { note ->
-        if (note.focus) focusInCapsule else !normalsInStack
+        (if (note.focus) focusInCapsule && !focusAutoCollapse
+            else !normalsInStack && !ordinaryAutoCollapse) && note.key !in manuallyCaptured
     }.map { it.key }
 
-    fun captureManually(key: String): Boolean {
-        if (autoCollapse || key !in manualCandidateKeys()) return false
-        if (!released.add(key)) return true
-        publish()
-        invalidate("manual capture $key")
+    fun requiresManualCapture(key: String): Boolean = lastRead[key]?.let {
+        if (it.focus) !focusAutoCollapse else !ordinaryAutoCollapse
+    } == true
+
+    /** Keep the native row until the collapse commits through recapture/takeInEarly. */
+    fun prepareManualCapture(key: String): Boolean {
+        if (key !in manualCandidateKeys()) return false
+        released.add(key)
         return true
     }
 
-    @JvmStatic fun setAutoCollapse(on: Boolean) {
-        if (autoCollapse == on) return
-        autoCollapse = on
+    @JvmStatic fun setAutoCollapse(focus: Boolean, ordinary: Boolean) {
+        if (focusAutoCollapse == focus && ordinaryAutoCollapse == ordinary) return
+        focusAutoCollapse = focus
+        ordinaryAutoCollapse = ordinary
         released.clear()
-        stackOut = !on
+        manuallyCaptured.clear()
+        stackOut = !ordinary
         NumState.setFolding(nativeStack && active)
-        invalidate("automatic capsule collapse ${if (on) "on" else "off"}")
+        invalidate("automatic capsule collapse focus=$focus ordinary=$ordinary")
     }
 
     @JvmStatic fun setFocusInCapsule(on: Boolean) {
         if (focusInCapsule == on) return
         focusInCapsule = on
+        manuallyCaptured.removeAll { lastRead[it]?.focus == true }
         released.removeAll { it != STACK_KEY && !isAppGroup(it) }
         publish()
         invalidate("focus notifications ${if (on) "in" else "out of"} capsule")
@@ -369,7 +381,8 @@ internal object LockIslands {
     @JvmStatic fun setNormalsInStack(on: Boolean) {
         if (normalsInStack == on) return
         normalsInStack = on
-        stackOut = !autoCollapse
+        manuallyCaptured.removeAll { lastRead[it]?.focus != true }
+        stackOut = !ordinaryAutoCollapse
         released.removeAll(::isAppGroup)
         // Restore the OEM fold and count with its ordinary rows. Keeping our forced fold
         // after removing the aggregate island would leave those rows hidden.
@@ -388,7 +401,7 @@ internal object LockIslands {
      *
      * Only with NumState's hooks in; without them, the old way.
      */
-    private val nativeStack get() = autoCollapse && NumState.available && !groupByApp && !normalsInStack
+    private val nativeStack get() = ordinaryAutoCollapse && NumState.available && !groupByApp && !normalsInStack
 
     /** For the controller: the stack island opens as the stack's list (openStack), no flight. */
     fun foldsNatively(): Boolean = nativeStack
@@ -444,7 +457,8 @@ internal object LockIslands {
         scene = null
         sceneMissingSince = 0L
         released.clear()
-        stackOut = !autoCollapse
+        manuallyCaptured.clear()
+        stackOut = !ordinaryAutoCollapse
         stackMembers = emptyList()
         focusShown = emptyList()
         setActive(false)
@@ -501,7 +515,7 @@ internal object LockIslands {
                 val result = chain.proceed()
                 (chain.args.firstOrNull() as? StatusBarNotification)?.key?.let { key ->
                     runCatching { CountdownScene.INSTANCE.onRemoved(key) }
-                    Gen.post { if (key in released) dropRemoved(key) }
+                    Gen.post { if (key in released || key in manuallyCaptured) dropRemoved(key) }
                 }
                 result
             }
@@ -514,7 +528,7 @@ internal object LockIslands {
                 val result = chain.proceed()
                 (chain.args.firstOrNull() as? StatusBarNotification)?.key?.let { key ->
                     val at = android.os.SystemClock.uptimeMillis()
-                    Gen.post { if (key in released) postedAt[key] = at }
+                    Gen.post { if (key in released || key in manuallyCaptured) postedAt[key] = at }
                 }
                 result
             }
@@ -643,6 +657,7 @@ internal object LockIslands {
             }
             return
         }
+        manuallyCaptured.remove(key)
         if (released.add(key)) invalidate("island $key released")
         if (isAppGroup(key)) return
         val opened = sceneOf(key)
@@ -669,7 +684,8 @@ internal object LockIslands {
             }
             return
         }
-        if (released.remove(key)) invalidate("island $key recaptured")
+        val captured = requiresManualCapture(key) && manuallyCaptured.add(key)
+        if (released.remove(key) || captured) invalidate("island $key recaptured")
         if (key == sceneKey) {
             val closed = scene
             sceneKey = null
@@ -700,10 +716,11 @@ internal object LockIslands {
      * should take them for released ones.
      */
     fun isReleased(key: String): Boolean =
-        if (key == STACK_KEY) stackOut && !nativeStack else key in released
+        if (key == STACK_KEY) ordinaryAutoCollapse && !normalsInStack && stackOut && !nativeStack else key in released
 
     fun releasedKeys(): List<String> =
-        released.toList() + if (stackOut && !nativeStack) listOf(STACK_KEY) else emptyList()
+        released.toList() + if (ordinaryAutoCollapse && !normalsInStack && stackOut && !nativeStack)
+            listOf(STACK_KEY) else emptyList()
 
     /** A notification as last read, released or not: what a row collapsing back will show. */
     fun noteFor(key: String): Note? = when {
@@ -775,7 +792,7 @@ internal object LockIslands {
             // Unlocked: what a tap put back is an island again on the next lock screen - all but
             // the focus ones, which stay open as 高德's map stays up (clearReleased).
             clearReleased()
-            if (!nativeStack && autoCollapse) stackOut = false
+            if (!nativeStack && ordinaryAutoCollapse) stackOut = false
             // Unlocking, the keyguard is "not locked" from the first frame of its fade-out,
             // while the row is still drawn on it: letting the islands go then put every one
             // of them in the fading stack at once - a flash of rows on each unlock (filmed
@@ -794,7 +811,7 @@ internal object LockIslands {
         val note = read(entry, redacted(filterObject, entry)) ?: return false
         if (note.focus && !focusInCapsule) return false
         if (!note.focus && normalsInStack) return false
-        if (!autoCollapse && note.key !in released) {
+        if (!(if (note.focus) focusAutoCollapse else ordinaryAutoCollapse) && note.key !in manuallyCaptured) {
             pending[note.key] = note
             pendingEntries[note.key] = entry
             return false
@@ -809,6 +826,7 @@ internal object LockIslands {
             return false
         }
         val out = when {
+            note.key in manuallyCaptured -> false
             note.focus -> note.key in released
             groupByApp -> appKey(note.pkg) in released
             else -> stackOut
@@ -1054,7 +1072,7 @@ internal object LockIslands {
         stackMembers = members.map { it.key }
         stackNote = aggregate(members)
         if (groupByApp) buildAppGroups(members)
-        focusShown = shown.filter { it.focus && if (autoCollapse) it.key !in released else it.key in released }
+        focusShown = shown.filter { it.focus && if (focusAutoCollapse) it.key !in released else it.key in manuallyCaptured }
         if (nativeStack) {
             // The stack said nothing yet this lock screen: read where it is.
             stackOut = !stackFolded()
@@ -1072,14 +1090,14 @@ internal object LockIslands {
     /** The islands put together from the last run: the focus ones and the stack island. */
     private fun publish() {
         val stack = stackNote?.takeIf { !stackOut }
-        val ordinary = if (!autoCollapse) stackFrom.filter { !it.focus && it.key in released }
-            else if (normalsInStack) emptyList()
+        val ordinary = if (normalsInStack) emptyList()
+            else if (!ordinaryAutoCollapse) stackFrom.filter { !it.focus && it.key in manuallyCaptured }
             else if (groupByApp) appGroupNotes.values.filter { it.key !in released }
             else listOfNotNull(stack)
         // App-group islands replace the count too. The OEM may enter NUMBER during a
         // cancelled pull, even when nativeStack is off; don't leave its count over our cards.
         NumState.hideCount(!normalsInStack && (spreading || active && ordinary.isNotEmpty()))
-        val next = (focusShown + ordinary).sortedWith(bigFirst)
+        val next = ((if (focusInCapsule) focusShown else emptyList()) + ordinary).sortedWith(bigFirst)
         // Unchanged is the same reading (read() hands back the cached note): by key and time, a
         // stopwatch paused or resumed - its `when` the same - never reached the island.
         if (next.size == notes.size && next.indices.all { next[it] === notes[it] }) return

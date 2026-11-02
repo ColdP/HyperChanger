@@ -5810,11 +5810,11 @@ internal class MiniPlayerController(
                 "morph=${morph != null} exchange=${exchange != null}")
             return false
         }
-        if (!LockIslands.autoCollapseEnabled() && !LockIslands.captureManually(key)) return false
         val row = nativeFor(key) ?: run {
             MiniPlayerRuntime.noteTouch("collapse refused: no row")
             return false
         }
+        if (LockIslands.requiresManualCapture(key) && !LockIslands.prepareManualCapture(key)) return false
         // Nothing left in the row - the only island was let out - and the notification coming
         // back is all of it: the pill. It used to just go back in there with no motion at all.
         val rowEmpty = player?.visibility != View.VISIBLE
@@ -6417,8 +6417,7 @@ internal class MiniPlayerController(
     /** A released notification's row under a point on screen, by key. */
     fun releasedRowAt(x: Float, y: Float): String? {
         val xy = IntArray(2)
-        val keys = if (LockIslands.autoCollapseEnabled()) LockIslands.releasedKeys()
-            else LockIslands.manualCandidateKeys()
+        val keys = (LockIslands.releasedKeys() + LockIslands.manualCandidateKeys()).distinct()
         for (key in keys) {
             // The stack island's rows are all its: the one under the finger leads it home.
             for (member in LockIslands.membersOf(key)) {

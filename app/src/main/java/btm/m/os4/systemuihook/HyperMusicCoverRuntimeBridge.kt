@@ -145,6 +145,7 @@ object HyperMusicCoverRuntimeBridge {
         val ctx = context ?: return
         val s = readHyperMusicCoverSettings(prefs)
         val notificationTypes = readCapsuleNotificationTypes(prefs)
+        val automaticTypes = readLockscreenCapsuleAutoCollapseTypes(prefs)
         val music = coverAllowed()
         val lyrics = lyricsAllowed()
         val island = capsuleAllowed() &&
@@ -165,7 +166,9 @@ object HyperMusicCoverRuntimeBridge {
             put(MiniPlayerConfig.HEIGHT_RADIUS, prefs.readMiniPlayerHeightRadius())
             put(MiniPlayerConfig.ART_RADIUS, prefs.getFloat("lockscreen_mini_player_artwork_corner_radius", 12f))
             put(MiniPlayerConfig.MEDIA_COLLAPSED_DEFAULT, mode != LOCKSCREEN_MEDIA_NOTIFICATION_DO_NOT_HIDE)
-            put(MiniPlayerConfig.AUTO_COLLAPSE, readLockscreenCapsuleAutoCollapse(prefs))
+            put(MiniPlayerConfig.AUTO_COLLAPSE, automaticTypes and CAPSULE_NOTIFICATION_MEDIA != 0)
+            put(MiniPlayerConfig.FOCUS_AUTO_COLLAPSE, automaticTypes and CAPSULE_NOTIFICATION_FOCUS != 0)
+            put(MiniPlayerConfig.ORDINARY_AUTO_COLLAPSE, automaticTypes and CAPSULE_NOTIFICATION_ORDINARY != 0)
             put(MiniPlayerConfig.MEDIA_IN_CAPSULE, notificationTypes and CAPSULE_NOTIFICATION_MEDIA != 0)
             put(MiniPlayerConfig.FOCUS_IN_CAPSULE, notificationTypes and CAPSULE_NOTIFICATION_FOCUS != 0)
             put(MiniPlayerConfig.STYLE, s.islandStyle)

@@ -27,6 +27,8 @@ object MiniPlayerConfig {
     const val NOTIFICATION_MATERIAL = "notificationMaterial"
     const val MEDIA_COLLAPSED_DEFAULT = "mediaCollapsedDefault"
     const val AUTO_COLLAPSE = "autoCollapse"
+    const val FOCUS_AUTO_COLLAPSE = "focusAutoCollapse"
+    const val ORDINARY_AUTO_COLLAPSE = "ordinaryAutoCollapse"
     const val MEDIA_IN_CAPSULE = "mediaInCapsule"
     const val FOCUS_IN_CAPSULE = "focusInCapsule"
     const val GROUP_NOTIFICATIONS_BY_APP = "groupNotificationsByApp"
@@ -66,6 +68,8 @@ object MiniPlayerConfig {
         NOTIFICATION_MATERIAL to true,
         MEDIA_COLLAPSED_DEFAULT to false,
         AUTO_COLLAPSE to true,
+        FOCUS_AUTO_COLLAPSE to true,
+        ORDINARY_AUTO_COLLAPSE to true,
         MEDIA_IN_CAPSULE to true,
         FOCUS_IN_CAPSULE to true,
         GROUP_NOTIFICATIONS_BY_APP to false,
@@ -97,9 +101,13 @@ object MiniPlayerConfig {
                 runCatching { input.getInt(key) }.getOrDefault(STYLE_ROW)
                     .takeIf { it == STYLE_ROW || it == STYLE_STACK } ?: STYLE_ROW
             } else if (key == ENABLED || key == ADAPTIVE_WIDTH ||
-                key == MEDIA_COLLAPSED_DEFAULT || key == AUTO_COLLAPSE || key == MEDIA_IN_CAPSULE || key == FOCUS_IN_CAPSULE ||
+                key == MEDIA_COLLAPSED_DEFAULT || key == AUTO_COLLAPSE ||
+                key == FOCUS_AUTO_COLLAPSE || key == ORDINARY_AUTO_COLLAPSE ||
+                key == MEDIA_IN_CAPSULE || key == FOCUS_IN_CAPSULE ||
                 key == GROUP_NOTIFICATIONS_BY_APP || key in switches) {
-                runCatching { input.getBoolean(key) }.getOrDefault(fallback)
+                runCatching { input.getBoolean(key) }.getOrDefault(
+                    if (key == FOCUS_AUTO_COLLAPSE || key == ORDINARY_AUTO_COLLAPSE)
+                        input.optBoolean(AUTO_COLLAPSE, true) else fallback)
             } else {
                 fallback
             })
