@@ -24,6 +24,8 @@ import btm.m.liquidglass.NavigationStyle
 import btm.m.liquidglass.ScopedSettings
 import btm.m.liquidglass.hook.AppBottomNavHooks
 import btm.m.liquidglass.hook.LuckinAntiDetectionHooks
+import btm.m.os4.systemuihook.htmlviewer.HtmlViewerHooks
+import btm.m.os4.systemuihook.joyose.JoyoseHooks
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 import io.github.libxposed.api.XposedInterface.HookBuilder
 import io.github.libxposed.api.XposedModule
@@ -53,6 +55,8 @@ internal class OthersHooks(
     private val screenshotHooks = ScreenshotHooks(module, hookDeoptimized, logTag)
     private val contactsDialerHooks = ContactsDialerHooks(module, hookDeoptimized, logTag)
     private val portalHooks = PortalHooks(module, hookDeoptimized, logTag)
+    private val htmlViewerHooks = HtmlViewerHooks(module)
+    private val joyoseHooks = JoyoseHooks(module)
 
     fun installPortalHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
         portalHooks.install(classLoader, preferences)
@@ -62,6 +66,12 @@ internal class OthersHooks(
 
     fun installScreenshotHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
         screenshotHooks.install(classLoader, preferences)
+
+    fun installHtmlViewerHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
+        htmlViewerHooks.install(classLoader, preferences)
+
+    fun installJoyoseHooks(param: PackageLoadedParam, preferences: SharedPreferences) =
+        joyoseHooks.install(param, preferences)
 
     fun installRearMiniPlayerMusicHooks(preferences: SharedPreferences) = rearMiniPlayerHooks.installMusic(preferences)
 
