@@ -2112,5 +2112,8 @@
   "iosNotificationStagedExpansion": "段階的な展開アニメーション",
   "iosNotificationStagedExpansionSummary": "スワイプに合わせて角丸のリキッドガラスを広げ、完全に開いてから壁紙を表示します。上スワイプで逆再生し、壁紙を表示しない場合はガラス背景を維持します。",
   "iosNotificationBottomRefraction": "下端のガラス屈折",
-  "iosNotificationBottomRefractionSummary": "段階的な展開中に、下端の角丸部分にガラスの屈折を表示します。オフにしても背景のぼかしと細い枠線は維持されます。"
+  "iosNotificationBottomRefractionSummary": "段階的な展開中に、下端の角丸部分にガラスの屈折を表示します。オフにしても背景のぼかしと細い枠線は維持されます。",
+  "dockUnlockEntryAnimation": "ロック解除時の表示アニメーション",
+  "dockUnlockEntryAnimationSummary": "画面下から上に移動しながらフェードイン",
+  "dockUnlockEntryAnimationFollow": "Dock アイコン本来の移動、フェードイン、バウンドに追従します。速度調整は不要です"
 }

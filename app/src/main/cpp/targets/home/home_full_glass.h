@@ -76,6 +76,32 @@ inline constexpr std::array<uint32_t, 17> kLightCallShape{
     0x6e211c21, 0x9140b371, 0xfd432a23, 0x6e251ca5, 0xd2800006, 0x9143b764,
     0xf945ec84, 0x97fffb21, 0xaa1d03ef, 0xa8c179fd, 0xd65f03c0,
 };
+inline constexpr auto kRelease8593DarkCallShape = [] {
+    auto shape = kDarkCallShape;
+    shape[7] = 0x9141f371;
+    shape[8] = 0xfd47d223;
+    shape[12] = 0xf945b884;
+    return shape;
+}();
+inline constexpr auto kRelease8593LightCallShape = [] {
+    auto shape = kLightCallShape;
+    shape[8] = 0xfd42f623;
+    shape[12] = 0xf945b884;
+    return shape;
+}();
+struct Profile {
+    uintptr_t v7, constructor, factory_tail, factory_call;
+    uintptr_t dark_call, dark_return, light_call, light_return, factory;
+    std::array<uint32_t, 17> dark_shape, light_shape;
+};
+inline constexpr std::array kProfiles{
+    Profile{kV7Rva, kConstructorRva, 0x117a1cc, kFactoryCallRva,
+        0x1179948, kDarkReturnRva, 0x117acd8, kLightReturnRva, 0x1179990,
+        kDarkCallShape, kLightCallShape},
+    Profile{0x17a64a4, 0x11764ac, 0x117637c, 0x11763c0,
+        0x1175af8, 0x1175b30, 0x1176e88, 0x1176ec0, 0x1175b40,
+        kRelease8593DarkCallShape, kRelease8593LightCallShape},
+};
 // Only PC-relative BL displacements vary; pool offsets and every field write
 // are exact for the supplied 8583 image. Other versions fail closed.
 inline bool matches(std::span<const uint32_t> code, std::span<const uint32_t> shape) {

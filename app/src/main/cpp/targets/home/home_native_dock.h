@@ -38,6 +38,13 @@ inline constexpr uintptr_t kRelease8583BackgroundGateRva = 0x11786a4;
 inline constexpr uintptr_t kRelease8583NoLabelLayoutGateRva = 0xee21d0;
 inline constexpr uintptr_t kRelease8583NoLabelOffsetGateRva = 0x8f60f0;
 inline constexpr uintptr_t kRelease8583NoLabelPositionGateRva = 0xbe7eac;
+// Independently checked against libapp 68f62bbd... (8593). The support
+// predicate is shared with 8583; all layout targets must select this profile.
+inline constexpr uintptr_t kRelease8593SupportRva = 0x100cedc;
+inline constexpr uintptr_t kRelease8593BackgroundGateRva = 0x1174854;
+inline constexpr uintptr_t kRelease8593NoLabelLayoutGateRva = 0xedaf60;
+inline constexpr uintptr_t kRelease8593NoLabelOffsetGateRva = 0x8d89c0;
+inline constexpr uintptr_t kRelease8593NoLabelPositionGateRva = 0xcb3af4;
 inline constexpr uint32_t kNoLabelFallthrough = 0xd503201f;
 // Include the predicate call and the first four fallthrough instructions so a
 // single coincidental branch word cannot select a target in an unknown image.
@@ -144,6 +151,23 @@ inline constexpr auto kRelease8583PaddingShape = [] {
     auto shape = kPaddingShape;
     shape[5] = 0xfd475e20;
     shape[8] = 0xfd476220;
+    return shape;
+}();
+inline constexpr auto kRelease8593StrategyShape = [] {
+    auto shape = kRelease8583StrategyShape;
+    for (size_t i : {49, 57, 94}) shape[i] = 0xf9420821;
+    for (size_t i : {63, 71}) shape[i] = 0xf9420884;
+    shape[81] = 0xf9420c21;
+    return shape;
+}();
+inline constexpr auto kRelease8593GlassRadiusShape = [] {
+    auto shape = kRelease8583GlassRadiusShape;
+    shape[19] = 0xf9434210;
+    return shape;
+}();
+inline constexpr auto kRelease8593AdvancedRadiusShape = [] {
+    auto shape = kRelease8583AdvancedRadiusShape;
+    shape[25] = 0xf9433210;
     return shape;
 }();
 template<size_t N> inline bool matches(std::span<const uint32_t> code, const std::array<uint32_t,N> &shape) {

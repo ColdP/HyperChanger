@@ -15,11 +15,13 @@ using Loaded = void (*)(const char *, void *);
 struct NativeApiEntries { uint32_t version; Hook hook_func; Unhook unhook_func; };
 void start_folder_spacing();
 void refresh_home_effects_on_load();
+void start_dock_native_reveal(Hook);
 
 namespace {
 void (*original_name)(const char *) = nullptr;
 int (*original_property)(const char *, char *) = nullptr;
 pid_t entry_pid = 0;
+Hook reveal_hook = nullptr;
 bool launcher() {
     char name[128]{};
     FILE *file = std::fopen("/proc/self/cmdline", "r");
@@ -41,6 +43,7 @@ void start_in_child() {
     if (launcher() && (!spawner() || getpid() != entry_pid || getuid() >= 10000)) {
         if (!hc_native_features_allowed()) return;
         start_folder_spacing();
+        start_dock_native_reveal(reveal_hook);
     }
 }
 void process_name(const char *name) {
@@ -69,6 +72,7 @@ extern "C" [[gnu::visibility("default")]] [[gnu::used]]
 Loaded native_init(const NativeApiEntries *api) {
     if (api == nullptr || api->hook_func == nullptr) return nullptr;
     entry_pid = getpid();
+    reveal_hook = api->hook_func;
     __android_log_print(ANDROID_LOG_INFO, "HyperChangerFolder",
         "Native entry pid=%d uid=%d spawner=%d launcher=%d", entry_pid, getuid(), spawner(), launcher());
     if (spawner() || launcher()) {
