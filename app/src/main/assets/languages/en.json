@@ -2113,7 +2113,5 @@
   "iosNotificationStagedExpansionSummary": "Expand rounded liquid glass with your swipe, then reveal the wallpaper once fully open. Swipe up to reverse. With no wallpaper selected, keep the glass background.",
   "iosNotificationBottomRefraction": "Bottom glass refraction",
   "iosNotificationBottomRefractionSummary": "Show refraction along the rounded bottom edge during staged expansion. Disable to keep background blur and the thin border.",
-  "dockUnlockEntryAnimation": "Unlock entry animation",
-  "dockUnlockEntryAnimationSummary": "Slide up from the bottom of the screen and fade in",
-  "dockUnlockEntryAnimationFollow": "Follow the native Dock icon movement, fade-in and bounce without adjusting speed"
+  "dockUnlockEntryAnimation": "Unlock entry animation"
 }

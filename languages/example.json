@@ -2063,7 +2063,5 @@
   "iosNotificationStagedExpansionSummary": "先跟手展开圆角液态玻璃，完全展开后再渐显壁纸，上滑时反向过渡；选择不显示壁纸则保留玻璃背景。",
   "iosNotificationBottomRefraction": "底部玻璃折射",
   "iosNotificationBottomRefractionSummary": "在分段展开动画中显示底部圆角玻璃折射；关闭后保留背景模糊与细边框。",
-  "dockUnlockEntryAnimation": "解锁入场动画",
-  "dockUnlockEntryAnimationSummary": "从屏幕下方上移并渐显",
-  "dockUnlockEntryAnimationFollow": "跟随 Dock 图标的原生位移、渐显和回弹，无需调节速度"
+  "dockUnlockEntryAnimation": "解锁入场动画"
 }

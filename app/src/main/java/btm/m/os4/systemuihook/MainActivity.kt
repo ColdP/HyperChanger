@@ -3771,13 +3771,9 @@ private fun Desktop(
                     if (settings.material != 1) {
                         SwitchPreference(
                             title = tr("dockUnlockEntryAnimation", "解锁入场动画"),
-                            summary = tr("dockUnlockEntryAnimationSummary", "从屏幕下方上移并渐显"),
                             checked = settings.entryAnimation,
                             onCheckedChange = { value -> update { it.copy(entryAnimation = value) } },
                         )
-                        if (settings.entryAnimation) {
-                            Text(tr("dockUnlockEntryAnimationFollow", "跟随 Dock 图标的原生位移、渐显和回弹，无需调节速度"), modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
-                        }
                     }
                     OverlayDropdownPreference(
                         title = tr("Dock 背景材质", "Dock 背景材质"),
