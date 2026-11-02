@@ -4,6 +4,9 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.RenderEffect;
+import android.graphics.RenderNode;
+import android.graphics.RecordingCanvas;
 import android.graphics.RuntimeShader;
 import android.graphics.Shader;
 import android.os.SystemClock;
@@ -18,11 +21,12 @@ final class IosShadeLiquidLens {
             "uniform shader content;\n"
             + "uniform float2 size; uniform float2 sceneSize;\n"
             + "uniform float offsetY; uniform float sourceTop; uniform float radius; uniform float density;\n"
-            + "uniform float nativeBlurMix;\n"
+            + "uniform float outputTop;\n"
             + "float2 safeNormal(float2 v) { return v / max(length(v), 0.0001); }\n"
             + "half4 sampleScene(float2 p) {\n"
             + " return content.eval(clamp(p + float2(0.0, offsetY - sourceTop), float2(0.5), sceneSize - 0.5)); }\n"
-            + "half4 main(float2 p) {\n"
+            + "half4 main(float2 local) {\n"
+            + " float2 p = local + float2(0.0, outputTop);\n"
             + " float2 hs = size * 0.5; float2 cc = p - hs;\n"
             + " float2 q = abs(cc) - (hs - radius);\n"
             + " float sd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;\n"
@@ -54,9 +58,6 @@ final class IosShadeLiquidLens {
             + " rgb = mix(rgb, half3(1.0), half(highlight * fade * 0.25));\n"
             + " float coverage = (1.0 - smoothstep(-edge, edge, sd)) * bottom;\n"
             + " coverage *= 1.0 - smoothstep(0.15, 1.0, t);\n"
-            // The shade-excluded source is sharp. Reveal the real system blur underneath
-            // rather than covering it with opaque optical pixels or a second blur pass.
-            + " coverage *= 1.0 - nativeBlurMix;\n"
             + " a *= half(coverage); return half4(rgb * a, a); }\n";
 
     private final View host;
@@ -67,6 +68,11 @@ final class IosShadeLiquidLens {
     private ViewGroup root;
     private Bitmap frame;
     private BitmapShader texture;
+    private RenderNode optics;
+    private RenderEffect sourceEffect, blurredSource;
+    private int appliedBlur = -1, renderWidth, renderHeight;
+    private float outputTop = Float.NaN, appliedDensity = Float.NaN;
+    private boolean effectDirty;
     private int sourceTop;
     private boolean running, pending, unavailable;
     private int generation, failures, width, height, sheetWidth, sheetHeight;
@@ -80,6 +86,7 @@ final class IosShadeLiquidLens {
     void update(ViewGroup window, float offset, float corner, boolean visible) {
         if (window != root) { reset(); root = window; }
         if (window == null) return;
+        if (offsetY != offset || radius != corner) effectDirty = true;
         offsetY = offset;
         radius = corner;
         int w = window.getWidth(), h = window.getHeight();
@@ -91,9 +98,7 @@ final class IosShadeLiquidLens {
             pending = false;
             failures = 0;
             host.removeCallbacks(refresh);
-            if (frame != null && w > 0 && h > 0 && sheetWidth > 0 && sheetHeight > 0) {
-                uniforms();
-            }
+            effectDirty = true;
         }
         if (!visible || w <= 0 || h <= 0 || sheetWidth <= 0 || sheetHeight <= 0) {
             if (running) { generation++; pending = false; }
@@ -105,7 +110,9 @@ final class IosShadeLiquidLens {
         if (shader == null) {
             try {
                 shader = new RuntimeShader(OPTICS);
-                filtered.setShader(shader);
+                optics = new RenderNode("IosShadeEdgeOptics");
+                filtered.setColor(0xFFFFFFFF);
+                effectDirty = true;
             } catch (Throwable error) {
                 fail(error);
                 return;
@@ -113,25 +120,53 @@ final class IosShadeLiquidLens {
         }
         boolean starting = !running;
         running = true;
-        uniforms();
         if (starting || resized) {
             host.removeCallbacks(refresh);
             capture();
         }
     }
 
-    private void uniforms() {
-        if (shader == null) return;
+    private void prepareEffect() {
+        float density = host.getResources().getDisplayMetrics().density;
+        int blur = IosShadeBackdropBlur.currentRadius(root);
+        float corner = Math.max(0f, Math.min(radius, Math.min(sheetWidth, sheetHeight) * .5f));
+        // Keep all padded source pixels inside the effect input bounds. A tight
+        // output-band node clips displaced samples before the shader can read them.
+        float top = sourceTop - offsetY;
+        if (renderWidth != frame.getWidth() || renderHeight != frame.getHeight()) {
+            renderWidth = frame.getWidth(); renderHeight = frame.getHeight();
+            optics.setPosition(0, 0, renderWidth, renderHeight);
+            RecordingCanvas recording = optics.beginRecording(renderWidth, renderHeight);
+            recording.drawRect(0f, 0f, renderWidth, renderHeight, filtered);
+            optics.endRecording();
+            effectDirty = true;
+        }
+        if (top != outputTop || appliedDensity != density) {
+            outputTop = top;
+            optics.setTranslationY(top);
+            effectDirty = true;
+            appliedDensity = density;
+        }
+        if (blurredSource == null || appliedBlur != blur) {
+            // Blur the source pixels first, so every displaced/chromatic sample is blurred.
+            blurredSource = blur > 0 ? RenderEffect.createBlurEffect(blur, blur, sourceEffect, Shader.TileMode.CLAMP) : sourceEffect;
+            appliedBlur = blur;
+            effectDirty = true;
+        }
+        if (!effectDirty) return;
         shader.setFloatUniform("size", (float) sheetWidth, (float) sheetHeight);
         shader.setFloatUniform("sceneSize", frame == null ? (float) width : (float) frame.getWidth(),
                 frame == null ? (float) height : (float) frame.getHeight());
         shader.setFloatUniform("offsetY", offsetY);
         shader.setFloatUniform("sourceTop", (float) sourceTop);
-        shader.setFloatUniform("radius", Math.max(0f, Math.min(radius, Math.min(sheetWidth, sheetHeight) * .5f)));
-        float density = host.getResources().getDisplayMetrics().density;
+        shader.setFloatUniform("radius", corner);
         shader.setFloatUniform("density", density);
-        float blur = Math.max(0f, Math.min(1f, IosShadeBackdropBlur.currentRadius(root) / Math.max(1f, 24f * density)));
-        shader.setFloatUniform("nativeBlurMix", .55f * blur * blur * (3f - 2f * blur));
+        shader.setFloatUniform("outputTop", outputTop);
+        // Runtime effects snapshot uniforms. Rebuild after geometry/source changes,
+        // keeping the Gaussian source effect cached while its frame/radius are stable.
+        optics.setRenderEffect(RenderEffect.createChainEffect(
+                RenderEffect.createRuntimeShaderEffect(shader, "content"), blurredSource));
+        effectDirty = false;
     }
 
     private void capture() {
@@ -141,8 +176,9 @@ final class IosShadeLiquidLens {
         int request = generation;
         float density = host.getResources().getDisplayMetrics().density;
         float bottom = offsetY + sheetHeight;
-        int top = Math.min(height - 1, Math.max(0, (int) Math.floor(bottom - radius - 96f * density)));
-        int end = Math.min(height, Math.max(top + 1, (int) Math.ceil(bottom + 64f * density)));
+        float support = 3f * IosShadeBackdropBlur.currentRadius(root);
+        int top = Math.min(height - 1, Math.max(0, (int) Math.floor(bottom - radius - 96f * density - support)));
+        int end = Math.min(height, Math.max(top + 1, (int) Math.ceil(bottom + 64f * density + support)));
         IosShadeBackdropCapture.request(root, top, end, bitmap -> {
             if (!running || request != generation) {
                 // Only unpublished frames are safe to recycle explicitly.
@@ -158,8 +194,9 @@ final class IosShadeLiquidLens {
                 try {
                     texture = new BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
                     texture.setFilterMode(BitmapShader.FILTER_MODE_LINEAR);
-                    shader.setInputShader("content", texture);
-                    uniforms();
+                    sourceEffect = RenderEffect.createShaderEffect(texture);
+                    blurredSource = null;
+                    effectDirty = true;
                     host.invalidate();
                     if (first) frameReady.run();
                 } catch (Throwable error) { fail(error); return; }
@@ -175,9 +212,8 @@ final class IosShadeLiquidLens {
     void draw(Canvas canvas) {
         if (running && frame != null && shader != null && canvas.isHardwareAccelerated()) {
             try {
-                uniforms();
-                float bandTop = Math.max(0f, sheetHeight - radius - 40f * host.getResources().getDisplayMetrics().density);
-                canvas.drawRect(0f, bandTop, sheetWidth, sheetHeight, filtered);
+                prepareEffect();
+                canvas.drawRenderNode(optics);
             } catch (Throwable error) { fail(error); }
         }
     }
@@ -190,6 +226,7 @@ final class IosShadeLiquidLens {
         host.removeCallbacks(refresh);
         frame = null;
         texture = null;
+        releaseEffects();
         filtered.setShader(null);
         if (hadFrame) frameReady.run();
         Xp.log("[IOSShade] liquid optics unavailable: " + error);
@@ -203,7 +240,21 @@ final class IosShadeLiquidLens {
         root = null;
         failures = width = height = sheetWidth = sheetHeight = 0;
         texture = null;
+        releaseEffects();
         filtered.setShader(null);
         shader = null;
+    }
+
+    private void releaseEffects() {
+        if (optics != null) {
+            optics.setRenderEffect(null);
+            optics.discardDisplayList();
+        }
+        optics = null;
+        sourceEffect = blurredSource = null;
+        appliedBlur = -1;
+        renderWidth = renderHeight = 0;
+        outputTop = appliedDensity = Float.NaN;
+        effectDirty = true;
     }
 }

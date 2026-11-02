@@ -16,7 +16,7 @@ public final class IosNotificationCenterHooks {
     private IosNotificationCenterHooks() {}
 
     public static void install(ClassLoader loader) {
-        IosShadeBackdropBlur.install();
+        IosShadeBackdropBlur.install(loader);
         try {
             IosNotificationAnimationHooks.deoptimize(Xp.findClass(
                     "com.miui.systemui.shade.blur.ShadeBlendBlurController$BlurProvider", loader),

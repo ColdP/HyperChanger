@@ -2,6 +2,7 @@ package btm.m.os4.systemuihook.newnotificationcenter;
 
 import android.view.View;
 import java.lang.reflect.Method;
+import java.lang.ref.WeakReference;
 import btm.m.os4.systemuihook.hypermusiccover.Xp;
 
 /** Applies a gesture envelope to the native window blur, without changing row materials. */
@@ -12,10 +13,12 @@ public final class IosShadeBackdropBlur {
     private static Method getter;
     private static boolean writing;
     private static float amount = 1f;
+    private static WeakReference<View> surfaceRoot = new WeakReference<>(null);
+    private static int surfaceRadius;
 
     private IosShadeBackdropBlur() {}
 
-    static void install() {
+    static void install(ClassLoader loader) {
         try {
             setter = View.class.getDeclaredMethod("setMiBackgroundBlurRadius", int.class);
             getter = View.class.getDeclaredMethod("getMiBackgroundBlurRadius");
@@ -38,6 +41,27 @@ public final class IosShadeBackdropBlur {
             setter = null;
             getter = null;
             Xp.log("[IOSShade] staged backdrop blur control unavailable: " + error);
+        }
+        try {
+            Method apply = Xp.findClass("com.android.systemui.statusbar.BlurUtils", loader)
+                    .getDeclaredMethod("applyBlur", Xp.findClass("android.view.ViewRootImpl", loader), int.class);
+            Xp.api().hook(apply)
+                    .setExceptionMode(io.github.libxposed.api.XposedInterface.ExceptionMode.PROTECTIVE)
+                    .intercept(chain -> {
+                        Object result = chain.proceed();
+                        try {
+                            Object target = chain.getArgs().get(0);
+                            Object controller = chain.getThisObject();
+                            if (target != null && Xp.getObjectField(controller, "lastTargetViewRootImpl") == target) {
+                                View view = (View) Xp.callMethod(target, "getView");
+                                if (surfaceRoot.get() != view) surfaceRoot = new WeakReference<>(view);
+                                surfaceRadius = Math.max(0, ((Number) Xp.getObjectField(controller, "lastAppliedBlur")).intValue());
+                            }
+                        } catch (Throwable ignored) {}
+                        return result;
+                    });
+        } catch (Throwable error) {
+            Xp.log("[IOSShade] window blur radius observation unavailable: " + error);
         }
     }
 
@@ -65,8 +89,11 @@ public final class IosShadeBackdropBlur {
 
     private static int scaledRadius() { return Math.round(requestedRadius * amount); }
 
-    // Read the applied gesture radius without another native call or a second state owner.
-    static int currentRadius(View root) { return root != null && root == ownedRoot ? Math.max(0, scaledRadius()) : 0; }
+    // Both radii are already in pixels; never multiply them by display density again.
+    static int currentRadius(View root) {
+        if (root == null || root != ownedRoot) return 0;
+        return Math.max(Math.max(0, scaledRadius()), surfaceRoot.get() == root ? surfaceRadius : 0);
+    }
 
     public static void release() {
         View previous = ownedRoot;
