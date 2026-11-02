@@ -2108,5 +2108,9 @@
   "theme_mono": "Monochrome",
   "lsposed_status_connected_title": "Connected",
   "lsposed_status_disconnected_title": "Disconnected",
-  "lsposed_api": "API"
+  "lsposed_api": "API",
+  "iosNotificationStagedExpansion": "Staged expansion animation",
+  "iosNotificationStagedExpansionSummary": "Expand rounded liquid glass with your swipe, then reveal the wallpaper once fully open. Swipe up to reverse. With no wallpaper selected, keep the glass background.",
+  "iosNotificationBottomRefraction": "Bottom glass refraction",
+  "iosNotificationBottomRefractionSummary": "Show refraction along the rounded bottom edge during staged expansion. Disable to keep background blur and the thin border."
 }

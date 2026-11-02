@@ -348,7 +348,7 @@ public final class IosShadeMaterial {
                 // left the iOS shade with refraction only: a transparent glass with no blur at all.
                 // Fall back to the row radius whenever the native value is missing.
                 return radius > 0 ? radius : 80;
-            case 3: return false;
+            case 3: return false; // One local source for scene-to-wallpaper compositing.
             case 4: return false; // Include the wallpaper sibling below NotificationPanelView.
             default: throw new IllegalArgumentException();
         }

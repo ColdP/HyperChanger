@@ -46,6 +46,10 @@ public final class IosNotificationCenterPresentation {
     private static long clockMetadataSyncUptime;
     private static ArrayList<View> hostedClockMinuteViews;
     private static ImageView depth;
+    private static float wallpaperReveal = 1f;
+    private static int wallpaperRevealBlur;
+    private static ImageView revealedDepth;
+    private static int lastDepthRevealBlur = -1;
     private static MirrorView status;
     private static View stack;
     private static View transformedStack;
@@ -181,6 +185,7 @@ public final class IosNotificationCenterPresentation {
         boolean wasHoldingRows = IosNotificationExitState.isHolding();
         progress = enabled ? Math.max(0f, Math.min(1f, fraction)) : 0f;
         layoutProgress = enabled ? Math.max(0f, Math.min(1f, layoutFraction)) : 0f;
+        IosNotificationEntryState.updateProgress(previousProgress, progress);
         IosNotificationExitState.updateProgress(previousProgress, progress);
         wallpaperSheet = sheet;
         if (progress <= 0f) {
@@ -272,6 +277,26 @@ public final class IosNotificationCenterPresentation {
         if (depth != null) {
             depth.setVisibility(View.GONE);
             lastDepthDrawable = null;
+        }
+    }
+
+    /** The foreground shares wallpaper visibility, retaining its clock overlap and geometry. */
+    public static void setWallpaperReveal(float alpha, int blur) {
+        wallpaperReveal = Math.max(0f, Math.min(1f, alpha));
+        wallpaperRevealBlur = Math.max(0, blur);
+        syncWallpaperReveal();
+    }
+
+    private static void syncWallpaperReveal() {
+        if (depth == null) return;
+        if (revealedDepth != depth) {
+            revealedDepth = depth;
+            lastDepthRevealBlur = -1;
+        }
+        if (depth.getAlpha() != wallpaperReveal) depth.setAlpha(wallpaperReveal);
+        if (lastDepthRevealBlur != wallpaperRevealBlur) {
+            depth.setRenderEffect(IosShadeBlurEffects.blur(wallpaperRevealBlur));
+            lastDepthRevealBlur = wallpaperRevealBlur;
         }
     }
 
@@ -724,6 +749,7 @@ public final class IosNotificationCenterPresentation {
         }
         hideNativeHeader();
         syncDepth();
+        syncWallpaperReveal();
         syncStatus();
         syncClearButton();
         syncShortcuts();
@@ -1668,6 +1694,7 @@ public final class IosNotificationCenterPresentation {
     }
 
     private static void releasePresentation() {
+        IosNotificationEntryState.clear();
         IosNotificationShortcutHost.restore();
         IosNotificationExitState.clear();
         restoreStackTransform();
@@ -1739,6 +1766,8 @@ public final class IosNotificationCenterPresentation {
         panel = null;
         clock = null;
         depth = null;
+        revealedDepth = null;
+        lastDepthRevealBlur = -1;
         status = null;
         wallpaperSheet = null;
         lastBlur = -1;

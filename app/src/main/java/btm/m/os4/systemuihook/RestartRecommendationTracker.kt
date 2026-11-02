@@ -19,6 +19,9 @@ internal class RestartRecommendationTracker(
     private inner class Source(val group: String, val prefs: SharedPreferences) {
         var snapshot = snapshot(group, prefs)
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+            // A remote load can write hundreds of keys. withoutTracking takes one
+            // final baseline, so rebuilding every settings snapshot per key is wasted work.
+            if (ignoringChanges) return@OnSharedPreferenceChangeListener
             val current = snapshot(group, prefs)
             val changedKeys = (snapshot.keys + current.keys).filter { snapshot[it] != current[it] }
             snapshot = current

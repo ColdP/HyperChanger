@@ -16,6 +16,14 @@ public final class IosNotificationCenterHooks {
     private IosNotificationCenterHooks() {}
 
     public static void install(ClassLoader loader) {
+        IosShadeBackdropBlur.install();
+        try {
+            IosNotificationAnimationHooks.deoptimize(Xp.findClass(
+                    "com.miui.systemui.shade.blur.ShadeBlendBlurController$BlurProvider", loader),
+                    "setBlurRatio", "updateMaxRadius");
+        } catch (Throwable error) {
+            Xp.log("[IOSShade] backdrop blur caller deoptimization unavailable: " + error);
+        }
         IosNotificationStackHooks.install(loader);
         try {
             Class<?> shortcuts = Xp.findClass(

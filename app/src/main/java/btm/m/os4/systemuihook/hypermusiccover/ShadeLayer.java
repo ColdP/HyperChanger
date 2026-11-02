@@ -3,6 +3,9 @@ package btm.m.os4.systemuihook.hypermusiccover;
 import btm.m.os4.systemuihook.newnotificationcenter.IosShadeMaterial;
 import btm.m.os4.systemuihook.newnotificationcenter.IosShadeState;
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterPresentation;
+import btm.m.os4.systemuihook.newnotificationcenter.IosShadeGlassView;
+import btm.m.os4.systemuihook.newnotificationcenter.IosShadeWallpaperReveal;
+import btm.m.os4.systemuihook.newnotificationcenter.IosShadeBackdropBlur;
 
 import android.content.Context;
 import android.graphics.Rect;
@@ -50,6 +53,7 @@ public final class ShadeLayer {
     /** The shade window root, a NotificationShadeWindowView. */
     private static volatile ViewGroup sRoot;
     private static volatile FrameLayout sFrame;
+    private static View sBackdrop;
     private static volatile ImageView sWp;
     private static volatile Class<?> sPanelCls;
 
@@ -75,6 +79,9 @@ public final class ShadeLayer {
     private static volatile boolean sEffectOn;
     private static volatile boolean sIosEnabled;
     private static volatile int sIosWallpaper;
+    private static boolean sIosStagedExpansion;
+    private static boolean sIosBottomRefraction = true;
+    private static IosShadeWallpaperReveal sWallpaperReveal;
     private static final IosShadeState IOS = new IosShadeState();
     private static boolean sIosRawDriver;
     private static boolean sIosSwitchDriver;
@@ -228,6 +235,7 @@ public final class ShadeLayer {
     }
 
     private static void hideIosLayer() {
+        IosShadeBackdropBlur.release();
         sEffectOn = false;
         IosNotificationCenterPresentation.update(0f, 0f, false, null);
         IosShadeMaterial.setActive(false, sRoot);
@@ -239,6 +247,7 @@ public final class ShadeLayer {
             sFrame.setClipBounds(null);
             sFrame.invalidateOutline();
         }
+        if (sWallpaperReveal != null) sWallpaperReveal.reset();
         if (sWp != null) {
             sWp.setTranslationY(0f);
             sWp.setScaleX(1f);
@@ -260,10 +269,15 @@ public final class ShadeLayer {
         ensurePlacement();
         syncShown();
         boolean showWallpaper = iosWallpaperEnabled();
+        boolean staged = sIosStagedExpansion;
+        IosShadeBackdropBlur.update(sRoot, staged && !IOS.switching, IOS.progress * IOS.switchFraction);
         IosNotificationCenterPresentation.setWallpaperEnabled(showWallpaper);
         float visual = IOS.progress * IOS.switchFraction;
         // Both effects are driven by the finger/native switch animator, without another spring.
-        float opacity = visual * visual * (3f - 2f * visual);
+        // Position reveals the staged glass. Fading that same sheet by drag distance
+        // made its entire optical band almost transparent during most of the pull.
+        float opacityProgress = staged ? IOS.switchFraction : visual;
+        float opacity = opacityProgress * opacityProgress * (3f - 2f * opacityProgress);
         sFrame.setAlpha(opacity);
         sFrame.setVisibility(View.VISIBLE);
         sEffectOn = showWallpaper;
@@ -276,17 +290,23 @@ public final class ShadeLayer {
             if (sWp.getScaleX() != wallpaperScale) sWp.setScaleX(wallpaperScale);
             if (sWp.getScaleY() != wallpaperScale) sWp.setScaleY(wallpaperScale);
         }
+        applyCurtain(IOS.progress);
+        IosShadeMaterial.setActive(showWallpaper || staged, sRoot);
+        if (sWallpaperReveal != null) {
+            sWallpaperReveal.setRefractionEnabled(sIosBottomRefraction);
+            sWallpaperReveal.update(staged, showWallpaper, IOS.progress, IOS.switching, IOS.switchFraction,
+                    landscape, sRoot, sFrame.getTranslationY(), cornerRadius());
+        }
         float density = sFrame.getResources().getDisplayMetrics().density;
         int blur = landscape
                 ? Math.round((22f + 14f * (1f - visual)) * density)
                 : Math.round(28f * density * (1f - visual));
         blur = (blur + 1) / 2 * 2;
-        if (sWp != null && sLastWpBlur != blur) {
+        if (!staged && sWp != null && sLastWpBlur != blur) {
             sWp.setRenderEffect(btm.m.os4.systemuihook.newnotificationcenter.IosShadeBlurEffects.blur(blur));
             sLastWpBlur = blur;
         }
-        applyCurtain(IOS.progress);
-        IosShadeMaterial.setActive(showWallpaper, sRoot);
+        if (staged) sLastWpBlur = -1;
         IosNotificationCenterPresentation.update(visual, IOS.progress, true, sFrame);
     }
 
@@ -298,6 +318,8 @@ public final class ShadeLayer {
     private static final android.content.SharedPreferences.OnSharedPreferenceChangeListener PREFS_CHANGED =
             (prefs, key) -> {
                 if (btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_CENTER.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationExpansionSettingsKt.KEY_IOS_NOTIFICATION_STAGED_EXPANSION.equals(key)
+                        || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationRefractionSettingsKt.KEY_IOS_NOTIFICATION_BOTTOM_REFRACTION.equals(key)
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_WALLPAPER.equals(key)
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsKt.KEY_IOS_NOTIFICATION_HIDE_CLEAR.equals(key)
                         || btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsKt.KEY_IOS_NOTIFICATION_HEADER.equals(key)
@@ -377,7 +399,23 @@ public final class ShadeLayer {
         IosNotificationCenterPresentation.setNotificationHeaderGap(
                 prefs.getInt(btm.m.os4.systemuihook.newnotificationcenter.IosNotificationClockSettingsKt
                         .KEY_IOS_NOTIFICATION_HEADER_GAP, 0));
-        if (enabled == sIosEnabled && source == sIosWallpaper) return;
+        boolean staged = btm.m.os4.systemuihook.newnotificationcenter.IosNotificationExpansionSettingsKt
+                .readIosNotificationStagedExpansion(prefs);
+        boolean expansionChanged = sIosStagedExpansion != staged;
+        sIosStagedExpansion = staged;
+        boolean refraction = btm.m.os4.systemuihook.newnotificationcenter.IosNotificationRefractionSettingsKt
+                .readIosNotificationBottomRefraction(prefs);
+        boolean refractionChanged = sIosBottomRefraction != refraction;
+        sIosBottomRefraction = refraction;
+        if (enabled == sIosEnabled && source == sIosWallpaper) {
+            if (expansionChanged) {
+                if (sWallpaperReveal != null) sWallpaperReveal.reset();
+                if (sRoot != null && sIosEnabled) applyIosProgress();
+            } else if (refractionChanged && sRoot != null && sIosEnabled) {
+                applyIosProgress();
+            }
+            return;
+        }
         reset();
         if (sEffectOn) Main.setCardBlurActive(false);
         sEffectOn = false;
@@ -474,8 +512,13 @@ public final class ShadeLayer {
             if (sFrame != null && sFrame.getParent() instanceof ViewGroup) {
                 ((ViewGroup) sFrame.getParent()).removeView(sFrame);
             }
+            if (sBackdrop != null && sBackdrop.getParent() instanceof ViewGroup) {
+                ((ViewGroup) sBackdrop.getParent()).removeView(sBackdrop);
+            }
             sFrame = null;
+            sBackdrop = null;
             sWp = null;
+            sWallpaperReveal = null;
             sShown = null;
             sPanel = null;
         }
@@ -509,6 +552,10 @@ public final class ShadeLayer {
             // never touched still costs a traversal if it is merely invisible.
             frame.setVisibility(View.GONE);
 
+            final IosShadeGlassView glass = new IosShadeGlassView(ctx);
+            sBackdrop = glass.backdropView();
+            frame.addView(glass, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             final ImageView wp = new ImageView(ctx);
             wp.setClickable(false);
             wp.setFocusable(false);
@@ -519,6 +566,7 @@ public final class ShadeLayer {
 
             sFrame = frame;
             sWp = wp;
+            sWallpaperReveal = new IosShadeWallpaperReveal(wp, glass);
             frame.addOnLayoutChangeListener((view, left, top, right, bottom,
                     oldLeft, oldTop, oldRight, oldBottom) -> {
                 if (sFrame == view && sIosEnabled && IOS.progress > 0f
@@ -569,7 +617,8 @@ public final class ShadeLayer {
             // that made it look like first-time placement.
             if (fi >= 0 && fi + 1 < root.getChildCount()
                     && pc.isInstance(root.getChildAt(fi + 1))) {
-                sPlacedAt = fi;
+                ensureBackdropPlacement(root, frame);
+                sPlacedAt = root.indexOfChild(frame);
                 return;
             }
         }
@@ -593,12 +642,25 @@ public final class ShadeLayer {
             final int slot = idx < 0 ? 0 : Math.min(idx, root.getChildCount());
             root.addView(frame, slot, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            sPlacedAt = slot;
+            ensureBackdropPlacement(root, frame);
+            sPlacedAt = root.indexOfChild(frame);
             Xp.log(TAG + "cover layer at index " + slot + " of " + root.getChildCount()
                     + " children, " + (idx < 0 ? "NOT anchored to the panel" : "below the panel"));
         } catch (Throwable t) {
             Xp.log(TAG + "cover layer could not be placed: " + t);
         }
+    }
+
+    private static void ensureBackdropPlacement(ViewGroup root, View frame) {
+        View backdrop = sBackdrop;
+        if (backdrop == null) return;
+        int frameIndex = root.indexOfChild(frame);
+        if (backdrop.getParent() == root && root.indexOfChild(backdrop) + 1 == frameIndex) return;
+        if (backdrop.getParent() instanceof ViewGroup) {
+            ((ViewGroup) backdrop.getParent()).removeView(backdrop);
+        }
+        root.addView(backdrop, root.indexOfChild(frame), new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
     }
 
     private static Class<?> panelClass(ViewGroup root) {
@@ -1491,8 +1553,10 @@ public final class ShadeLayer {
      * no log explains.
      */
     static void reset() {
+        IosShadeBackdropBlur.release();
         sResets++;
         cancelIosSettle();
+        if (sWallpaperReveal != null) sWallpaperReveal.reset();
         IOS.clear();
         IosNotificationCenterPresentation.update(0f, 0f, false, null);
         btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterHooks.finishDeferredHide();

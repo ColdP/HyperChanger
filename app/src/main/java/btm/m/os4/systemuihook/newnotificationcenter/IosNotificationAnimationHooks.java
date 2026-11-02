@@ -56,6 +56,28 @@ final class IosNotificationAnimationHooks {
 
     static void install(ClassLoader loader) {
         try {
+            Class<?> state = Xp.findClass(
+                    "com.android.systemui.statusbar.notification.stack.ViewState", loader);
+            int tag = Xp.findClass("com.android.systemui.R$id", loader)
+                    .getField("translation_y_animator_tag").getInt(null);
+            state.getDeclaredMethod("abortAnimation", int.class, View.class);
+            for (String method : new String[]{"animateTo", "applyToView"}) {
+                Xp.hookAll(state, method, chain -> {
+                    if (!chain.getArgs().isEmpty() && chain.getArgs().get(0) instanceof View) {
+                        IosNotificationEntryState.settle((View) chain.getArgs().get(0),
+                                chain.getThisObject());
+                    }
+                    return chain.proceed();
+                });
+            }
+            deoptimize(Xp.findClass(
+                    "com.android.systemui.statusbar.notification.stack.ExpandableViewState", loader),
+                    "animateTo", "applyToView");
+            IosNotificationEntryState.configure(tag);
+        } catch (Throwable error) {
+            Xp.log("[IOSShade] notification entry position hook unavailable: " + error);
+        }
+        try {
             Class<?> controller = Xp.findClass(
                     "com.android.systemui.shade.MiuiNotificationPanelAnimControllerImpl", loader);
             Xp.hookAll(controller, "startPanelExpandAnimation$default", chain -> {
@@ -114,7 +136,11 @@ final class IosNotificationAnimationHooks {
             Class<?> row = Xp.findClass(
                     "com.miui.systemui.notification.row.ExpandableViewBase", loader);
             Xp.hookAll(row, "onPropertiesUpdate", chain -> {
-                if (chain.getThisObject() instanceof View) neutralizePanelTransform(chain.getThisObject());
+                if (chain.getThisObject() instanceof View) {
+                    View view = (View) chain.getThisObject();
+                    neutralizePanelTransform(view);
+                    IosNotificationEntryState.settle(view, null);
+                }
                 Object origin = chain.getThisObject() instanceof View
                         ? IosNotificationStackHooks.restingStackOrigin((View) chain.getThisObject()) : null;
                 try {

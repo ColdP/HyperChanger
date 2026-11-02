@@ -519,6 +519,13 @@ final class IosNotificationStackHooks {
                 // visibility first, including notifications inside expanded groups.
                 enforceUnstackedRows((View) chain.getThisObject());
                 View view = (View) chain.getThisObject();
+                if (IosNotificationEntryState.deferDraw(view)) {
+                    // A listener added during pre-draw may run only next traversal. Never
+                    // record the old native coordinates as the sheet's first visible frame.
+                    Xp.callMethod(view, "requestChildrenUpdate");
+                    view.invalidate();
+                    return null;
+                }
                 IosNotificationExitState.apply(view);
                 if (!IosNotificationCenterPresentation.ownsStack(view)
                         || chain.getArgs().isEmpty() || !(chain.getArgs().get(0) instanceof Canvas)) {
@@ -535,7 +542,10 @@ final class IosNotificationStackHooks {
                     canvas.clipRect(0f, 0f, view.getWidth(),
                             IosNotificationCenterPresentation.viewportBottomForDraw(view));
                     return chain.proceed();
-                } finally { canvas.restoreToCount(save); }
+                } finally {
+                    canvas.restoreToCount(save);
+                    IosNotificationEntryState.frameDrawn(view);
+                }
             });
             Xp.hookAll(stack, "drawChild", chain -> {
                 // This is the last boundary before Android records the child's RenderNode.
@@ -606,6 +616,7 @@ final class IosNotificationStackHooks {
                             ((Number) Xp.getObjectField(ambient, "mScrollY")).intValue()));
                     Object result = chain.proceed();
                     constrainSpecialRows(view, top);
+                    IosNotificationEntryState.targetsReady(view);
                     return result;
                 }
             });

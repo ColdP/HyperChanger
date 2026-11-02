@@ -3,6 +3,8 @@
 package btm.m.os4.systemuihook
 
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsStore
+import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationExpansionSettingsStore
+import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationRefractionSettingsStore
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationShortcutsSettingsStore
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationBottomOffsetSettingsStore
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationHeaderSettingsStore
@@ -411,6 +413,18 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
     CategorySearchItem(
         tr("iosNotificationHideClear", "隐藏通知中心清除按钮"),
         tr("iosNotificationHideClearSummary", "隐藏通知中心底部的清除按钮"),
+        setOf(ScopeApplication.SYSTEM_UI),
+        PageId.IOS_NOTIFICATION_CENTER,
+    ),
+    CategorySearchItem(
+        tr("iosNotificationStagedExpansion", "分段展开动画"),
+        tr("iosNotificationStagedExpansionSummary", "先跟手展开圆角液态玻璃，完全展开后再以淡入和模糊过渡显示壁纸。"),
+        setOf(ScopeApplication.SYSTEM_UI),
+        PageId.IOS_NOTIFICATION_CENTER,
+    ),
+    CategorySearchItem(
+        tr("iosNotificationBottomRefraction", "底部玻璃折射"),
+        tr("iosNotificationBottomRefractionSummary", "在分段展开动画中显示底部圆角玻璃折射；关闭后保留背景模糊与细边框。"),
         setOf(ScopeApplication.SYSTEM_UI),
         PageId.IOS_NOTIFICATION_CENTER,
     ),
@@ -986,6 +1000,8 @@ private fun Root(
                 ControlCenterHeaderHeightSettingsStore(context).syncRemote(it)
                 ControlCenterTileLayoutSettingsStore(context).syncRemote(it)
                 IosNotificationBottomOffsetSettingsStore(context).syncRemote(it)
+                IosNotificationExpansionSettingsStore(context).syncRemote(it)
+                IosNotificationRefractionSettingsStore(context).syncRemote(it)
                 ControlCenterCarrierSettingsStore(context).syncRemote(it)
                 ControlCenterClockSettingsStore(context).syncRemote(it)
                 IslandSmoothingSettingsStore(context).syncRemote(it)
@@ -6225,6 +6241,10 @@ private fun IosNotificationCenterPage(
     val service by HookApplication.service.collectAsStateWithLifecycle()
     val iosStore = remember(context) { IosNotificationCenterSettingsStore(context) }
     var iosSettings by remember { mutableStateOf(iosStore.settings) }
+    val expansionStore = remember(context) { IosNotificationExpansionSettingsStore(context) }
+    var stagedExpansion by remember { mutableStateOf(expansionStore.enabled) }
+    val refractionStore = remember(context) { IosNotificationRefractionSettingsStore(context) }
+    var bottomRefraction by remember { mutableStateOf(refractionStore.enabled) }
     val headerStore = remember(context) { IosNotificationHeaderSettingsStore(context) }
     var headerSettings by remember { mutableStateOf(headerStore.settings) }
     val offsetStore = remember(context) { IosNotificationBottomOffsetSettingsStore(context) }
@@ -6236,11 +6256,15 @@ private fun IosNotificationCenterPage(
     var headerGapDp by remember { mutableIntStateOf(layoutStore.headerGapDp) }
     LaunchedEffect(service) {
         service?.let(iosStore::syncRemote)
+        service?.let(expansionStore::syncRemote)
+        service?.let(refractionStore::syncRemote)
         service?.let(headerStore::syncRemote)
         service?.let(offsetStore::syncRemote)
         service?.let(shortcutStore::syncRemote)
         service?.let(layoutStore::syncRemote)
         iosSettings = iosStore.settings
+        stagedExpansion = expansionStore.enabled
+        bottomRefraction = refractionStore.enabled
         headerSettings = headerStore.settings
         offsetDp = offsetStore.offsetDp
         showLockscreenShortcuts = shortcutStore.enabled
@@ -6291,6 +6315,26 @@ private fun IosNotificationCenterPage(
                                 iosSettings = iosStore.settings
                             },
                         )
+                        SwitchPreference(
+                            title = tr("iosNotificationStagedExpansion", "分段展开动画"),
+                            summary = tr("iosNotificationStagedExpansionSummary", "先跟手展开圆角液态玻璃，完全展开后再渐显壁纸，上滑时反向过渡；选择不显示壁纸则保留玻璃背景。"),
+                            checked = stagedExpansion,
+                            onCheckedChange = { enabled ->
+                                expansionStore.update(service, enabled)
+                                stagedExpansion = expansionStore.enabled
+                            },
+                        )
+                        if (stagedExpansion) {
+                            SwitchPreference(
+                                title = tr("iosNotificationBottomRefraction", "底部玻璃折射"),
+                                summary = tr("iosNotificationBottomRefractionSummary", "在分段展开动画中显示底部圆角玻璃折射；关闭后保留背景模糊与细边框。"),
+                                checked = bottomRefraction,
+                                onCheckedChange = { enabled ->
+                                    refractionStore.update(service, enabled)
+                                    bottomRefraction = refractionStore.enabled
+                                },
+                            )
+                        }
                         ArrowPreference(
                             title = tr("iosNotificationHeaderSettings", "通知横条设置"),
                             summary = if (headerSettings.enabled) tr("已开启", "已开启") else tr("未开启", "未开启"),

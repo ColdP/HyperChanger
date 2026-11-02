@@ -2058,5 +2058,9 @@
   "theme_mono": "黑白极简",
   "lsposed_status_connected_title": "已连接",
   "lsposed_status_disconnected_title": "未连接",
-  "lsposed_api": "API"
+  "lsposed_api": "API",
+  "iosNotificationStagedExpansion": "分段展开动画",
+  "iosNotificationStagedExpansionSummary": "先跟手展开圆角液态玻璃，完全展开后再渐显壁纸，上滑时反向过渡；选择不显示壁纸则保留玻璃背景。",
+  "iosNotificationBottomRefraction": "底部玻璃折射",
+  "iosNotificationBottomRefractionSummary": "在分段展开动画中显示底部圆角玻璃折射；关闭后保留背景模糊与细边框。"
 }

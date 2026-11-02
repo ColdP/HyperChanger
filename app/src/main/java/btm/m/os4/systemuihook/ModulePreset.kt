@@ -3,6 +3,8 @@
 package btm.m.os4.systemuihook
 
 import android.content.Context
+import btm.m.os4.systemuihook.newnotificationcenter.completeIosNotificationExpansionPreset
+import btm.m.os4.systemuihook.newnotificationcenter.completeIosNotificationRefractionPreset
 import io.github.libxposed.service.XposedService
 import org.json.JSONArray
 import org.json.JSONObject
@@ -86,6 +88,8 @@ object ModulePresetCodec {
                 completeCcTileLayoutPreset(values)
                 completeCapsuleNotificationPreset(values)
                 completeLockscreenCapsuleBehaviorPreset(values)
+                completeIosNotificationExpansionPreset(values)
+                completeIosNotificationRefractionPreset(values)
             }
             groups.put(groupName, values)
         }
@@ -136,6 +140,8 @@ object ModulePresetCodec {
                 completeCcTileLayoutPreset(values)
                 completeCapsuleNotificationPreset(values)
                 completeLockscreenCapsuleBehaviorPreset(values)
+                completeIosNotificationExpansionPreset(values)
+                completeIosNotificationRefractionPreset(values)
             }
             PreviewGroup(
                 groupName,
@@ -192,6 +198,8 @@ object ModulePresetCodec {
                 completeCcTileLayoutPreset(values)
                 completeCapsuleNotificationPreset(values)
                 completeLockscreenCapsuleBehaviorPreset(values)
+                completeIosNotificationExpansionPreset(values)
+                completeIosNotificationRefractionPreset(values)
             }
             applyValues(context.getSharedPreferences(groupName, Context.MODE_PRIVATE), values, replace = true)
             service?.getRemotePreferences(groupName)?.let { applyValues(it, values, replace = true) }
