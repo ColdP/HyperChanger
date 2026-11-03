@@ -3,6 +3,7 @@
   "creator": "btm_m",
   "locale": "ja",
   "strings": {
+    "sharedViewAnimation": "ワンカットのシームレスアニメーション",
     "cc_layout_title": "コントロールセンターのタイル配置",
     "cc_layout_enable": "カスタム配置を使用",
     "cc_media_hide_source": "メディアソースアイコンを隠す",

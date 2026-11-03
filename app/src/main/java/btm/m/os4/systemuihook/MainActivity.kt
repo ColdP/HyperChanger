@@ -185,6 +185,7 @@ import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 import top.yukonga.miuix.kmp.basic.*
+import btm.m.os4.systemuihook.SeamlessCard as Card
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.Close as BasicClose
 import top.yukonga.miuix.kmp.icon.extended.ChevronBackward
@@ -222,6 +223,7 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
+    internal val sharedViewAnimations by lazy { SharedViewAnimationSettingsStore(this) }
     private val hookStore by lazy { HookSettingsStore(this) }
     private val navigationStore by lazy { ModuleNavigationSettingsStore(this) }
     private val lockscreenCapsuleStore by lazy { LockscreenCapsuleSettingsStore(this) }
@@ -616,6 +618,12 @@ private fun Root(
         val dispose = appThemeStore.observe()
         onDispose { dispose() }
     }
+    val sharedViewAnimations = (context as MainActivity).sharedViewAnimations
+    DisposableEffect(sharedViewAnimations) {
+        val dispose = sharedViewAnimations.observe()
+        onDispose { dispose() }
+    }
+    LaunchedEffect(service) { service?.let(sharedViewAnimations::syncRemote) }
     var pendingRestartTargets by remember { mutableStateOf(emptySet<ScopeApplication>()) }
     val markRestartTargets: (Set<ScopeApplication>) -> Unit = { targets ->
         if (targets.isNotEmpty()) pendingRestartTargets = pendingRestartTargets + targets
@@ -1486,19 +1494,29 @@ private fun Shell(
         }
     }
     val pageStack = remember { mutableStateListOf<PageId>() }
+    val seamless = remember { SeamlessNavigationState() }
+    val seamlessScope = rememberCoroutineScope()
+    val seamlessEnabled = (context as MainActivity).sharedViewAnimations.enabled
+    var seamlessClosing by remember { mutableStateOf(false) }
+    var ordinaryClosingIndex by remember { mutableIntStateOf(-1) }
     val page = pageStack.lastOrNull()
     var suppressPageBack by remember { mutableStateOf(false) }
     var retainedPage by remember { mutableStateOf<PageId?>(null) }
     var navigatingForward by remember { mutableStateOf(true) }
     if (page != null) retainedPage = page
     val openRootPage: (PageId) -> Unit = { target ->
-        navigatingForward = true
-        pageStack.clear()
-        pageStack += target
-        if (target == PageId.DISCLAIMER) disclaimerRead = true
+        if (!seamlessClosing) {
+            seamless.entries.clear()
+            seamless.open(0, seamlessEnabled)
+            navigatingForward = true
+            pageStack.clear()
+            pageStack += target
+            if (target == PageId.DISCLAIMER) disclaimerRead = true
+        }
     }
     val openNestedPage: (PageId) -> Unit = { target ->
-        if (pageStack.lastOrNull() != target) {
+        if (!seamlessClosing && pageStack.lastOrNull() != target) {
+            seamless.open(pageStack.size, seamlessEnabled)
             navigatingForward = true
             pageStack += target
             if (target == PageId.DISCLAIMER) disclaimerRead = true
@@ -1510,40 +1528,67 @@ private fun Shell(
         }
     }
     val dismissPage: () -> Unit = {
-        val leavingDisclaimer = pageStack.lastOrNull() == PageId.DISCLAIMER
-        if (pageStack.size > 1) {
-            navigatingForward = false
-            pageStack.removeAt(pageStack.lastIndex)
-        } else {
-            pageStack.clear()
+        if (!seamlessClosing) {
+            val leavingDisclaimer = pageStack.lastOrNull() == PageId.DISCLAIMER
+            val entry = seamless.entries[pageStack.lastIndex]
+            val pop: () -> Unit = {
+                navigatingForward = false
+                seamless.entries.remove(pageStack.lastIndex)
+                if (pageStack.isNotEmpty()) pageStack.removeAt(pageStack.lastIndex)
+                if (leavingDisclaimer && osCode.isNotBlank() && osCode != "4") showOsWarning = true
+            }
+            if (entry != null) {
+                seamlessClosing = true
+                val velocity = if (entry.gesturing) entry.releaseVelocity else 0f
+                val effectOrigin = if (entry.gesturing) entry.progress.value else null
+                seamlessScope.launch {
+                    try { entry.close(velocity, effectOrigin); pop() }
+                    finally { seamlessClosing = false }
+                }
+            } else if (pageStack.isNotEmpty()) {
+                // Keep the outgoing page composed until its fade/blur has finished.
+                seamlessClosing = true
+                ordinaryClosingIndex = pageStack.lastIndex
+                seamlessScope.launch {
+                    try { delay(207); pop() }
+                    finally { ordinaryClosingIndex = -1; seamlessClosing = false }
+                }
+            }
         }
-        if (leavingDisclaimer && osCode.isNotBlank() && osCode != "4") {
-            showOsWarning = true
-        }
-        Unit
     }
     val backState = rememberMomentumPredictiveBack(
-        enabled = page != null && settings.predictiveBackEnabled && !suppressPageBack,
+        enabled = page != null && settings.predictiveBackEnabled && !suppressPageBack &&
+            seamless.entries[pageStack.lastIndex] == null && !seamlessClosing,
         maxProgress = settings.predictiveBackProgress.coerceIn(10, 100) / 100f,
         onBack = dismissPage
     )
     LaunchedEffect(pageStack.size) {
         if (pageStack.isNotEmpty()) backState.reset()
     }
-    BackHandler(enabled = page != null && !settings.predictiveBackEnabled && !suppressPageBack, onBack = dismissPage)
+    BackHandler(
+        enabled = page != null && (seamlessClosing || !settings.predictiveBackEnabled) && !suppressPageBack,
+        onBack = dismissPage,
+    )
+    SeamlessPredictiveBack(
+        entry = seamless.entries[pageStack.lastIndex],
+        enabled = page != null && settings.predictiveBackEnabled && !suppressPageBack && !seamlessClosing,
+        maxProgress = settings.predictiveBackProgress.coerceIn(10, 100) / 100f,
+        onBack = dismissPage,
+    )
+    val seamlessEntry = seamless.entries[pageStack.lastIndex]
     val backdrop = rememberLayerBackdrop()
     val maxBackProgress = settings.predictiveBackProgress.coerceIn(10, 100) / 100f
-    val gestureBlur = 12f - 8f *
-        (backState.gestureProgress / maxBackProgress).coerceIn(0f, 1f)
+    val gestureBlur = if (seamlessEntry != null) 12f * seamlessEntry.progress.value
+        else 12f - 8f * (backState.gestureProgress / maxBackProgress).coerceIn(0f, 1f)
     val baseCoveredBlur by animateFloatAsState(
         targetValue = when {
             page == null -> 0f
-            backState.isSwiping && pageStack.size == 1 -> gestureBlur
+            (backState.isSwiping || seamlessEntry != null) && pageStack.size == 1 -> gestureBlur
             else -> 12f
         },
         animationSpec = when {
             page == null -> tween(300, easing = FastOutSlowInEasing)
-            backState.isSwiping && pageStack.size == 1 -> snap()
+            (backState.isSwiping || seamlessEntry != null) && pageStack.size == 1 -> snap()
             else -> tween(520, easing = FastOutSlowInEasing)
         },
         label = "basePageCoveredBlur",
@@ -1590,7 +1635,7 @@ private fun Shell(
         }
     }
 
-    CompositionLocalProvider(LocalDialogBackdrop provides backdrop) {
+    CompositionLocalProvider(LocalDialogBackdrop provides backdrop, LocalSeamlessNavigation provides seamless) {
     Scaffold(containerColor = ComposeColor.Transparent) {
     Box(Modifier.fillMaxSize()) {
         // The backdrop must only record page content. Recording the navigation that consumes it
@@ -1645,14 +1690,14 @@ private fun Shell(
         )
         AnimatedVisibility(
             visible = page != null,
-            enter = slideInHorizontally(
+            enter = if (seamless.entries[0] != null) EnterTransition.None else slideInHorizontally(
                 animationSpec = tween(252, easing = FastOutSlowInEasing),
                 initialOffsetX = { it / 7 },
             ) + fadeIn(tween(189)) + scaleIn(
                 animationSpec = tween(252, easing = FastOutSlowInEasing),
                 initialScale = .985f,
             ),
-            exit = slideOutHorizontally(
+            exit = if (seamless.rootWasSeamless) ExitTransition.None else slideOutHorizontally(
                 animationSpec = tween(207, easing = FastOutSlowInEasing),
                 targetOffsetX = { -it / 3 },
             ) + fadeOut(tween(162)) + scaleOut(
@@ -1660,7 +1705,13 @@ private fun Shell(
                 targetScale = .975f,
             ),
         ) {
-            Box(Modifier.fillMaxSize()) {
+            val pageTransitionBlur by transition.animateFloat(
+                transitionSpec = { tween(252, easing = FastOutSlowInEasing) },
+                label = "detailRootTransitionBlur",
+            ) { state ->
+                if (seamless.rootWasSeamless || state == EnterExitState.Visible) 0f else 12f
+            }
+            Box(Modifier.fillMaxSize().blur(pageTransitionBlur.dp)) {
                 // Keep every page in the stack composed. The top page is an overlay,
                 // while the page below remains the exact instance revealed by the
                 // predictive-back gesture, preserving its scroll position.
@@ -1670,12 +1721,12 @@ private fun Shell(
                         val coveredPageBlur by animateFloatAsState(
                             targetValue = when {
                                 isTop -> 0f
-                                index == pageStack.lastIndex - 1 && backState.isSwiping -> gestureBlur
+                                index == pageStack.lastIndex - 1 && (backState.isSwiping || seamlessEntry != null) -> gestureBlur
                                 else -> 12f
                             },
                             animationSpec = when {
                                 isTop -> tween(300, easing = FastOutSlowInEasing)
-                                index == pageStack.lastIndex - 1 && backState.isSwiping -> snap()
+                                index == pageStack.lastIndex - 1 && (backState.isSwiping || seamlessEntry != null) -> snap()
                                 else -> tween(520, easing = FastOutSlowInEasing)
                             },
                             label = "coveredPageBlur:$stackPage",
@@ -1683,9 +1734,10 @@ private fun Shell(
                         val pageVisibility = remember(stackPage) {
                             MutableTransitionState(false).apply { targetState = true }
                         }
+                        pageVisibility.targetState = index != ordinaryClosingIndex
                         AnimatedVisibility(
                             visibleState = pageVisibility,
-                            enter = if (index > 0) {
+                            enter = if (index > 0 && seamless.entries[index] == null) {
                                 slideInHorizontally(
                                     animationSpec = tween(252, easing = FastOutSlowInEasing),
                                     initialOffsetX = { it / 7 },
@@ -1694,16 +1746,27 @@ private fun Shell(
                                     initialScale = .985f,
                                 )
                             } else EnterTransition.None,
-                            exit = ExitTransition.None,
+                            exit = if (seamless.entries[index] == null) {
+                                slideOutHorizontally(tween(207, easing = FastOutSlowInEasing)) { -it / 3 } +
+                                    fadeOut(tween(162)) + scaleOut(tween(207), targetScale = .975f)
+                            } else ExitTransition.None,
                             modifier = Modifier.fillMaxSize(),
                         ) {
+                            val detailTransitionBlur by transition.animateFloat(
+                                transitionSpec = { tween(207, easing = FastOutSlowInEasing) },
+                                label = "detailTransitionBlur:$stackPage",
+                            ) { state ->
+                                if (seamless.entries[index] != null || state == EnterExitState.Visible) 0f else 12f
+                            }
                             Box(
                                 Modifier
                                     .fillMaxSize()
-                                    .blur(coveredPageBlur.dp)
-                                    .then(if (isTop) Modifier.momentumBackTransform(backState) else Modifier),
+                                    .blur((coveredPageBlur + detailTransitionBlur).dp)
+                                    .then(if (isTop && seamless.entries[index] == null) Modifier.momentumBackTransform(backState) else Modifier),
                             ) {
-                                renderDetail(stackPage, isTop)
+                                SeamlessPageFrame(
+                                    entry = seamless.entries[index],
+                                ) { renderDetail(stackPage, isTop) }
                             }
                         }
                     }
@@ -1921,7 +1984,7 @@ private fun CategoryHome(
                         )
                         Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
                             items.forEach { result ->
-                                ArrowPreference(
+                                SharedViewArrowPreference(
                                     title = result.title,
                                     summary = result.description,
                                     enabled = connected,
@@ -2014,7 +2077,7 @@ private fun CategoryGroup(
     )
     Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
         entries.forEach { entry ->
-            ArrowPreference(
+            SharedViewArrowPreference(
                 title = entry.title,
                 enabled = enabled,
                 onClick = { open(entry.page) },
@@ -2073,7 +2136,7 @@ private fun OtherPage(
                     checked = screenRecorder.moreBitRates,
                     onCheckedChange = { value -> update { it.copy(moreBitRates = value) } },
                 )
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("自定义保存位置", "自定义保存位置"),
                     summary = screenRecorder.savePath.ifBlank { tr("使用系统默认位置", "使用系统默认位置") },
                     onClick = { pathDraft = screenRecorder.savePath; showSavePathDialog = true },
@@ -2086,12 +2149,12 @@ private fun OtherPage(
                 insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp),
             )
             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("环境检测", "环境检测"),
                     summary = tr("实验性功能", "实验性功能"),
                     onClick = { open(PageId.ENVIRONMENT_DETECTION) },
                 )
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("应用底部导航", "应用底部导航"),
                     onClick = { open(PageId.APP_NAVIGATION) },
                 )
@@ -2315,12 +2378,12 @@ private fun RearScreen(
     AppList(padding, scroll, 28) {
         item {
             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("rear_mini_player_title", "在背屏启动小折叠版迷你音乐播放器"),
                     summary = tr("rear_mini_player_entry", "将网易云音乐原生迷你播放器投放到背屏。"),
                     onClick = { open(PageId.REAR_MINI_PLAYER) },
                 )
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("rear_screenshot_shell_title", "自定义带壳截图外壳样式"),
                     summary = tr("rear_screenshot_shell_entry", "在截屏应用中自定义背屏带壳截图的聚焦和完整样式。"),
                     onClick = { open(PageId.REAR_SCREEN_SHELL) },
@@ -2352,7 +2415,7 @@ private fun RearScreen(
                     enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
                     exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
                 ) {
-                    ArrowPreference(
+                    SharedViewArrowPreference(
                         title = tr("左滑启动应用", "左滑启动应用"),
                         summary = gestureAppLabel.ifBlank { tr("未选择应用", "未选择应用") },
                         onClick = {
@@ -2377,7 +2440,7 @@ private fun RearScreen(
                     checked = settings.removeCustomRearScreenRestrictions,
                     onCheckedChange = { enabled -> update { it.copy(removeCustomRearScreenRestrictions = enabled) } },
                 )
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("自定义背屏中心", "自定义背屏中心"),
                     summary = tr("查看和管理已导入的自定义背屏应用", "查看和管理已导入的自定义背屏应用"),
                     onClick = { open(PageId.REAR_CUSTOM_CENTER) },
@@ -2434,7 +2497,7 @@ private fun RearScreen(
                             enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
                             exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
                         ) {
-                            ArrowPreference(
+                            SharedViewArrowPreference(
                                 title = tr("自定义背屏壁纸数量", "自定义背屏壁纸数量"),
                                 summary = tr("%d 张", "%d 张").format(wallpaperLimit.custom),
                                 onClick = { showWallpaperLimitDialog = true },
@@ -2446,7 +2509,7 @@ private fun RearScreen(
         }
         item {
             Group(tr("\u80cc\u5c4f\u97f3\u4e50\u63a7\u4ef6", "\u80cc\u5c4f\u97f3\u4e50\u63a7\u4ef6")) {
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("\u6dfb\u52a0\u5e94\u7528\u5230\u80cc\u5c4f\u97f3\u4e50\u63a7\u4ef6\u767d\u540d\u5355", "\u6dfb\u52a0\u5e94\u7528\u5230\u80cc\u5c4f\u97f3\u4e50\u63a7\u4ef6\u767d\u540d\u5355"),
                     onClick = { open(PageId.REAR_MUSIC_APPS) },
                 )
@@ -3008,8 +3071,8 @@ private fun SettingsHome(
         item { ServiceCard(service, appThemeStore.settings.monetEnabled) }
         item {
             Group(tr("模块设置", "模块设置")) {
-                ArrowPreference(title = tr("moduleSafety", "模块安全"), onClick = { open(PageId.MODULE_SAFETY) })
-                ArrowPreference(
+                SharedViewArrowPreference(title = tr("moduleSafety", "模块安全"), onClick = { open(PageId.MODULE_SAFETY) })
+                SharedViewArrowPreference(
                     title = tr("restart_scope_apps", tr("\u91cd\u542f\u4f5c\u7528\u57df\u5e94\u7528", "\u91cd\u542f\u4f5c\u7528\u57df\u5e94\u7528")),
                     onClick = { open(PageId.RESTART_SCOPES) },
                 )
@@ -3022,7 +3085,7 @@ private fun SettingsHome(
                     "ja" -> tr("japanese", "日本語")
                     else -> loadLanguagePacks(languagePrefs).firstOrNull { it.name == selectedLanguage }?.name ?: selectedLanguage
                 }
-                ArrowPreference(title = tr("language", "语言"), summary = selectedLanguageSummary, onClick = { open(PageId.LANGUAGE) })
+                SharedViewArrowPreference(title = tr("language", "语言"), summary = selectedLanguageSummary, onClick = { open(PageId.LANGUAGE) })
                 SwitchPreference(
                     title = tr("隐藏桌面图标", "隐藏桌面图标"),
                     checked = settings.hideAppIcon,
@@ -3046,21 +3109,21 @@ private fun SettingsHome(
                     },
                 )
                 if (settingsApp.entryPosition != 0) {
-                    ArrowPreference(
+                    SharedViewArrowPreference(
                         title = tr("settingsAppEntryTitle", "模块入口文案"),
                         summary = settingsApp.entryTitle.ifBlank { tr("settingsAppEntryTitleDefault", "默认（模块名称）") },
                         onClick = { editingEntryTitle = true },
                     )
                     SettingsModuleEntryIconPreference()
                 }
-                ArrowPreference(title = tr("preference-导入模块预设", "导入模块预设"), onClick = onImportModulePreset)
-                ArrowPreference(title = tr("preference-导出模块预设", "导出模块预设"), onClick = onExportModulePreset)
-                ArrowPreference(title = tr("preference-恢复默认配置", "恢复默认配置"), onClick = onResetModulePreset)
+                SharedViewArrowPreference(title = tr("preference-导入模块预设", "导入模块预设"), onClick = onImportModulePreset)
+                SharedViewArrowPreference(title = tr("preference-导出模块预设", "导出模块预设"), onClick = onExportModulePreset)
+                SharedViewArrowPreference(title = tr("preference-恢复默认配置", "恢复默认配置"), onClick = onResetModulePreset)
             }
         }
         item {
             Group(tr("外观", "外观")) {
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("主题与颜色", "主题与颜色"),
                     summary = if (appThemeStore.settings.monetEnabled) tr("Monet 取色", "Monet 取色") else tr("theme_mode", "主题模式"),
                     onClick = { open(PageId.THEME_AND_COLOR) },
@@ -3101,13 +3164,18 @@ private fun SettingsHome(
                         defaultValue = 90f,
                     )
                 }
+                SwitchPreference(
+                    title = tr("sharedViewAnimation", "一镜到底的无缝动画"),
+                    checked = (context as MainActivity).sharedViewAnimations.enabled,
+                    onCheckedChange = { (context as MainActivity).sharedViewAnimations.update(service, it) },
+                )
             }
         }
         item {
             Group(tr("模块信息", "模块信息")) {
-                ArrowPreference(title = tr("\u5173\u4e8e", "\u5173\u4e8e"), onClick = { open(PageId.ABOUT) })
-                ArrowPreference(title = tr("\u8f6f\u4ef6\u66f4\u65b0", "\u8f6f\u4ef6\u66f4\u65b0"), onClick = { open(PageId.SOFTWARE_UPDATE) })
-                ArrowPreference(title = tr("\u6350\u8d60", "\u6350\u8d60"), onClick = { open(PageId.DONATE) })
+                SharedViewArrowPreference(title = tr("\u5173\u4e8e", "\u5173\u4e8e"), onClick = { open(PageId.ABOUT) })
+                SharedViewArrowPreference(title = tr("\u8f6f\u4ef6\u66f4\u65b0", "\u8f6f\u4ef6\u66f4\u65b0"), onClick = { open(PageId.SOFTWARE_UPDATE) })
+                SharedViewArrowPreference(title = tr("\u6350\u8d60", "\u6350\u8d60"), onClick = { open(PageId.DONATE) })
             }
         }
     }
@@ -3822,7 +3890,7 @@ private fun Desktop(
                     onCheckedChange = { enabled -> updateHomeMaterial { it.copy(enabled = enabled) } },
                 )
                 AnimatedVisibility(visible = homeMaterialSettings.enabled) {
-                    ArrowPreference(title = tr("调整桌面材质", "调整桌面材质"), onClick = { openPage(PageId.DESKTOP_MATERIAL) })
+                    SharedViewArrowPreference(title = tr("调整桌面材质", "调整桌面材质"), onClick = { openPage(PageId.DESKTOP_MATERIAL) })
                 }
             }
         }
@@ -4210,12 +4278,12 @@ private fun SystemSettings(
                         exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(animationSpec = tween(120)),
                     ) {
                         Column(Modifier.fillMaxWidth()) {
-                            ArrowPreference(
+                            SharedViewArrowPreference(
                                 title = tr("导入徽标", "导入徽标"),
                                 summary = if (audioLogoImported) tr("已导入", "已导入") else tr("未导入", "未导入"),
                                 onClick = { pickAudioLogo.launch(arrayOf("image/*", "application/xml", "text/xml")) },
                             )
-                            ArrowPreference(
+                            SharedViewArrowPreference(
                                 title = tr("清除徽标", "清除徽标"),
                                 summary = if (audioLogoImported) tr("已导入", "已导入") else tr("无图标", "无图标"),
                                 onClick = {
@@ -4266,12 +4334,12 @@ private fun SystemSettings(
                     exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(animationSpec = tween(120)),
                 ) {
                     Column(Modifier.fillMaxWidth()) {
-                        ArrowPreference(
+                        SharedViewArrowPreference(
                             title = tr("导入处理器图标", "导入处理器图标"),
                             summary = if (cpuIconImported) tr("已导入", "已导入") else tr("未导入", "未导入"),
                             onClick = { pickCpuIcon.launch(arrayOf("image/*", "application/xml", "text/xml")) },
                         )
-                        ArrowPreference(
+                        SharedViewArrowPreference(
                             title = tr("清除处理器图标", "清除处理器图标"),
                             summary = if (cpuIconImported) tr("已导入", "已导入") else tr("无图标", "无图标"),
                             onClick = {
@@ -4332,9 +4400,9 @@ private fun SystemSettings(
         item {
             SmallTitle(tr("界面自定义", "界面自定义"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp))
             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-                ArrowPreference(title = tr("自定义设置主界面背景图", "自定义设置主界面背景图"), onClick = { open(PageId.SETTINGS_APPEARANCE_HOME) })
-                ArrowPreference(title = tr("自定义我的设备界面背景图", "自定义我的设备界面背景图"), onClick = { open(PageId.SETTINGS_APPEARANCE_DEVICE) })
-                ArrowPreference(title = tr("自定义我的设备界面", "自定义我的设备界面"), onClick = { open(PageId.TUTORIAL_DEVICE_CARD) })
+                SharedViewArrowPreference(title = tr("自定义设置主界面背景图", "自定义设置主界面背景图"), onClick = { open(PageId.SETTINGS_APPEARANCE_HOME) })
+                SharedViewArrowPreference(title = tr("自定义我的设备界面背景图", "自定义我的设备界面背景图"), onClick = { open(PageId.SETTINGS_APPEARANCE_DEVICE) })
+                SharedViewArrowPreference(title = tr("自定义我的设备界面", "自定义我的设备界面"), onClick = { open(PageId.TUTORIAL_DEVICE_CARD) })
                 if (appearance.deviceInterfaceStyle == DEVICE_INTERFACE_STYLE_SYSTEM) {
 OverlayDropdownPreference(
                         title = tr("自定义LOGO", "自定义LOGO"),
@@ -4344,12 +4412,12 @@ OverlayDropdownPreference(
                     )
                 }
                 if (appearance.deviceInterfaceStyle == DEVICE_INTERFACE_STYLE_SYSTEM && appearance.logoMode != LOGO_MODE_SYSTEM) {
-                    ArrowPreference(
+                    SharedViewArrowPreference(
                         title = tr("导入LOGO", "导入LOGO"),
                         summary = appearance.logoMime.ifBlank { tr("未导入", "未导入") },
                         onClick = onPickLogo,
                     )
-                    ArrowPreference(
+                    SharedViewArrowPreference(
                         title = tr("清除LOGO", "清除LOGO"),
                         summary = if (appearance.logoMime.isBlank()) tr("无LOGO", "无LOGO") else tr("已导入", "已导入"),
                         onClick = onClearLogo,
@@ -4369,11 +4437,11 @@ OverlayDropdownPreference(
         }
         item {
             Group(tr("settingsEntriesGroup", "设置入口")) {
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("settingsEntryLabels", "自定义系统设置入口文案"),
                     onClick = { open(PageId.SETTINGS_ENTRY_LABELS) },
                 )
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("settingsEntryIcons", "自定义系统设置入口图标"),
                     onClick = { open(PageId.SETTINGS_ENTRY_ICONS) },
                 )
@@ -4381,7 +4449,7 @@ OverlayDropdownPreference(
         }
         item {
             Group(tr("设备信息", "设备信息")) {
-                ArrowPreference(title = tr("我的设备与全部参数", "我的设备与全部参数"), onClick = { open(PageId.DEVICE_PROFILE) })
+                SharedViewArrowPreference(title = tr("我的设备与全部参数", "我的设备与全部参数"), onClick = { open(PageId.DEVICE_PROFILE) })
             }
         }
     }
@@ -4441,7 +4509,7 @@ private fun SettingsEntryLabelsPage(
         item {
             Group(tr("settingsEntryLabelsGroup", "设置入口文案")) {
                 settingsEntryLabelCatalog().forEach { entry ->
-                    ArrowPreference(
+                    SharedViewArrowPreference(
                         title = entry.title,
                         summary = settingsApp.entryLabels[entry.id]?.takeIf { it.isNotBlank() }
                             ?: tr("默认", "默认"),
@@ -4508,13 +4576,13 @@ private fun DeviceProfileEditor(
     AppList(padding, scroll) {
         item {
             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
-                ArrowPreference(title = tr("预设库", "预设库"), onClick = openPresets)
+                SharedViewArrowPreference(title = tr("预设库", "预设库"), onClick = openPresets)
             }
         }
         item {
             Group(tr("基础参数", "基础参数")) {
                 basicFields.forEach { (label, value) ->
-                    ArrowPreference(
+                    SharedViewArrowPreference(
                         title = label,
                         summary = value.ifBlank { tr("未设置", "未设置") },
                         onClick = { editingField = ProfileField(title = label, value = value, setter = { p, v ->
@@ -4534,7 +4602,7 @@ private fun DeviceProfileEditor(
         item {
             Group(tr("全部参数与信息", "全部参数与信息")) {
                 allInfoFields.forEach { (label, value) ->
-                    ArrowPreference(
+                    SharedViewArrowPreference(
                         title = label,
                         summary = value.ifBlank { tr("未设置", "未设置") },
                         onClick = { editingField = ProfileField(title = label, value = value, setter = { p, v ->
@@ -4557,7 +4625,7 @@ private fun DeviceProfileEditor(
         item {
             Group(tr("我的设备（影像参数）", "我的设备（影像参数）")) {
                 imagingFields.forEach { (label, value) ->
-                    ArrowPreference(
+                    SharedViewArrowPreference(
                         title = label,
                         summary = value.ifBlank { tr("未设置", "未设置") },
                         onClick = { editingField = ProfileField(title = label, value = value, setter = { p, v ->
@@ -4598,12 +4666,12 @@ private fun ColorModeAssetRows(
     listOf(false to tr("浅色", "浅色"), true to tr("深色", "深色")).forEach { (dark, mode) ->
         val key = colorModeAssetKey(slot, dark)
         val imported = appearance.colorModeAssetMimes[key].orEmpty().isNotBlank()
-        ArrowPreference(
+        SharedViewArrowPreference(
             title = "$mode $label - ${tr("导入", "导入")}",
             summary = if (imported) tr("已导入", "已导入") else tr("未导入", "未导入"),
             onClick = { onAction(slot, dark, true) },
         )
-        ArrowPreference(
+        SharedViewArrowPreference(
             title = "$mode $label - ${tr("清除", "清除")}",
             summary = if (imported) tr("清除当前素材", "清除当前素材") else tr("无素材", "无素材"),
             onClick = { onAction(slot, dark, false) },
@@ -4666,12 +4734,12 @@ OverlayDropdownPreference(
         if (style == DEVICE_INTERFACE_STYLE_SYSTEM) {
             item {
                 Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-                    ArrowPreference(
+                    SharedViewArrowPreference(
                         title = tr("导入LOGO", "导入LOGO"),
                         summary = appearance.logoMime.ifBlank { tr("未导入", "未导入") },
                         onClick = onPickSystemLogo,
                     )
-                    ArrowPreference(
+                    SharedViewArrowPreference(
                         title = tr("清除LOGO", "清除LOGO"),
                         summary = if (appearance.logoMime.isBlank()) tr("无LOGO", "无LOGO") else tr("已导入", "已导入"),
                         onClick = onClearSystemLogo,
@@ -4684,8 +4752,8 @@ OverlayDropdownPreference(
                 Group(tr("机型图片", "机型图片")) {
                     if (appearance.colorModeAssetsEnabled) ColorModeAssetRows(appearance, APPEARANCE_SLOT_DEVICE_IMAGE, tr("机型图片", "机型图片"), onColorModeAssetAction)
                     else {
-                        ArrowPreference(title = tr("导入机型图片", "导入机型图片"), summary = appearance.tutorialCardImageMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle1Image)
-                        ArrowPreference(title = tr("清除机型图片", "清除机型图片"), summary = if (appearance.tutorialCardImageMime.isBlank()) tr("无图片", "无图片") else tr("已导入", "已导入"), onClick = onClearStyle1Image)
+                        SharedViewArrowPreference(title = tr("导入机型图片", "导入机型图片"), summary = appearance.tutorialCardImageMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle1Image)
+                        SharedViewArrowPreference(title = tr("清除机型图片", "清除机型图片"), summary = if (appearance.tutorialCardImageMime.isBlank()) tr("无图片", "无图片") else tr("已导入", "已导入"), onClick = onClearStyle1Image)
                     }
                     EditableSliderPreference(
                         value = appearance.tutorialCardImageScale.toFloat(),
@@ -4713,8 +4781,8 @@ OverlayDropdownPreference(
                 Group(tr("背景图片", "背景图片")) {
                     if (appearance.colorModeAssetsEnabled) ColorModeAssetRows(appearance, APPEARANCE_SLOT_STYLE1_UPDATE_BACKGROUND, tr("背景图片", "背景图片"), onColorModeAssetAction)
                     else {
-                        ArrowPreference(title = tr("导入背景图片", "导入背景图片"), summary = appearance.tutorialCardBackgroundMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle1Background)
-                        ArrowPreference(title = tr("清除背景图片", "清除背景图片"), summary = if (appearance.tutorialCardBackgroundMime.isBlank()) tr("无图片", "无图片") else tr("已导入", "已导入"), onClick = onClearStyle1Background)
+                        SharedViewArrowPreference(title = tr("导入背景图片", "导入背景图片"), summary = appearance.tutorialCardBackgroundMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle1Background)
+                        SharedViewArrowPreference(title = tr("清除背景图片", "清除背景图片"), summary = if (appearance.tutorialCardBackgroundMime.isBlank()) tr("无图片", "无图片") else tr("已导入", "已导入"), onClick = onClearStyle1Background)
                     }
                 EditableSliderPreference(
                     value = appearance.tutorialCardBackgroundBlur,
@@ -4766,8 +4834,8 @@ OverlayDropdownPreference(
                 Group(tr("logo", "LOGO")) {
                     if (appearance.colorModeAssetsEnabled) ColorModeAssetRows(appearance, APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO, "LOGO", onColorModeAssetAction)
                     else {
-                        ArrowPreference(title = tr("导入LOGO", "导入LOGO"), summary = appearance.tutorialCardLogoMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle1Logo)
-                        ArrowPreference(title = tr("清除LOGO", "清除LOGO"), summary = if (appearance.tutorialCardLogoMime.isBlank()) tr("无LOGO", "无LOGO") else tr("已导入", "已导入"), onClick = onClearStyle1Logo)
+                        SharedViewArrowPreference(title = tr("导入LOGO", "导入LOGO"), summary = appearance.tutorialCardLogoMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle1Logo)
+                        SharedViewArrowPreference(title = tr("清除LOGO", "清除LOGO"), summary = if (appearance.tutorialCardLogoMime.isBlank()) tr("无LOGO", "无LOGO") else tr("已导入", "已导入"), onClick = onClearStyle1Logo)
                     }
                     EditableSliderPreference(
                         value = appearance.tutorialCardLogoScale.toFloat(),
@@ -4812,8 +4880,8 @@ OverlayDropdownPreference(
                 Group(tr("机型图片", "机型图片")) {
                     if (appearance.colorModeAssetsEnabled) ColorModeAssetRows(appearance, APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE, tr("机型图片", "机型图片"), onColorModeAssetAction)
                     else {
-                        ArrowPreference(title = tr("导入机型图片", "导入机型图片"), summary = appearance.style2ImageMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle2Image)
-                        ArrowPreference(title = tr("清除机型图片", "清除机型图片"), summary = if (appearance.style2ImageMime.isBlank()) tr("无图片", "无图片") else tr("已导入", "已导入"), onClick = onClearStyle2Image)
+                        SharedViewArrowPreference(title = tr("导入机型图片", "导入机型图片"), summary = appearance.style2ImageMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle2Image)
+                        SharedViewArrowPreference(title = tr("清除机型图片", "清除机型图片"), summary = if (appearance.style2ImageMime.isBlank()) tr("无图片", "无图片") else tr("已导入", "已导入"), onClick = onClearStyle2Image)
                     }
                     EditableSliderPreference(
                         value = appearance.style2ImageScale.toFloat(),
@@ -4831,8 +4899,8 @@ OverlayDropdownPreference(
                 Group(tr("背景图片", "背景图片")) {
                     if (appearance.colorModeAssetsEnabled) ColorModeAssetRows(appearance, APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND, tr("背景图片", "背景图片"), onColorModeAssetAction)
                     else {
-                        ArrowPreference(title = tr("导入背景图片", "导入背景图片"), summary = appearance.style2BackgroundMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle2Background)
-                        ArrowPreference(title = tr("清除背景图片", "清除背景图片"), summary = if (appearance.style2BackgroundMime.isBlank()) tr("无背景图", "无背景图") else tr("已导入", "已导入"), onClick = onClearStyle2Background)
+                        SharedViewArrowPreference(title = tr("导入背景图片", "导入背景图片"), summary = appearance.style2BackgroundMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle2Background)
+                        SharedViewArrowPreference(title = tr("清除背景图片", "清除背景图片"), summary = if (appearance.style2BackgroundMime.isBlank()) tr("无背景图", "无背景图") else tr("已导入", "已导入"), onClick = onClearStyle2Background)
                     }
                     EditableSliderPreference(
                         value = appearance.style2BackgroundBlur,
@@ -4880,8 +4948,8 @@ OverlayDropdownPreference(
                 Group(tr("LOGO与版本号", "LOGO与版本号")) {
                     if (appearance.colorModeAssetsEnabled) ColorModeAssetRows(appearance, APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO, "LOGO", onColorModeAssetAction)
                     else {
-                        ArrowPreference(title = tr("导入LOGO", "导入LOGO"), summary = appearance.style2LogoMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle2Logo)
-                        ArrowPreference(title = tr("清除LOGO", "清除LOGO"), summary = if (appearance.style2LogoMime.isBlank()) tr("无LOGO", "无LOGO") else tr("已导入", "已导入"), onClick = onClearStyle2Logo)
+                        SharedViewArrowPreference(title = tr("导入LOGO", "导入LOGO"), summary = appearance.style2LogoMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle2Logo)
+                        SharedViewArrowPreference(title = tr("清除LOGO", "清除LOGO"), summary = if (appearance.style2LogoMime.isBlank()) tr("无LOGO", "无LOGO") else tr("已导入", "已导入"), onClick = onClearStyle2Logo)
                     }
 OverlayDropdownPreference(
                         title = tr("LOGO与版本号对齐方式", "LOGO与版本号对齐方式"),
@@ -5326,7 +5394,7 @@ internal fun Group(
 
 @Composable
 private fun Entry(title: String, enabled: Boolean = true, click: () -> Unit) {
-    Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) { ArrowPreference(title = title, onClick = click, enabled = enabled) }
+    Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) { SharedViewArrowPreference(title = title, onClick = click, enabled = enabled) }
 }
 
 @Composable
@@ -6065,7 +6133,7 @@ private fun SuperXiaoAi(
 
         item {
             Group(tr("传送门", "传送门")) {
-                ArrowPreference(title = tr("传送门", "传送门"), onClick = { openPage(PageId.PORTAL) })
+                SharedViewArrowPreference(title = tr("传送门", "传送门"), onClick = { openPage(PageId.PORTAL) })
             }
         }
         item {
@@ -6137,13 +6205,13 @@ private fun SystemUpdate(
                     checked = systemUpdate.versionSpoofEnabled,
                     onCheckedChange = { enabled -> update { it.copy(versionSpoofEnabled = enabled) } },
                 )
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("\u4f2a\u88c5\u7248\u672c", "\u4f2a\u88c5\u7248\u672c"),
                     summary = systemUpdate.version.ifBlank { tr("\u672a\u8bbe\u7f6e", "\u672a\u8bbe\u7f6e") },
                     enabled = systemUpdate.versionSpoofEnabled,
                     onClick = { editingVersion = SystemUpdateVersionField.SYSTEM },
                 )
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("\u4f2a\u88c5 SOTA \u7248\u672c", "\u4f2a\u88c5 SOTA \u7248\u672c"),
                     summary = systemUpdate.sotaVersion.ifBlank { tr("\u672a\u8bbe\u7f6e", "\u672a\u8bbe\u7f6e") },
                     enabled = systemUpdate.versionSpoofEnabled,
@@ -6342,12 +6410,12 @@ private fun IosNotificationCenterPage(
                                 },
                             )
                         }
-                        ArrowPreference(
+                        SharedViewArrowPreference(
                             title = tr("iosNotificationHeaderSettings", "通知横条设置"),
                             summary = if (headerSettings.enabled) tr("已开启", "已开启") else tr("未开启", "未开启"),
                             onClick = { openPage(PageId.IOS_NOTIFICATION_HEADER_SETTINGS) },
                         )
-                        ArrowPreference(
+                        SharedViewArrowPreference(
                             title = tr("iosNotificationClockGlass", "通知中心大时钟柔光玻璃"),
                             onClick = { openPage(PageId.IOS_NOTIFICATION_CLOCK_GLASS) },
                         )
@@ -6505,14 +6573,14 @@ private fun IosNotificationHeaderSettingsPage(back: () -> Unit) {
                             )
                             if (settings.leftContentMode == 3 || settings.leftContentMode == 4 || settings.leftContentMode == 6) {
                                 if (settings.leftContentMode == 3 || settings.leftContentMode == 6) {
-                                    ArrowPreference(
+                                    SharedViewArrowPreference(
                                         title = tr("iosNotificationHeaderEditText", "设置横条文本"),
                                         summary = settings.leftContentText.ifBlank { tr("iosNotificationHeaderDefaultText", "模块默认") },
                                         onClick = { showHeaderText = true },
                                     )
                                 }
                                 if (settings.leftContentMode == 4 || settings.leftContentMode == 6) {
-                                    ArrowPreference(
+                                    SharedViewArrowPreference(
                                         title = tr("iosNotificationHeaderEditIcon", "设置横条图标"),
                                         summary = if (settings.leftContentIcon.isBlank()) tr("iosNotificationHeaderNotImported", "未导入")
                                             else tr("iosNotificationHeaderIconImported", "已导入图标"),
@@ -6764,8 +6832,8 @@ private fun Shade(
                     exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
                 ) {
                     Column {
-                        ArrowPreference(title = tr("柔光玻璃参数调整", "柔光玻璃参数调整"), onClick = { openPage(PageId.SOFT_GLASS_PARAMETERS) })
-                        ArrowPreference(title = tr("softGlassPresets", "柔光玻璃预设"), onClick = { openPage(PageId.SOFT_GLASS_PRESETS) })
+                        SharedViewArrowPreference(title = tr("柔光玻璃参数调整", "柔光玻璃参数调整"), onClick = { openPage(PageId.SOFT_GLASS_PARAMETERS) })
+                        SharedViewArrowPreference(title = tr("softGlassPresets", "柔光玻璃预设"), onClick = { openPage(PageId.SOFT_GLASS_PRESETS) })
                     }
                 }
             }
@@ -6783,7 +6851,7 @@ private fun Shade(
                             ?.putBoolean(KEY_HIDE_GLOBAL_GESTURE_HANDLE, enabled)?.apply()
                     },
                 )
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("\u624b\u52bf\u63d0\u793a\u7ebf\u6837\u5f0f\u81ea\u5b9a\u4e49", "\u624b\u52bf\u63d0\u793a\u7ebf\u6837\u5f0f\u81ea\u5b9a\u4e49"),
                     onClick = { openPage(PageId.GESTURE_HANDLE_STYLE) },
                 )
@@ -6894,8 +6962,8 @@ private fun SoftGlassParametersPage(openPage: (PageId) -> Unit, back: () -> Unit
         AppList(padding, scroll, 28) {
             item {
                 Group(tr("softGlassPresets", "柔光玻璃预设")) {
-                    ArrowPreference(title = tr("softGlassPresets", "柔光玻璃预设"), onClick = { openPage(PageId.SOFT_GLASS_PRESETS) })
-                    ArrowPreference(
+                    SharedViewArrowPreference(title = tr("softGlassPresets", "柔光玻璃预设"), onClick = { openPage(PageId.SOFT_GLASS_PRESETS) })
+                    SharedViewArrowPreference(
                         title = tr("softGlassReset", "恢复柔光玻璃默认参数"),
                         onClick = { updateGlass { it.resetParameters() } },
                     )
@@ -7098,8 +7166,8 @@ private fun SoftGlassPresetsPage(back: () -> Unit) {
             item {
                 Group(tr("softGlassPresets", "柔光玻璃预设")) {
                     Text(tr("softGlassPresetHint", "所有预设同时应用玻璃与背景参数，不会更改总开关。旧版单独预设缺少的部分恢复系统默认值。点击或长按预设可保存、另存为、使用、导出或删除。"), modifier = Modifier.padding(16.dp), style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                    ArrowPreference(title = tr("新建预设", "新建预设"), onClick = ::beginNewPreset)
-                    ArrowPreference(title = tr("导入预设", "导入预设"), onClick = { showImport = true })
+                    SharedViewArrowPreference(title = tr("新建预设", "新建预设"), onClick = ::beginNewPreset)
+                    SharedViewArrowPreference(title = tr("导入预设", "导入预设"), onClick = { showImport = true })
                 }
             }
             item {
@@ -7380,7 +7448,7 @@ private fun GestureHandleStylePage(back: () -> Unit) {
             }
             item {
                 Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-                    ArrowPreference(
+                    SharedViewArrowPreference(
                         title = tr("调整项目", "调整项目"),
                         enabled = enabled && customEnabled,
                         onClick = { showAdjustDialog = true },
@@ -7465,7 +7533,7 @@ private fun ShadePresets(
     AppList(p, scroll, 28) {
         item {
             Group(tr("\u5bfc\u5165", "\u5bfc\u5165")) {
-                ArrowPreference(title = tr("\u5bfc\u5165\u9884\u8bbe", "\u5bfc\u5165\u9884\u8bbe"), onClick = { showImportDialog = true })
+                SharedViewArrowPreference(title = tr("\u5bfc\u5165\u9884\u8bbe", "\u5bfc\u5165\u9884\u8bbe"), onClick = { showImportDialog = true })
             }
         }
         item { SmallTitle(tr("\u5185\u7f6e\u9884\u8bbe", "\u5185\u7f6e\u9884\u8bbe"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp)) }
@@ -8196,7 +8264,7 @@ private fun Island(
     AppList(p, scroll, 28) {
         item {
             Group(tr("iosNotificationCenter", "iOS 风格通知中心")) {
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("iosNotificationCenter", "iOS 风格通知中心"),
                     summary = tr("iosNotificationCenterSummary", "下拉时展示圆角壁纸面板、锁屏时钟及景深效果。动态壁纸暂不支持。"),
                     onClick = { openPage(PageId.IOS_NOTIFICATION_CENTER) },
@@ -8205,11 +8273,11 @@ private fun Island(
         }
         item {
             Group(tr("超级岛", "超级岛")) {
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("islandCollapsedPage", "超级岛收起态"),
                     onClick = { openPage(PageId.ISLAND_COLLAPSED) },
                 )
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("islandExpandedPage", "超级岛展开态"),
                     onClick = { openPage(PageId.ISLAND_EXPANDED) },
                 )
@@ -8282,21 +8350,21 @@ private fun Island(
                         update { it.copy(notificationCornerRadiusOffset = value) }
                     }
                 }
-                ArrowPreference(title = tr("通知限制去除", "通知限制去除"), onClick = { openPage(PageId.NOTIFICATION_RESTRICTIONS) })
-                ArrowPreference(title = tr("notificationMediaCard", "媒体卡片"), onClick = { openPage(PageId.NOTIFICATION_MEDIA_CARD) })
+                SharedViewArrowPreference(title = tr("通知限制去除", "通知限制去除"), onClick = { openPage(PageId.NOTIFICATION_RESTRICTIONS) })
+                SharedViewArrowPreference(title = tr("notificationMediaCard", "媒体卡片"), onClick = { openPage(PageId.NOTIFICATION_MEDIA_CARD) })
             }
         }
         item {
             Group(tr("notification_simulation", "通知模拟")) {
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("normal_notification_simulation", "普通通知模拟"),
                     onClick = { showNormalNotificationDialog = true },
                 )
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("island_simulation", "超级岛模拟"),
                     onClick = { openPage(PageId.SIMULATE_ISLAND) },
                 )
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("simulate_media_notification", "媒体通知模拟"),
                     onClick = { openPage(PageId.SIMULATE_MEDIA_NOTIFICATION) },
                 )
@@ -8454,7 +8522,7 @@ private fun IslandExpandedPage(openPage: (PageId) -> Unit, back: () -> Unit) = A
                     enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
                     exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
                 ) {
-                    ArrowPreference(
+                    SharedViewArrowPreference(
                         title = tr("超级岛展开态背景参数", "超级岛展开态背景参数"),
                         onClick = { openPage(PageId.ISLAND_EXPANDED_BACKGROUND) },
                     )
@@ -8777,7 +8845,7 @@ private fun Status(
         } }
         item {
             Group(tr("\u72b6\u6001\u680f\u663e\u793a", "\u72b6\u6001\u680f\u663e\u793a")) {
-                ArrowPreference(title = tr("状态栏调整", "状态栏调整"), onClick = { open(PageId.STATUS_ADJUSTMENT) })
+                SharedViewArrowPreference(title = tr("状态栏调整", "状态栏调整"), onClick = { open(PageId.STATUS_ADJUSTMENT) })
                 SwitchPreference(
                     title = tr("\u9690\u85cf\u72b6\u6001\u680f\u7535\u6c60\u5185\u6587\u672c", "\u9690\u85cf\u72b6\u6001\u680f\u7535\u6c60\u5185\u6587\u672c"),
                     checked = s.hideStatusBarClockText,
@@ -8789,7 +8857,7 @@ private fun Status(
                     selectedIndex = adjustmentSettings.statusBarBatteryPercentMode,
                     onSelectedIndexChange = { mode -> updateAdjustment { it.copy(statusBarBatteryPercentMode = mode) } },
                 )
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("\u72b6\u6001\u680f\u4fe1\u53f7\u81ea\u5b9a\u4e49", "\u72b6\u6001\u680f\u4fe1\u53f7\u81ea\u5b9a\u4e49"),
                     onClick = { open(PageId.STATUS_SIGNAL_CUSTOMIZATION) },
                 )
@@ -8797,7 +8865,7 @@ private fun Status(
         }
         item {
             Group(tr("\u63a7\u5236\u4e2d\u5fc3", "\u63a7\u5236\u4e2d\u5fc3")) {
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("cc_layout_title", "控制中心磁贴布局自定义"),
                     onClick = { open(PageId.CONTROL_CENTER_TILE_LAYOUT) },
                 )
@@ -8807,7 +8875,7 @@ private fun Status(
                     selectedIndex = adjustmentSettings.controlCenterBatteryPercentMode,
                     onSelectedIndexChange = { mode -> updateAdjustment { it.copy(controlCenterBatteryPercentMode = mode) } },
                 )
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("\u63a7\u5236\u4e2d\u5fc3\u5706\u89d2\u8be6\u7ec6\u8bbe\u7f6e", "\u63a7\u5236\u4e2d\u5fc3\u5706\u89d2\u8be6\u7ec6\u8bbe\u7f6e"),
                     onClick = { open(PageId.CONTROL) },
                 )
@@ -8833,7 +8901,7 @@ private fun Status(
                 )
                 AnimatedVisibility(visible = controlCenterClockSettings.enabled) {
                     Column {
-                        ArrowPreference(
+                        SharedViewArrowPreference(
                             title = tr("controlCenterClockFormat", "大时钟格式"),
                             summary = controlCenterClockSettings.format,
                             onClick = { showControlCenterClockFormatDialog = true },
@@ -8873,7 +8941,7 @@ private fun Status(
                     onCheckedChange = { enabled -> updateCarrier { it.copy(customEnabled = enabled) } },
                 )
                 AnimatedVisibility(visible = carrierSettings.customEnabled) {
-                    ArrowPreference(
+                    SharedViewArrowPreference(
                         title = tr("controlCenterCarrierText", "运营商文本"),
                         summary = carrierSettings.customText.ifBlank { tr("未设置", "未设置") },
                         onClick = { showCarrierTextDialog = true },
@@ -8914,7 +8982,7 @@ private fun Status(
                     checked = s.hideControlCenterEditButton,
                     onCheckedChange = { enabled -> update { it.copy(hideControlCenterEditButton = enabled) } },
                 )
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("控制中心顶部按钮", "控制中心顶部按钮"),
                     onClick = { open(PageId.CONTROL_CENTER_TOP_BUTTONS) },
                 )
@@ -9080,7 +9148,7 @@ private fun StatusSignalCustomization(
                     onCheckedChange = { enabled -> update { it.copy(stackedMobileSignalEnabled = enabled) } },
                 )
                 AnimatedVisibility(visible = s.stackedMobileSignalEnabled) {
-                    ArrowPreference(
+                    SharedViewArrowPreference(
                         title = tr("双排信号参数调整", "双排信号参数调整"),
                         onClick = { open(PageId.STATUS_SIGNAL_TUNING) },
                     )
@@ -9106,7 +9174,7 @@ OverlayDropdownPreference(
                 )
                 AnimatedVisibility(visible = s.mobileNetworkTypeMode == 1) {
                     Column {
-                        ArrowPreference(
+                        SharedViewArrowPreference(
                             title = tr("移动网络类型参数调整", "移动网络类型参数调整"),
                             onClick = { open(PageId.STATUS_MOBILE_NETWORK_TYPE_TUNING) },
                         )
@@ -9124,7 +9192,7 @@ OverlayDropdownPreference(
                             selectedIndex = s.mobileNetworkTypePosition.coerceIn(0, 1),
                             onSelectedIndexChange = { value -> update { it.copy(mobileNetworkTypePosition = value) } },
                         )
-                        ArrowPreference(
+                        SharedViewArrowPreference(
                             title = tr("\u81ea\u5b9a\u4e49\u72ec\u7acb\u79fb\u52a8\u7f51\u7edc\u7c7b\u578b\u663e\u793a\u6587\u672c", "\u81ea\u5b9a\u4e49\u72ec\u7acb\u79fb\u52a8\u7f51\u7edc\u7c7b\u578b\u663e\u793a\u6587\u672c"),
                             summary = s.mobileNetworkTypeCustomText.ifBlank { tr("\u8ddf\u968f\u771f\u5b9e\u7f51\u7edc\u7c7b\u578b", "\u8ddf\u968f\u771f\u5b9e\u7f51\u7edc\u7c7b\u578b") },
                             onClick = {
@@ -9482,7 +9550,7 @@ private fun CustomDepthWallpaperPage(back: () -> Unit) {
         AppList(padding, scroll, 28) {
             item {
                 Group(tr("壁纸包", "壁纸包")) {
-                    ArrowPreference(
+                    SharedViewArrowPreference(
                         title = tr("导入壁纸 ZIP", "导入壁纸 ZIP"),
                         summary = if (busy) tr("正在导入…", "正在导入…") else tr("选择 HyperChanger 景深壁纸包", "选择 HyperChanger 景深壁纸包"),
                         enabled = !busy,
@@ -9502,7 +9570,7 @@ private fun CustomDepthWallpaperPage(back: () -> Unit) {
                             },
                         )
                     } else {
-                        ArrowPreference(
+                        SharedViewArrowPreference(
                             title = tr("已安装壁纸包", "已安装壁纸包"),
                             summary = tr("没有找到有效的壁纸包", "没有找到有效的壁纸包"),
                             enabled = false,
@@ -9610,7 +9678,7 @@ private fun Lock(
         }
         item {
             Group(tr("\u9501\u5c4f\u642d\u914d", "\u9501\u5c4f\u642d\u914d")) {
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("保存当前壁纸", "保存当前壁纸"),
                     onClick = { showSaveWallpaperDialog = true },
                 )
@@ -9657,12 +9725,12 @@ private fun Lock(
                     exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
                 ) {
                     Column {
-                        ArrowPreference(
+                        SharedViewArrowPreference(
                             title = tr("选择自定义图片", "选择自定义图片"),
                             summary = s.lockscreenEditorBackgroundMime.ifBlank { tr("未选择", "未选择") },
                             onClick = { pickEditorBackground.launch(arrayOf("image/*")) },
                         )
-                        ArrowPreference(
+                        SharedViewArrowPreference(
                             title = tr("清除自定义图片", "清除自定义图片"),
                             summary = if (s.lockscreenEditorBackgroundMime.isBlank()) tr("无图片", "无图片") else tr("已选择", "已选择"),
                             onClick = {
@@ -9692,7 +9760,7 @@ private fun Lock(
                     enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
                     exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
                 ) {
-                    ArrowPreference(
+                    SharedViewArrowPreference(
                         title = tr("\u81ea\u5b9a\u4e49\u642d\u914d\u6570\u91cf", "\u81ea\u5b9a\u4e49\u642d\u914d\u6570\u91cf"),
                         summary = "${s.lockscreenTemplateLimitCustom}",
                         onClick = { showLockscreenTemplateLimitDialog = true },
@@ -9751,7 +9819,7 @@ private fun Lock(
                     enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
                     exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
                 ) {
-                    ArrowPreference(
+                    SharedViewArrowPreference(
                         title = tr("\u5149\u6805\u58c1\u7eb8\u8bbe\u7f6e", "\u5149\u6805\u58c1\u7eb8\u8bbe\u7f6e"),
                         summary = "${s.rasterWallpaperUriList().size}/4 \u5f20\u56fe\u7247",
                         onClick = { open(PageId.RASTER_WALLPAPER) },
@@ -9813,17 +9881,17 @@ OverlayDropdownPreference(
                         update { it.copy(fingerprintHideMode = value) }
                     },
                 )
-                ArrowPreference(title = tr("unlockIslandPage", "解锁岛"), onClick = { open(PageId.UNLOCK_ISLAND) })
+                SharedViewArrowPreference(title = tr("unlockIslandPage", "解锁岛"), onClick = { open(PageId.UNLOCK_ISLAND) })
             }
         }
         item {
             Group(tr("lockscreenMediaFeatures", "锁屏媒体")) {
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("音乐锁屏", "音乐锁屏"),
                     summary = if (s.lockscreenMusicLockscreenEnabled) tr("已开启", "已开启") else tr("未开启", "未开启"),
                     onClick = { open(PageId.LOCKSCREEN_MUSIC) },
                 )
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("锁屏胶囊", "锁屏胶囊"),
                     summary = if (capsule.enabled) tr("已开启", "已开启") else tr("未开启", "未开启"),
                     onClick = { open(PageId.LOCKSCREEN_CAPSULE) },
@@ -9852,17 +9920,17 @@ OverlayDropdownPreference(
                     exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
                 ) {
                     Column {
-                        ArrowPreference(
+                        SharedViewArrowPreference(
                             title = tr("锁屏小组件", "锁屏小组件"),
                             summary = lockscreenWidgetItemsSummary(s.lockscreenWidgetItems),
                             onClick = { open(PageId.LOCKSCREEN_WIDGET_EDITOR) },
                         )
-                        ArrowPreference(
+                        SharedViewArrowPreference(
                             title = tr("锁屏小组件背景调整", "锁屏小组件背景调整"),
                             summary = lockscreenWidgetBackgroundModeLabel(s.lockscreenWidgetBackgroundMode),
                             onClick = { open(PageId.LOCKSCREEN_WIDGET_BACKGROUND) },
                         )
-                        ArrowPreference(
+                        SharedViewArrowPreference(
                             title = tr("\u81ea\u5b9a\u4e49\u8bbe\u5907\u540d\u79f0", "\u81ea\u5b9a\u4e49\u8bbe\u5907\u540d\u79f0"),
                             summary = s.lockscreenWidgetDeviceName.ifBlank { readRoProductMarketName() },
                             onClick = { showWidgetDeviceNameDialog = true },
@@ -9897,7 +9965,7 @@ OverlayDropdownPreference(
         }
         item {
             Group(tr("\u9501\u5c4f\u5e95\u90e8", "\u9501\u5c4f\u5e95\u90e8")) {
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("\u9690\u85cf\u9501\u5c4f\u5e95\u90e8\u6587\u672c", "\u9690\u85cf\u9501\u5c4f\u5e95\u90e8\u6587\u672c"),
                     summary = lockscreenBottomTextSummary(s.lockscreenBottomTextMask),
                     onClick = { showBottomTextDialog = true },
@@ -9917,7 +9985,7 @@ OverlayDropdownPreference(
         }
         item {
             Group(tr("快捷功能背景", "快捷功能背景")) {
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("锁屏快捷功能背景", "锁屏快捷功能背景"),
                     onClick = { open(PageId.LOCKSCREEN_SHORTCUT_BACKGROUND) },
                 )
@@ -10065,7 +10133,7 @@ private fun MusicLockscreenPage(
                                     )
                                 }
                             }
-                            ArrowPreference(title = tr("歌词库", "歌词库"), onClick = { open(PageId.LYRIC_LIBRARY) })
+                            SharedViewArrowPreference(title = tr("歌词库", "歌词库"), onClick = { open(PageId.LYRIC_LIBRARY) })
                         }
                     }
                 }
@@ -10649,7 +10717,7 @@ private fun LiftToWakeSchedulePage(back: () -> Unit) {
             }
             item {
                 Group(tr("预览", "预览")) {
-                    ArrowPreference(
+                    SharedViewArrowPreference(
                         title = tr("生效时间段", "生效时间段"),
                         summary = schedule.windowLabel(),
                         onClick = {},
@@ -11525,7 +11593,7 @@ private fun LockscreenWidgetEditor(
             item {
                 Group(tr("签名组件", "签名组件")) {
                     val signatureType = settings.lockscreenWidgetSignatureType
-                    ArrowPreference(
+                    SharedViewArrowPreference(
                         title = tr("导入签名图片", "导入签名图片"),
                         summary = when (signatureType) {
                             LOCKSCREEN_WIDGET_SIGNATURE_PNG -> "PNG"
@@ -11557,13 +11625,13 @@ private fun LockscreenWidgetEditor(
                             },
                         )
                         if (signatureType == LOCKSCREEN_WIDGET_SIGNATURE_VECTOR) {
-                            ArrowPreference(
+                            SharedViewArrowPreference(
                                 title = tr("签名颜色", "签名颜色"),
                                 summary = String.format(Locale.US, "#%06X", settings.lockscreenWidgetSignatureColor and 0x00FFFFFF),
                                 onClick = { showSignatureColorPicker = true },
                             )
                         }
-                        ArrowPreference(
+                        SharedViewArrowPreference(
                             title = tr("移除签名图片", "移除签名图片"),
                             onClick = {
                                 removeLockscreenWidgetSignature(context)
@@ -12092,7 +12160,7 @@ private fun RasterWallpaper(
     AppList(p, scroll, 28) {
         item {
             Group(tr("\u7d20\u6750", "\u7d20\u6750")) {
-                ArrowPreference(
+                SharedViewArrowPreference(
                     title = tr("\u6279\u91cf\u9009\u62e9\u56fe\u7247\u6216\u77ed\u89c6\u9891", "\u6279\u91cf\u9009\u62e9\u56fe\u7247\u6216\u77ed\u89c6\u9891"),
                     summary = if (sources.isEmpty()) tr("\u8bf7\u9009\u62e9 2\u20134 \u4e2a\u7d20\u6750", "\u8bf7\u9009\u62e9 2\u20134 \u4e2a\u7d20\u6750") else "${sources.size}/4 \u4e2a\u7d20\u6750",
                     onClick = onPickImages,
@@ -13422,20 +13490,20 @@ private fun About(back: () -> Unit, openPage: (PageId) -> Unit, monetEnabled: Bo
         }
         item {
             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, colors = aboutCardColors()) {
-                ArrowPreference(title = tr("license", "LICENSE"), summary = tr("project_license_name", "AGPL-3.0（组合分发）"), onClick = { openPage(PageId.LICENSE) })
-                ArrowPreference(title = tr("githubRepository", "GitHub Repository"), summary = "github.com/ColdP/HyperChanger", onClick = { openUrl(context, "https://github.com/ColdP/HyperChanger") })
-                ArrowPreference(title = tr("telegramGroup", "Telegram 群组"), summary = "t.me/HyperChanger", onClick = { openUrl(context, "https://t.me/HyperChanger") })
-                ArrowPreference(title = tr("qqGroup", "QQ 群"), summary = tr("qqGroupNumber", "群号: 429188055"), onClick = { openUrl(context, "https://qm.qq.com/q/rQhbQbiYLe") })
+                SharedViewArrowPreference(title = tr("license", "LICENSE"), summary = tr("project_license_name", "AGPL-3.0（组合分发）"), onClick = { openPage(PageId.LICENSE) })
+                SharedViewArrowPreference(title = tr("githubRepository", "GitHub Repository"), summary = "github.com/ColdP/HyperChanger", onClick = { openUrl(context, "https://github.com/ColdP/HyperChanger") })
+                SharedViewArrowPreference(title = tr("telegramGroup", "Telegram 群组"), summary = "t.me/HyperChanger", onClick = { openUrl(context, "https://t.me/HyperChanger") })
+                SharedViewArrowPreference(title = tr("qqGroup", "QQ 群"), summary = tr("qqGroupNumber", "群号: 429188055"), onClick = { openUrl(context, "https://qm.qq.com/q/rQhbQbiYLe") })
             }
         }
         item {
             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, colors = aboutCardColors()) {
-                ArrowPreference(title = tr("用户协议", "用户协议"), onClick = { openPage(PageId.LEGAL_USER_AGREEMENT) })
-                ArrowPreference(title = tr("免责声明", "免责声明"), onClick = { openPage(PageId.LEGAL_DISCLAIMER) })
-                ArrowPreference(title = tr("隐私政策", "隐私政策"), onClick = { openPage(PageId.LEGAL_PRIVACY) })
-                ArrowPreference(title = tr("\u672c\u9879\u76ee\u57fa\u4e8e MIUIX \u6784\u5efa", "\u672c\u9879\u76ee\u57fa\u4e8e MIUIX \u6784\u5efa"), onClick = { openUrl(context, "https://compose-miuix-ui.github.io/miuix/") })
-                ArrowPreference(title = tr("\u5f00\u6e90\u4ee3\u7801\u58f0\u660e", "\u5f00\u6e90\u4ee3\u7801\u58f0\u660e"), onClick = { openPage(PageId.OPEN) })
-                ArrowPreference(title = tr("contributors", "\u8d21\u732e\u8005"), onClick = { openPage(PageId.CONTRIBUTORS) })
+                SharedViewArrowPreference(title = tr("用户协议", "用户协议"), onClick = { openPage(PageId.LEGAL_USER_AGREEMENT) })
+                SharedViewArrowPreference(title = tr("免责声明", "免责声明"), onClick = { openPage(PageId.LEGAL_DISCLAIMER) })
+                SharedViewArrowPreference(title = tr("隐私政策", "隐私政策"), onClick = { openPage(PageId.LEGAL_PRIVACY) })
+                SharedViewArrowPreference(title = tr("\u672c\u9879\u76ee\u57fa\u4e8e MIUIX \u6784\u5efa", "\u672c\u9879\u76ee\u57fa\u4e8e MIUIX \u6784\u5efa"), onClick = { openUrl(context, "https://compose-miuix-ui.github.io/miuix/") })
+                SharedViewArrowPreference(title = tr("\u5f00\u6e90\u4ee3\u7801\u58f0\u660e", "\u5f00\u6e90\u4ee3\u7801\u58f0\u660e"), onClick = { openPage(PageId.OPEN) })
+                SharedViewArrowPreference(title = tr("contributors", "\u8d21\u732e\u8005"), onClick = { openPage(PageId.CONTRIBUTORS) })
             }
         }
         item { Text("\u00a9 ${Year.now().value} btm_m", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = .56f), modifier = Modifier.padding(start = 12.dp)) }
@@ -13490,7 +13558,7 @@ private fun Donate(back: () -> Unit) = AppPage(tr("\u6350\u8d60", "\u6350\u8d60"
     val isDark = MiuixTheme.colorScheme.surface.luminance() < 0.5f
     AppList(padding, scroll, 28) {
         item { Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) { Image(painterResource(R.drawable.btm_m_avatar), "btm_m", Modifier.size(84.dp).clip(androidx.compose.foundation.shape.CircleShape), contentScale = ContentScale.Crop); Text("btm_m", style = MiuixTheme.textStyles.title2, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp)) } }
-        item { Group(tr("\u7231\u53d1\u7535", "\u7231\u53d1\u7535")) { ArrowPreference(title = tr("\u901a\u8fc7\u7231\u53d1\u7535\u652f\u6301\u6211", "\u901a\u8fc7\u7231\u53d1\u7535\u652f\u6301\u6211"), summary = tr("\u7231\u53d1\u7535\uff1abtm_m", "\u7231\u53d1\u7535\uff1abtm_m"), onClick = { openUrl(context, "https://afdian.com/a/btm_m") }) } }
+        item { Group(tr("\u7231\u53d1\u7535", "\u7231\u53d1\u7535")) { SharedViewArrowPreference(title = tr("\u901a\u8fc7\u7231\u53d1\u7535\u652f\u6301\u6211", "\u901a\u8fc7\u7231\u53d1\u7535\u652f\u6301\u6211"), summary = tr("\u7231\u53d1\u7535\uff1abtm_m", "\u7231\u53d1\u7535\uff1abtm_m"), onClick = { openUrl(context, "https://afdian.com/a/btm_m") }) } }
         item { Group(tr("\u5fae\u4fe1\u8d5e\u8d4f\u7801", "\u5fae\u4fe1\u8d5e\u8d4f\u7801")) { Image(painterResource(if (isDark) R.drawable.mm_reward_darkmode else R.drawable.mm_reward_lightmode), tr("\u5fae\u4fe1\u8d5e\u8d4f\u7801", "\u5fae\u4fe1\u8d5e\u8d4f\u7801"), Modifier.fillMaxWidth().aspectRatio(1f).padding(12.dp), contentScale = ContentScale.Fit) } }
     }
 }
@@ -13872,7 +13940,7 @@ private fun License(back: () -> Unit) {
                         style = MiuixTheme.textStyles.body2,
                         modifier = Modifier.padding(top = 12.dp),
                     )
-                    ArrowPreference(
+                    SharedViewArrowPreference(
                         title = tr("project_license_source", "查看项目源代码"),
                         onClick = { openUrl(context, "https://github.com/ColdP/HyperChanger") },
                     )
@@ -13995,8 +14063,8 @@ private fun LanguagePage(back: () -> Unit) {
             item {
                 Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
                     SmallTitle(tr("languageActions", "语言操作"), insideMargin = PaddingValues(start = 16.dp, top = 10.dp, end = 16.dp, bottom = 4.dp))
-                    ArrowPreference(title = tr("import", "导入..."), onClick = { importer.launch(arrayOf("application/json", "text/json", "text/plain")) })
-                    ArrowPreference(title = tr("new", "新建"), summary = tr("newSummary", "根据 example.json 创建"), onClick = { editor = LanguagePack("New Language", "", exampleLanguageJson(context)) })
+                    SharedViewArrowPreference(title = tr("import", "导入..."), onClick = { importer.launch(arrayOf("application/json", "text/json", "text/plain")) })
+                    SharedViewArrowPreference(title = tr("new", "新建"), summary = tr("newSummary", "根据 example.json 创建"), onClick = { editor = LanguagePack("New Language", "", exampleLanguageJson(context)) })
                 }
             }
             packs.forEach { pack ->

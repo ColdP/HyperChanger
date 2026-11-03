@@ -3,6 +3,7 @@
   "creator": "btm_m",
   "locale": "en",
   "strings": {
+    "sharedViewAnimation": "一镜到底的无缝动画",
     "cc_layout_title": "控制中心磁贴布局自定义",
     "cc_layout_enable": "启用自定义布局",
     "cc_media_hide_source": "隐藏媒体来源图标",

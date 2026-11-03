@@ -98,7 +98,7 @@ internal fun DeviceProfilePresetsPage(
         AppList(padding, scroll) {
             item {
                 Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
-                    ArrowPreference(title = tr("云端预设库", "云端预设库"), onClick = openCloud)
+                    SharedViewArrowPreference(title = tr("云端预设库", "云端预设库"), onClick = openCloud)
                     ArrowPreference(title = tr("保存当前预设", "保存当前预设"), enabled = !busy, onClick = { showSave = true })
                 }
             }

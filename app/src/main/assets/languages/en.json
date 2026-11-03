@@ -3,6 +3,7 @@
   "creator": "btm_m",
   "locale": "en",
   "strings": {
+    "sharedViewAnimation": "One-take seamless animations",
     "cc_layout_title": "Control Center tile layout",
     "cc_layout_enable": "Use custom layout",
     "cc_media_hide_source": "Hide media source icon",

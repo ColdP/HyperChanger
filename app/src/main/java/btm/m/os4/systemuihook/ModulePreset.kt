@@ -84,6 +84,7 @@ object ModulePresetCodec {
                 }
             if (groupName == REMOTE_PREFERENCE_GROUP) {
                 completeModuleNavigationPreset(values)
+                completeSharedViewAnimationPreset(values)
                 completeStackedMobileCornerPreset(values)
                 completeCcTileLayoutPreset(values)
                 completeCapsuleNotificationPreset(values)
@@ -137,6 +138,7 @@ object ModulePresetCodec {
             val values = groups.optJSONObject(groupName) ?: return@mapNotNull null
             if (groupName == REMOTE_PREFERENCE_GROUP) {
                 completeModuleNavigationPreset(values)
+                completeSharedViewAnimationPreset(values)
                 completeStackedMobileCornerPreset(values)
                 completeCcTileLayoutPreset(values)
                 completeCapsuleNotificationPreset(values)
@@ -196,6 +198,7 @@ object ModulePresetCodec {
             val values = groups.optJSONObject(groupName) ?: return@forEach
             if (groupName == REMOTE_PREFERENCE_GROUP) {
                 completeModuleNavigationPreset(values)
+                completeSharedViewAnimationPreset(values)
                 completeStackedMobileCornerPreset(values)
                 completeCcTileLayoutPreset(values)
                 completeCapsuleNotificationPreset(values)

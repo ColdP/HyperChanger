@@ -68,7 +68,7 @@ internal fun restartScopesForPreference(group: String, key: String): Set<ScopeAp
     if (group != REMOTE_PREFERENCE_GROUP) return emptySet()
 
     // Module UI and saved preset libraries do not change any hooked application.
-    if (key == KEY_APP_MONET_PALETTE || key == KEY_APP_MONET_COLOR_SPEC ||
+    if (key == KEY_SHARED_VIEW_ANIMATION || key == KEY_APP_MONET_PALETTE || key == KEY_APP_MONET_COLOR_SPEC ||
         key == KEY_APP_MONET_NOTICE_DISMISSED || key == KEY_APP_MONET_NOTICE_DISMISS_COUNT
     ) return emptySet()
     if (key in setOf(

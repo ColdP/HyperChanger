@@ -26,7 +26,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.Card
+import btm.m.os4.systemuihook.SeamlessCard as Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.preference.ArrowPreference
@@ -73,7 +73,7 @@ internal fun SettingsEntryIconsPage(openAppearance: () -> Unit, back: () -> Unit
                         enabled = loaded && !busy,
                         onClick = { showImport = true },
                     )
-                    ArrowPreference(
+                    SharedViewArrowPreference(
                         title = tr("settingsEntryAppearance", "系统设置首页入口外观调整"),
                         onClick = openAppearance,
                     )

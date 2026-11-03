@@ -14,7 +14,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.preference.SwitchPreference
-import top.yukonga.miuix.kmp.preference.ArrowPreference
 
 @Composable
 internal fun PortalPage(openMaterial: () -> Unit, back: () -> Unit) {
@@ -33,7 +32,7 @@ internal fun PortalPage(openMaterial: () -> Unit, back: () -> Unit) {
         AppList(padding, scroll, 28) {
             item {
                 Group(tr("外观调整", "外观调整")) {
-                    ArrowPreference(
+                    SharedViewArrowPreference(
                         title = tr("传送门材质调整", "传送门材质调整"),
                         onClick = openMaterial,
                     )
