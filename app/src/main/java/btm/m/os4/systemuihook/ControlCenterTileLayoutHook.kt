@@ -946,8 +946,8 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
 
     private fun showMediaOutputPopup(root: View, anchor: View) {
         val context = root.context
-        val routes = CcMediaRoute.routes(context)
-        if (routes.isEmpty()) return
+        val devices = CcMediaRoute.outputs(context)
+        if (devices.isEmpty()) return
         val d = context.resources.displayMetrics.density
         fun dp(v: Int) = (v * d).roundToInt()
         val list = android.widget.LinearLayout(context).apply {
@@ -955,15 +955,16 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
             setPadding(dp(4), dp(4), dp(4), dp(4))
         }
         var popup: android.widget.PopupWindow? = null
-        routes.forEach { route ->
+        devices.forEach { device ->
             list.addView(android.widget.TextView(context).apply {
-                text = route.name
+                text = device.productName?.toString()?.takeIf { it.isNotBlank() }
+                    ?: tr("cc_media_output", "播放设备")
                 setTextColor(0xffffffff.toInt())
                 textSize = 14f
                 setPadding(dp(14), dp(12), dp(14), dp(12))
                 isClickable = true
                 setOnClickListener {
-                    CcMediaRoute.select(context, route)
+                    CcMediaRoute.select(context, device)
                     popup?.dismiss()
                 }
             })

@@ -9,6 +9,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.Rating
@@ -36,10 +37,9 @@ internal object CcMediaActions {
     fun favoriteAction(controller: MediaController): PlaybackState.CustomAction? =
         controller.playbackState?.customActions?.firstOrNull { action ->
             val name = action.name?.toString().orEmpty().lowercase()
-            val pkg = action.getPackage().orEmpty().lowercase()
             name.contains("favorite") || name.contains("favourite") || name.contains("like") ||
                 name.contains("collect") || name.contains("star") ||
-                pkg.contains("favorite") || Regex(FAVORITE_HINTS).containsMatchIn(name)
+                Regex(FAVORITE_HINTS).containsMatchIn(name)
         }
 
     /** PlaybackState carries no per-action toggle state, so the heart follows the metadata rating. */
@@ -83,23 +83,51 @@ internal object CcMediaVolume {
     }
 }
 
-/** Output routing through MediaRouter2: the label follows the selected route, selection transfers playback. */
+/** Output routing through AudioManager; switching is a best-effort system call. */
 internal object CcMediaRoute {
-    private fun router(context: Context): android.media.MediaRouter2? = runCatching {
-        android.media.MediaRouter2.getInstance(context)
-    }.getOrNull()
+    private fun audio(context: Context): AudioManager? = context.getSystemService(AudioManager::class.java)
 
-    fun currentName(context: Context): String? = runCatching {
-        router(context)?.selectedRoute?.name?.toString()
-    }.getOrNull()
-
-    fun routes(context: Context): List<android.media.MediaRouter2.RouteInfo> = runCatching {
-        router(context)?.routes.orEmpty()
+    fun outputs(context: Context): List<AudioDeviceInfo> = runCatching {
+        audio(context)?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)?.filter { it.isSink }.orEmpty()
     }.getOrDefault(emptyList())
 
-    fun select(context: Context, route: android.media.MediaRouter2.RouteInfo): Boolean = runCatching {
-        router(context)?.transferTo(route)
-        true
+    fun currentName(context: Context): String? {
+        val device = outputs(context).minByOrNull { priority(it.type) } ?: return null
+        return device.productName?.toString()?.takeIf { it.isNotBlank() }
+    }
+
+    private fun priority(type: Int): Int = when (type) {
+        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> 0
+        AudioDeviceInfo.TYPE_BLE_HEADSET -> 1
+        AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> 2
+        AudioDeviceInfo.TYPE_USB_HEADSET -> 3
+        AudioDeviceInfo.TYPE_USB_DEVICE -> 4
+        AudioDeviceInfo.TYPE_WIRED_HEADSET -> 5
+        AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> 6
+        AudioDeviceInfo.TYPE_HEARING_AID -> 7
+        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> 9
+        else -> 8
+    }
+
+    /** setPreferredDeviceForStrategy is a system API, so resolve it reflectively and fail quietly. */
+    fun select(context: Context, device: AudioDeviceInfo): Boolean = runCatching {
+        val manager = audio(context) ?: return false
+        val attributes = Class.forName("android.media.AudioDeviceAttributes")
+            .getConstructor(AudioDeviceInfo::class.java)
+            .newInstance(device)
+        val strategyClass = Class.forName("android.media.audiopolicy.AudioProductStrategy")
+        val strategies = strategyClass.getMethod("getAudioProductStrategies").invoke(null) as? List<*> ?: return false false
+        val mediaStrategy = strategies.firstOrNull { strategy ->
+            val attributesValue = strategy?.javaClass?.getMethod("getAudioAttributes")?.invoke(strategy)
+            val usage = attributesValue?.javaClass?.getMethod("getUsage")?.invoke(attributesValue) as? Int
+            usage == android.media.AudioAttributes.USAGE_MEDIA
+        } ?: return false
+        val setter = AudioManager::class.java.getMethod(
+            "setPreferredDeviceForStrategy",
+            strategyClass,
+            attributes.javaClass,
+        )
+        setter.invoke(manager, mediaStrategy, attributes) as? Boolean ?: false
     }.getOrDefault(false)
 }
 
