@@ -607,9 +607,16 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
                 val t = adapted[root]
                 val parent = root?.parent
                 val adapter = if (parent is ViewGroup) call(parent, "getAdapter") else null
-                if (root != null && t != null && adapter != null && panels[adapter]?.get() === parent &&
-                    settings.enabled && field(adapter, "mode")?.toString() == "NORMAL" && field(adapter, "style")?.toString() == "VERTICAL") {
-                    if (t.id == "media") layoutMedia(root, t) else if (!t.slider) layoutCard(root, t)
+                if (root != null && settings.enabled) {
+                    if (t != null && adapter != null && panels[adapter]?.get() === parent &&
+                        field(adapter, "mode")?.toString() == "NORMAL" && field(adapter, "style")?.toString() == "VERTICAL") {
+                        if (t.id == "media") layoutMedia(root, t) else if (!t.slider) layoutCard(root, t)
+                    } else if (settings.mediaExpandedStyle && (t == null || t.id == "media") &&
+                        find(root, "cover") != null && insideExpandedMediaPanel(root)) {
+                        layoutExpandedMedia(root)
+                    } else if ((t == null || t.id == "media") && hasExpandedControls(root)) {
+                        clearExpandedControls(root)
+                    }
                 }
                 result
             }
@@ -644,10 +651,6 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         if (mediaLayoutSizes[root] != size) {
             restoreMediaChildren(root)
             mediaLayoutSizes[root] = size
-        }
-        if (settings.mediaExpandedStyle && expandedMedia(root)) {
-            layoutExpandedMedia(root, t)
-            return
         }
         clearExpandedControls(root)
         val d = root.resources.displayMetrics.density
@@ -806,13 +809,26 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         syncEmptyMedia(root)
     }
 
-    private fun expandedMedia(root: View): Boolean = adapted[root]?.let { it.h >= 3 && it.w >= 2 } == true
+    /** True while the media card is hosted by the secondary panel that opens after tapping it. */
+    private fun insideExpandedMediaPanel(root: View): Boolean {
+        val content = root.resources.getIdentifier("media_content", "id", "miui.systemui.plugin")
+        if (content == 0) return false
+        var parent = root.parent
+        while (parent is View) {
+            if (parent.id == content) return true
+            parent = parent.parent
+        }
+        return false
+    }
+
+    private fun hasExpandedControls(root: View): Boolean =
+        mediaFavorite.containsKey(root) || mediaVolume.containsKey(root) || mediaDevice.containsKey(root)
 
     /**
      * Expanded card: cover, title, the system artist/lyric line, progress, transport row with a
      * favourite toggle, then the media volume slider and the output device row.
      */
-    private fun layoutExpandedMedia(root: View, t: CcTile) {
+    private fun layoutExpandedMedia(root: View) {
         if (root.width <= 0 || root.height <= 0) return
         val d = root.resources.displayMetrics.density
         fun dp(v: Int) = (v * d).roundToInt()

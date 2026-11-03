@@ -35,8 +35,8 @@ internal object CcMediaActions {
 
     fun favoriteAction(controller: MediaController): PlaybackState.CustomAction? =
         controller.playbackState?.customActions?.firstOrNull { action ->
-            val name = action.name.orEmpty().lowercase()
-            val pkg = action.package.orEmpty().lowercase()
+            val name = action.name?.toString().orEmpty().lowercase()
+            val pkg = action.getPackage().orEmpty().lowercase()
             name.contains("favorite") || name.contains("favourite") || name.contains("like") ||
                 name.contains("collect") || name.contains("star") ||
                 pkg.contains("favorite") || Regex(FAVORITE_HINTS).containsMatchIn(name)
@@ -83,20 +83,22 @@ internal object CcMediaVolume {
     }
 }
 
-/** Output routing: read the live route for the label and forward selection to the system router. */
+/** Output routing through MediaRouter2: the label follows the selected route, selection transfers playback. */
 internal object CcMediaRoute {
-    fun currentName(context: Context): String? = runCatching {
-        val router = context.getSystemService(android.media.MediaRouter::class.java) ?: return null
-        router.getSelectedRoute(android.media.MediaRouter.ROUTE_TYPE_LIVE_AUDIO)?.name?.toString()
+    private fun router(context: Context): android.media.MediaRouter2? = runCatching {
+        android.media.MediaRouter2.getInstance(context)
     }.getOrNull()
 
-    fun routes(context: Context): List<android.media.MediaRouter.RouteInfo> = runCatching {
-        val router = context.getSystemService(android.media.MediaRouter::class.java) ?: return emptyList()
-        router.getRoutes().filter { it.playbackType == android.media.MediaRouter.ROUTE_TYPE_LIVE_AUDIO }
+    fun currentName(context: Context): String? = runCatching {
+        router(context)?.selectedRoute?.name?.toString()
+    }.getOrNull()
+
+    fun routes(context: Context): List<android.media.MediaRouter2.RouteInfo> = runCatching {
+        router(context)?.routes.orEmpty()
     }.getOrDefault(emptyList())
 
-    fun select(context: Context, route: android.media.MediaRouter.RouteInfo): Boolean = runCatching {
-        route.select()
+    fun select(context: Context, route: android.media.MediaRouter2.RouteInfo): Boolean = runCatching {
+        router(context)?.transferTo(route)
         true
     }.getOrDefault(false)
 }
