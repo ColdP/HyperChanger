@@ -1982,7 +1982,9 @@
     "capsuleAutoCollapse": "Notification types to automatically collapse into lockscreen capsules",
     "capsuleAutoCollapseNone": "Do not collapse any notifications automatically",
     "capsuleAutoCollapseHint": "Selected types collapse automatically; swipe down other types manually. Only types allowed in lockscreen capsules are affected.",
-    "锁屏胶囊图标圆角 (dp)": "Lockscreen capsule icon corner radius (dp)"
+    "锁屏胶囊图标圆角 (dp)": "Lockscreen capsule icon corner radius (dp)",
+    "cc_media_expanded_style": "New expanded media card style",
+    "cc_media_output": "Playback device"
   },
   "Xiaomi 18 Pro 系列 AI 背屏": "Xiaomi 18 Pro Series AI Rear Screen",
   "解锁 AI 功能": "Unlock AI features",

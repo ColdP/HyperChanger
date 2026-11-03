@@ -42,6 +42,9 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
     private val blockExtents = WeakHashMap<View, BlockExtent>()
     private val sliderSizes = WeakHashMap<View, Pair<Int, Int>>()
     private val mediaProgress = WeakHashMap<View, WeakReference<MediaProgressView>>()
+    private val mediaFavorite = WeakHashMap<View, WeakReference<CcMediaFavoriteView>>()
+    private val mediaVolume = WeakHashMap<View, WeakReference<CcMediaVolumeSlider>>()
+    private val mediaDevice = WeakHashMap<View, WeakReference<CcMediaDeviceRow>>()
     private val mediaPlaceholders = WeakHashMap<View, WeakReference<View>>()
     private val mediaHolders = WeakHashMap<View, WeakReference<Any>>()
     private val hiddenMediaChildren = WeakHashMap<View, MutableMap<String, Int>>()
@@ -80,7 +83,7 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         }
         if (preferenceListener == null) {
             preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-                if (key == null || key == KEY_CC_TILE_LAYOUT || key == KEY_CC_TILE_LAYOUT_ENABLED || key == KEY_CC_MEDIA_SOURCE_ICON_HIDDEN || key == KEY_CC_SMALL_TILE_AUTO_FILL) {
+                if (key == null || key == KEY_CC_TILE_LAYOUT || key == KEY_CC_TILE_LAYOUT_ENABLED || key == KEY_CC_MEDIA_SOURCE_ICON_HIDDEN || key == KEY_CC_SMALL_TILE_AUTO_FILL || key == KEY_CC_MEDIA_EXPANDED_STYLE) {
                     handler.post {
                         settings = readCcTileLayoutSettings(p)
                         if (!settings.enabled) adapted.entries.toList().filter { it.value.id == "media" }
@@ -212,6 +215,7 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
     }
 
     private fun clearMedia(root: View) {
+        clearExpandedControls(root)
         restoreMediaChildren(root)
         mediaLayoutSizes.remove(root)
         mediaProgress.remove(root)?.get()?.let { (root as? ViewGroup)?.overlay?.remove(it) }
@@ -641,6 +645,11 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
             restoreMediaChildren(root)
             mediaLayoutSizes[root] = size
         }
+        if (settings.mediaExpandedStyle && expandedMedia(root)) {
+            layoutExpandedMedia(root, t)
+            return
+        }
+        clearExpandedControls(root)
         val d = root.resources.displayMetrics.density
         val inset = minOf((14*d).roundToInt(), root.width/8)
         val cover = find(root, "cover") ?: return
@@ -795,6 +804,170 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
             progress.invalidate()
         } else mediaProgress.remove(root)?.get()?.let { (root as? ViewGroup)?.overlay?.remove(it) }
         syncEmptyMedia(root)
+    }
+
+    private fun expandedMedia(root: View): Boolean = adapted[root]?.let { it.h >= 3 && it.w >= 2 } == true
+
+    /**
+     * Expanded card: cover, title, the system artist/lyric line, progress, transport row with a
+     * favourite toggle, then the media volume slider and the output device row.
+     */
+    private fun layoutExpandedMedia(root: View, t: CcTile) {
+        if (root.width <= 0 || root.height <= 0) return
+        val d = root.resources.displayMetrics.density
+        fun dp(v: Int) = (v * d).roundToInt()
+        val inset = dp(12)
+        val gap = dp(6)
+        val width = (root.width - inset * 2).coerceAtLeast(1)
+        val titleH = dp(18)
+        val artistH = dp(16)
+        val progressH = progressHeight(root)
+        val buttonsH = dp(36)
+        val volumeH = dp(30)
+        val deviceH = dp(26)
+        val fixed = titleH + artistH + progressH + buttonsH + volumeH + deviceH + gap * 6
+        val cover = find(root, "cover") ?: return
+        val coverSize = minOf(width, (root.height - inset * 2 - fixed)).coerceAtLeast(dp(40))
+        mediaChildVisible(root, "title", true)
+        mediaChildVisible(root, "artist", true)
+        mediaChildVisible(root, "empty_state", true)
+        mediaChildVisible(root, "audio_container", true)
+        mediaChildVisible(root, "device_icon", false)
+        box(cover, (root.width - coverSize) / 2, inset, coverSize, coverSize)
+        syncCoverOutline(root)
+        var y = inset + coverSize + gap
+        find(root, "title")?.let { box(it, inset, y, width, titleH) }
+        find(root, "artist")?.let { box(it, inset, y + titleH, width, artistH) }
+        find(root, "empty_state")?.let { box(it, inset, y, width, titleH + artistH) }
+        y += titleH + artistH + gap
+        val progress = ensureMediaProgress(root)
+        box(progress, inset, y, width, progressH)
+        progress.invalidate()
+        y += progressH + gap
+        // Four equal slots: favourite first, then the untouched OEM transport buttons.
+        val slot = width / 4
+        ensureFavorite(root)?.let { box(it, inset, y, slot, buttonsH) }
+        find(root, "audio_container")?.let { owner ->
+            box(owner, inset, y, width, buttonsH)
+            listOf("prev", "play", "next").forEachIndexed { index, name ->
+                val child = find(owner, name) ?: return@forEachIndexed
+                val size = minOf(dp(30), slot, buttonsH).coerceAtLeast(1)
+                box(child, slot * (index + 1) + (slot - size) / 2, (buttonsH - size) / 2, size, size)
+            }
+        }
+        y += buttonsH + gap
+        ensureVolumeSlider(root)?.let { box(it, inset, y, width, volumeH) }
+        y += volumeH + gap
+        ensureDeviceRow(root)?.let { box(it, inset, y, width, deviceH) }
+        syncEmptyMedia(root)
+    }
+
+    private fun ensureMediaProgress(root: View): MediaProgressView {
+        mediaProgress[root]?.get()?.let { return it }
+        val view = MediaProgressView(root.context, root)
+        mediaProgress[root] = WeakReference(view)
+        (root as? ViewGroup)?.let { group -> runCatching { group.overlay.add(view) } }
+        return view
+    }
+
+    private fun ensureFavorite(root: View): CcMediaFavoriteView? {
+        if (root !is ViewGroup) return null
+        mediaFavorite[root]?.get()?.let { return it }
+        val context = root.context
+        val view = CcMediaFavoriteView(
+            context,
+            isFavorite = { CcMediaActions.controller(context)?.let(CcMediaActions::isFavorite) ?: false },
+            onToggle = { CcMediaActions.controller(context)?.let(CcMediaActions::toggleFavorite) },
+        )
+        runCatching { root.addView(view) }
+        mediaFavorite[root] = WeakReference(view)
+        return view
+    }
+
+    private fun ensureVolumeSlider(root: View): CcMediaVolumeSlider? {
+        if (root !is ViewGroup) return null
+        mediaVolume[root]?.get()?.let { return it }
+        val context = root.context
+        val view = CcMediaVolumeSlider(
+            context,
+            level = { CcMediaVolume.level(context) },
+            max = { CcMediaVolume.max(context) },
+            onSet = { CcMediaVolume.set(context, it) },
+        )
+        runCatching { root.addView(view) }
+        mediaVolume[root] = WeakReference(view)
+        return view
+    }
+
+    private fun ensureDeviceRow(root: View): CcMediaDeviceRow? {
+        if (root !is ViewGroup) return null
+        mediaDevice[root]?.get()?.let { return it }
+        val context = root.context
+        val view = CcMediaDeviceRow(
+            context,
+            label = { CcMediaRoute.currentName(context) ?: tr("cc_media_output", "播放设备") },
+            onClick = { anchor -> openMediaDevicePicker(root, anchor) },
+        )
+        runCatching { root.addView(view) }
+        mediaDevice[root] = WeakReference(view)
+        return view
+    }
+
+    private fun clearExpandedControls(root: View) {
+        mediaFavorite.remove(root)?.get()?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        mediaVolume.remove(root)?.get()?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        mediaDevice.remove(root)?.get()?.let { (it.parent as? ViewGroup)?.removeView(it) }
+    }
+
+    /** Forward to the stock output picker first; fall back to our own route list. */
+    private fun openMediaDevicePicker(root: View, anchor: View) {
+        val native = find(root, "device_icon")
+        if (native != null && (native.isClickable || native.hasOnClickListeners())) {
+            if (runCatching { native.performClick() }.getOrDefault(false)) return
+        }
+        showMediaOutputPopup(root, anchor)
+    }
+
+    private fun showMediaOutputPopup(root: View, anchor: View) {
+        val context = root.context
+        val routes = CcMediaRoute.routes(context)
+        if (routes.isEmpty()) return
+        val d = context.resources.displayMetrics.density
+        fun dp(v: Int) = (v * d).roundToInt()
+        val list = android.widget.LinearLayout(context).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+        }
+        var popup: android.widget.PopupWindow? = null
+        routes.forEach { route ->
+            list.addView(android.widget.TextView(context).apply {
+                text = route.name
+                setTextColor(0xffffffff.toInt())
+                textSize = 14f
+                setPadding(dp(14), dp(12), dp(14), dp(12))
+                isClickable = true
+                setOnClickListener {
+                    CcMediaRoute.select(context, route)
+                    popup?.dismiss()
+                }
+            })
+        }
+        val widthPx = dp(220)
+        list.measure(
+            View.MeasureSpec.makeMeasureSpec(widthPx, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+        )
+        val created = android.widget.PopupWindow(list, widthPx, list.measuredHeight, true).apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0xf0181a1c.toInt()))
+            isOutsideTouchable = true
+            elevation = dp(8).toFloat()
+        }
+        popup = created
+        val location = IntArray(2)
+        anchor.getLocationOnScreen(location)
+        val x = (location[0] + anchor.width - widthPx).coerceAtLeast(dp(8))
+        val yValue = (location[1] - list.measuredHeight - dp(8)).coerceAtLeast(dp(8))
+        runCatching { created.showAtLocation(anchor, Gravity.NO_GRAVITY, x, yValue) }
     }
 
     private fun syncEmptyMedia(root: View) {
