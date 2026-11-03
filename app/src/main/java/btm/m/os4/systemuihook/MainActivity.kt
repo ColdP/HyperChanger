@@ -1566,6 +1566,9 @@ private fun Shell(
         maxProgress = settings.predictiveBackProgress.coerceIn(10, 100) / 100f,
         onBack = dismissPage
     )
+    // The revealed page must not inherit the outgoing page's gesture transform before
+    // the existing stack-change effect has reset the shared momentum state.
+    val momentumBackOwner = remember(backState.isSwiping) { pageStack.lastIndex to page }
     LaunchedEffect(pageStack.size) {
         if (pageStack.isNotEmpty()) backState.reset()
     }
@@ -1721,6 +1724,10 @@ private fun Shell(
                 // predictive-back gesture, preserving its scroll position.
                 pageStack.forEachIndexed { index, stackPage ->
                     key(index, stackPage) {
+                        // AnimatedVisibility may keep outgoing content alive after pop.
+                        // Retain its transition until disposal instead of switching to the
+                        // fallback when its entry is removed from the navigation map.
+                        val stackEntry = remember { seamless.entries[index] }
                         val isTop = index == pageStack.lastIndex
                         val coveredPageBlur by animateFloatAsState(
                             targetValue = when {
@@ -1741,7 +1748,7 @@ private fun Shell(
                         pageVisibility.targetState = index != ordinaryClosingIndex
                         AnimatedVisibility(
                             visibleState = pageVisibility,
-                            enter = if (index > 0 && seamless.entries[index] == null) {
+                            enter = if (index > 0 && stackEntry == null) {
                                 slideInHorizontally(
                                     animationSpec = tween(252, easing = FastOutSlowInEasing),
                                     initialOffsetX = { it / 7 },
@@ -1750,7 +1757,7 @@ private fun Shell(
                                     initialScale = .985f,
                                 )
                             } else EnterTransition.None,
-                            exit = if (seamless.entries[index] == null) {
+                            exit = if (stackEntry == null) {
                                 slideOutHorizontally(tween(207, easing = FastOutSlowInEasing)) { -it / 3 } +
                                     fadeOut(tween(162)) + scaleOut(tween(207), targetScale = .975f)
                             } else ExitTransition.None,
@@ -1760,16 +1767,17 @@ private fun Shell(
                                 transitionSpec = { tween(207, easing = FastOutSlowInEasing) },
                                 label = "detailTransitionBlur:$stackPage",
                             ) { state ->
-                                if (seamless.entries[index] != null || state == EnterExitState.Visible) 0f else 12f
+                                if (stackEntry != null || state == EnterExitState.Visible) 0f else 12f
                             }
                             Box(
                                 Modifier
                                     .fillMaxSize()
                                     .blur((coveredPageBlur + detailTransitionBlur).dp)
-                                    .then(if (isTop && seamless.entries[index] == null) Modifier.momentumBackTransform(backState) else Modifier),
+                                    .then(if (isTop && stackEntry == null && momentumBackOwner == (index to stackPage))
+                                        Modifier.momentumBackTransform(backState) else Modifier),
                             ) {
                                 SeamlessPageFrame(
-                                    entry = seamless.entries[index],
+                                    entry = stackEntry,
                                 ) { renderDetail(stackPage, isTop) }
                             }
                         }

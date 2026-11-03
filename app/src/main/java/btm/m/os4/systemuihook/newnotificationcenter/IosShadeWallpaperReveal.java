@@ -18,6 +18,7 @@ public final class IosShadeWallpaperReveal {
     private boolean exiting;
     private boolean stagedMode;
     private int lastBlur = -1;
+    private ViewGroup root;
 
     public IosShadeWallpaperReveal(ImageView wallpaper, IosShadeGlassView glass) {
         this.wallpaper = wallpaper;
@@ -36,6 +37,7 @@ public final class IosShadeWallpaperReveal {
     public void update(boolean enabled, boolean showWallpaper, float progress, boolean switching, float switchFraction,
                        boolean landscape, ViewGroup root, float sheetOffset, float radius) {
         this.landscape = landscape;
+        this.root = root;
         stagedMode = enabled;
         if (progress <= 0f || !enabled) exiting = false;
         else if (progress < previousProgress) exiting = true;
@@ -83,6 +85,7 @@ public final class IosShadeWallpaperReveal {
 
     private void apply() {
         float alpha = state.alpha;
+        IosShadeBackdropBlur.setWallpaperReveal(root, alpha);
         if (wallpaper.getAlpha() != alpha) wallpaper.setAlpha(alpha);
         float density = wallpaper.getResources().getDisplayMetrics().density;
         int blur = Math.round((landscape ? 22f + 14f * (1f - alpha) : 28f * (1f - alpha)) * density);
@@ -107,12 +110,14 @@ public final class IosShadeWallpaperReveal {
     public void reset() {
         stagedMode = false;
         cancel();
+        IosShadeBackdropBlur.setWallpaperReveal(root, 0f);
         state.reset();
         previousProgress = 0f;
         exiting = false;
         wallpaper.setAlpha(1f);
         lastBlur = -1;
         glass.reset();
+        root = null;
         IosNotificationCenterPresentation.setWallpaperReveal(1f, 0);
     }
 }

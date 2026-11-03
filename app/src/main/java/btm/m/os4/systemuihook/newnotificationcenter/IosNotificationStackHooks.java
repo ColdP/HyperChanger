@@ -531,6 +531,7 @@ final class IosNotificationStackHooks {
                         || chain.getArgs().isEmpty() || !(chain.getArgs().get(0) instanceof Canvas)) {
                     return chain.proceed();
                 }
+                IosNotificationEntryState.settleForDraw(view);
                 IosNotificationExitState.rememberFrame(view);
                 clipStackedRows(view, true);
                 Canvas canvas = (Canvas) chain.getArgs().get(0);
@@ -595,6 +596,7 @@ final class IosNotificationStackHooks {
                 }
                 if (!own) return chain.proceed();
                 ViewGroup view = (ViewGroup) host;
+                IosNotificationEntryState.prepareTargets(view);
                 float nativeTop = ((Number) Xp.callMethod(view, "getTopPadding")).floatValue();
                 float top = nativeTop + IosNotificationCenterPresentation.stackOffset(view, nativeTop);
                 float bottom = IosNotificationCenterPresentation.viewportBottom(view);

@@ -13,8 +13,14 @@ public final class IosShadeBackdropBlur {
     private static Method getter;
     private static boolean writing;
     private static float amount = 1f;
+    private static float gestureAmount, wallpaperAlpha;
     private static WeakReference<View> surfaceRoot = new WeakReference<>(null);
     private static int surfaceRadius;
+    private static int requestedSurfaceRadius;
+    private static WeakReference<Object> surfaceController = new WeakReference<>(null);
+    private static WeakReference<Object> surfaceTarget = new WeakReference<>(null);
+    private static Method surfaceApply;
+    private static boolean writingSurface;
 
     private IosShadeBackdropBlur() {}
 
@@ -45,17 +51,31 @@ public final class IosShadeBackdropBlur {
         try {
             Method apply = Xp.findClass("com.android.systemui.statusbar.BlurUtils", loader)
                     .getDeclaredMethod("applyBlur", Xp.findClass("android.view.ViewRootImpl", loader), int.class);
+            apply.setAccessible(true);
+            surfaceApply = apply;
             Xp.api().hook(apply)
                     .setExceptionMode(io.github.libxposed.api.XposedInterface.ExceptionMode.PROTECTIVE)
                     .intercept(chain -> {
-                        Object result = chain.proceed();
+                        Object target = chain.getArgs().get(0);
+                        View view = null;
                         try {
-                            Object target = chain.getArgs().get(0);
+                            if (target != null) view = (View) Xp.callMethod(target, "getView");
+                        } catch (Throwable ignored) {}
+                        Object[] args = chain.getArgs().toArray();
+                        if (!writingSurface && view != null && args[1] instanceof Integer) {
+                            surfaceRoot = new WeakReference<>(view);
+                            surfaceController = new WeakReference<>(chain.getThisObject());
+                            surfaceTarget = new WeakReference<>(target);
+                            requestedSurfaceRadius = (Integer) args[1];
+                            if (view == ownedRoot) args[1] = scaledSurfaceRadius();
+                        }
+                        Object result = chain.proceed(args);
+                        try {
                             Object controller = chain.getThisObject();
                             if (target != null && Xp.getObjectField(controller, "lastTargetViewRootImpl") == target) {
-                                View view = (View) Xp.callMethod(target, "getView");
-                                if (surfaceRoot.get() != view) surfaceRoot = new WeakReference<>(view);
-                                surfaceRadius = Math.max(0, ((Number) Xp.getObjectField(controller, "lastAppliedBlur")).intValue());
+                                if (surfaceRoot.get() == view) {
+                                    surfaceRadius = Math.max(0, ((Number) Xp.getObjectField(controller, "lastAppliedBlur")).intValue());
+                                }
                             }
                         } catch (Throwable ignored) {}
                         return result;
@@ -67,14 +87,9 @@ public final class IosShadeBackdropBlur {
 
     public static void update(View root, boolean enabled, float progress) {
         float p = Float.isFinite(progress) ? Math.max(0f, Math.min(1f, progress)) : 0f;
-        float next = p * p * (3f - 2f * p);
         if (root == ownedRoot && enabled) {
-            if (amount == next) return;
-            amount = next;
-            try {
-                int wanted = scaledRadius();
-                if (((Number) getter.invoke(root)).intValue() != wanted) write(root, wanted);
-            } catch (Throwable ignored) {}
+            gestureAmount = p * p * (3f - 2f * p);
+            updateAmount();
             return;
         }
         release();
@@ -82,12 +97,44 @@ public final class IosShadeBackdropBlur {
         try {
             requestedRadius = ((Number) getter.invoke(root)).intValue();
             ownedRoot = root;
-            amount = next;
+            gestureAmount = p * p * (3f - 2f * p);
+            amount = .3f * gestureAmount;
             write(root, scaledRadius());
+            replaySurface(root, true);
         } catch (Throwable ignored) { release(); }
     }
 
     private static int scaledRadius() { return Math.round(requestedRadius * amount); }
+    private static int scaledSurfaceRadius() { return Math.round(requestedSurfaceRadius * amount); }
+
+    static void setWallpaperReveal(View root, float alpha) {
+        if (root == null || root != ownedRoot) return;
+        wallpaperAlpha = Float.isFinite(alpha) ? Math.max(0f, Math.min(1f, alpha)) : 0f;
+        updateAmount();
+    }
+
+    private static void updateAmount() {
+        float capped = .3f * gestureAmount;
+        float next = capped + (1f - capped) * wallpaperAlpha;
+        if (amount == next) return;
+        amount = next;
+        try {
+            int wanted = scaledRadius();
+            if (((Number) getter.invoke(ownedRoot)).intValue() != wanted) write(ownedRoot, wanted);
+        } catch (Throwable ignored) {}
+        replaySurface(ownedRoot, true);
+    }
+
+    private static void replaySurface(View root, boolean scaled) {
+        if (root == null || surfaceRoot.get() != root || surfaceApply == null) return;
+        Object controller = surfaceController.get(), target = surfaceTarget.get();
+        if (controller == null || target == null) return;
+        boolean previous = writingSurface;
+        writingSurface = true;
+        try { surfaceApply.invoke(controller, target, scaled ? scaledSurfaceRadius() : requestedSurfaceRadius); }
+        catch (Throwable ignored) {}
+        finally { writingSurface = previous; }
+    }
 
     // Both radii are already in pixels; never multiply them by display density again.
     static int currentRadius(View root) {
@@ -98,9 +145,11 @@ public final class IosShadeBackdropBlur {
     public static void release() {
         View previous = ownedRoot;
         ownedRoot = null;
+        wallpaperAlpha = gestureAmount = 0f;
         if (previous == null) return;
         try { write(previous, requestedRadius); }
         catch (Throwable ignored) {}
+        replaySurface(previous, false);
     }
 
     private static void write(View view, int radius) throws Exception {

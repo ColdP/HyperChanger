@@ -17,7 +17,8 @@ final class IosNotificationAnimationHooks {
         // reports a non-zero height. Use the takeover predicate here so that animation is
         // suppressed before it can queue, while the normal enabled predicate remains the
         // runtime guard for already-open frames.
-        if (!ShadeLayer.iosNotificationPanelIntercepting()) return false;
+        if (!ShadeLayer.iosNotificationPanelIntercepting()
+                || !IosNotificationEntryState.ownsPanelMotion()) return false;
         try {
             Object ambient = Xp.getObjectField(owner, "ambientState");
             return !Boolean.TRUE.equals(Xp.callMethod(ambient, "isOnKeyguard"));
@@ -58,8 +59,11 @@ final class IosNotificationAnimationHooks {
         try {
             Class<?> state = Xp.findClass(
                     "com.android.systemui.statusbar.notification.stack.ViewState", loader);
-            int tag = Xp.findClass("com.android.systemui.R$id", loader)
-                    .getField("translation_y_animator_tag").getInt(null);
+            Class<?> ids = Xp.findClass("com.android.systemui.R$id", loader);
+            int tag = ids.getField("translation_y_animator_tag").getInt(null);
+            int springTag = 0;
+            try { springTag = ids.getField("miui_spring_y_offset_animator_tag").getInt(null); }
+            catch (Throwable ignored) {}
             state.getDeclaredMethod("abortAnimation", int.class, View.class);
             for (String method : new String[]{"animateTo", "applyToView"}) {
                 Xp.hookAll(state, method, chain -> {
@@ -70,10 +74,17 @@ final class IosNotificationAnimationHooks {
                     return chain.proceed();
                 });
             }
+            Xp.hookAll(state, "startYTranslationAnimation", chain -> {
+                if (!chain.getArgs().isEmpty() && chain.getArgs().get(0) instanceof View
+                        && IosNotificationEntryState.settle((View) chain.getArgs().get(0),
+                        chain.getThisObject())) return null;
+                return chain.proceed();
+            });
+            deoptimize(state, "animateTo", "applyToView");
             deoptimize(Xp.findClass(
                     "com.android.systemui.statusbar.notification.stack.ExpandableViewState", loader),
                     "animateTo", "applyToView");
-            IosNotificationEntryState.configure(tag);
+            IosNotificationEntryState.configure(tag, springTag);
         } catch (Throwable error) {
             Xp.log("[IOSShade] notification entry position hook unavailable: " + error);
         }
@@ -147,6 +158,7 @@ final class IosNotificationAnimationHooks {
                     Object result = chain.proceed();
                     if (chain.getThisObject() instanceof View) {
                         IosNotificationStackHooks.enforceUnstackedRow((View) chain.getThisObject());
+                        IosNotificationEntryState.settle((View) chain.getThisObject(), null);
                         IosNotificationExitState.applyRow((View) chain.getThisObject());
                     }
                     return result;
