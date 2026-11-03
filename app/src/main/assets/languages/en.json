@@ -7,6 +7,7 @@
     "cc_layout_title": "Control Center tile layout",
     "cc_layout_enable": "Use custom layout",
     "cc_media_hide_source": "Hide media source icon",
+    "cc_small_tile_auto_fill": "Automatically fill gaps with small tiles",
     "cc_layout_reset": "Reset layout",
     "cc_layout_wlan": "WLAN",
     "cc_layout_data": "Mobile data",

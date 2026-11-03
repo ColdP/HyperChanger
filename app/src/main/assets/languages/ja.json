@@ -7,6 +7,7 @@
     "cc_layout_title": "コントロールセンターのタイル配置",
     "cc_layout_enable": "カスタム配置を使用",
     "cc_media_hide_source": "メディアソースアイコンを隠す",
+    "cc_small_tile_auto_fill": "小タイルで空きスペースを自動補完",
     "cc_layout_reset": "初期配置に戻す",
     "cc_layout_wlan": "WLAN",
     "cc_layout_data": "モバイルデータ",

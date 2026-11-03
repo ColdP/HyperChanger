@@ -70,6 +70,12 @@ internal fun ControlCenterTileLayoutPage(back: () -> Unit) = AppPage(
                         settings = settings.copy(mediaSourceIconHidden = it)
                         store.update(service, settings)
                     })
+                SwitchPreference(title = tr("cc_small_tile_auto_fill", "小磁贴自动补位"), checked = settings.smallTileAutoFill,
+                    enabled = settings.enabled,
+                    onCheckedChange = {
+                        settings = settings.copy(smallTileAutoFill = it)
+                        store.update(service, settings)
+                    })
                 ArrowPreference(title = tr("cc_layout_reset", "还原初始布局"), onClick = { confirmReset = true })
             }
         }
@@ -233,18 +239,21 @@ internal class CcLayoutEditorView(context: Context) : View(context) {
             }
         } else {
             val vertical = t.w == 1
+            val small = t.w == 1 && t.h == 1
             val iconSize = 32 * u
             val x = if (vertical) r.centerX() - iconSize / 2 else r.left + 20 * u
-            val y = if (vertical) r.centerY() - 30 * u else r.centerY() - iconSize / 2
+            val y = if (vertical && !small) r.centerY() - 30 * u else r.centerY() - iconSize / 2
             icon(c, t.id, x, y, iconSize)
-            paint.color = palette.foreground; paint.typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            paint.textSize = (if (vertical) 11 else 21) * u
-            paint.style = Paint.Style.FILL
-            val available = if (vertical) r.width() - 12 * u else r.right - (x + iconSize + 12 * u) - 12 * u
-            val title = android.text.TextUtils.ellipsize(ccTileTitle(t.id), android.text.TextPaint(paint), available.coerceAtLeast(0f), android.text.TextUtils.TruncateAt.END).toString()
-            paint.textAlign = if (vertical) Paint.Align.CENTER else Paint.Align.LEFT
-            c.drawText(title, if (vertical) r.centerX() else x + iconSize + 12 * u,
-                if (vertical) y + iconSize + 17 * u else r.centerY() - (paint.ascent() + paint.descent()) / 2, paint)
+            if (!small) {
+                paint.color = palette.foreground; paint.typeface = Typeface.create("sans-serif", Typeface.BOLD)
+                paint.textSize = (if (vertical) 11 else 21) * u
+                paint.style = Paint.Style.FILL
+                val available = if (vertical) r.width() - 12 * u else r.right - (x + iconSize + 12 * u) - 12 * u
+                val title = android.text.TextUtils.ellipsize(ccTileTitle(t.id), android.text.TextPaint(paint), available.coerceAtLeast(0f), android.text.TextUtils.TruncateAt.END).toString()
+                paint.textAlign = if (vertical) Paint.Align.CENTER else Paint.Align.LEFT
+                c.drawText(title, if (vertical) r.centerX() else x + iconSize + 12 * u,
+                    if (vertical) y + iconSize + 17 * u else r.centerY() - (paint.ascent() + paint.descent()) / 2, paint)
+            }
         }
         if (!t.slider) {
             paint.color = palette.handle; paint.style = Paint.Style.STROKE; paint.strokeWidth = 4.8f * u

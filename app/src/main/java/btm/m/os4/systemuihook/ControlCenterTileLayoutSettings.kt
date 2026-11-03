@@ -10,6 +10,7 @@ import org.json.JSONObject
 internal const val KEY_CC_TILE_LAYOUT_ENABLED = "control_center_tile_layout_enabled"
 internal const val KEY_CC_TILE_LAYOUT = "control_center_tile_layout_v1"
 internal const val KEY_CC_MEDIA_SOURCE_ICON_HIDDEN = "control_center_media_source_icon_hidden"
+internal const val KEY_CC_SMALL_TILE_AUTO_FILL = "control_center_small_tile_auto_fill"
 
 internal data class CcTile(val id: String, val col: Int, val row: Int, val w: Int, val h: Int) {
     val slider get() = id == "brightness" || id == "volume"
@@ -22,6 +23,7 @@ internal object CcTileLayouts {
         CcTile("media", 0, 1, 2, 2), CcTile("brightness", 2, 1, 1, 2), CcTile("volume", 3, 1, 1, 2),
     )
     fun rows(tiles: List<CcTile>) = maxOf(3, tiles.maxOf { it.row + it.h })
+
     fun valid(tiles: List<CcTile>): Boolean = tiles.size == initial.size &&
         tiles.map { it.id }.toSet() == initial.map { it.id }.toSet() && tiles.all { t ->
             t.w in 1..4 && t.h in 1..(if (t.id == "media") 3 else 2) &&
@@ -77,12 +79,14 @@ internal data class CcTileLayoutSettings(
     val enabled: Boolean = false,
     val tiles: List<CcTile> = CcTileLayouts.initial,
     val mediaSourceIconHidden: Boolean = false,
+    val smallTileAutoFill: Boolean = false,
 )
 
 internal fun readCcTileLayoutSettings(p: SharedPreferences) = CcTileLayoutSettings(
     p.getBoolean(KEY_CC_TILE_LAYOUT_ENABLED, false),
     CcTileLayouts.decode(p.getString(KEY_CC_TILE_LAYOUT, null)),
     p.getBoolean(KEY_CC_MEDIA_SOURCE_ICON_HIDDEN, false),
+    p.getBoolean(KEY_CC_SMALL_TILE_AUTO_FILL, false),
 )
 
 /** Explicit defaults keep exported presets complete, including untouched/disabled layouts. */
@@ -90,6 +94,7 @@ internal fun completeCcTileLayoutPreset(values: JSONObject) {
     if (!values.has(KEY_CC_TILE_LAYOUT_ENABLED)) values.put(KEY_CC_TILE_LAYOUT_ENABLED, JSONObject().put("type", "boolean").put("value", false))
     if (!values.has(KEY_CC_TILE_LAYOUT)) values.put(KEY_CC_TILE_LAYOUT, JSONObject().put("type", "string").put("value", CcTileLayouts.encode(CcTileLayouts.initial)))
     if (!values.has(KEY_CC_MEDIA_SOURCE_ICON_HIDDEN)) values.put(KEY_CC_MEDIA_SOURCE_ICON_HIDDEN, JSONObject().put("type", "boolean").put("value", false))
+    if (!values.has(KEY_CC_SMALL_TILE_AUTO_FILL)) values.put(KEY_CC_SMALL_TILE_AUTO_FILL, JSONObject().put("type", "boolean").put("value", false))
 }
 
 internal class ControlCenterTileLayoutSettingsStore(private val local: SharedPreferences) {
@@ -112,6 +117,7 @@ internal class ControlCenterTileLayoutSettingsStore(private val local: SharedPre
     private fun write(p: SharedPreferences) {
         p.edit().putBoolean(KEY_CC_TILE_LAYOUT_ENABLED, settings.enabled)
             .putString(KEY_CC_TILE_LAYOUT, CcTileLayouts.encode(settings.tiles))
-            .putBoolean(KEY_CC_MEDIA_SOURCE_ICON_HIDDEN, settings.mediaSourceIconHidden).apply()
+            .putBoolean(KEY_CC_MEDIA_SOURCE_ICON_HIDDEN, settings.mediaSourceIconHidden)
+            .putBoolean(KEY_CC_SMALL_TILE_AUTO_FILL, settings.smallTileAutoFill).apply()
     }
 }

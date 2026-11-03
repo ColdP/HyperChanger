@@ -7,6 +7,7 @@
     "cc_layout_title": "控制中心磁贴布局自定义",
     "cc_layout_enable": "启用自定义布局",
     "cc_media_hide_source": "隐藏媒体来源图标",
+    "cc_small_tile_auto_fill": "小磁贴自动补位",
     "cc_layout_reset": "还原初始图",
     "cc_layout_wlan": "WLAN",
     "cc_layout_data": "数据网络",

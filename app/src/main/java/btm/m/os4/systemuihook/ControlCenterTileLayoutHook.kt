@@ -27,7 +27,7 @@ import java.util.WeakHashMap
 import kotlin.math.roundToInt
 
 /**
- * HyperiOS-style real 2D layoutChunk, limited to the stock five upper controls.
+ * HyperiOS-style real 2D layoutChunk for the upper controls and optional small-tile backfill.
  * All RecyclerView objects belong to the plugin loader; only Android View crosses loaders.
  * No record reordering, replacement views, frame translations or secondary router hooks.
  */
@@ -38,10 +38,14 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
     private val managers = WeakHashMap<Any, WeakReference<Any>>()
     private val panels = WeakHashMap<Any, WeakReference<ViewGroup>>()
     private val adapted = WeakHashMap<View, CcTile>()
+    private data class BlockExtent(val start: Int, val end: Int, val total: Int)
+    private val blockExtents = WeakHashMap<View, BlockExtent>()
     private val sliderSizes = WeakHashMap<View, Pair<Int, Int>>()
     private val mediaProgress = WeakHashMap<View, WeakReference<MediaProgressView>>()
     private val mediaPlaceholders = WeakHashMap<View, WeakReference<View>>()
     private val mediaHolders = WeakHashMap<View, WeakReference<Any>>()
+    private val hiddenMediaChildren = WeakHashMap<View, MutableMap<String, Int>>()
+    private val mediaLayoutSizes = WeakHashMap<View, Pair<Int, Int>>()
     private val mediaInstalled = Collections.newSetFromMap(WeakHashMap<Class<*>, Boolean>())
     private val childLayouts = mutableSetOf<Method>()
     private val handler by lazy { Handler(Looper.getMainLooper()) }
@@ -67,6 +71,7 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
     private fun installAdapter(clazz: Class<*>, p: SharedPreferences) {
         if (!installed.add(clazz)) return
         settings = readCcTileLayoutSettings(p)
+        installSmallTileTypes(clazz)
         // This runs on the main handler, outside the ClassLoader discovery stack.
         listOf(MEDIA_HOLDER, MEDIA_ANIMATOR).forEach { name ->
             runCatching { installMediaHooks(clazz.classLoader!!.loadClass(name)) }.onFailure {
@@ -75,14 +80,17 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         }
         if (preferenceListener == null) {
             preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-                if (key == null || key == KEY_CC_TILE_LAYOUT || key == KEY_CC_TILE_LAYOUT_ENABLED || key == KEY_CC_MEDIA_SOURCE_ICON_HIDDEN) {
+                if (key == null || key == KEY_CC_TILE_LAYOUT || key == KEY_CC_TILE_LAYOUT_ENABLED || key == KEY_CC_MEDIA_SOURCE_ICON_HIDDEN || key == KEY_CC_SMALL_TILE_AUTO_FILL) {
                     handler.post {
                         settings = readCcTileLayoutSettings(p)
                         if (!settings.enabled) adapted.entries.toList().filter { it.value.id == "media" }
                             .forEach { clearMedia(it.key) }
-                        panels.entries.toList().forEach { (_, reference) ->
+                        panels.entries.toList().forEach { (adapter, reference) ->
                             reference.get()?.let { rv ->
                                 // Drop stale saved anchors after dimensions/order change; OEM lays out from top.
+                                if (key == null || key == KEY_CC_TILE_LAYOUT || key == KEY_CC_TILE_LAYOUT_ENABLED || key == KEY_CC_SMALL_TILE_AUTO_FILL) {
+                                    call(adapter, "notifyDataSetChanged")
+                                }
                                 call(rv, "scrollToPosition", 0)
                                 rv.requestLayout()
                             }
@@ -133,6 +141,32 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         installOrientationHelper(manager)
     }
 
+    /** Use the plugin's ordinary tile factory/holder, just as HyperiOS does for small cards. */
+    private fun installSmallTileTypes(clazz: Class<*>) {
+        runCatching { clazz.classLoader!!.loadClass(QS_CARDS_CONTROLLER) }.getOrNull()?.let { cardClass ->
+            cardClass.declaredMethods.filter { it.name == "createViewHolder" && it.parameterCount == 2 }.forEach { m ->
+                module.hook(m).setExceptionMode(ExceptionMode.PROTECTIVE).setId("cc-tiles:card-to-tile-holder").intercept { chain ->
+                    if ((chain.getArg(1) as? Int) == 8453) {
+                        val provider = field(chain.thisObject, "qsListController")
+                        val listController = call(provider, "get")
+                        val holder = call(listController, "createViewHolder", chain.getArg(0), 8453)
+                        if (holder != null) holder else chain.proceed()
+                    } else chain.proceed()
+                }
+            }
+        }
+        clazz.getDeclaredMethod("getItemViewType", Int::class.javaPrimitiveType).let { m ->
+            module.hook(m).setExceptionMode(ExceptionMode.PROTECTIVE).setId("cc-tiles:small-tile-type").intercept { chain ->
+                val original = chain.proceed()
+                val adapter = chain.thisObject
+                val manager = field(adapter, "layoutManager")
+                val id = if (adapter != null && manager != null) block(adapter, manager)?.ids?.get(chain.getArg(0) as Int) else null
+                val tile = settings.tiles.firstOrNull { it.id == id }
+                if ((id == "wlan" || id == "data") && tile?.w == 1 && tile.h == 1) 8453 else original
+            }
+        }
+    }
+
     private fun mediaRoot(holder: Any?): View? = call(holder, "getContentView") as? View
 
     private fun customMedia(root: View?): Boolean = settings.enabled && root != null && adapted[root]?.id == "media"
@@ -153,9 +187,33 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         return false
     }
 
-    private fun wideMedia(root: View): Boolean = adapted[root]?.let { it.w >= 3 && it.h >= 2 } == true
+    private fun wideMedia(root: View): Boolean = adapted[root]?.let { it.w == 4 && it.h == 2 } == true
+
+    private fun hasMediaProgress(root: View): Boolean = adapted[root]?.let {
+        it.w >= 2 && it.h >= 2 && (it.w >= 3 || it.h >= 3)
+    } == true
+
+    private fun mediaEmpty(root: View): Boolean =
+        (hiddenMediaChildren[root]?.get("empty_state") ?: find(root, "empty_state")?.visibility) == View.VISIBLE
+
+    private fun mediaChildVisible(root: View, name: String, visible: Boolean) {
+        val child = find(root, name) ?: return
+        if (visible) {
+            hiddenMediaChildren[root]?.remove(name)?.let { child.visibility = it }
+        } else {
+            hiddenMediaChildren.getOrPut(root) { mutableMapOf() }.putIfAbsent(name, child.visibility)
+            // INVISIBLE still participates in OEM measurement and preserves expansion snapshots.
+            child.visibility = View.INVISIBLE
+        }
+    }
+
+    private fun restoreMediaChildren(root: View) {
+        hiddenMediaChildren.remove(root)?.forEach { (name, visibility) -> find(root, name)?.visibility = visibility }
+    }
 
     private fun clearMedia(root: View) {
+        restoreMediaChildren(root)
+        mediaLayoutSizes.remove(root)
         mediaProgress.remove(root)?.get()?.let { (root as? ViewGroup)?.overlay?.remove(it) }
         mediaPlaceholders.remove(root)?.get()?.let { (root as? ViewGroup)?.overlay?.remove(it) }
         find(root, "device_icon")?.visibility = View.VISIBLE
@@ -203,10 +261,12 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
             }
             clazz.declaredMethods.filter { it.name in setOf("setCornerRadius", "updateRadius", "updateMetaData") }.forEach { m ->
                 module.hook(m).setExceptionMode(ExceptionMode.PROTECTIVE).setId("cc-tiles:cover-invalidate:${m.name}").intercept { chain ->
+                    if (m.name == "updateMetaData") mediaRoot(chain.thisObject)?.let(::restoreMediaChildren)
                     val result = chain.proceed()
                     mediaRoot(chain.thisObject)?.let { root ->
                         chain.thisObject?.let { mediaHolders[root] = WeakReference(it) }
                         if (mainMedia(root)) {
+                            if (m.name == "updateMetaData") adapted[root]?.let { layoutMedia(root, it) }
                             syncCoverOutline(root)
                             syncEmptyMedia(root)
                         }
@@ -228,7 +288,7 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
             val snapshot = field(animator, "animValue")
             val fraction = field(animator, "size") as? Float
             val delegate = field(animator, "contentController")
-            if (root != null && customMedia(root) && wideMedia(root) && snapshot != null && fraction != null && delegate != null) {
+            if (root != null && customMedia(root) && snapshot != null && fraction != null && delegate != null) {
                 // No second ValueAnimator and no scaling around a different pivot at hand-off.
                 listOf("Prev", "Play", "Next").forEach { name ->
                     val start = call(snapshot, "getFromAudio$name")
@@ -238,6 +298,9 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
                         val a = snapshotRect(start); val b = snapshotRect(end)
                         val rect = interpolate(a, b, fraction)
                         button.layout(rect.left.roundToInt(), rect.top.roundToInt(), rect.right.roundToInt(), rect.bottom.roundToInt())
+                        val id = name.lowercase(java.util.Locale.ROOT)
+                        button.alpha = if (find(root, "audio_container")?.visibility != View.VISIBLE || find(root, id)?.visibility != View.VISIBLE)
+                            fraction.coerceIn(0f, 1f) else 1f
                     }
                 }
                 val progress = mediaProgress[root]?.get()
@@ -257,11 +320,14 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
                             expanded.scaleY = rect.height() / target.height().coerceAtLeast(1f)
                             val x = rect.left.roundToInt(); val y = rect.top.roundToInt()
                             expanded.layout(x, y, x + target.width().roundToInt(), y + target.height().roundToInt())
-                            expanded.alpha = if (find(root, "empty_state")?.visibility == View.VISIBLE) 0f else 1f
-                            readMediaProgress(root)?.let { state ->
+                            expanded.alpha = 1f
+                            val state = if (mediaEmpty(root)) Triple(0f, 0L, 0L) else readMediaProgress(root)
+                            state?.let {
                                 (find(expanded, "media_progress_bar") as? android.widget.SeekBar)?.let { bar ->
                                     if (!bar.isPressed) bar.progress = (state.first * bar.max).roundToInt()
                                 }
+                                (find(expanded, "media_elapsed_time") as? android.widget.TextView)?.text = formatTime(state.second)
+                                (find(expanded, "media_total_time") as? android.widget.TextView)?.text = formatTime(state.third)
                             }
                         }
                     }
@@ -270,7 +336,7 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
                 val source = find(root, "device_icon")
                 if (device != null && source != null) {
                     // This icon is hidden at the expanded endpoint by OEM; interpolate its alpha.
-                    val alpha = if (settings.mediaSourceIconHidden) 0f else 1f - fraction.coerceIn(0f, 1f)
+                    val alpha = if (settings.mediaSourceIconHidden || source.visibility != View.VISIBLE) 0f else 1f - fraction.coerceIn(0f, 1f)
                     device.alpha = alpha
                     if (alpha > 0f) {
                         val parent = device.parent as? View
@@ -299,7 +365,14 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         return RectF(rect).also { fromMatrix.mapRect(it); inverse.mapRect(it) }
     }
 
-    private data class Block(val start: Int, val end: Int, val ids: Map<Int, String>)
+    private data class Block(
+        val start: Int,
+        val end: Int,
+        val ids: Map<Int, String>,
+        val tiles: Map<Int, CcTile>,
+        val nativePositions: Set<Int>,
+        val rows: Int,
+    )
 
     /** Reject any unfamiliar structure rather than moving lower tiles or mixed panel contents. */
     private fun block(adapter: Any, manager: Any): Block? {
@@ -307,7 +380,7 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         if ((call(manager, "getSpanCount") as? Int) != 4 || (call(manager, "getOrientation") as? Int) != 1) return null
         val content = field(adapter, "contentMap") as? Map<*, *> ?: return null
         var index = 0
-        val ids = linkedMapOf<Int, String>()
+        val all = mutableListOf<Triple<Int, String?, Any?>>()
         content.forEach { (owner, raw) ->
             (raw as? List<*>)?.forEach { item ->
                 val id = when (owner?.javaClass?.simpleName) {
@@ -317,13 +390,26 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
                     "VolumeSliderController" -> "volume"
                     else -> null
                 }
-                if (id != null) ids[index] = id
-                index++
+                all += Triple(index++, id, item)
             }
         }
+        val ids = linkedMapOf<Int, String>()
+        all.forEach { (position, id, _) -> if (id != null) ids[position] = id }
         if (ids.size != 5 || ids.values.toSet() != CcTileLayouts.initial.map { it.id }.toSet()) return null
         val start = ids.keys.min(); val end = ids.keys.max()
-        return if (end - start == 4) Block(start, end, ids) else null
+        if (end - start != 4) return null
+        val tiles = linkedMapOf<Int, CcTile>()
+        ids.forEach { (position, id) -> tiles[position] = settings.tiles.first { it.id == id } }
+        val following = if (settings.smallTileAutoFill) all.filter { it.first > end }.map { (position, _, item) ->
+            val span = ((call(item, "getSpanSize") as? Int) ?: 4).coerceIn(1, 4)
+            CcFillRecord(position, span, item?.javaClass?.simpleName == "QSRecord" &&
+                (call(item, "getType") as? Int) == 8453 && span == 1)
+        } else emptyList()
+        val lookup = if (following.isNotEmpty()) call(manager, "getSpanSizeLookup") else null
+        val nextSpanIndex = (call(lookup, "getSpanIndex", end + 1, 4) as? Int) ?: 0
+        val fill = planCcSmallTileFill(tiles, CcTileLayouts.rows(settings.tiles), following,
+            settings.smallTileAutoFill, nextSpanIndex)
+        return Block(start, fill.tiles.keys.max(), ids, fill.tiles, fill.nativePositions, fill.rows)
     }
 
     private fun installManager(clazz: Class<*>) {
@@ -347,6 +433,7 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
                         if (adapted[root]?.id == "media") clearMedia(root)
                         adapted.remove(root)
                     }
+                    blockExtents.keys.toList().filter { it.parent === rv }.forEach(blockExtents::remove)
                 }
                 chain.proceed()
             }
@@ -395,7 +482,7 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         }
     }
 
-    /** Treat the five real children as one recycling/scrolling extent. This prevents
+    /** Treat the reordered visual block as one recycling/scrolling extent. This prevents
      * recycling an early adapter record while a later record is visually above it. */
     private fun installOrientationHelper(manager: Any) {
         call(manager, "ensureLayoutState")
@@ -409,11 +496,12 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
                 val lm = field(chain.thisObject, "mLayoutManager")
                 val adapter = managers[lm]?.get()
                 val view = chain.getArg(0) as? View
-                val t = adapted[view]
-                if (lm != null && adapter != null && t != null && view?.parent === panels[adapter]?.get() && block(adapter,lm) != null) {
-                    val pitch = step(lm)
-                    if (m.name.contains("Start")) original - t.row * pitch
-                    else original + (CcTileLayouts.rows(settings.tiles) - t.row - t.h) * pitch
+                val extent = blockExtents[view]
+                val plan = if (lm != null && adapter != null) block(adapter, lm) else null
+                val position = if (lm != null && view != null) call(lm, "getPosition", view) as? Int else null
+                if (extent != null && plan != null && position in plan.start..plan.end && view?.parent === panels[adapter]?.get()) {
+                    if (m.name.contains("Start")) original - extent.start
+                    else original + extent.total - extent.end
                 } else original
             }
         }
@@ -423,36 +511,72 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         (call(manager, "getPaddingLeft") as Int) - (call(manager, "getPaddingRight") as Int)) / 4
 
     private fun layoutBlock(manager: Any, adapter: Any, block: Block, recycler: Any, layout: Any, result: Any) {
-        val tileSnapshot = settings.tiles
         val pitch = step(manager).coerceAtLeast(1)
-        val total = CcTileLayouts.rows(tileSnapshot) * pitch
         val forward = (field(layout, "mItemDirection") as Int) == 1
         val towardEnd = (field(layout, "mLayoutDirection") as Int) == 1
         val offset = field(layout, "mOffset") as Int
         val rv = panels[adapter]?.get() ?: error("Detached upper tile layout")
         val left = call(manager, "getPaddingLeft") as Int
-        val top = if (towardEnd) offset else offset - total
         val rtl = rv.layoutDirection == View.LAYOUT_DIRECTION_RTL
-        // Continue through the complete five-item block even when the scroll anchor lies inside it.
+        // Collect in adapter order (or reverse), retaining every original view exactly once.
         set(layout, "mCurrentPosition", if (forward) block.start else block.end)
         val positions = if (forward) (block.start..block.end).toList() else (block.end downTo block.start).toList()
+        val views = linkedMapOf<Int, View>()
+        val verticalInsets = mutableMapOf<Int, Int>()
+        val rowHeights = IntArray(block.rows) { pitch }
+        val naturalRows = block.nativePositions.map { block.tiles.getValue(it).row }.toSet()
+        naturalRows.forEach { rowHeights[it] = 0 }
         var focusable = false
         positions.forEach { position ->
             val view = call(layout, "next", recycler) as? View ?: error("Missing upper tile at $position")
-            val tile = tileSnapshot.first { it.id == block.ids.getValue(position) }
+            views[position] = view
+            val tile = block.tiles.getValue(position)
             val params = view.layoutParams as ViewGroup.MarginLayoutParams
             set(params, "mSpanIndex", tile.col); set(params, "mSpanSize", tile.w)
             if (forward) call(manager, "addView", view) else call(manager, "addView", view, 0)
             val decoration = Rect()
             call(manager, "calculateItemDecorationsForChild", view, decoration)
             val width = (tile.w * pitch - params.leftMargin - params.rightMargin - decoration.left - decoration.right).coerceAtLeast(1)
-            val height = (tile.h * pitch - params.topMargin - params.bottomMargin - decoration.top - decoration.bottom).coerceAtLeast(1)
-            prepareChild(view, tile, width, height)
-            view.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
-            val col = if (rtl) 4 - tile.col - tile.w else tile.col
-            val x = left + col * pitch; val y = top + tile.row * pitch
-            call(manager, "layoutDecoratedWithMargins", view, x, y, x + tile.w * pitch, y + tile.h * pitch)
+            val insets = params.topMargin + params.bottomMargin + decoration.top + decoration.bottom
+            verticalInsets[position] = insets
+            if (position in block.nativePositions) {
+                // Device entries and other system rows keep their OEM requested height.
+                adapted.remove(view)
+                blockExtents.remove(view)
+                val heightSpec = if (params.height >= 0) View.MeasureSpec.makeMeasureSpec(params.height, View.MeasureSpec.EXACTLY)
+                    else View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+                view.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), heightSpec)
+                rowHeights[tile.row] = maxOf(rowHeights[tile.row], view.measuredHeight + insets)
+            } else {
+                val height = (tile.h * pitch - insets).coerceAtLeast(1)
+                prepareChild(view, tile, width, height)
+                view.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
+                // A small tile with labels may need more vertical room than an empty slot.
+                // Grow that shared row; spanning upper cards use the same row boundaries.
+                if (tile.id.startsWith("small:")) {
+                    val label = find(view, "tile_label")
+                    if (label?.visibility == View.VISIBLE) rowHeights[tile.row] = maxOf(rowHeights[tile.row], params.height + insets)
+                }
+            }
             focusable = focusable || view.hasFocusable()
+        }
+        val rowOffsets = IntArray(block.rows + 1)
+        for (row in rowHeights.indices) rowOffsets[row + 1] = rowOffsets[row] + rowHeights[row]
+        val total = rowOffsets.last()
+        val top = if (towardEnd) offset else offset - total
+        positions.forEach { position ->
+            val view = views.getValue(position)
+            val tile = block.tiles.getValue(position)
+            val start = rowOffsets[tile.row]
+            val end = rowOffsets[tile.row + tile.h]
+            val height = (end - start - verticalInsets.getValue(position)).coerceAtLeast(1)
+            if (position !in block.nativePositions) prepareChild(view, tile, view.measuredWidth, height)
+            view.measure(View.MeasureSpec.makeMeasureSpec(view.measuredWidth, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
+            val col = if (rtl) 4 - tile.col - tile.w else tile.col
+            val x = left + col * pitch
+            call(manager, "layoutDecoratedWithMargins", view, x, top + start, x + tile.w * pitch, top + end)
+            blockExtents[view] = BlockExtent(start, end, total)
         }
         set(layout, "mCurrentPosition", if (forward) block.end + 1 else block.start - 1)
         set(result, "mConsumed", total)
@@ -490,6 +614,8 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
 
     /** Keep the OEM children/listeners; resize their actual boxes instead of scaling touch targets. */
     private fun layoutCard(root: View, t: CcTile) {
+        // Native 1×1 tiles own their icon frame, text mode, background and touch geometry.
+        if (find(root, "icon_frame") != null) return
         val content = find(root, "scale_content") as? ViewGroup ?: return
         val label = find(root, "label_container") ?: return
         val icon = (0 until content.childCount).map(content::getChildAt).firstOrNull { it !== label } ?: return
@@ -509,6 +635,12 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
     }
 
     private fun layoutMedia(root: View, t: CcTile) {
+        if (root.width <= 0 || root.height <= 0) return
+        val size = t.w to t.h
+        if (mediaLayoutSizes[root] != size) {
+            restoreMediaChildren(root)
+            mediaLayoutSizes[root] = size
+        }
         val d = root.resources.displayMetrics.density
         val inset = minOf((14*d).roundToInt(), root.width/8)
         val cover = find(root, "cover") ?: return
@@ -517,12 +649,12 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         val audio = find(root, "audio_container")
         val device = find(root, "device_icon")
         val empty = find(root, "empty_state")
-        device?.visibility = if (settings.mediaSourceIconHidden) View.GONE else View.VISIBLE
-        if (t.w == 2 && t.h == 2) {
-            mediaProgress.remove(root)?.get()?.let { (root as? ViewGroup)?.overlay?.remove(it) }
-            syncCoverOutline(root)
-            syncEmptyMedia(root)
-            return // Retain OEM geometry at the original size.
+        if (wideMedia(root)) {
+            device?.visibility = if (settings.mediaSourceIconHidden) View.GONE else View.VISIBLE
+        }
+        if (!wideMedia(root)) {
+            layoutAdaptiveMedia(root, t)
+            return
         }
         val wide = wideMedia(root)
         val horizontal = t.h == 1 || wide
@@ -578,6 +710,93 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         syncEmptyMedia(root)
     }
 
+    /** Size tiers follow HyperiOS: cover-only, compact transport, then metadata/transport. */
+    private fun layoutAdaptiveMedia(root: View, t: CcTile) {
+        val d = root.resources.displayMetrics.density
+        fun dp(value: Int) = (value * d).roundToInt()
+        val inset = minOf(dp(12), root.width / 8, root.height / 8)
+        val gap = dp(6)
+        val width = (root.width - inset * 2).coerceAtLeast(1)
+        val height = (root.height - inset * 2).coerceAtLeast(1)
+        val coverOnly = t.w == 1 && t.h == 1
+        val transportOnly = (t.w == 2 && t.h == 1) || (t.w == 1 && t.h == 2)
+        val singleRow = t.h == 1 && !coverOnly && !transportOnly
+        val vertical = t.w <= 2 && t.h > 1
+        val showProgress = hasMediaProgress(root)
+        listOf("title", "artist", "empty_state").forEach { mediaChildVisible(root, it, !coverOnly && !transportOnly) }
+        mediaChildVisible(root, "audio_container", !coverOnly)
+        listOf("prev", "play", "next").forEach { name ->
+            mediaChildVisible(root, name, !coverOnly && (!singleRow || name == "play" || (t.w == 4 && name == "next")))
+        }
+        // A source icon must not compete with the cover or transport in narrow/short tiers.
+        mediaChildVisible(root, "device_icon", !settings.mediaSourceIconHidden && t.w >= 2 && t.h >= 2)
+        val cover = find(root, "cover") ?: return
+        val coverSize = when {
+            coverOnly -> minOf(width, height, dp(56))
+            transportOnly && t.h == 1 -> minOf(height, (width * .28f).roundToInt())
+            transportOnly -> minOf(width, (height * .36f).roundToInt())
+            singleRow -> minOf(height, (width * .22f).roundToInt())
+            vertical -> minOf(width, (height * .32f).roundToInt())
+            else -> minOf(height, (width * .42f).roundToInt())
+        }.coerceAtLeast(1)
+        val coverX = if (t.w == 1 || coverOnly) (root.width - coverSize) / 2 else inset
+        val coverY = if (coverOnly || !vertical) (root.height - coverSize) / 2 else inset
+        box(cover, coverX, coverY, coverSize, coverSize)
+        syncCoverOutline(root)
+        find(root, "device_icon")?.let { device ->
+            val s = minOf(dp(20), width / 4)
+            box(device, root.width - inset - s, inset, s, s)
+        }
+        if (coverOnly) {
+            mediaProgress.remove(root)?.get()?.let { (root as? ViewGroup)?.overlay?.remove(it) }
+            syncEmptyMedia(root)
+            return
+        }
+        val progressH = if (showProgress) progressHeight(root) else 0
+        val contentX = if (vertical) inset else coverX + coverSize + gap
+        val contentW = (root.width - inset - contentX).coerceAtLeast(1)
+        val audio = find(root, "audio_container")
+        val verticalButtons = t.w == 1
+        val buttonCount = if (singleRow) if (t.w == 4) 2 else 1 else 3
+        val audioW = if (singleRow) minOf(contentW / 2, dp(32) * buttonCount + gap) else contentW
+        val audioH = when {
+            verticalButtons -> minOf((height - coverSize - gap - if (transportOnly) 0 else dp(42) + gap).coerceAtLeast(1), dp(28) * 3)
+            singleRow -> minOf(height, dp(36))
+            else -> minOf(height / 3, dp(36))
+        }.coerceAtLeast(1)
+        val audioX = if (singleRow) root.width - inset - audioW else contentX
+        val audioY = if (singleRow || transportOnly && !vertical) (root.height - audioH) / 2
+            else root.height - inset - progressH - (if (showProgress) gap else 0) - audioH
+        audio?.let {
+            box(it, audioX, audioY, audioW, audioH)
+            val controls = listOf("prev", "play", "next").mapNotNull { name -> find(it, name) }.filter { v -> v.visibility == View.VISIBLE }
+            controls.forEachIndexed { index, child ->
+                val slot = if (verticalButtons) audioH / controls.size else audioW / controls.size
+                val s = minOf(dp(32), slot, if (verticalButtons) audioW else audioH).coerceAtLeast(1)
+                box(child, if (verticalButtons) (audioW - s) / 2 else index * slot + (slot - s) / 2,
+                    if (verticalButtons) index * slot + (slot - s) / 2 else (audioH - s) / 2, s, s)
+            }
+        }
+        val textTop = if (vertical) coverY + coverSize + gap else inset
+        val textBottom = if (singleRow) root.height - inset else audioY - gap
+        val lineH = minOf(dp(22), (textBottom - textTop).coerceAtLeast(2) / 2).coerceAtLeast(1)
+        val textY = if (singleRow) (root.height - lineH * 2) / 2 else textTop
+        val textW = if (singleRow) (audioX - gap - contentX).coerceAtLeast(1)
+            else (contentW - if (!vertical && find(root, "device_icon")?.visibility == View.VISIBLE) dp(26) else 0).coerceAtLeast(1)
+        find(root, "title")?.let { box(it, contentX, textY, textW, lineH) }
+        find(root, "artist")?.let { box(it, contentX, textY + lineH, textW, lineH) }
+        find(root, "empty_state")?.let { box(it, contentX, textY, textW, lineH * 2) }
+        if (showProgress && root is ViewGroup) {
+            val progress = mediaProgress[root]?.get() ?: MediaProgressView(root.context, root).also {
+                mediaProgress[root] = WeakReference(it)
+                root.overlay.add(it)
+            }
+            box(progress, contentX, root.height - inset - progressH, contentW, progressH)
+            progress.invalidate()
+        } else mediaProgress.remove(root)?.get()?.let { (root as? ViewGroup)?.overlay?.remove(it) }
+        syncEmptyMedia(root)
+    }
+
     private fun syncEmptyMedia(root: View) {
         if (root !is ViewGroup) return
         val empty = find(root, "empty_state") as? android.widget.TextView
@@ -586,7 +805,7 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
             it.gravity = Gravity.LEFT or Gravity.CENTER_VERTICAL
             it.textAlignment = View.TEXT_ALIGNMENT_VIEW_START
         }
-        if (empty?.visibility == View.VISIBLE) {
+        if (mediaEmpty(root)) {
             val placeholder = mediaPlaceholders[root]?.get() ?: View(root.context).also {
                 it.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 it.isClickable = false
@@ -594,7 +813,7 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
                 root.overlay.add(it)
             }
             val background = placeholder.background as? GradientDrawable ?: GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE; setColor(0x26808080)
+                shape = GradientDrawable.RECTANGLE; setColor(0x73808080)
             }.also { placeholder.background = it }
             background.cornerRadius = coverRadius(mediaHolders[root]?.get(), cover) ?: (10f * root.resources.displayMetrics.density)
             box(placeholder, cover.left, cover.top, cover.width, cover.height)
@@ -625,10 +844,10 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
             val root = mediaRoot.get() ?: return
-            if (!settings.enabled || !wideMedia(root)) return
-            if (find(root, "empty_state")?.visibility == View.VISIBLE) { cachedState = null; return }
-            readMediaProgress(root)?.let { cachedState = it }
-            val state = cachedState ?: return
+            if (!settings.enabled || !hasMediaProgress(root)) return
+            if (mediaEmpty(root)) cachedState = null
+            else readMediaProgress(root)?.let { cachedState = it }
+            val state = cachedState ?: Triple(0f, 0L, 0L)
             val barH = 4f * density
             val barTop = 1f * density
             paint.color = 0x33ffffff
@@ -690,6 +909,7 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
     }
     companion object {
         private const val ADAPTER = "miui.systemui.controlcenter.panel.main.recyclerview.MainPanelAdapter"
+        private const val QS_CARDS_CONTROLLER = "miui.systemui.controlcenter.panel.main.qs.QSCardsController"
         private const val MEDIA_HOLDER = "miui.systemui.controlcenter.panel.main.media.MediaPlayerController\$MediaPlayerViewHolder"
         private const val MEDIA_ANIMATOR = "miui.systemui.controlcenter.panel.secondary.media.MediaPanelAnimator"
     }
