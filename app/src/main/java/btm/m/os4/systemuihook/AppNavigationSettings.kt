@@ -39,7 +39,7 @@ internal class AppNavigationSettingsStore internal constructor(val preferences: 
                 is Boolean -> editor.putBoolean(key, value)
                 is Int -> editor.putInt(key, value)
                 is String -> editor.putString(key, value)
-                is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+                is Set<*> -> editor.putFrameworkStringSet(key, value.filterIsInstance<String>())
             }
         }
         editor.apply()

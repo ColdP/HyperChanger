@@ -260,7 +260,7 @@ object ModulePresetCodec {
                 "string" -> editor.putString(key, encoded.getString("value"))
                 "string_set" -> {
                     val array = encoded.optJSONArray("value") ?: error("预设字段格式错误: $key")
-                    editor.putStringSet(key, buildSet {
+                    editor.putFrameworkStringSet(key, buildSet {
                         for (index in 0 until array.length()) add(array.getString(index))
                     })
                 }

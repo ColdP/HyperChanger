@@ -88,7 +88,7 @@ internal class NativeBoseSupportStore(
         boundService = service
         val editor = service.getRemotePreferences(NATIVE_BOSE_PREFERENCES).edit()
         if (local.contains(KEY_DEVICES)) {
-            editor.putStringSet(KEY_DEVICES, nativeBoseDevices(local).toSet())
+            editor.putFrameworkStringSet(KEY_DEVICES, nativeBoseDevices(local))
         } else {
             // Do not turn the bundled snapshot into an authoritative downloaded cache.
             editor.remove(KEY_DEVICES)

@@ -37,7 +37,7 @@ class MusicControlSettingsStore(context: Context) {
 
     private fun write(preferences: SharedPreferences) {
         preferences.edit()
-            .putStringSet(MUSIC_CONTROLS_WHITELIST_APPS, apps)
+            .putFrameworkStringSet(MUSIC_CONTROLS_WHITELIST_APPS, apps)
             .putBoolean(HOOK_MUSIC_CONTROLS_WHITELIST, true)
             .apply()
     }

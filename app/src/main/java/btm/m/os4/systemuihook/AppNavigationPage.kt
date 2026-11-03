@@ -182,7 +182,7 @@ private fun AppNavigationSettings(appItem: AppNavItem, store: AppNavigationSetti
                         val checked = tab in walletTabs
                         SwitchPreference(title = walletTabName(tab), checked = checked, enabled = enabled && (!checked || walletTabs.size > 1), onCheckedChange = { value ->
                             walletTabs = if (value) walletTabs + tab else walletTabs - tab
-                            store.edit(service) { putStringSet(ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_VISIBLE_TABS), walletTabs) }; onChanged()
+                            store.edit(service) { putFrameworkStringSet(ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_VISIBLE_TABS), walletTabs) }; onChanged()
                         })
                     }
                 }
