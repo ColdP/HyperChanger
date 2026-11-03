@@ -1745,7 +1745,9 @@ private fun Shell(
                         val pageVisibility = remember(stackPage) {
                             MutableTransitionState(false).apply { targetState = true }
                         }
-                        pageVisibility.targetState = index != ordinaryClosingIndex
+                        // Once exit starts, never reopen this instance when the global
+                        // closing index is cleared or reused by the next stack entry.
+                        if (index == ordinaryClosingIndex) pageVisibility.targetState = false
                         AnimatedVisibility(
                             visibleState = pageVisibility,
                             enter = if (index > 0 && stackEntry == null) {
