@@ -116,7 +116,7 @@ internal object CcMediaRoute {
             .getConstructor(AudioDeviceInfo::class.java)
             .newInstance(device)
         val strategyClass = Class.forName("android.media.audiopolicy.AudioProductStrategy")
-        val strategies = strategyClass.getMethod("getAudioProductStrategies").invoke(null) as? List<*> ?: return false false
+        val strategies = strategyClass.getMethod("getAudioProductStrategies").invoke(null) as? List<*> ?: return false
         val mediaStrategy = strategies.firstOrNull { strategy ->
             val attributesValue = strategy?.javaClass?.getMethod("getAudioAttributes")?.invoke(strategy)
             val usage = attributesValue?.javaClass?.getMethod("getUsage")?.invoke(attributesValue) as? Int
