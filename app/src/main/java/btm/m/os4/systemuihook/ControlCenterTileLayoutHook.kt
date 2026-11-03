@@ -43,8 +43,8 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
     private val sliderSizes = WeakHashMap<View, Pair<Int, Int>>()
     private val mediaProgress = WeakHashMap<View, WeakReference<MediaProgressView>>()
     private val mediaFavorite = WeakHashMap<View, WeakReference<CcMediaFavoriteView>>()
-    private val mediaVolume = WeakHashMap<View, WeakReference<CcMediaVolumeSlider>>()
-    private val mediaDevice = WeakHashMap<View, WeakReference<CcMediaDeviceRow>>()
+    private val mediaVolume = WeakHashMap<View, WeakReference<View>>()
+    private val mediaDevice = WeakHashMap<View, WeakReference<View>>()
     private val mediaPlaceholders = WeakHashMap<View, WeakReference<View>>()
     private val mediaHolders = WeakHashMap<View, WeakReference<Any>>()
     private val hiddenMediaChildren = WeakHashMap<View, MutableMap<String, Int>>()
@@ -830,51 +830,69 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
      */
     private fun layoutExpandedMedia(root: View) {
         if (root.width <= 0 || root.height <= 0) return
-        val d = root.resources.displayMetrics.density
-        fun dp(v: Int) = (v * d).roundToInt()
-        val inset = dp(12)
-        val gap = dp(6)
-        val width = (root.width - inset * 2).coerceAtLeast(1)
-        val titleH = dp(18)
-        val artistH = dp(16)
-        val progressH = progressHeight(root)
-        val buttonsH = dp(36)
-        val volumeH = dp(30)
-        val deviceH = dp(26)
-        val fixed = titleH + artistH + progressH + buttonsH + volumeH + deviceH + gap * 6
+        val context = root.context
+        val density = root.resources.displayMetrics.density
+        fun dp(value: Float) = (value * density).roundToInt()
+        // Stock measurements from the official control center plugin layout.
+        val inset = CcMediaNative.dimension(context, "miplay_detail_header_padding_start_end", dp(16f))
+        val gap = dp(8f)
         val cover = find(root, "cover") ?: return
-        val coverSize = minOf(width, (root.height - inset * 2 - fixed)).coerceAtLeast(dp(40))
         mediaChildVisible(root, "title", true)
         mediaChildVisible(root, "artist", true)
         mediaChildVisible(root, "empty_state", true)
         mediaChildVisible(root, "audio_container", true)
         mediaChildVisible(root, "device_icon", false)
+        val coverSize = minOf(
+            CcMediaNative.dimension(context, "miplay_detail_header_cover_size", dp(96f)),
+            (root.width - inset * 2).coerceAtLeast(1),
+        )
         box(cover, (root.width - coverSize) / 2, inset, coverSize, coverSize)
         syncCoverOutline(root)
         var y = inset + coverSize + gap
-        find(root, "title")?.let { box(it, inset, y, width, titleH) }
-        find(root, "artist")?.let { box(it, inset, y + titleH, width, artistH) }
-        find(root, "empty_state")?.let { box(it, inset, y, width, titleH + artistH) }
-        y += titleH + artistH + gap
+        // Title uses 18sp and the subtitle 13sp: force enough height or the glyphs get clipped.
+        val titleHeight = dp(26f)
+        val subtitleHeight = dp(20f)
+        val textWidth = (root.width - inset * 2).coerceAtLeast(1)
+        find(root, "title")?.let { box(it, inset, y, textWidth, titleHeight) }
+        find(root, "artist")?.let { box(it, inset, y + titleHeight, textWidth, subtitleHeight) }
+        find(root, "empty_state")?.let { box(it, inset, y, textWidth, titleHeight + subtitleHeight) }
+        y += titleHeight + subtitleHeight + gap
+        val progressHeight = CcMediaNative.dimension(context, "miplay_detail_header_media_progress_bar_top", dp(20f))
         val progress = ensureMediaProgress(root)
-        box(progress, inset, y, width, progressH)
+        box(progress, inset, y, textWidth, progressHeight)
         progress.invalidate()
-        y += progressH + gap
-        // Four equal slots: favourite first, then the untouched OEM transport buttons.
-        val slot = width / 4
-        ensureFavorite(root)?.let { box(it, inset, y, slot, buttonsH) }
+        y += progressHeight + dp(14f)
+        val actionSize = CcMediaNative.dimension(context, "miplay_detail_header_action_size", dp(44f))
+        val actionRow = actionSize.coerceAtMost(root.height / 6).coerceAtLeast(dp(28f))
+        ensureFavorite(root)?.let {
+            val size = (actionRow * .6f).roundToInt().coerceAtLeast(1)
+            box(it, inset, y + (actionRow - size) / 2, size, size)
+        }
         find(root, "audio_container")?.let { owner ->
-            box(owner, inset, y, width, buttonsH)
+            val trackWidth = (textWidth - actionRow - gap).coerceAtLeast(1)
+            box(owner, inset + actionRow + gap, y, trackWidth, actionRow)
+            val slot = trackWidth / 3
             listOf("prev", "play", "next").forEachIndexed { index, name ->
                 val child = find(owner, name) ?: return@forEachIndexed
-                val size = minOf(dp(30), slot, buttonsH).coerceAtLeast(1)
-                box(child, slot * (index + 1) + (slot - size) / 2, (buttonsH - size) / 2, size, size)
+                val size = minOf(actionSize, slot, actionRow).coerceAtLeast(1)
+                box(child, slot * index + (slot - size) / 2, (actionRow - size) / 2, size, size)
             }
         }
-        y += buttonsH + gap
-        ensureVolumeSlider(root)?.let { box(it, inset, y, width, volumeH) }
-        y += volumeH + gap
-        ensureDeviceRow(root)?.let { box(it, inset, y, width, deviceH) }
+        y += actionRow + gap
+        if (findInPanel(root, "volume_row_slider") == null) {
+            ensureVolumeRow(root)?.let { row ->
+                val height = CcMediaNative.dimension(context, "miplay_detail_item_volume_bar_height", dp(40f))
+                    .coerceAtLeast(1)
+                box(row, inset, y, textWidth, height)
+                y += height + gap
+            }
+        }
+        if (findInPanel(root, "list") == null) {
+            ensureDeviceRow(root)?.let { row ->
+                box(row, inset, y, textWidth, dp(52f))
+                syncDeviceTitle(root)
+            }
+        }
         syncEmptyMedia(root)
     }
 
@@ -900,34 +918,58 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         return view
     }
 
-    private fun ensureVolumeSlider(root: View): CcMediaVolumeSlider? {
+    /** Stock volume item layout: real MiPlayVolumeBar, bound to STREAM_MUSIC. */
+    private fun ensureVolumeRow(root: View): View? {
         if (root !is ViewGroup) return null
         mediaVolume[root]?.get()?.let { return it }
         val context = root.context
-        val view = CcMediaVolumeSlider(
-            context,
-            level = { CcMediaVolume.level(context) },
-            max = { CcMediaVolume.max(context) },
-            onSet = { CcMediaVolume.set(context, it) },
-        )
-        runCatching { root.addView(view) }
-        mediaVolume[root] = WeakReference(view)
-        return view
+        val row = CcMediaNative.layout(context, "qs_control_detail_miplay_device_volume_item") ?: return null
+        row.findViewById<android.widget.SeekBar>(CcMediaNative.id(context, "device_volume_bar"))?.let { seek ->
+            seek.visibility = View.VISIBLE
+            seek.max = CcMediaVolume.max(context).coerceAtLeast(1)
+            seek.progress = CcMediaVolume.level(context)
+            seek.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar: android.widget.SeekBar, value: Int, fromUser: Boolean) {
+                    if (fromUser) CcMediaVolume.set(context, value)
+                }
+
+                override fun onStartTrackingTouch(bar: android.widget.SeekBar) = Unit
+
+                override fun onStopTrackingTouch(bar: android.widget.SeekBar) = Unit
+            })
+        }
+        runCatching { root.addView(row) }
+        mediaVolume[root] = WeakReference(row)
+        return row
     }
 
-    private fun ensureDeviceRow(root: View): CcMediaDeviceRow? {
+    /** Stock device item layout, so the row matches the native device list entries. */
+    private fun ensureDeviceRow(root: View): View? {
         if (root !is ViewGroup) return null
         mediaDevice[root]?.get()?.let { return it }
         val context = root.context
-        val view = CcMediaDeviceRow(
-            context,
-            label = { CcMediaRoute.currentName(context) ?: tr("cc_media_output", "播放设备") },
-            onClick = { anchor -> openMediaDevicePicker(root, anchor) },
-        )
+        val view = CcMediaNative.layout(context, "qs_control_detail_miplay_device_item") ?: return null
+        view.findViewById<View>(CcMediaNative.id(context, "device_volume_bar"))?.visibility = View.GONE
+        view.isClickable = true
+        view.setOnClickListener { openMediaDevicePicker(root, it) }
         runCatching { root.addView(view) }
         mediaDevice[root] = WeakReference(view)
         return view
     }
+
+    private fun syncDeviceTitle(root: View) {
+        val context = root.context
+        val id = CcMediaNative.id(context, "device_title")
+        if (id == 0) return
+        val text = CcMediaRoute.currentName(context) ?: tr("cc_media_output", "播放设备")
+        mediaDevice[root]?.get()?.findViewById<android.widget.TextView>(id)?.let { view ->
+            if (view.text?.toString() != text) view.text = text
+        }
+    }
+
+    /** Looks for a stock view on the card and, failing that, on the panel hosting it. */
+    private fun findInPanel(root: View, name: String): View? =
+        find(root, name) ?: ((root.parent as? View)?.let { find(it, name) })
 
     private fun clearExpandedControls(root: View) {
         mediaFavorite.remove(root)?.get()?.let { (it.parent as? ViewGroup)?.removeView(it) }
@@ -935,7 +977,7 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         mediaDevice.remove(root)?.get()?.let { (it.parent as? ViewGroup)?.removeView(it) }
     }
 
-    /** Forward to the stock output picker first; fall back to our own route list. */
+    /** Forward to the stock output picker first; fall back to our own device list. */
     private fun openMediaDevicePicker(root: View, anchor: View) {
         val native = find(root, "device_icon")
         if (native != null && (native.isClickable || native.hasOnClickListeners())) {
@@ -948,8 +990,8 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         val context = root.context
         val devices = CcMediaRoute.outputs(context)
         if (devices.isEmpty()) return
-        val d = context.resources.displayMetrics.density
-        fun dp(v: Int) = (v * d).roundToInt()
+        val density = context.resources.displayMetrics.density
+        fun dp(value: Int) = (value * density).roundToInt()
         val list = android.widget.LinearLayout(context).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             setPadding(dp(4), dp(4), dp(4), dp(4))
