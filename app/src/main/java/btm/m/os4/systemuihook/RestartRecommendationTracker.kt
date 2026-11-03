@@ -29,6 +29,8 @@ internal class RestartRecommendationTracker(
                 val scopes = changedKeys.flatMap { restartScopesForPreference(group, it) }.toMutableSet()
                 if (group == REMOTE_PREFERENCE_GROUP && changedKeys.any { it.startsWith("soft_glass_parameters_v3_") }
                     && homeGlassFollowsGlobal(prefs)) scopes += ScopeApplication.DESKTOP
+                if (group == REMOTE_PREFERENCE_GROUP && changedKeys.any { it.startsWith("soft_glass_parameters_v3_") }
+                    && readSidebarSettings(prefs).let { it.glass.enabled && it.useGlobal }) scopes += ScopeApplication.SECURITY_CENTER
                 if (scopes.isNotEmpty()) onChanged(scopes)
             }
         }
@@ -88,6 +90,7 @@ internal fun restartScopesForPreference(group: String, key: String): Set<ScopeAp
             ScopeApplication.THEME_MANAGER,
         )
         key.startsWith("contacts_dialer_background_") -> setOf(ScopeApplication.CONTACTS_DIALER)
+        key.startsWith(SIDEBAR_PREFIX) -> setOf(ScopeApplication.SECURITY_CENTER)
         key.startsWith("portal_") -> setOf(ScopeApplication.PORTAL)
         key.startsWith("home_") || key.startsWith("dock_") -> setOf(ScopeApplication.DESKTOP)
         key.startsWith("settings_") || key in setOf(

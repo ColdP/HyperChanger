@@ -55,11 +55,15 @@ internal class OthersHooks(
     private val screenshotHooks = ScreenshotHooks(module, hookDeoptimized, logTag)
     private val contactsDialerHooks = ContactsDialerHooks(module, hookDeoptimized, logTag)
     private val portalHooks = PortalHooks(module, hookDeoptimized, logTag)
+    private val sidebarHooks = SidebarHooks(module, hookDeoptimized, logTag)
     private val htmlViewerHooks = HtmlViewerHooks(module)
     private val joyoseHooks = JoyoseHooks(module)
 
     fun installPortalHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
         portalHooks.install(classLoader, preferences)
+
+    fun installSidebarHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
+        sidebarHooks.install(classLoader, preferences)
 
     fun installContactsDialerHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
         contactsDialerHooks.install(classLoader, preferences)

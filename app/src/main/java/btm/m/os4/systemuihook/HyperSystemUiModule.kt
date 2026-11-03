@@ -1044,6 +1044,9 @@ class HyperSystemUiModule : XposedModule() {
         }
         if (param.packageName == "com.miui.securitycenter") {
             val preferences = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
+            if (runCatching { android.app.Application.getProcessName() == "com.miui.securitycenter:ui" }.getOrDefault(false)) {
+                othersHooks.installSidebarHooks(param.defaultClassLoader, preferences)
+            }
             if (preferences.isEnvironmentDetectionEnabled() && preferences.getBoolean(KEY_SECURITYCENTER_ROOTED_DIAGNOSTICS, false)) {
                 SecurityCenterRootDiagnostics.inspectRootedCheck(this, param)
             }

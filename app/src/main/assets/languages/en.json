@@ -3,6 +3,11 @@
   "creator": "btm_m",
   "locale": "en",
   "strings": {
+    "安全服务": "Security services",
+    "统一使用全局柔光玻璃参数": "Use global soft glass parameters for all cards",
+    "统一侧边栏各卡片的材质": "Unify sidebar card materials",
+    "侧边栏柔光玻璃参数调整": "Sidebar soft glass parameters",
+    "侧边栏": "Sidebar",
     "sharedViewAnimation": "One-take seamless animations",
     "cc_layout_title": "Control Center tile layout",
     "cc_layout_enable": "Use custom layout",

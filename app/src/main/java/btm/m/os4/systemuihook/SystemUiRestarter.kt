@@ -127,6 +127,7 @@ enum class ScopeApplication(val title: String, val packageName: String) {
     X("X", "com.twitter.android"),
     GITHUB("GitHub", "com.github.android"),
     CONTACTS_DIALER("拨号与通话", "com.android.contacts"),
+    SECURITY_CENTER("安全服务", "com.miui.securitycenter"),
     PORTAL("传送门", "com.miui.contentextension"),
     SOUND_EFFECT("音质音效", "com.miui.misound"),
     MI_SETTINGS("小米设置", "com.xiaomi.misettings"),

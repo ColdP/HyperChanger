@@ -22,6 +22,8 @@ class HookApplication : Application(), XposedServiceHelper.OnServiceListener {
     override fun onServiceBind(service: XposedService) {
         runCatching { nativeBoseSupport.syncRemote(service) }
             .onFailure { ModuleLog.w("NativeBose", "Could not sync native BOSE device list", it) }
+        runCatching { SidebarSettingsStore(this).syncRemote(service) }
+            .onFailure { ModuleLog.w("Sidebar", "Could not sync sidebar settings", it) }
         runCatching { PortalSettings.syncRemote(this, service) }
             .onFailure { ModuleLog.w("Portal", "Could not sync Portal settings", it) }
         runCatching { ContactsDialerSettings.syncRemote(this, service) }

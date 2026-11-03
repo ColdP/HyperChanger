@@ -314,7 +314,7 @@ private enum class PageId {
     DEVICE_PROFILE_PRESETS, DEVICE_PROFILE_CLOUD_PRESETS, CUSTOM_DEPTH_WALLPAPER,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, SETTINGS_ENTRY_ICONS, SETTINGS_ENTRY_APPEARANCE, THEME_AND_COLOR, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
-    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, PORTAL_MATERIAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND, MODULE_PRESET_IMPORT_PREVIEW,
+    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, SIDEBAR, SIDEBAR_GLASS, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, PORTAL_MATERIAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND, MODULE_PRESET_IMPORT_PREVIEW,
     STATUS_MOBILE_NETWORK_TYPE_TUNING,
     CLOUD_CONTROL,
 }
@@ -403,6 +403,12 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
         tr("category_search_other_description", "调整屏幕录制、健康和小米互传等功能。"),
         setOf(ScopeApplication.SCREEN_RECORDER, ScopeApplication.XIAOMI_HEALTH, ScopeApplication.AIRDROP),
         PageId.OTHER,
+    ),
+    CategorySearchItem(
+        tr("侧边栏", "侧边栏"),
+        tr("侧边栏柔光玻璃参数调整", "侧边栏柔光玻璃参数调整"),
+        setOf(ScopeApplication.SECURITY_CENTER),
+        PageId.SIDEBAR,
     ),
     CategorySearchItem(
         tr("拨号与通话", "拨号与通话"),
@@ -985,6 +991,7 @@ private fun Root(
         service?.let {
             restartTracker.withoutTracking {
                 hooks.syncRemote(it)
+                SidebarSettingsStore(context).syncRemote(it)
                 PortalSettings.syncRemote(context, it)
                 globalSoftGlassStore.syncRemote(it)
                 VolumePanelGlassSettingsStore(context).syncRemote(it)
@@ -1966,6 +1973,7 @@ private fun CategoryHome(
                     CategoryGroup(
                         title = tr("其他", "其他"),
                         entries = listOf(
+                            CategoryPageEntry(tr("侧边栏", "侧边栏"), PageId.SIDEBAR),
                             CategoryPageEntry(tr("拨号与通话", "拨号与通话"), PageId.CONTACTS_DIALER),
                             CategoryPageEntry(tr("其他", "其他"), PageId.OTHER),
                         ),
@@ -3425,6 +3433,7 @@ private fun RestartScopesPage(
         ScopeApplication.MEDIA_EDITOR,
     )
     val otherTargets = listOf(
+        ScopeApplication.SECURITY_CENTER,
         ScopeApplication.CONTACTS_DIALER,
         ScopeApplication.PORTAL,
         ScopeApplication.APPLE_MUSIC,
@@ -5589,6 +5598,8 @@ private fun Detail(
         PageId.CLOUD_CONTROL -> CloudControlPage(back)
         PageId.CONTACTS_DIALER -> ContactsDialerPage({ openPage(PageId.CONTACTS_DIALER_BACKGROUND) }, back)
         PageId.CONTACTS_DIALER_BACKGROUND -> ContactsDialerBackgroundPage(back)
+        PageId.SIDEBAR -> SidebarPage({ openPage(PageId.SIDEBAR_GLASS) }, back)
+        PageId.SIDEBAR_GLASS -> SidebarGlassPage(back)
         PageId.PORTAL -> PortalPage({ openPage(PageId.PORTAL_MATERIAL) }, back)
         PageId.PORTAL_MATERIAL -> PortalMaterialPage(back)
         PageId.APP_NAVIGATION -> AppNavigationPage(back)
