@@ -281,6 +281,7 @@ HyperChanger はコミュニティが開発する実験的なモジュールで�
 
 - 音楽ロック画面、歌詞、ロック画面カプセルは [HyperMusicCover](https://github.com/zyl6932/HyperMusicCover) の 2026-10-30 ソーススナップショット（AGPL-3.0-only、一部 Apache-2.0 / GPL-3.0）から導入・改変しています。既存の通知センターは元の Apache-2.0 許諾を維持します。ハッシュと適用範囲は [統合監査](docs/hypermusiccover-upstream-sync.md) を参照してください。
 - 折りたたみ時のアイランドの輪郭、大小アイランド間の距離、顔認証アイランドの実装は [HyperIsland 3.1.8](https://github.com/1812z/HyperIsland)（Copyright 2026 1812z、MIT）を基にしています。全文は [HyperIsland-MIT.txt](app/src/main/assets/licenses/HyperIsland-MIT.txt) を参照してください。
+- 省電力とバッテリー、動画ツールボックスの温度制限解除に関するコードは [HyperCeiler](https://github.com/ReChronoRain/HyperCeiler)（複数のバージョン · AGPL-3.0 / MIT、Copyright 2023–2026 HyperCeiler Contributions）を参考に移植・調整しています。各ファイルにはそれぞれのライセンスが適用され、今回移植したバッテリーと動画ツールボックスの元ファイルは AGPL-3.0-or-later です。[NOTICE](NOTICE) と上流の MIT 表記 [HyperCeiler-MIT.txt](app/src/main/assets/licenses/HyperCeiler-MIT.txt) を参照してください。
 - MIUIX、AndroidLiquidGlass / Backdrop、および各依存プロジェクトに感謝します。詳細はアプリ内のオープンソース表記を参照してください。
 
 ## Star History

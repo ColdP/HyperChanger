@@ -94,6 +94,9 @@ object ModulePresetCodec {
                 completeIosNotificationRefractionPreset(values)
                 completeDockRevealPreset(values)
                 completeSidebarPreset(values)
+                completeSidebarFeaturePreset(values)
+                completePersonalAssistantPreset(values)
+                completePowerBatteryPreset(values)
             }
             groups.put(groupName, values)
         }
@@ -149,6 +152,9 @@ object ModulePresetCodec {
                 completeIosNotificationRefractionPreset(values)
                 completeDockRevealPreset(values)
                 completeSidebarPreset(values)
+                completeSidebarFeaturePreset(values)
+                completePersonalAssistantPreset(values)
+                completePowerBatteryPreset(values)
             }
             PreviewGroup(
                 groupName,
@@ -210,6 +216,9 @@ object ModulePresetCodec {
                 completeIosNotificationRefractionPreset(values)
                 completeDockRevealPreset(values)
                 completeSidebarPreset(values)
+                completeSidebarFeaturePreset(values)
+                completePersonalAssistantPreset(values)
+                completePowerBatteryPreset(values)
             }
             val preserveMissingNavigation = groupName == REMOTE_PREFERENCE_GROUP
             applyValues(context.getSharedPreferences(groupName, Context.MODE_PRIVATE), values, replace = true,

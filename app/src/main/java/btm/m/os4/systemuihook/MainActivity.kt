@@ -992,6 +992,9 @@ private fun Root(
             restartTracker.withoutTracking {
                 hooks.syncRemote(it)
                 SidebarSettingsStore(context).syncRemote(it)
+                SidebarFeatureSettingsStore(context).syncRemote(it)
+                PersonalAssistantSettingsStore(context).syncRemote(it)
+                PowerBatterySettingsStore(context).syncRemote(it)
                 PortalSettings.syncRemote(context, it)
                 globalSoftGlassStore.syncRemote(it)
                 VolumePanelGlassSettingsStore(context).syncRemote(it)
@@ -2119,6 +2122,10 @@ private fun OtherPage(
 ) {
     val context = LocalContext.current
     val service by HookApplication.service.collectAsState()
+    val assistantStore = remember(context, service) { PersonalAssistantSettingsStore(context) }
+    var assistantSettings by remember(assistantStore) { mutableStateOf(assistantStore.settings) }
+    val temperatureStore = remember(context, service) { SidebarFeatureSettingsStore(context) }
+    var temperatureSettings by remember(temperatureStore) { mutableStateOf(temperatureStore.settings) }
     val scopedPrefs = remember(service) {
         service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)
             ?: context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, 0)
@@ -2136,7 +2143,7 @@ private fun OtherPage(
     AppPage(
     tr("其他", "其他"),
     back,
-    restartScopes = setOf(ScopeApplication.SCREEN_RECORDER, ScopeApplication.XIAOMI_HEALTH, ScopeApplication.AIRDROP, ScopeApplication.JOYOSE),
+    restartScopes = setOf(ScopeApplication.SCREEN_RECORDER, ScopeApplication.XIAOMI_HEALTH, ScopeApplication.AIRDROP, ScopeApplication.JOYOSE, ScopeApplication.SETTINGS, ScopeApplication.PERSONAL_ASSISTANT),
 ) { padding, scroll ->
     val joyoseStore = remember(context) { JoyoseSettingsStore(context) }
     var joyoseSettings by remember { mutableStateOf(joyoseStore.settings) }
@@ -2195,6 +2202,14 @@ private fun OtherPage(
                 insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp),
             )
             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                SwitchPreference(
+                    title = tr("去除负一屏背景壁纸模糊", "去除负一屏背景壁纸模糊"),
+                    checked = assistantSettings.removeWallpaperBlur,
+                    onCheckedChange = { value ->
+                        assistantStore.update(service) { it.copy(removeWallpaperBlur = value) }
+                        assistantSettings = assistantStore.settings
+                    },
+                )
                 SharedViewArrowPreference(
                     title = tr("环境检测", "环境检测"),
                     summary = tr("实验性功能", "实验性功能"),
@@ -2221,6 +2236,15 @@ private fun OtherPage(
                             ),
                             enabled,
                         ).apply()
+                    },
+                )
+                TemperatureWarningSwitch(
+                    title = tr("去除热点的温度限制", "去除热点的温度限制"),
+                    summary = tr("解除系统设置中开启热点的高温拦截，不影响底层温控。", "解除系统设置中开启热点的高温拦截，不影响底层温控。"),
+                    checked = temperatureSettings.removeHotspotTemperatureLimit,
+                    onCheckedChange = { value ->
+                        temperatureStore.update(service) { it.copy(removeHotspotTemperatureLimit = value) }
+                        temperatureSettings = temperatureStore.settings
                     },
                 )
                 SwitchPreference(
@@ -4212,7 +4236,7 @@ private fun SystemSettings(
     onPickLogo: () -> Unit,
     onClearLogo: () -> Unit,
     back: () -> Unit,
-) = AppPage(tr("系统设置", "系统设置"), back, restartScopes = setOf(ScopeApplication.SETTINGS, ScopeApplication.SOUND_EFFECT, ScopeApplication.MI_SETTINGS)) { padding, scroll ->
+) = AppPage(tr("系统设置", "系统设置"), back, restartScopes = setOf(ScopeApplication.SETTINGS, ScopeApplication.SOUND_EFFECT, ScopeApplication.MI_SETTINGS, ScopeApplication.SECURITY_CENTER)) { padding, scroll ->
     val cpuIconContext = LocalContext.current
     val soundEffectService by HookApplication.service.collectAsStateWithLifecycle()
     val appScopeService by HookApplication.service.collectAsStateWithLifecycle()
@@ -4281,6 +4305,7 @@ private fun SystemSettings(
         }
     }
     AppList(padding, scroll) {
+        item { PowerBatteryPreferences() }
         item {
             Group(tr("音效设置", "音效设置")) {
                 if (!nativeBoseSupported) {
@@ -13777,6 +13802,13 @@ private fun openProjects() = listOf(
     OpenProject("Compose Multiplatform", "1.11.x", tr("\u58f0\u660e\u5f0f\u754c\u9762\u3001\u5e03\u5c40\u4e0e\u52a8\u753b", "\u58f0\u660e\u5f0f\u754c\u9762\u3001\u5e03\u5c40\u4e0e\u52a8\u753b"), "https://github.com/JetBrains/compose-multiplatform"),
     OpenProject("AndroidX", tr("\u591a\u4e2a\u7ec4\u4ef6", "\u591a\u4e2a\u7ec4\u4ef6"), tr("Activity\u3001Lifecycle\u3001Core \u7b49 Android \u57fa\u7840\u5e93", "Activity\u3001Lifecycle\u3001Core \u7b49 Android \u57fa\u7840\u5e93"), "https://github.com/androidx/androidx"),
     OpenProject(tr("HyperMusicCover", "HyperMusicCover"), tr("hmcSnapshot", "源码快照 2026-10-30"), tr("hmcAttribution", "音乐锁屏、歌词与锁屏胶囊；保留旧通知中心实现"), "https://github.com/zyl6932/HyperMusicCover", tr("hmcLicense", "AGPL-3.0-only；部分代码为 Apache-2.0 / GPL-3.0")),
+    OpenProject(
+        tr("HyperCeiler", "HyperCeiler"),
+        tr("hyperCeilerVersions", "多个版本"),
+        tr("hyperCeilerAttribution", "省电与电池、视频工具箱温控去除相关代码"),
+        "https://github.com/ReChronoRain/HyperCeiler",
+        tr("hyperCeilerLicense", "AGPL-3.0 / MIT"),
+    ),
     OpenProject(
         tr("HyperIsland", "HyperIsland"),
         tr("3.1.8", "3.1.8"),

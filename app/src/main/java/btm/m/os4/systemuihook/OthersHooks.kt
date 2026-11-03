@@ -56,6 +56,11 @@ internal class OthersHooks(
     private val contactsDialerHooks = ContactsDialerHooks(module, hookDeoptimized, logTag)
     private val portalHooks = PortalHooks(module, hookDeoptimized, logTag)
     private val sidebarHooks = SidebarHooks(module, hookDeoptimized, logTag)
+    private val personalAssistantWallpaperHooks = PersonalAssistantWallpaperHooks(module, hookDeoptimized)
+    private val videoToolboxHooks = VideoToolboxHooks(module)
+    private val powerBatteryHooks = PowerBatteryHooks(module, hookDeoptimized)
+    private val powerBatteryInfoHooks = PowerBatteryInfoHooks(module, hookDeoptimized)
+    private val hotspotTemperatureHooks = HotspotTemperatureHooks(module)
     private val htmlViewerHooks = HtmlViewerHooks(module)
     private val joyoseHooks = JoyoseHooks(module)
 
@@ -64,6 +69,21 @@ internal class OthersHooks(
 
     fun installSidebarHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
         sidebarHooks.install(classLoader, preferences)
+
+    fun installPersonalAssistantWallpaperHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
+        personalAssistantWallpaperHooks.install(classLoader, preferences)
+
+    fun installVideoToolboxHooks(param: PackageLoadedParam, preferences: SharedPreferences) =
+        videoToolboxHooks.install(param, preferences)
+
+    fun installPowerBatteryHooks(param: PackageLoadedParam, preferences: SharedPreferences, mainProcess: Boolean) =
+        powerBatteryHooks.install(param, preferences, mainProcess)
+
+    fun installPowerBatteryInfoHooks(param: PackageLoadedParam, preferences: SharedPreferences) =
+        powerBatteryInfoHooks.install(param, preferences)
+
+    fun installHotspotTemperatureHooks(param: PackageLoadedParam, preferences: SharedPreferences) =
+        hotspotTemperatureHooks.install(param, preferences)
 
     fun installContactsDialerHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
         contactsDialerHooks.install(classLoader, preferences)

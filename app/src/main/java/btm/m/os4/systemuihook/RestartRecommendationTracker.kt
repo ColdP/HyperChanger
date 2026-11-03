@@ -90,6 +90,10 @@ internal fun restartScopesForPreference(group: String, key: String): Set<ScopeAp
             ScopeApplication.THEME_MANAGER,
         )
         key.startsWith("contacts_dialer_background_") -> setOf(ScopeApplication.CONTACTS_DIALER)
+        key == KEY_REMOVE_ASSISTANT_WALLPAPER_BLUR -> setOf(ScopeApplication.PERSONAL_ASSISTANT)
+        key == KEY_REMOVE_VIDEO_TEMP_LIMIT -> setOf(ScopeApplication.SECURITY_CENTER)
+        PowerBatteryFeature.entries.any { it.key == key } -> setOf(ScopeApplication.SECURITY_CENTER)
+        key == KEY_REMOVE_HOTSPOT_TEMP_LIMIT -> setOf(ScopeApplication.SETTINGS)
         key.startsWith(SIDEBAR_PREFIX) -> setOf(ScopeApplication.SECURITY_CENTER)
         key.startsWith("portal_") -> setOf(ScopeApplication.PORTAL)
         key.startsWith("home_") || key.startsWith("dock_") -> setOf(ScopeApplication.DESKTOP)

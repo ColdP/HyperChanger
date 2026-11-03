@@ -24,6 +24,19 @@ https://github.com/zyl6932/HyperMusicCover
 
 The imported implementation is licensed under the Apache License, Version 2.0.
 
+HyperCeiler (https://github.com/ReChronoRain/HyperCeiler)
+Copyright (C) 2023-2026 HyperCeiler Contributions
+Multiple versions; AGPL-3.0 / MIT across the referenced project components.
+Power saving and battery features, and video toolbox temperature-limit removal,
+are adapted with reference to HyperCeiler. The battery and video toolbox source
+files used for these adaptations are AGPL-3.0-or-later, not dual-licensed under MIT.
+Individual files retain their original licenses and copyright notices.
+Modifications by btm_m for HyperChanger, 2026-11-03: host-version adaptation,
+libxposed API 102 integration, independent settings and preset synchronization,
+battery-detail lifecycle handling, and localized module preferences.
+See app/src/main/assets/licenses/AGPL-3.0-or-later.txt for the AGPL text and
+app/src/main/assets/licenses/HyperCeiler-MIT.txt for the upstream MIT notice.
+
 Collapsed island smoothing (IslandSmoothingHook.kt and IslandSmoothingShape.kt)
 large-small island spacing (IslandSpacingHook.kt), and face-unlock island
 (LockscreenFaceUnlockHook.kt)
