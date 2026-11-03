@@ -46,9 +46,11 @@ import btm.m.liquidglass.NavigationStyle
 import btm.m.liquidglass.ScopedSettings
 import btm.m.liquidglass.NavigationAccentSettings
 import btm.m.liquidglass.NavigationBadgeSettings
+import btm.m.liquidglass.NavigationOffsetSettings
 import btm.m.liquidglass.hook.WeChatAvatarRadiusSettings
 import btm.m.liquidglass.rememberMomentumPredictiveBack
 import btm.m.liquidglass.momentumBackTransform
+import kotlin.math.roundToInt
 
 private data class AppNavItem(val name: String, val packageName: String)
 
@@ -106,6 +108,11 @@ internal fun AppNavigationPage(back: () -> Unit) {
                 restartScrollableList = true,
             ) { padding, scroll ->
                 AppList(padding, scroll, 28) {
+                    item {
+                        Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                            AppNavigationOffsetPreferences(store.preferences, service)
+                        }
+                    }
                     item { SmallTitle(tr("支持的应用", "支持的应用"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp)) }
                     items(appNavItems, key = { it.packageName }) { item ->
                         AppNavigationCard(item, store, service, revision) {
@@ -185,7 +192,7 @@ private fun AppNavigationSettings(appItem: AppNavItem, store: AppNavigationSetti
     var accentColor by remember(appItem.packageName, service) { mutableIntStateOf(NavigationAccentSettings.getColor(prefs, appItem.packageName)) }
     var showBadges by remember(appItem.packageName, service) { mutableStateOf(NavigationBadgeSettings.getShowBadges(prefs, appItem.packageName)) }
     var showAccentDialog by remember { mutableStateOf(false) }
-    val accentEnabled = enabled && NavigationStyle.entries.getOrNull(styleIndex) in setOf(
+    val accentEnabled = NavigationStyle.entries.getOrNull(styleIndex) in setOf(
         NavigationStyle.LIQUID_GLASS,
         NavigationStyle.HARMONY_OS_FLOATING,
     )
@@ -198,62 +205,78 @@ private fun AppNavigationSettings(appItem: AppNavItem, store: AppNavigationSetti
         AppList(padding, scroll, 28) {
             item {
                 Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-                    SwitchPreference(title = tr("启用自定义底栏", "启用自定义底栏"), summary = tr("关闭后使用应用原始导航栏", "关闭后使用应用原始导航栏"), checked = enabled, onCheckedChange = { value -> enabled = value; store.edit(service) { putBoolean(enabledKey, value) }; onChanged() })
-                    OverlayDropdownPreference(title = tr("导航栏样式", "导航栏样式"), items = NavigationStyle.entries.map { tr(it.displayName, it.displayName) }, selectedIndex = styleIndex, enabled = enabled) { value -> styleIndex = value; store.edit(service) { putString(ScopedSettings.key(appItem.packageName, NavigationStyle.PREFERENCE_KEY), NavigationStyle.entries[value].preferenceValue) }; onChanged() }
-                    OverlayDropdownPreference(title = tr("标签显示方式", "标签显示方式"), items = LabelMode.entries.map { tr(it.displayName, it.displayName) }, selectedIndex = labelIndex, enabled = enabled) { value -> labelIndex = value; store.edit(service) { putString(ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_LABEL_MODE), LabelMode.entries[value].preferenceValue) }; onChanged() }
-                    OverlayDropdownPreference(title = tr("颜色模式", "颜色模式"), items = AppColorMode.entries.map { tr(it.displayName, it.displayName) }, selectedIndex = colorIndex, enabled = enabled) { value -> colorIndex = value; store.edit(service) { putString(ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_COLOR_MODE), AppColorMode.entries[value].preferenceValue) }; onChanged() }
-                    if (appItem.packageName == "com.tencent.mobileqq" || appItem.packageName == "com.tencent.mm") {
-                        SwitchPreference(
-                            title = tr("显示小红点", "显示小红点"),
-                            summary = tr("在自定义底栏图标旁显示未读提示", "在自定义底栏图标旁显示未读提示"),
-                            checked = showBadges,
-                            enabled = enabled,
-                            onCheckedChange = { value ->
-                                showBadges = value
-                                store.edit(service) { putBoolean(ScopedSettings.key(appItem.packageName, NavigationBadgeSettings.KEY_SHOW_BADGES), value) }
-                                onChanged()
-                            },
-                        )
-                    }
-                    NavigationAccentPreference(
-                        color = accentColor,
-                        enabled = accentEnabled,
-                        onClick = { if (accentEnabled) showAccentDialog = true },
-                    )
-                }
-            }
-            if (appItem.packageName == "com.mipay.wallet") item {
-                SmallTitle(tr("钱包导航标签", "钱包导航标签"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp))
-                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-                    ScopedSettings.WALLET_TAB_IDS.forEach { tab ->
-                        val checked = tab in walletTabs
-                        SwitchPreference(title = walletTabName(tab), checked = checked, enabled = enabled && (!checked || walletTabs.size > 1), onCheckedChange = { value ->
-                            walletTabs = if (value) walletTabs + tab else walletTabs - tab
-                            store.edit(service) { putFrameworkStringSet(ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_VISIBLE_TABS), walletTabs) }; onChanged()
-                        })
-                    }
-                }
-            }
-            if (appItem.packageName == "com.tencent.mm") item {
-                SmallTitle(tr("微信头像圆角", "微信头像圆角"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp))
-                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-                    EditableSliderPreference(
-                        title = tr("头像圆角半径", "头像圆角半径"),
-                        value = avatarRadius,
-                        valueText = if (avatarRadius == 0f) tr("微信默认", "微信默认") else avatarRadius.toInt().toString(),
-                        valueRange = WeChatAvatarRadiusSettings.MIN.toFloat()..WeChatAvatarRadiusSettings.MAX.toFloat(),
-                        steps = 159,
-                        defaultValue = 0f,
-                        enabled = enabled,
-                        onValueChange = { avatarRadius = it },
-                        onValueChangeFinished = {
-                            store.edit(service) {
-                                putInt(ScopedSettings.key(appItem.packageName, WeChatAvatarRadiusSettings.KEY),
-                                    avatarRadius.toInt().coerceIn(WeChatAvatarRadiusSettings.MIN, WeChatAvatarRadiusSettings.MAX))
-                            }
+                    SwitchPreference(
+                        title = tr("appNavigationEnableBar", "启用自定义底部导航栏"),
+                        checked = enabled,
+                        onCheckedChange = { value ->
+                            enabled = value
+                            if (!value) showAccentDialog = false
+                            store.edit(service) { putBoolean(enabledKey, value) }
                             onChanged()
                         },
                     )
+                }
+            }
+            item {
+                PortalAppearanceVisibility(enabled) {
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Group(tr("外观调整", "外观调整")) {
+                            OverlayDropdownPreference(title = tr("导航栏样式", "导航栏样式"), items = NavigationStyle.entries.map { tr(it.displayName, it.displayName) }, selectedIndex = styleIndex) { value -> styleIndex = value; store.edit(service) { putString(ScopedSettings.key(appItem.packageName, NavigationStyle.PREFERENCE_KEY), NavigationStyle.entries[value].preferenceValue) }; onChanged() }
+                            OverlayDropdownPreference(title = tr("标签显示方式", "标签显示方式"), items = LabelMode.entries.map { tr(it.displayName, it.displayName) }, selectedIndex = labelIndex) { value -> labelIndex = value; store.edit(service) { putString(ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_LABEL_MODE), LabelMode.entries[value].preferenceValue) }; onChanged() }
+                            OverlayDropdownPreference(title = tr("颜色模式", "颜色模式"), items = AppColorMode.entries.map { tr(it.displayName, it.displayName) }, selectedIndex = colorIndex) { value -> colorIndex = value; store.edit(service) { putString(ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_COLOR_MODE), AppColorMode.entries[value].preferenceValue) }; onChanged() }
+                            PortalAppearanceVisibility(accentEnabled) {
+                                NavigationAccentPreference(color = accentColor, enabled = enabled, onClick = { showAccentDialog = true })
+                            }
+                        }
+                        Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                            AppNavigationOffsetPreferences(prefs, service, appItem.packageName)
+                        }
+                        if (appItem.packageName == "com.tencent.mobileqq" || appItem.packageName == "com.tencent.mm") {
+                            Group(tr("appNavigationUnreadHints", "未读提示")) {
+                                SwitchPreference(
+                                    title = tr("显示小红点", "显示小红点"),
+                                    summary = tr("在自定义底栏图标旁显示未读提示", "在自定义底栏图标旁显示未读提示"),
+                                    checked = showBadges,
+                                    onCheckedChange = { value ->
+                                        showBadges = value
+                                        store.edit(service) { putBoolean(ScopedSettings.key(appItem.packageName, NavigationBadgeSettings.KEY_SHOW_BADGES), value) }
+                                        onChanged()
+                                    },
+                                )
+                            }
+                        }
+                        if (appItem.packageName == "com.mipay.wallet") {
+                            Group(tr("钱包导航标签", "钱包导航标签")) {
+                                ScopedSettings.WALLET_TAB_IDS.forEach { tab ->
+                                    val checked = tab in walletTabs
+                                    SwitchPreference(title = walletTabName(tab), checked = checked, enabled = !checked || walletTabs.size > 1, onCheckedChange = { value ->
+                                        walletTabs = if (value) walletTabs + tab else walletTabs - tab
+                                        store.edit(service) { putFrameworkStringSet(ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_VISIBLE_TABS), walletTabs) }; onChanged()
+                                    })
+                                }
+                            }
+                        }
+                        if (appItem.packageName == "com.tencent.mm") {
+                            Group(tr("微信头像圆角", "微信头像圆角")) {
+                                EditableSliderPreference(
+                                    title = tr("头像圆角半径", "头像圆角半径"),
+                                    value = avatarRadius,
+                                    valueText = if (avatarRadius == 0f) tr("微信默认", "微信默认") else avatarRadius.toInt().toString(),
+                                    valueRange = WeChatAvatarRadiusSettings.MIN.toFloat()..WeChatAvatarRadiusSettings.MAX.toFloat(),
+                                    steps = 159,
+                                    defaultValue = 0f,
+                                    onValueChange = { avatarRadius = it },
+                                    onValueChangeFinished = {
+                                        store.edit(service) {
+                                            putInt(ScopedSettings.key(appItem.packageName, WeChatAvatarRadiusSettings.KEY),
+                                                avatarRadius.toInt().coerceIn(WeChatAvatarRadiusSettings.MIN, WeChatAvatarRadiusSettings.MAX))
+                                        }
+                                        onChanged()
+                                    },
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -272,6 +295,46 @@ private fun AppNavigationSettings(appItem: AppNavItem, store: AppNavigationSetti
             showAccentDialog = false
         },
     )
+}
+
+@Composable
+private fun AppNavigationOffsetPreferences(preferences: SharedPreferences, service: XposedService?, packageName: String? = null) {
+    var settings by remember(preferences, packageName, service) { mutableStateOf(NavigationOffsetSettings.load(preferences, packageName)) }
+    var draft by remember(settings.valueDp) { mutableFloatStateOf(settings.valueDp.toFloat()) }
+    DisposableEffect(preferences, packageName) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == null || key == NavigationOffsetSettings.enabledKey(packageName) || key == NavigationOffsetSettings.valueKey(packageName)) {
+                settings = NavigationOffsetSettings.load(preferences, packageName)
+            }
+        }
+        preferences.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+    fun save(updated: NavigationOffsetSettings.Settings) {
+        settings = updated
+        NavigationOffsetSettings.save(preferences, service, packageName, updated)
+    }
+    SwitchPreference(
+        title = if (packageName == null) tr("appNavigationVerticalOffset", "自定义底部导航栏垂直偏移")
+            else tr("appNavigationAppVerticalOffset", "单独设置底部导航栏垂直偏移"),
+        summary = if (packageName == null) tr("appNavigationVerticalOffsetSummary", "正值向上，负值向下，重启目标应用后生效")
+            else tr("appNavigationAppVerticalOffsetSummary", "开启后覆盖全局偏移，关闭后跟随全局设置"),
+        checked = settings.enabled,
+        onCheckedChange = { save(settings.copy(enabled = it)) },
+    )
+    PortalAppearanceVisibility(settings.enabled) {
+        EditableSliderPreference(
+            title = tr("appNavigationVerticalOffsetValue", "垂直偏移"),
+            value = draft,
+            valueText = tr("appNavigationVerticalOffsetDp", "%d dp").format(draft.roundToInt()),
+            valueRange = NavigationOffsetSettings.MIN.toFloat()..NavigationOffsetSettings.MAX.toFloat(),
+            steps = NavigationOffsetSettings.MAX - NavigationOffsetSettings.MIN - 1,
+            defaultValue = NavigationOffsetSettings.DEFAULT.toFloat(),
+            centerValue = 0f,
+            onValueChange = { draft = it },
+            onValueChangeFinished = { save(settings.copy(valueDp = draft.roundToInt())) },
+        )
+    }
 }
 
 @Composable

@@ -78,6 +78,10 @@ internal fun restartScopesForPreference(group: String, key: String): Set<ScopeAp
             "predictive_back_progress", "hide_app_icon", "user_shade_presets_v1", "soft_glass_custom_presets_v1",
         )) return emptySet()
 
+    if (btm.m.liquidglass.NavigationOffsetSettings.isGlobalPreference(key)) {
+        val packages = btm.m.liquidglass.ScopedSettings.apps.map { it.packageName }.toSet()
+        return ScopeApplication.entries.filter { it.packageName in packages }.toSet()
+    }
     if (key.startsWith("scope.")) {
         return ScopeApplication.entries.filter { key.startsWith("scope.${it.packageName}.") }.toSet()
     }

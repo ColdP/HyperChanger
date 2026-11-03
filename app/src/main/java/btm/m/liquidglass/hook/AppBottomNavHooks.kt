@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import btm.m.liquidglass.AppColorMode
 import btm.m.liquidglass.NavigationStyle
+import btm.m.liquidglass.NavigationOffsetSettings
 import btm.m.os4.systemuihook.tr
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
@@ -961,6 +962,9 @@ object AppBottomNavHooks {
         private val visibleTabs: Set<String>?,
         private val showBadges: Boolean = false
     ) {
+        private val verticalOffsetDp = NavigationOffsetSettings.effectiveOffset(
+            module.getRemotePreferences(btm.m.os4.systemuihook.REMOTE_PREFERENCE_GROUP), config.packageName,
+        )
         private val selectedIndex = mutableIntStateOf(0)
         private val originalViews = linkedSetOf<View>()
         private val originalStates = IdentityHashMap<View, OriginalViewState>()
@@ -1092,7 +1096,7 @@ object AppBottomNavHooks {
                 if (config === github) GitHubNavigation.setActive(activity, false)
                 nav?.visibility = View.GONE
             } else {
-                xNavigation?.setActive(nav != null, navigationOverlayHeight())
+                xNavigation?.setActive(nav != null, navigationOccupiedHeight())
                 nav?.visibility = View.VISIBLE
             }
             attempts = 0
@@ -1220,11 +1224,14 @@ object AppBottomNavHooks {
                     GitHubNavigation.setActive(
                         activity,
                         true,
-                        navigationOverlayHeight(),
+                        navigationOccupiedHeight(),
                         githubNavigation?.isRoot() == true,
                     )
                 }
                 val composeView = ComposeView(activity).apply {
+                    // Move the View itself so rendering, backdrop coordinates and touch bounds
+                    // move together, including an attached mini-player's spacing above the bar.
+                    translationY = -verticalOffsetDp * activity.resources.displayMetrics.density
                     owner.attachTo(this)
                     setBackgroundColor(android.graphics.Color.TRANSPARENT)
                     setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
@@ -1234,7 +1241,8 @@ object AppBottomNavHooks {
                         val watchFaceBackdrop = if (config === xiaomiHealthWatchFaceMarket) {
                             rememberBitmapNativeViewBackdrop(
                                 sourceView = navigationBackdropSource,
-                                sampleHeightPx = navigationOverlayHeight(),
+                                // An upward offset exposes content above the original bottom band.
+                                sampleHeightPx = maxOf(navigationOverlayHeight(), navigationOccupiedHeight()),
                                 onHostPreDraw = ::syncHostState
                             )
                         } else {
@@ -1473,8 +1481,8 @@ object AppBottomNavHooks {
                 installGuard(content)
                 // Activate only after the overlay has been successfully added. Host snapshot
                 // state triggers composition and removes the native row on the next frame.
-                xNavigation?.setActive(true, navigationOverlayHeight())
-                if (config === github) GitHubNavigation.setActive(activity, true, navigationOverlayHeight())
+                xNavigation?.setActive(true, navigationOccupiedHeight())
+                if (config === github) GitHubNavigation.setActive(activity, true, navigationOccupiedHeight())
                 composeView.post(::syncHostState)
                 btm.m.os4.systemuihook.HookModuleLogger.log(module,
                     Log.INFO,
@@ -2617,7 +2625,7 @@ object AppBottomNavHooks {
             detectedTabs = detected.tabs
             if (navigationTabs != detected.tabs) navigationTabs = detected.tabs
             nav?.visibility = View.VISIBLE
-            xNavigation?.setActive(true, navigationOverlayHeight())
+            xNavigation?.setActive(true, navigationOccupiedHeight())
             val now = android.os.SystemClock.uptimeMillis()
             if (before != selectedIndex.intValue || now - xLastInsetMaintenanceAt >= 500L) {
                 xLastInsetMaintenanceAt = now
@@ -2656,7 +2664,7 @@ object AppBottomNavHooks {
             GitHubNavigation.setActive(
                 activity,
                 true,
-                navigationOverlayHeight(),
+                navigationOccupiedHeight(),
                 githubNavigation?.isRoot() == true,
             )
             val now = android.os.SystemClock.uptimeMillis()
@@ -3929,6 +3937,7 @@ object AppBottomNavHooks {
 
         private fun updateNavigationOverlayHeight() {
             val overlay = nav ?: return
+            overlay.translationY = -verticalOffsetDp * activity.resources.displayMetrics.density
             val targetHeight = navigationOverlayHeight()
             val params = overlay.layoutParams ?: return
             if (targetHeight > 0 && params.height != targetHeight) {
@@ -3936,6 +3945,9 @@ object AppBottomNavHooks {
                 overlay.layoutParams = params
             }
         }
+
+        private fun navigationOccupiedHeight(): Int =
+            (navigationOverlayHeight() + verticalOffsetDp * activity.resources.displayMetrics.density).toInt().coerceAtLeast(0)
 
         private fun adaptMiniPlayer() {
             if (config.miniPlayerResourceName == null) return
