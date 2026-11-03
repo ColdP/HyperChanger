@@ -3,6 +3,9 @@
   "creator": "btm_m",
   "locale": "en",
   "strings": {
+    "MIUIX": "MIUIX",
+    "miuixVersion": "0.9.4",
+    "miuixAttribution": "HyperOS-style UI components, preferences, icons, and blur effects form the foundation of this module's settings interface. Thanks to the MIUIX authors and contributors.",
     "HyperCeiler": "HyperCeiler",
     "hyperCeilerVersions": "Multiple versions",
     "hyperCeilerLicense": "AGPL-3.0 / MIT",

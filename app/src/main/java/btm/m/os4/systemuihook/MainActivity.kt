@@ -13796,7 +13796,12 @@ private data class OpenProject(
     val license: String = tr("Apache License 2.0", "Apache License 2.0"),
 )
 private fun openProjects() = listOf(
-    OpenProject("MIUIX", "0.9.3", tr("HyperOS \u98ce\u683c\u754c\u9762\u3001\u504f\u597d\u8bbe\u7f6e\u3001\u56fe\u6807\u4e0e\u6a21\u7cca\u6548\u679c", "HyperOS \u98ce\u683c\u754c\u9762\u3001\u504f\u597d\u8bbe\u7f6e\u3001\u56fe\u6807\u4e0e\u6a21\u7cca\u6548\u679c"), "https://github.com/compose-miuix-ui/miuix"),
+    OpenProject(
+        tr("MIUIX", "MIUIX"),
+        tr("miuixVersion", "0.9.4"),
+        tr("miuixAttribution", "提供 HyperOS 风格界面组件、偏好设置、图标与模糊效果，构成本模块设置界面的基础。感谢 MIUIX 作者与贡献者。"),
+        "https://github.com/compose-miuix-ui/miuix",
+    ),
     OpenProject("LSPosed API", "102", tr("LSPosed \u6a21\u5757 API \u4e0e\u670d\u52a1\u901a\u4fe1", "LSPosed \u6a21\u5757 API \u4e0e\u670d\u52a1\u901a\u4fe1"), "https://github.com/LSPosed/LSPosed"),
     OpenProject("Backdrop / AndroidLiquidGlass", "2.0.0", tr("\u6db2\u6001\u73bb\u7483\u6e32\u67d3\u4e0e\u5e95\u90e8\u5bfc\u822a\u4ea4\u4e92", "\u6db2\u6001\u73bb\u7483\u6e32\u67d3\u4e0e\u5e95\u90e8\u5bfc\u822a\u4ea4\u4e92"), "https://github.com/Kyant0/AndroidLiquidGlass"),
     OpenProject("Compose Multiplatform", "1.11.x", tr("\u58f0\u660e\u5f0f\u754c\u9762\u3001\u5e03\u5c40\u4e0e\u52a8\u753b", "\u58f0\u660e\u5f0f\u754c\u9762\u3001\u5e03\u5c40\u4e0e\u52a8\u753b"), "https://github.com/JetBrains/compose-multiplatform"),

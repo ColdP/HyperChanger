@@ -13,6 +13,15 @@ Apache-2.0 text is in app/src/main/assets/licenses/Apache-2.0.txt.
 Native source attribution is recorded in the file headers and in
 app/src/main/cpp/nativehook/THIRD_PARTY_NOTICES.md.
 
+MIUIX 0.9.4 (https://github.com/compose-miuix-ui/miuix)
+Licensed under the Apache License, Version 2.0.
+HyperChanger's settings interface uses MIUIX's HyperOS-style UI components,
+preferences, icons, and blur effects through miuix-ui, miuix-preference,
+miuix-icons, and miuix-blur. Thanks to the MIUIX authors and contributors
+for the UI foundation. Individual components retain their upstream notices.
+Documentation: https://compose-miuix-ui.github.io/miuix/
+License text: app/src/main/assets/licenses/Apache-2.0.txt.
+
 This product includes the HyperMusicCover lock-screen runtime implementation
 (Main.java, WallpaperProbe.java, Xp.java, MiBlur.java, ShadeBlur.java,
 ShadeGate.java, ShadeHeader.java, ShadeLayer.java, and ShadeSpring.java)

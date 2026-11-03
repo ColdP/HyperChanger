@@ -3,6 +3,9 @@
   "creator": "btm_m",
   "locale": "en",
   "strings": {
+    "MIUIX": "MIUIX",
+    "miuixVersion": "0.9.4",
+    "miuixAttribution": "提供 HyperOS 风格界面组件、偏好设置、图标与模糊效果，构成本模块设置界面的基础。感谢 MIUIX 作者与贡献者。",
     "HyperCeiler": "HyperCeiler",
     "hyperCeilerVersions": "多个版本",
     "hyperCeilerLicense": "AGPL-3.0 / MIT",

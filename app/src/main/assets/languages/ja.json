@@ -3,6 +3,9 @@
   "creator": "btm_m",
   "locale": "ja",
   "strings": {
+    "MIUIX": "MIUIX",
+    "miuixVersion": "0.9.4",
+    "miuixAttribution": "HyperOS スタイルの UI コンポーネント、設定項目、アイコン、ぼかし効果がモジュールの設定画面の基盤です。MIUIX の作者と貢献者に感謝します。",
     "HyperCeiler": "HyperCeiler",
     "hyperCeilerVersions": "複数のバージョン",
     "hyperCeilerLicense": "AGPL-3.0 / MIT",

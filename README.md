@@ -282,7 +282,8 @@ HyperChanger 是社区开发的实验性模块，与小米无隶属或官方授�
 - 音乐锁屏、歌词与锁屏胶囊更新自 [HyperMusicCover](https://github.com/zyl6932/HyperMusicCover) 2026-10-30 源码快照（AGPL-3.0-only，部分 Apache-2.0 / GPL-3.0）；保留的旧通知中心代码继续适用原 Apache-2.0 授权。导入文件哈希与边界见 [同步审计](docs/hypermusiccover-upstream-sync.md)。
 - 收起岛平滑轮廓、大小岛间距及人脸解锁岛相关实现适配自 [HyperIsland 3.1.8](https://github.com/1812z/HyperIsland)（Copyright 2026 1812z，MIT）；完整声明见 [HyperIsland-MIT.txt](app/src/main/assets/licenses/HyperIsland-MIT.txt)。
 - 省电与电池、视频工具箱温控去除相关代码参考并适配自 [HyperCeiler](https://github.com/ReChronoRain/HyperCeiler)（多个版本 · AGPL-3.0 / MIT，Copyright 2023–2026 HyperCeiler Contributions）。具体文件遵循各自的许可声明，本次电池与视频工具箱适配源文件为 AGPL-3.0-or-later；详见 [NOTICE](NOTICE)，上游 MIT 声明见 [HyperCeiler-MIT.txt](app/src/main/assets/licenses/HyperCeiler-MIT.txt)。
-- 感谢 MIUIX、AndroidLiquidGlass / Backdrop 及其他依赖项目；更多信息见应用内开源代码声明。
+- 模块设置界面基于 [MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix)（Apache-2.0）构建，使用其 HyperOS 风格界面组件、偏好设置、图标和模糊效果（`miuix-ui`、`miuix-preference`、`miuix-icons`、`miuix-blur`）。感谢 MIUIX 作者与贡献者提供的界面基础；详见 [官方文档](https://compose-miuix-ui.github.io/miuix/) 和 [NOTICE](NOTICE)。
+- 感谢 AndroidLiquidGlass / Backdrop 及其他依赖项目；更多信息见应用内开源代码声明。
 
 ## Star History
 
