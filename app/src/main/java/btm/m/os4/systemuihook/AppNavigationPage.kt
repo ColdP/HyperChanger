@@ -1,6 +1,12 @@
 package btm.m.os4.systemuihook
 
 import android.graphics.drawable.Drawable
+import android.content.SharedPreferences
+import androidx.compose.animation.*
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -11,7 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.asImageBitmap
@@ -31,8 +37,9 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.ChevronForward
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import btm.m.liquidglass.AppColorMode
 import btm.m.liquidglass.LabelMode
 import btm.m.liquidglass.NavigationStyle
@@ -59,6 +66,7 @@ private val appNavItems = listOf(
     AppNavItem("微信", "com.tencent.mm"),
     AppNavItem("拼多多", "com.xunmeng.pinduoduo"),
     AppNavItem("Instagram", "com.instagram.android"),
+    AppNavItem("Pinterest", "com.pinterest"),
     AppNavItem("X", "com.twitter.android"),
     AppNavItem("GitHub", "com.github.android"),
 )
@@ -70,22 +78,63 @@ internal fun AppNavigationPage(back: () -> Unit) {
     val store = remember(context) { AppNavigationSettingsStore(context) }
     var selected by remember { mutableStateOf<String?>(null) }
     var revision by remember { mutableIntStateOf(0) }
-    val selectedItem = appNavItems.firstOrNull { it.packageName == selected }
-    if (selectedItem != null) {
-        val settingsBack = rememberMomentumPredictiveBack(
-            enabled = true,
-            onBack = { selected = null },
-        )
-        Box(Modifier.fillMaxSize().then(Modifier.momentumBackTransform(settingsBack))) {
-            AppNavigationSettings(selectedItem, store, service, { revision++ }) { selected = null }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(store, lifecycleOwner) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == null || isAppNavigationPreference(key)) revision++
         }
-        return
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) revision++
+        }
+        store.preferences.registerOnSharedPreferenceChangeListener(listener)
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            store.preferences.unregisterOnSharedPreferenceChangeListener(listener)
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
-    AppPage(tr("应用底部导航", "应用底部导航"), back, restartScopes = setOf(ScopeApplication.QQ, ScopeApplication.APPLE_MUSIC, ScopeApplication.WEIBO, ScopeApplication.XIAOHONGSHU, ScopeApplication.XIAOMI_STORE, ScopeApplication.XIAOMI_WALLET, ScopeApplication.XIAOMI_HEALTH, ScopeApplication.LUCKIN_COFFEE, ScopeApplication.TENCENT_MEETING, ScopeApplication.CMB_BANK, ScopeApplication.WECHAT, ScopeApplication.PINDUODUO, ScopeApplication.INSTAGRAM, ScopeApplication.X, ScopeApplication.GITHUB), restartEnabled = service != null) { padding, scroll ->
-        AppList(padding, scroll, 28) {
-            item { SmallTitle(tr("支持的应用", "支持的应用"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp)) }
-            items(appNavItems, key = { it.packageName }) { item ->
-                AppNavigationCard(item, store, service, revision) { selected = item.packageName }
+    var lastSelected by remember { mutableStateOf<AppNavItem?>(null) }
+    val overviewBlur by animateFloatAsState(if (selected != null) 12f else 0f, tween(252), label = "appNavigationOverviewBlur")
+    Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().blur(overviewBlur.dp)) {
+            AppPage(
+                tr("应用底部导航", "应用底部导航"), back,
+                restartScopes = appNavItems.mapNotNull { item ->
+                    ScopeApplication.entries.firstOrNull { it.packageName == item.packageName }
+                }.toSet(),
+                restartEnabled = service != null,
+                restartScrollableList = true,
+            ) { padding, scroll ->
+                AppList(padding, scroll, 28) {
+                    item { SmallTitle(tr("支持的应用", "支持的应用"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp)) }
+                    items(appNavItems, key = { it.packageName }) { item ->
+                        AppNavigationCard(item, store, service, revision) {
+                            lastSelected = item
+                            selected = item.packageName
+                        }
+                    }
+                }
+            }
+        }
+        AnimatedVisibility(
+            visible = selected != null,
+            enter = slideInHorizontally(tween(252, easing = FastOutSlowInEasing)) { it / 7 } +
+                fadeIn(tween(189)) + scaleIn(tween(252, easing = FastOutSlowInEasing), initialScale = .985f),
+            exit = slideOutHorizontally(tween(207, easing = FastOutSlowInEasing)) { -it / 3 } +
+                fadeOut(tween(162)) + scaleOut(tween(207, easing = FastOutSlowInEasing), targetScale = .975f),
+        ) {
+            val selectedItem = lastSelected ?: return@AnimatedVisibility
+            val transitionBlur by transition.animateFloat(
+                transitionSpec = { tween(207, easing = FastOutSlowInEasing) }, label = "appNavigationDetailBlur",
+            ) { if (it == EnterExitState.Visible) 0f else 12f }
+            val settingsBack = rememberMomentumPredictiveBack(
+                enabled = selected != null,
+                onBack = { selected = null },
+            )
+            Box(Modifier.fillMaxSize().blur(transitionBlur.dp).momentumBackTransform(settingsBack)) {
+                key(selectedItem.packageName) {
+                    AppNavigationSettings(selectedItem, store, service, { revision++ }) { selected = null }
+                }
             }
         }
     }
@@ -108,6 +157,7 @@ private fun AppNavigationCard(item: AppNavItem, store: AppNavigationSettingsStor
                 Text(item.packageName, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(packageInfo?.let { "${it.versionName ?: "?"} (${it.longVersionCode})" } ?: tr("未安装", "未安装"), style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             }
+            Box(Modifier.padding(horizontal = 12.dp).width(1.dp).height(28.dp).background(MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = .35f)))
             Switch(
                 checked = enabled,
                 onCheckedChange = {
@@ -119,12 +169,6 @@ private fun AppNavigationCard(item: AppNavItem, store: AppNavigationSettingsStor
                         )
                     }
                 }
-            )
-            Image(
-                MiuixIcons.Regular.ChevronForward,
-                null,
-                Modifier.padding(start = 12.dp).size(22.dp),
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary)
             )
         }
     }
@@ -147,7 +191,10 @@ private fun AppNavigationSettings(appItem: AppNavItem, store: AppNavigationSetti
     )
     var walletTabs by remember(appItem.packageName, service) { mutableStateOf(ScopedSettings.getWalletVisibleTabs(prefs)) }
     var avatarRadius by remember(appItem.packageName, service) { mutableFloatStateOf(WeChatAvatarRadiusSettings.getOffset(prefs, appItem.packageName).toFloat()) }
-    AppPage(tr(appItem.name, appItem.name), back) { padding, scroll ->
+    AppPage(tr(appItem.name, appItem.name), back,
+        restartScopes = ScopeApplication.entries.filter { it.packageName == appItem.packageName }.toSet(),
+        restartEnabled = service != null,
+    ) { padding, scroll ->
         AppList(padding, scroll, 28) {
             item {
                 Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {

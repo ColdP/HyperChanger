@@ -297,6 +297,7 @@ object ModulePresetCodec {
             File(root, "settings_appearance"),
             File(root, "rear_screenshot_shells"),
             File(root, "lyric_library"),
+            File(root, ASSISTANT_BACKGROUND_DIRECTORY),
         )
         return candidates.flatMap { file ->
             if (!file.exists()) emptyList() else if (file.isDirectory) {
@@ -347,5 +348,6 @@ object ModulePresetCodec {
         File(context.filesDir, "settings_appearance"),
         File(context.filesDir, "rear_screenshot_shells"),
         File(context.filesDir, "lyric_library"),
+        File(context.filesDir, ASSISTANT_BACKGROUND_DIRECTORY),
     )
 }

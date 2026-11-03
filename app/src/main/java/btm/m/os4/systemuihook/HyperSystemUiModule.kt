@@ -1142,7 +1142,7 @@ class HyperSystemUiModule : XposedModule() {
             param.packageName == "com.lucky.luckyclient" || param.packageName == "com.tencent.wemeet.app" ||
             param.packageName == "cmb.pb" || param.packageName == "com.tencent.mm" ||
             param.packageName == "com.tencent.mobileqq" ||
-            param.packageName == "com.xunmeng.pinduoduo" || param.packageName == "com.instagram.android" || param.packageName == "com.twitter.android" || param.packageName == "com.github.android"
+            param.packageName == "com.xunmeng.pinduoduo" || param.packageName == "com.instagram.android" || param.packageName == "com.pinterest" || param.packageName == "com.twitter.android" || param.packageName == "com.github.android"
         ) {
             othersHooks.installAppNavigation(param)
             return

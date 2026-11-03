@@ -81,6 +81,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
@@ -314,7 +316,7 @@ private enum class PageId {
     DEVICE_PROFILE_PRESETS, DEVICE_PROFILE_CLOUD_PRESETS, CUSTOM_DEPTH_WALLPAPER,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, SETTINGS_ENTRY_ICONS, SETTINGS_ENTRY_APPEARANCE, THEME_AND_COLOR, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
-    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, SIDEBAR, SIDEBAR_GLASS, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, PORTAL_MATERIAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND, MODULE_PRESET_IMPORT_PREVIEW,
+    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, SIDEBAR, SIDEBAR_GLASS, PERSONAL_ASSISTANT, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, PORTAL_MATERIAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND, MODULE_PRESET_IMPORT_PREVIEW,
     STATUS_MOBILE_NETWORK_TYPE_TUNING,
     CLOUD_CONTROL,
 }
@@ -409,6 +411,12 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
         tr("侧边栏柔光玻璃参数调整", "侧边栏柔光玻璃参数调整"),
         setOf(ScopeApplication.SECURITY_CENTER),
         PageId.SIDEBAR,
+    ),
+    CategorySearchItem(
+        tr("负一屏", "负一屏"),
+        tr("负一屏背景壁纸模糊值", "负一屏背景壁纸模糊值"),
+        setOf(ScopeApplication.PERSONAL_ASSISTANT),
+        PageId.PERSONAL_ASSISTANT,
     ),
     CategorySearchItem(
         tr("拨号与通话", "拨号与通话"),
@@ -511,6 +519,7 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
             ScopeApplication.QQ,
             ScopeApplication.PINDUODUO,
             ScopeApplication.INSTAGRAM,
+            ScopeApplication.PINTEREST,
         ScopeApplication.X,
         ),
         PageId.APP_NAVIGATION,
@@ -1976,7 +1985,6 @@ private fun CategoryHome(
                     CategoryGroup(
                         title = tr("其他", "其他"),
                         entries = listOf(
-                            CategoryPageEntry(tr("侧边栏", "侧边栏"), PageId.SIDEBAR),
                             CategoryPageEntry(tr("拨号与通话", "拨号与通话"), PageId.CONTACTS_DIALER),
                             CategoryPageEntry(tr("其他", "其他"), PageId.OTHER),
                         ),
@@ -2122,8 +2130,6 @@ private fun OtherPage(
 ) {
     val context = LocalContext.current
     val service by HookApplication.service.collectAsState()
-    val assistantStore = remember(context, service) { PersonalAssistantSettingsStore(context) }
-    var assistantSettings by remember(assistantStore) { mutableStateOf(assistantStore.settings) }
     val temperatureStore = remember(context, service) { SidebarFeatureSettingsStore(context) }
     var temperatureSettings by remember(temperatureStore) { mutableStateOf(temperatureStore.settings) }
     val scopedPrefs = remember(service) {
@@ -2202,13 +2208,13 @@ private fun OtherPage(
                 insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp),
             )
             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-                SwitchPreference(
-                    title = tr("去除负一屏背景壁纸模糊", "去除负一屏背景壁纸模糊"),
-                    checked = assistantSettings.removeWallpaperBlur,
-                    onCheckedChange = { value ->
-                        assistantStore.update(service) { it.copy(removeWallpaperBlur = value) }
-                        assistantSettings = assistantStore.settings
-                    },
+                SharedViewArrowPreference(
+                    title = tr("侧边栏", "侧边栏"),
+                    onClick = { open(PageId.SIDEBAR) },
+                )
+                SharedViewArrowPreference(
+                    title = tr("负一屏", "负一屏"),
+                    onClick = { open(PageId.PERSONAL_ASSISTANT) },
                 )
                 SharedViewArrowPreference(
                     title = tr("环境检测", "环境检测"),
@@ -3472,6 +3478,7 @@ private fun RestartScopesPage(
         ScopeApplication.QQ,
         ScopeApplication.PINDUODUO,
         ScopeApplication.INSTAGRAM,
+        ScopeApplication.PINTEREST,
         ScopeApplication.X,
     )
     val toggleTarget: (ScopeApplication) -> Unit = { target ->
@@ -3783,6 +3790,7 @@ private fun RestartScopeDialog(
     onDismiss: () -> Unit,
     onRestart: (Set<ScopeApplication>) -> Unit,
     availableTargets: Set<ScopeApplication> = ScopeApplication.entries.toSet(),
+    scrollableList: Boolean = false,
 ) {
     var selectedTargets by remember(show) {
         mutableStateOf<Set<ScopeApplication>>(emptySet())
@@ -3806,11 +3814,16 @@ private fun RestartScopeDialog(
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 textAlign = TextAlign.Start,
             )
-            ScopeRestartCheckboxes(
-                selectedTargets = selectedTargets,
-                onSelectedTargetsChange = { selectedTargets = it },
-                availableTargets = availableTargets,
-            )
+            Column(if (scrollableList) Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState()) else Modifier) {
+                ScopeRestartCheckboxes(
+                    selectedTargets = selectedTargets,
+                    onSelectedTargetsChange = { selectedTargets = it },
+                    availableTargets = availableTargets,
+                )
+            }
+            if (scrollableList) {
+                GlassDialogButton({ selectedTargets = availableTargets }, Modifier.fillMaxWidth()) { Text(tr("全选", "全选")) }
+            }
             Spacer(Modifier.height(8.dp))
             Row(
                 Modifier.fillMaxWidth(),
@@ -5625,6 +5638,7 @@ private fun Detail(
         PageId.CONTACTS_DIALER_BACKGROUND -> ContactsDialerBackgroundPage(back)
         PageId.SIDEBAR -> SidebarPage({ openPage(PageId.SIDEBAR_GLASS) }, back)
         PageId.SIDEBAR_GLASS -> SidebarGlassPage(back)
+        PageId.PERSONAL_ASSISTANT -> PersonalAssistantPage(back)
         PageId.PORTAL -> PortalPage({ openPage(PageId.PORTAL_MATERIAL) }, back)
         PageId.PORTAL_MATERIAL -> PortalMaterialPage(back)
         PageId.APP_NAVIGATION -> AppNavigationPage(back)
@@ -13883,6 +13897,7 @@ internal fun AppPage(
     navigationIcon: (@Composable () -> Unit)? = null,
     restartScopes: Set<ScopeApplication> = emptySet(),
     restartEnabled: Boolean = true,
+    restartScrollableList: Boolean = false,
     compactTopBar: Boolean = false,
     actions: @Composable RowScope.() -> Unit = {},
     floatingToolbarPosition: ToolbarPosition = ToolbarPosition.BottomCenter,
@@ -14014,6 +14029,7 @@ internal fun AppPage(
                 showRestartScopeDialog = false
             },
             availableTargets = restartScopes,
+            scrollableList = restartScrollableList,
         )
     }
     }

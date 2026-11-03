@@ -124,6 +124,7 @@ enum class ScopeApplication(val title: String, val packageName: String) {
     QQ("QQ", "com.tencent.mobileqq"),
     PINDUODUO("拼多多", "com.xunmeng.pinduoduo"),
     INSTAGRAM("Instagram", "com.instagram.android"),
+    PINTEREST("Pinterest", "com.pinterest"),
     X("X", "com.twitter.android"),
     GITHUB("GitHub", "com.github.android"),
     CONTACTS_DIALER("拨号与通话", "com.android.contacts"),

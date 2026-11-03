@@ -301,7 +301,7 @@ internal class OthersHooks(
             packageName != "cmb.pb" && packageName != "com.tencent.mm" &&
             packageName != "com.tencent.mobileqq"
             && packageName != "com.xunmeng.pinduoduo" && packageName != "com.instagram.android" && packageName != "com.twitter.android"
-            && packageName != "com.github.android"
+            && packageName != "com.github.android" && packageName != "com.pinterest"
         ) return
         if (!runCatching { android.app.Application.getProcessName() == packageName }.getOrDefault(false)) return
         runCatching {
@@ -350,6 +350,7 @@ internal class OthersHooks(
                 }
                 "com.xunmeng.pinduoduo" -> AppBottomNavHooks.installPinduoduo(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 "com.instagram.android" -> AppBottomNavHooks.installInstagram(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
+                "com.pinterest" -> AppBottomNavHooks.installPinterest(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 "com.twitter.android" -> AppBottomNavHooks.installX(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 "com.github.android" -> AppBottomNavHooks.installGitHub(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 "com.lucky.luckyclient" -> {
