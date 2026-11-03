@@ -7014,6 +7014,7 @@ internal fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, onSelected: 
 @Composable
 private fun SoftGlassParametersPage(openPage: (PageId) -> Unit, back: () -> Unit) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    var showResetConfirmation by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     val service by HookApplication.service.collectAsStateWithLifecycle()
     val changed = LocalNotificationSettingsChanged.current
@@ -7045,7 +7046,7 @@ private fun SoftGlassParametersPage(openPage: (PageId) -> Unit, back: () -> Unit
                     SharedViewArrowPreference(title = tr("softGlassPresets", "柔光玻璃预设"), onClick = { openPage(PageId.SOFT_GLASS_PRESETS) })
                     SharedViewArrowPreference(
                         title = tr("softGlassReset", "恢复柔光玻璃默认参数"),
-                        onClick = { updateGlass { it.resetParameters() } },
+                        onClick = { showResetConfirmation = true },
                     )
                 }
             }
@@ -7081,6 +7082,29 @@ private fun SoftGlassParametersPage(openPage: (PageId) -> Unit, back: () -> Unit
                     }
                 }
             }
+        }
+    }
+    WindowDialog(
+        show = showResetConfirmation,
+        title = tr("softGlassReset", "恢复柔光玻璃默认参数"),
+        summary = tr("softGlassResetConfirm", "确定将柔光玻璃的玻璃参数和背景参数恢复为默认值吗？"),
+        titleTextAlign = TextAlign.Left,
+        summaryTextAlign = TextAlign.Left,
+        onDismissRequest = { showResetConfirmation = false },
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            GlassDialogButton(
+                onClick = { showResetConfirmation = false },
+                modifier = Modifier.weight(1f),
+            ) { Text(tr("取消", "取消")) }
+            GlassDialogButton(
+                onClick = {
+                    showResetConfirmation = false
+                    updateGlass { it.resetParameters() }
+                },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColorsPrimary(),
+            ) { Text(tr("确认", "确认")) }
         }
     }
 }

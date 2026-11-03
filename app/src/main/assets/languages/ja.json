@@ -1631,6 +1631,7 @@
     "柔光玻璃参数调整": "ソフトガラスのパラメータ調整",
     "softGlassScope": "通知、コントロールセンター、フローティング通知のソフトガラスをまとめて調整します。システムのライト・ダーク素材の違いは維持されます。",
     "softGlassReset": "ソフトガラスのパラメータをリセット",
+    "softGlassResetConfirm": "ソフトガラスのガラスと背景のパラメータをデフォルト値に戻しますか？",
     "softGlassBackgroundBlur": "背景のぼかし",
     "softGlassBackgroundScale": "背景の拡大率",
     "softGlassOptics": "ガラスの光学パラメータ",

@@ -1631,6 +1631,7 @@
     "柔光玻璃参数调整": "Soft glass parameters",
     "softGlassScope": "Tune soft glass for notifications, Control Center and heads-up notifications together, preserving system light and dark materials.",
     "softGlassReset": "Reset soft glass parameters",
+    "softGlassResetConfirm": "Restore the soft glass and background parameters to their default values?",
     "softGlassBackgroundBlur": "Background blur",
     "softGlassBackgroundScale": "Background scale",
     "softGlassOptics": "Glass optics",
