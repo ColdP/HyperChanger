@@ -67,10 +67,7 @@ private val appNavItems = listOf(
 internal fun AppNavigationPage(back: () -> Unit) {
     val context = LocalContext.current
     val service by HookApplication.service.collectAsState()
-    val prefs = remember(service) {
-        service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)
-            ?: context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, 0)
-    }
+    val store = remember(context) { AppNavigationSettingsStore(context) }
     var selected by remember { mutableStateOf<String?>(null) }
     var revision by remember { mutableIntStateOf(0) }
     val selectedItem = appNavItems.firstOrNull { it.packageName == selected }
@@ -80,7 +77,7 @@ internal fun AppNavigationPage(back: () -> Unit) {
             onBack = { selected = null },
         )
         Box(Modifier.fillMaxSize().then(Modifier.momentumBackTransform(settingsBack))) {
-            AppNavigationSettings(selectedItem, prefs, { revision++ }) { selected = null }
+            AppNavigationSettings(selectedItem, store, service, { revision++ }) { selected = null }
         }
         return
     }
@@ -88,18 +85,19 @@ internal fun AppNavigationPage(back: () -> Unit) {
         AppList(padding, scroll, 28) {
             item { SmallTitle(tr("支持的应用", "支持的应用"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp)) }
             items(appNavItems, key = { it.packageName }) { item ->
-                AppNavigationCard(item, prefs, revision) { selected = item.packageName }
+                AppNavigationCard(item, store, service, revision) { selected = item.packageName }
             }
         }
     }
 }
 
 @Composable
-private fun AppNavigationCard(item: AppNavItem, prefs: android.content.SharedPreferences, revision: Int, onOpen: () -> Unit) {
+private fun AppNavigationCard(item: AppNavItem, store: AppNavigationSettingsStore, service: XposedService?, revision: Int, onOpen: () -> Unit) {
+    val prefs = store.preferences
     val context = LocalContext.current
     val info = remember(item.packageName, revision) { runCatching { context.packageManager.getApplicationInfo(item.packageName, 0) }.getOrNull() }
     val packageInfo = remember(item.packageName, revision) { runCatching { context.packageManager.getPackageInfo(item.packageName, 0) }.getOrNull() }
-    val enabled = remember(item.packageName, revision) { ScopedSettings.getBoolean(prefs, item.packageName, ScopedSettings.KEY_ENABLED, true) }
+    var enabled by remember(item.packageName, revision, service) { mutableStateOf(ScopedSettings.getBoolean(prefs, item.packageName, ScopedSettings.KEY_ENABLED, true)) }
     val icon = remember(info) { info?.loadIcon(context.packageManager)?.toBitmap(96, 96)?.asImageBitmap() }
     Card(Modifier.fillMaxWidth().clickable(onClick = onOpen), cornerRadius = 22.5.dp, insideMargin = PaddingValues(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -113,12 +111,13 @@ private fun AppNavigationCard(item: AppNavItem, prefs: android.content.SharedPre
             Switch(
                 checked = enabled,
                 onCheckedChange = {
-                    prefs.edit()
-                        .putBoolean(
+                    enabled = it
+                    store.edit(service) {
+                        putBoolean(
                             ScopedSettings.key(item.packageName, ScopedSettings.KEY_ENABLED),
                             it
                         )
-                        .apply()
+                    }
                 }
             )
             Image(
@@ -132,30 +131,30 @@ private fun AppNavigationCard(item: AppNavItem, prefs: android.content.SharedPre
 }
 
 @Composable
-private fun AppNavigationSettings(appItem: AppNavItem, prefs: android.content.SharedPreferences, onChanged: () -> Unit, back: () -> Unit) {
-    val context = LocalContext.current
+private fun AppNavigationSettings(appItem: AppNavItem, store: AppNavigationSettingsStore, service: XposedService?, onChanged: () -> Unit, back: () -> Unit) {
+    val prefs = store.preferences
     val enabledKey = ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_ENABLED)
-    var enabled by remember(appItem.packageName) { mutableStateOf(ScopedSettings.getBoolean(prefs, appItem.packageName, ScopedSettings.KEY_ENABLED, true)) }
-    var styleIndex by remember(appItem.packageName) { mutableIntStateOf(NavigationStyle.fromPreference(ScopedSettings.getString(prefs, appItem.packageName, NavigationStyle.PREFERENCE_KEY, NavigationStyle.DEFAULT_VALUE)).ordinal) }
-    var labelIndex by remember(appItem.packageName) { mutableIntStateOf(LabelMode.fromPreference(ScopedSettings.getLabelMode(prefs, appItem.packageName)).ordinal) }
-    var colorIndex by remember(appItem.packageName) { mutableIntStateOf(AppColorMode.fromPreference(ScopedSettings.getString(prefs, appItem.packageName, ScopedSettings.KEY_COLOR_MODE, AppColorMode.DEFAULT_VALUE)).ordinal) }
-    var accentColor by remember(appItem.packageName) { mutableIntStateOf(NavigationAccentSettings.getColor(prefs, appItem.packageName)) }
-    var showBadges by remember(appItem.packageName) { mutableStateOf(NavigationBadgeSettings.getShowBadges(prefs, appItem.packageName)) }
+    var enabled by remember(appItem.packageName, service) { mutableStateOf(ScopedSettings.getBoolean(prefs, appItem.packageName, ScopedSettings.KEY_ENABLED, true)) }
+    var styleIndex by remember(appItem.packageName, service) { mutableIntStateOf(NavigationStyle.fromPreference(ScopedSettings.getString(prefs, appItem.packageName, NavigationStyle.PREFERENCE_KEY, NavigationStyle.DEFAULT_VALUE)).ordinal) }
+    var labelIndex by remember(appItem.packageName, service) { mutableIntStateOf(LabelMode.fromPreference(ScopedSettings.getLabelMode(prefs, appItem.packageName)).ordinal) }
+    var colorIndex by remember(appItem.packageName, service) { mutableIntStateOf(AppColorMode.fromPreference(ScopedSettings.getString(prefs, appItem.packageName, ScopedSettings.KEY_COLOR_MODE, AppColorMode.DEFAULT_VALUE)).ordinal) }
+    var accentColor by remember(appItem.packageName, service) { mutableIntStateOf(NavigationAccentSettings.getColor(prefs, appItem.packageName)) }
+    var showBadges by remember(appItem.packageName, service) { mutableStateOf(NavigationBadgeSettings.getShowBadges(prefs, appItem.packageName)) }
     var showAccentDialog by remember { mutableStateOf(false) }
     val accentEnabled = enabled && NavigationStyle.entries.getOrNull(styleIndex) in setOf(
         NavigationStyle.LIQUID_GLASS,
         NavigationStyle.HARMONY_OS_FLOATING,
     )
-    var walletTabs by remember(appItem.packageName) { mutableStateOf(ScopedSettings.getWalletVisibleTabs(prefs)) }
-    var avatarRadius by remember(appItem.packageName) { mutableFloatStateOf(WeChatAvatarRadiusSettings.getOffset(prefs, appItem.packageName).toFloat()) }
+    var walletTabs by remember(appItem.packageName, service) { mutableStateOf(ScopedSettings.getWalletVisibleTabs(prefs)) }
+    var avatarRadius by remember(appItem.packageName, service) { mutableFloatStateOf(WeChatAvatarRadiusSettings.getOffset(prefs, appItem.packageName).toFloat()) }
     AppPage(tr(appItem.name, appItem.name), back) { padding, scroll ->
         AppList(padding, scroll, 28) {
             item {
                 Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-                    SwitchPreference(title = tr("启用自定义底栏", "启用自定义底栏"), summary = tr("关闭后使用应用原始导航栏", "关闭后使用应用原始导航栏"), checked = enabled, onCheckedChange = { value -> enabled = value; prefs.edit().putBoolean(enabledKey, value).apply(); onChanged() })
-                    OverlayDropdownPreference(title = tr("导航栏样式", "导航栏样式"), items = NavigationStyle.entries.map { tr(it.displayName, it.displayName) }, selectedIndex = styleIndex, enabled = enabled) { value -> styleIndex = value; prefs.edit().putString(ScopedSettings.key(appItem.packageName, NavigationStyle.PREFERENCE_KEY), NavigationStyle.entries[value].preferenceValue).apply(); onChanged() }
-                    OverlayDropdownPreference(title = tr("标签显示方式", "标签显示方式"), items = LabelMode.entries.map { tr(it.displayName, it.displayName) }, selectedIndex = labelIndex, enabled = enabled) { value -> labelIndex = value; prefs.edit().putString(ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_LABEL_MODE), LabelMode.entries[value].preferenceValue).apply(); onChanged() }
-                    OverlayDropdownPreference(title = tr("颜色模式", "颜色模式"), items = AppColorMode.entries.map { tr(it.displayName, it.displayName) }, selectedIndex = colorIndex, enabled = enabled) { value -> colorIndex = value; prefs.edit().putString(ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_COLOR_MODE), AppColorMode.entries[value].preferenceValue).apply(); onChanged() }
+                    SwitchPreference(title = tr("启用自定义底栏", "启用自定义底栏"), summary = tr("关闭后使用应用原始导航栏", "关闭后使用应用原始导航栏"), checked = enabled, onCheckedChange = { value -> enabled = value; store.edit(service) { putBoolean(enabledKey, value) }; onChanged() })
+                    OverlayDropdownPreference(title = tr("导航栏样式", "导航栏样式"), items = NavigationStyle.entries.map { tr(it.displayName, it.displayName) }, selectedIndex = styleIndex, enabled = enabled) { value -> styleIndex = value; store.edit(service) { putString(ScopedSettings.key(appItem.packageName, NavigationStyle.PREFERENCE_KEY), NavigationStyle.entries[value].preferenceValue) }; onChanged() }
+                    OverlayDropdownPreference(title = tr("标签显示方式", "标签显示方式"), items = LabelMode.entries.map { tr(it.displayName, it.displayName) }, selectedIndex = labelIndex, enabled = enabled) { value -> labelIndex = value; store.edit(service) { putString(ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_LABEL_MODE), LabelMode.entries[value].preferenceValue) }; onChanged() }
+                    OverlayDropdownPreference(title = tr("颜色模式", "颜色模式"), items = AppColorMode.entries.map { tr(it.displayName, it.displayName) }, selectedIndex = colorIndex, enabled = enabled) { value -> colorIndex = value; store.edit(service) { putString(ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_COLOR_MODE), AppColorMode.entries[value].preferenceValue) }; onChanged() }
                     if (appItem.packageName == "com.tencent.mobileqq" || appItem.packageName == "com.tencent.mm") {
                         SwitchPreference(
                             title = tr("显示小红点", "显示小红点"),
@@ -164,7 +163,7 @@ private fun AppNavigationSettings(appItem: AppNavItem, prefs: android.content.Sh
                             enabled = enabled,
                             onCheckedChange = { value ->
                                 showBadges = value
-                                NavigationBadgeSettings.save(context, prefs, appItem.packageName, value)
+                                store.edit(service) { putBoolean(ScopedSettings.key(appItem.packageName, NavigationBadgeSettings.KEY_SHOW_BADGES), value) }
                                 onChanged()
                             },
                         )
@@ -183,7 +182,7 @@ private fun AppNavigationSettings(appItem: AppNavItem, prefs: android.content.Sh
                         val checked = tab in walletTabs
                         SwitchPreference(title = walletTabName(tab), checked = checked, enabled = enabled && (!checked || walletTabs.size > 1), onCheckedChange = { value ->
                             walletTabs = if (value) walletTabs + tab else walletTabs - tab
-                            prefs.edit().putStringSet(ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_VISIBLE_TABS), walletTabs).apply(); onChanged()
+                            store.edit(service) { putStringSet(ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_VISIBLE_TABS), walletTabs) }; onChanged()
                         })
                     }
                 }
@@ -201,7 +200,10 @@ private fun AppNavigationSettings(appItem: AppNavItem, prefs: android.content.Sh
                         enabled = enabled,
                         onValueChange = { avatarRadius = it },
                         onValueChangeFinished = {
-                            WeChatAvatarRadiusSettings.saveOffset(prefs, appItem.packageName, avatarRadius.toInt())
+                            store.edit(service) {
+                                putInt(ScopedSettings.key(appItem.packageName, WeChatAvatarRadiusSettings.KEY),
+                                    avatarRadius.toInt().coerceIn(WeChatAvatarRadiusSettings.MIN, WeChatAvatarRadiusSettings.MAX))
+                            }
                             onChanged()
                         },
                     )
@@ -216,10 +218,8 @@ private fun AppNavigationSettings(appItem: AppNavItem, prefs: android.content.Sh
         onDismiss = { showAccentDialog = false },
         onSave = { selected ->
             accentColor = selected
-            if (selected == NavigationAccentSettings.defaultColor(appItem.packageName)) {
-                NavigationAccentSettings.resetColor(prefs, appItem.packageName)
-            } else {
-                NavigationAccentSettings.saveColor(prefs, appItem.packageName, selected)
+            store.edit(service) {
+                putInt(ScopedSettings.key(appItem.packageName, NavigationAccentSettings.KEY), selected or 0xFF000000.toInt())
             }
             onChanged()
             showAccentDialog = false

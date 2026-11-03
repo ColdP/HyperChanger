@@ -83,6 +83,7 @@ object ModulePresetCodec {
                     values.put(key, encodeValue(value))
                 }
             if (groupName == REMOTE_PREFERENCE_GROUP) {
+                completeAppNavigationPreset(values, context.getSharedPreferences(groupName, Context.MODE_PRIVATE))
                 completeModuleNavigationPreset(values)
                 completeSharedViewAnimationPreset(values)
                 completeStackedMobileCornerPreset(values)
@@ -207,8 +208,13 @@ object ModulePresetCodec {
                 completeIosNotificationRefractionPreset(values)
                 completeDockRevealPreset(values)
             }
-            applyValues(context.getSharedPreferences(groupName, Context.MODE_PRIVATE), values, replace = true)
-            service?.getRemotePreferences(groupName)?.let { applyValues(it, values, replace = true) }
+            val preserveMissingNavigation = groupName == REMOTE_PREFERENCE_GROUP
+            applyValues(context.getSharedPreferences(groupName, Context.MODE_PRIVATE), values, replace = true,
+                preserveMissingNavigation = preserveMissingNavigation)
+            service?.getRemotePreferences(groupName)?.let {
+                applyValues(it, values, replace = true, preserveMissingNavigation = preserveMissingNavigation)
+                if (preserveMissingNavigation) AppNavigationSettingsStore(context).syncPreferences(it)
+            }
         }
     }
 
@@ -234,9 +240,14 @@ object ModulePresetCodec {
         preferences: android.content.SharedPreferences,
         values: JSONObject,
         replace: Boolean,
+        preserveMissingNavigation: Boolean = false,
     ) {
         val editor = preferences.edit()
-        if (replace) preferences.all.keys.filter { !isExcludedFromModulePreset(it) && !values.has(it) }.forEach(editor::remove)
+        // Older presets omitted settings that existed only in remote preferences.
+        if (replace) preferences.all.keys.filter {
+            !isExcludedFromModulePreset(it) && !values.has(it) &&
+                !(preserveMissingNavigation && isAppNavigationPreference(it))
+        }.forEach(editor::remove)
         values.keys().forEach { key ->
             if (isExcludedFromModulePreset(key)) return@forEach
             val encoded = values.optJSONObject(key) ?: error("预设字段格式错误: $key")

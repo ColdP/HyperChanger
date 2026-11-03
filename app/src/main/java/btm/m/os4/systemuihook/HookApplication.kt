@@ -26,6 +26,8 @@ class HookApplication : Application(), XposedServiceHelper.OnServiceListener {
             .onFailure { ModuleLog.w("Portal", "Could not sync Portal settings", it) }
         runCatching { ContactsDialerSettings.syncRemote(this, service) }
             .onFailure { ModuleLog.w("ContactsDialer", "Could not sync dialer setting", it) }
+        runCatching { AppNavigationSettingsStore(this).syncRemote(service) }
+            .onFailure { ModuleLog.w("AppNavigation", "Could not sync app navigation settings", it) }
         runCatching { btm.m.liquidglass.NavigationBadgeSettings.syncRemote(this, service) }
             .onFailure { ModuleLog.w("NavigationBadges", "Could not sync navigation badge setting", it) }
         runCatching { ModuleHotReloadSettingsStore(this).syncRemote(service) }
