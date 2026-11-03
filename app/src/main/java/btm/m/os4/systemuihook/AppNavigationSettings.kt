@@ -6,6 +6,7 @@ import btm.m.liquidglass.AppColorMode
 import btm.m.liquidglass.NavigationAccentSettings
 import btm.m.liquidglass.NavigationBadgeSettings
 import btm.m.liquidglass.NavigationStyle
+import btm.m.liquidglass.NavigationOffsetSettings
 import btm.m.liquidglass.ScopedSettings
 import btm.m.liquidglass.hook.WeChatAvatarRadiusSettings
 import io.github.libxposed.service.XposedService
@@ -24,12 +25,13 @@ internal class AppNavigationSettingsStore internal constructor(val preferences: 
     fun syncRemote(service: XposedService) = syncPreferences(service.getRemotePreferences(REMOTE_PREFERENCE_GROUP))
 
     internal fun syncPreferences(remote: SharedPreferences) {
-        val localValues = preferences.all.filterKeys(::isAppNavigationPreference)
-        val remoteValues = remote.all.filterKeys(::isAppNavigationPreference)
+        val localValues = preferences.all.filterKeys { isAppNavigationPreference(it) && !NavigationOffsetSettings.isPreference(it) }
+        val remoteValues = remote.all.filterKeys { isAppNavigationPreference(it) && !NavigationOffsetSettings.isPreference(it) }
         // Recover installations made by older versions; subsequent page edits save both copies.
         val merged = remoteValues + localValues
         writeValues(preferences, merged)
         writeValues(remote, merged)
+        NavigationOffsetSettings.syncPreferences(preferences, remote)
     }
 
     private fun writeValues(target: SharedPreferences, values: Map<String, *>) {
@@ -39,7 +41,7 @@ internal class AppNavigationSettingsStore internal constructor(val preferences: 
                 is Boolean -> editor.putBoolean(key, value)
                 is Int -> editor.putInt(key, value)
                 is String -> editor.putString(key, value)
-                is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+                is Set<*> -> editor.putFrameworkStringSet(key, value.filterIsInstance<String>())
             }
         }
         editor.apply()
@@ -62,12 +64,14 @@ private val appNavigationSettingNames = setOf(
 )
 
 internal fun isAppNavigationPreference(key: String): Boolean =
-    key.startsWith("scope.") && key.substringAfterLast('.') in appNavigationSettingNames ||
+    NavigationOffsetSettings.isPreference(key) ||
+        key.startsWith("scope.") && key.substringAfterLast('.') in appNavigationSettingNames ||
         key == ScopedSettings.key("com.mipay.wallet", ScopedSettings.KEY_VISIBLE_TABS) ||
         key == ScopedSettings.key("com.tencent.mm", WeChatAvatarRadiusSettings.KEY)
 
 /** Export defaults explicitly so a new preset can also restore a default over a custom value. */
 internal fun completeAppNavigationPreset(values: JSONObject, preferences: SharedPreferences) {
+    NavigationOffsetSettings.completePreset(values)
     fun put(packageName: String, setting: String, type: String, value: Any) {
         val key = ScopedSettings.key(packageName, setting)
         if (!values.has(key)) values.put(key, JSONObject().put("type", type).put("value", value))

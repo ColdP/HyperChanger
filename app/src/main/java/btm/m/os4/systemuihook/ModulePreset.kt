@@ -93,6 +93,10 @@ object ModulePresetCodec {
                 completeIosNotificationExpansionPreset(values)
                 completeIosNotificationRefractionPreset(values)
                 completeDockRevealPreset(values)
+                completeSidebarPreset(values)
+                completeSidebarFeaturePreset(values)
+                completePersonalAssistantPreset(values)
+                completePowerBatteryPreset(values)
             }
             groups.put(groupName, values)
         }
@@ -147,6 +151,10 @@ object ModulePresetCodec {
                 completeIosNotificationExpansionPreset(values)
                 completeIosNotificationRefractionPreset(values)
                 completeDockRevealPreset(values)
+                completeSidebarPreset(values)
+                completeSidebarFeaturePreset(values)
+                completePersonalAssistantPreset(values)
+                completePowerBatteryPreset(values)
             }
             PreviewGroup(
                 groupName,
@@ -207,6 +215,10 @@ object ModulePresetCodec {
                 completeIosNotificationExpansionPreset(values)
                 completeIosNotificationRefractionPreset(values)
                 completeDockRevealPreset(values)
+                completeSidebarPreset(values)
+                completeSidebarFeaturePreset(values)
+                completePersonalAssistantPreset(values)
+                completePowerBatteryPreset(values)
             }
             val preserveMissingNavigation = groupName == REMOTE_PREFERENCE_GROUP
             applyValues(context.getSharedPreferences(groupName, Context.MODE_PRIVATE), values, replace = true,
@@ -260,7 +272,7 @@ object ModulePresetCodec {
                 "string" -> editor.putString(key, encoded.getString("value"))
                 "string_set" -> {
                     val array = encoded.optJSONArray("value") ?: error("预设字段格式错误: $key")
-                    editor.putStringSet(key, buildSet {
+                    editor.putFrameworkStringSet(key, buildSet {
                         for (index in 0 until array.length()) add(array.getString(index))
                     })
                 }
@@ -285,6 +297,7 @@ object ModulePresetCodec {
             File(root, "settings_appearance"),
             File(root, "rear_screenshot_shells"),
             File(root, "lyric_library"),
+            File(root, ASSISTANT_BACKGROUND_DIRECTORY),
         )
         return candidates.flatMap { file ->
             if (!file.exists()) emptyList() else if (file.isDirectory) {
@@ -335,5 +348,6 @@ object ModulePresetCodec {
         File(context.filesDir, "settings_appearance"),
         File(context.filesDir, "rear_screenshot_shells"),
         File(context.filesDir, "lyric_library"),
+        File(context.filesDir, ASSISTANT_BACKGROUND_DIRECTORY),
     )
 }

@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import btm.m.liquidglass.AppColorMode
 import btm.m.liquidglass.NavigationStyle
+import btm.m.liquidglass.NavigationOffsetSettings
 import btm.m.os4.systemuihook.tr
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
@@ -301,6 +302,16 @@ object AppBottomNavHooks {
         anchorResourceName = null,
         requiredTabs = emptySet(),
         targetVersion = "12.37.2-prod.01 (312372001)"
+    )
+
+    private val pinterest = AppConfig(
+        displayName = "Pinterest",
+        packageName = PinterestNavigation.PACKAGE,
+        activityName = PinterestNavigation.ACTIVITY,
+        barResourceName = "bottom_nav_bar",
+        anchorResourceName = null,
+        requiredTabs = emptySet(),
+        targetVersion = "14.42.0 (14428030)",
     )
 
     private val github = AppConfig(
@@ -690,6 +701,22 @@ object AppBottomNavHooks {
     ) = install(module, loader, instagram, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
 
     @JvmStatic
+    fun installPinterest(
+        module: XposedModule,
+        loader: ClassLoader,
+        blurRadius: Int,
+        labelMode: String,
+        navigationStyle: String,
+        advancedMaterial: Boolean,
+        colorMode: String,
+        accentColor: Int = 0,
+    ) {
+        PinterestNavigation.validate(loader)
+        ImmersiveNavigationHooks.install(module)
+        install(module, loader, pinterest, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
+    }
+
+    @JvmStatic
     @Throws(ReflectiveOperationException::class)
     fun installX(
         module: XposedModule,
@@ -935,6 +962,9 @@ object AppBottomNavHooks {
         private val visibleTabs: Set<String>?,
         private val showBadges: Boolean = false
     ) {
+        private val verticalOffsetDp = NavigationOffsetSettings.effectiveOffset(
+            module.getRemotePreferences(btm.m.os4.systemuihook.REMOTE_PREFERENCE_GROUP), config.packageName,
+        )
         private val selectedIndex = mutableIntStateOf(0)
         private val originalViews = linkedSetOf<View>()
         private val originalStates = IdentityHashMap<View, OriginalViewState>()
@@ -974,6 +1004,8 @@ object AppBottomNavHooks {
             InstagramNavigation.Detector(activity)
         } else null
         private var instagramLastInsetMaintenanceAt = 0L
+        private val pinterestNavigation = if (config === pinterest) PinterestNavigation.Detector(activity) else null
+        private var pinterestLastInsetMaintenanceAt = 0L
         private val xNavigation = if (config === twitter) XNavigation.Detector(activity) else null
         private var xLastInsetMaintenanceAt = 0L
         private val githubNavigation = if (config === github) GitHubNavigation.Detector(activity) else null
@@ -1064,7 +1096,7 @@ object AppBottomNavHooks {
                 if (config === github) GitHubNavigation.setActive(activity, false)
                 nav?.visibility = View.GONE
             } else {
-                xNavigation?.setActive(nav != null, navigationOverlayHeight())
+                xNavigation?.setActive(nav != null, navigationOccupiedHeight())
                 nav?.visibility = View.VISIBLE
             }
             attempts = 0
@@ -1097,6 +1129,8 @@ object AppBottomNavHooks {
             pinduoduoLastInsetMaintenanceAt = 0L
             instagramNavigation?.clear()
             instagramLastInsetMaintenanceAt = 0L
+            pinterestNavigation?.clear()
+            pinterestLastInsetMaintenanceAt = 0L
             xNavigation?.clear()
             xLastInsetMaintenanceAt = 0L
             githubNavigation?.clear()
@@ -1190,11 +1224,14 @@ object AppBottomNavHooks {
                     GitHubNavigation.setActive(
                         activity,
                         true,
-                        navigationOverlayHeight(),
+                        navigationOccupiedHeight(),
                         githubNavigation?.isRoot() == true,
                     )
                 }
                 val composeView = ComposeView(activity).apply {
+                    // Move the View itself so rendering, backdrop coordinates and touch bounds
+                    // move together, including an attached mini-player's spacing above the bar.
+                    translationY = -verticalOffsetDp * activity.resources.displayMetrics.density
                     owner.attachTo(this)
                     setBackgroundColor(android.graphics.Color.TRANSPARENT)
                     setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
@@ -1204,7 +1241,8 @@ object AppBottomNavHooks {
                         val watchFaceBackdrop = if (config === xiaomiHealthWatchFaceMarket) {
                             rememberBitmapNativeViewBackdrop(
                                 sourceView = navigationBackdropSource,
-                                sampleHeightPx = navigationOverlayHeight(),
+                                // An upward offset exposes content above the original bottom band.
+                                sampleHeightPx = maxOf(navigationOverlayHeight(), navigationOccupiedHeight()),
                                 onHostPreDraw = ::syncHostState
                             )
                         } else {
@@ -1251,7 +1289,7 @@ object AppBottomNavHooks {
                                     config === qq || config === twitter ||
                                     config === github ||
                                     config.packageName == PinduoduoNavigation.PACKAGE ||
-                                    config.packageName == InstagramNavigation.PACKAGE,
+                                    config.packageName == InstagramNavigation.PACKAGE || config === pinterest,
                                 softBackdropShadow = config === tencentMeeting,
                                 liquidBottomSpacingDp = if (config === xiaomiWallet) -8 else 8,
                                 liquidBarWidthFraction = 1f,
@@ -1280,7 +1318,7 @@ object AppBottomNavHooks {
                                     config === twitter ||
                                     config === github ||
                                     config.packageName == PinduoduoNavigation.PACKAGE ||
-                                    config.packageName == InstagramNavigation.PACKAGE
+                                    config.packageName == InstagramNavigation.PACKAGE || config === pinterest
                                 ) {
                                     { index, color ->
                                         val tab = currentNavigationTabs[index]
@@ -1295,7 +1333,7 @@ object AppBottomNavHooks {
                                                 Modifier.size(if (config === xiaomiHealth) 26.dp else 24.dp),
                                                 colorFilter = if (
                                                     (config === xiaomiHealth && selectedIndex.intValue == index) ||
-                                                    (config.packageName == InstagramNavigation.PACKAGE && tab.key == TabKey.PROFILE)
+                                                    ((config.packageName == InstagramNavigation.PACKAGE || config === pinterest) && tab.key == TabKey.PROFILE)
                                                 ) null else ColorFilter.tint(color)
                                             )
                                         }
@@ -1443,8 +1481,8 @@ object AppBottomNavHooks {
                 installGuard(content)
                 // Activate only after the overlay has been successfully added. Host snapshot
                 // state triggers composition and removes the native row on the next frame.
-                xNavigation?.setActive(true, navigationOverlayHeight())
-                if (config === github) GitHubNavigation.setActive(activity, true, navigationOverlayHeight())
+                xNavigation?.setActive(true, navigationOccupiedHeight())
+                if (config === github) GitHubNavigation.setActive(activity, true, navigationOccupiedHeight())
                 composeView.post(::syncHostState)
                 btm.m.os4.systemuihook.HookModuleLogger.log(module,
                     Log.INFO,
@@ -1545,7 +1583,7 @@ object AppBottomNavHooks {
             }
             if (config === tencentMeeting || config === wechat || config === qq ||
                 config.packageName == PinduoduoNavigation.PACKAGE ||
-                config.packageName == InstagramNavigation.PACKAGE
+                config.packageName == InstagramNavigation.PACKAGE || config === pinterest
             ) {
                 val previousSelected = selectedIndex.intValue
                 val detected = if (config === qq) content?.let(::cachedQQDetection)
@@ -1630,6 +1668,19 @@ object AppBottomNavHooks {
                     }
                     updateNavigationOverlayHeight()
                     releaseOriginalBarSpace()
+                    hideOriginalBar()
+                    return
+                }
+                if (config === pinterest) {
+                    val now = android.os.SystemClock.uptimeMillis()
+                    if (barChanged || previousSelected != selectedIndex.intValue ||
+                        now - pinterestLastInsetMaintenanceAt >= 500L
+                    ) {
+                        pinterestLastInsetMaintenanceAt = now
+                        ImmersiveNavigationHooks.activate(activity)
+                        releaseHostContentSpace()
+                    }
+                    updateNavigationOverlayHeight()
                     hideOriginalBar()
                     return
                 }
@@ -1790,7 +1841,7 @@ object AppBottomNavHooks {
             }
             if (config === tencentMeeting || config === cmbBank || config === wechat || config === qq ||
                 config.packageName == PinduoduoNavigation.PACKAGE ||
-                config.packageName == InstagramNavigation.PACKAGE
+                config.packageName == InstagramNavigation.PACKAGE || config === pinterest
             ) {
                 val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
                 val current = if (config === qq) cachedQQDetection(content)?.tabs
@@ -2073,6 +2124,8 @@ object AppBottomNavHooks {
         }
 
         private fun releaseOriginalBarSpace() {
+            // Pinterest's host hide/scroll logic compares translationY with measured height.
+            if (config === pinterest) return
             if (config === twitter) return
             if (config === qq || config === qqMusic || config === weibo || config === xiaomiWallet ||
                 config.coordinateTabSurface
@@ -2109,6 +2162,8 @@ object AppBottomNavHooks {
                 releasePinduoduoPageNavigationInset(content)
             } else if (config.packageName == InstagramNavigation.PACKAGE) {
                 releaseInstagramPageNavigationInset(content)
+            } else if (config === pinterest) {
+                releasePinterestPageNavigationInset(content)
             } else if (config === cmbBank) {
                 cmbBankPage?.let(::releaseCmbBankPageNavigationInset)
             } else if (config === xiaohongshu) {
@@ -2570,7 +2625,7 @@ object AppBottomNavHooks {
             detectedTabs = detected.tabs
             if (navigationTabs != detected.tabs) navigationTabs = detected.tabs
             nav?.visibility = View.VISIBLE
-            xNavigation?.setActive(true, navigationOverlayHeight())
+            xNavigation?.setActive(true, navigationOccupiedHeight())
             val now = android.os.SystemClock.uptimeMillis()
             if (before != selectedIndex.intValue || now - xLastInsetMaintenanceAt >= 500L) {
                 xLastInsetMaintenanceAt = now
@@ -2609,7 +2664,7 @@ object AppBottomNavHooks {
             GitHubNavigation.setActive(
                 activity,
                 true,
-                navigationOverlayHeight(),
+                navigationOccupiedHeight(),
                 githubNavigation?.isRoot() == true,
             )
             val now = android.os.SystemClock.uptimeMillis()
@@ -2715,6 +2770,42 @@ object AppBottomNavHooks {
                     view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, 0)
                 }
                 if (!targeted && params != null && params.bottomMargin == inset) {
+                    originalContentBottomMargins.putIfAbsent(view, params.bottomMargin)
+                    params.bottomMargin = 0
+                    view.layoutParams = params
+                }
+            }
+        }
+
+        private fun releasePinterestPageNavigationInset(content: ViewGroup) {
+            val page = findResourceView(content, "main_container") as? ViewGroup ?: return
+            val inset = navigationBarInset()
+            val injectedNav = nav
+            val bar = originalBar
+            descendants(page).forEach { view ->
+                if (!view.isShown || view is ComposeView || view === injectedNav || view === bar ||
+                    (injectedNav != null && isDescendantOf(view, injectedNav)) ||
+                    (bar != null && (isDescendantOf(view, bar) || isDescendantOf(bar, view)))
+                ) return@forEach
+                val name = view.id.takeIf { it != View.NO_ID }?.let {
+                    runCatching { view.resources.getResourceEntryName(it) }.getOrNull()
+                }
+                // XML bottom_nav_offset_view is specifically a native-tab spacer.
+                if (name == "bottom_nav_offset") {
+                    view.layoutParams?.takeIf { it.height != 0 }?.let { params ->
+                        originalContentLayoutHeights.putIfAbsent(view, params.height)
+                        params.height = 0
+                        view.layoutParams = params
+                    }
+                    return@forEach
+                }
+                if (inset <= 0 || view.width < page.width * .9f || view.height < inset * 4) return@forEach
+                if (view.paddingBottom == inset) {
+                    originalContentPaddings.putIfAbsent(view, intArrayOf(view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom))
+                    view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, 0)
+                }
+                val params = view.layoutParams as? ViewGroup.MarginLayoutParams
+                if (params != null && params.bottomMargin == inset) {
                     originalContentBottomMargins.putIfAbsent(view, params.bottomMargin)
                     params.bottomMargin = 0
                     view.layoutParams = params
@@ -3846,6 +3937,7 @@ object AppBottomNavHooks {
 
         private fun updateNavigationOverlayHeight() {
             val overlay = nav ?: return
+            overlay.translationY = -verticalOffsetDp * activity.resources.displayMetrics.density
             val targetHeight = navigationOverlayHeight()
             val params = overlay.layoutParams ?: return
             if (targetHeight > 0 && params.height != targetHeight) {
@@ -3853,6 +3945,9 @@ object AppBottomNavHooks {
                 overlay.layoutParams = params
             }
         }
+
+        private fun navigationOccupiedHeight(): Int =
+            (navigationOverlayHeight() + verticalOffsetDp * activity.resources.displayMetrics.density).toInt().coerceAtLeast(0)
 
         private fun adaptMiniPlayer() {
             if (config.miniPlayerResourceName == null) return
@@ -4016,6 +4111,20 @@ object AppBottomNavHooks {
                         item.clickTarget,
                         identity = "pdd:$index:${item.label}:${item.view.javaClass.name}",
                         nativeIcon = item.icon
+                    )
+                })
+            }
+            if (config === pinterest) {
+                val native = pinterestNavigation?.detect(content) ?: return null
+                selectedIndex.intValue = native.selectedIndex
+                return DetectedBar(native.container, native.items.map { item ->
+                    DetectedTab(
+                        key = if (item.avatar) TabKey.PROFILE else TabKey.NATIVE,
+                        displayLabel = item.label,
+                        view = item.view,
+                        clickTarget = item.view,
+                        identity = "pinterest:${item.kind}",
+                        nativeIcon = item.icon,
                     )
                 })
             }

@@ -107,5 +107,9 @@
             android:name=".RearScreenshotShellProvider"
             android:authorities="btm.m.os4.systemuihook.rearscreenshot.shells"
             android:exported="true" />
+        <provider
+            android:name=".PersonalAssistantBackgroundProvider"
+            android:authorities="${applicationId}.assistantbackground"
+            android:exported="true" />
     </application>
 </manifest>

@@ -81,6 +81,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
@@ -314,7 +316,7 @@ private enum class PageId {
     DEVICE_PROFILE_PRESETS, DEVICE_PROFILE_CLOUD_PRESETS, CUSTOM_DEPTH_WALLPAPER,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, SETTINGS_ENTRY_ICONS, SETTINGS_ENTRY_APPEARANCE, THEME_AND_COLOR, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
-    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, PORTAL_MATERIAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND, MODULE_PRESET_IMPORT_PREVIEW,
+    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, SIDEBAR, SIDEBAR_GLASS, PERSONAL_ASSISTANT, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, PORTAL_MATERIAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND, MODULE_PRESET_IMPORT_PREVIEW,
     STATUS_MOBILE_NETWORK_TYPE_TUNING,
     CLOUD_CONTROL,
 }
@@ -403,6 +405,18 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
         tr("category_search_other_description", "调整屏幕录制、健康和小米互传等功能。"),
         setOf(ScopeApplication.SCREEN_RECORDER, ScopeApplication.XIAOMI_HEALTH, ScopeApplication.AIRDROP),
         PageId.OTHER,
+    ),
+    CategorySearchItem(
+        tr("侧边栏", "侧边栏"),
+        tr("侧边栏柔光玻璃参数调整", "侧边栏柔光玻璃参数调整"),
+        setOf(ScopeApplication.SECURITY_CENTER),
+        PageId.SIDEBAR,
+    ),
+    CategorySearchItem(
+        tr("负一屏", "负一屏"),
+        tr("负一屏背景壁纸模糊值", "负一屏背景壁纸模糊值"),
+        setOf(ScopeApplication.PERSONAL_ASSISTANT),
+        PageId.PERSONAL_ASSISTANT,
     ),
     CategorySearchItem(
         tr("拨号与通话", "拨号与通话"),
@@ -505,6 +519,7 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
             ScopeApplication.QQ,
             ScopeApplication.PINDUODUO,
             ScopeApplication.INSTAGRAM,
+            ScopeApplication.PINTEREST,
         ScopeApplication.X,
         ),
         PageId.APP_NAVIGATION,
@@ -985,6 +1000,10 @@ private fun Root(
         service?.let {
             restartTracker.withoutTracking {
                 hooks.syncRemote(it)
+                SidebarSettingsStore(context).syncRemote(it)
+                SidebarFeatureSettingsStore(context).syncRemote(it)
+                PersonalAssistantSettingsStore(context).syncRemote(it)
+                PowerBatterySettingsStore(context).syncRemote(it)
                 PortalSettings.syncRemote(context, it)
                 globalSoftGlassStore.syncRemote(it)
                 VolumePanelGlassSettingsStore(context).syncRemote(it)
@@ -2111,6 +2130,8 @@ private fun OtherPage(
 ) {
     val context = LocalContext.current
     val service by HookApplication.service.collectAsState()
+    val temperatureStore = remember(context, service) { SidebarFeatureSettingsStore(context) }
+    var temperatureSettings by remember(temperatureStore) { mutableStateOf(temperatureStore.settings) }
     val scopedPrefs = remember(service) {
         service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)
             ?: context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, 0)
@@ -2128,7 +2149,7 @@ private fun OtherPage(
     AppPage(
     tr("其他", "其他"),
     back,
-    restartScopes = setOf(ScopeApplication.SCREEN_RECORDER, ScopeApplication.XIAOMI_HEALTH, ScopeApplication.AIRDROP, ScopeApplication.JOYOSE),
+    restartScopes = setOf(ScopeApplication.SCREEN_RECORDER, ScopeApplication.XIAOMI_HEALTH, ScopeApplication.AIRDROP, ScopeApplication.JOYOSE, ScopeApplication.SETTINGS, ScopeApplication.PERSONAL_ASSISTANT),
 ) { padding, scroll ->
     val joyoseStore = remember(context) { JoyoseSettingsStore(context) }
     var joyoseSettings by remember { mutableStateOf(joyoseStore.settings) }
@@ -2188,6 +2209,14 @@ private fun OtherPage(
             )
             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
                 SharedViewArrowPreference(
+                    title = tr("侧边栏", "侧边栏"),
+                    onClick = { open(PageId.SIDEBAR) },
+                )
+                SharedViewArrowPreference(
+                    title = tr("负一屏", "负一屏"),
+                    onClick = { open(PageId.PERSONAL_ASSISTANT) },
+                )
+                SharedViewArrowPreference(
                     title = tr("环境检测", "环境检测"),
                     summary = tr("实验性功能", "实验性功能"),
                     onClick = { open(PageId.ENVIRONMENT_DETECTION) },
@@ -2213,6 +2242,15 @@ private fun OtherPage(
                             ),
                             enabled,
                         ).apply()
+                    },
+                )
+                TemperatureWarningSwitch(
+                    title = tr("去除热点的温度限制", "去除热点的温度限制"),
+                    summary = tr("解除系统设置中开启热点的高温拦截，不影响底层温控。", "解除系统设置中开启热点的高温拦截，不影响底层温控。"),
+                    checked = temperatureSettings.removeHotspotTemperatureLimit,
+                    onCheckedChange = { value ->
+                        temperatureStore.update(service) { it.copy(removeHotspotTemperatureLimit = value) }
+                        temperatureSettings = temperatureStore.settings
                     },
                 )
                 SwitchPreference(
@@ -3425,6 +3463,7 @@ private fun RestartScopesPage(
         ScopeApplication.MEDIA_EDITOR,
     )
     val otherTargets = listOf(
+        ScopeApplication.SECURITY_CENTER,
         ScopeApplication.CONTACTS_DIALER,
         ScopeApplication.PORTAL,
         ScopeApplication.APPLE_MUSIC,
@@ -3439,6 +3478,7 @@ private fun RestartScopesPage(
         ScopeApplication.QQ,
         ScopeApplication.PINDUODUO,
         ScopeApplication.INSTAGRAM,
+        ScopeApplication.PINTEREST,
         ScopeApplication.X,
     )
     val toggleTarget: (ScopeApplication) -> Unit = { target ->
@@ -3750,6 +3790,7 @@ private fun RestartScopeDialog(
     onDismiss: () -> Unit,
     onRestart: (Set<ScopeApplication>) -> Unit,
     availableTargets: Set<ScopeApplication> = ScopeApplication.entries.toSet(),
+    scrollableList: Boolean = false,
 ) {
     var selectedTargets by remember(show) {
         mutableStateOf<Set<ScopeApplication>>(emptySet())
@@ -3773,11 +3814,16 @@ private fun RestartScopeDialog(
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 textAlign = TextAlign.Start,
             )
-            ScopeRestartCheckboxes(
-                selectedTargets = selectedTargets,
-                onSelectedTargetsChange = { selectedTargets = it },
-                availableTargets = availableTargets,
-            )
+            Column(if (scrollableList) Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState()) else Modifier) {
+                ScopeRestartCheckboxes(
+                    selectedTargets = selectedTargets,
+                    onSelectedTargetsChange = { selectedTargets = it },
+                    availableTargets = availableTargets,
+                )
+            }
+            if (scrollableList) {
+                GlassDialogButton({ selectedTargets = availableTargets }, Modifier.fillMaxWidth()) { Text(tr("全选", "全选")) }
+            }
             Spacer(Modifier.height(8.dp))
             Row(
                 Modifier.fillMaxWidth(),
@@ -4203,7 +4249,7 @@ private fun SystemSettings(
     onPickLogo: () -> Unit,
     onClearLogo: () -> Unit,
     back: () -> Unit,
-) = AppPage(tr("系统设置", "系统设置"), back, restartScopes = setOf(ScopeApplication.SETTINGS, ScopeApplication.SOUND_EFFECT, ScopeApplication.MI_SETTINGS)) { padding, scroll ->
+) = AppPage(tr("系统设置", "系统设置"), back, restartScopes = setOf(ScopeApplication.SETTINGS, ScopeApplication.SOUND_EFFECT, ScopeApplication.MI_SETTINGS, ScopeApplication.SECURITY_CENTER)) { padding, scroll ->
     val cpuIconContext = LocalContext.current
     val soundEffectService by HookApplication.service.collectAsStateWithLifecycle()
     val appScopeService by HookApplication.service.collectAsStateWithLifecycle()
@@ -4272,6 +4318,7 @@ private fun SystemSettings(
         }
     }
     AppList(padding, scroll) {
+        item { PowerBatteryPreferences() }
         item {
             Group(tr("音效设置", "音效设置")) {
                 if (!nativeBoseSupported) {
@@ -5589,6 +5636,9 @@ private fun Detail(
         PageId.CLOUD_CONTROL -> CloudControlPage(back)
         PageId.CONTACTS_DIALER -> ContactsDialerPage({ openPage(PageId.CONTACTS_DIALER_BACKGROUND) }, back)
         PageId.CONTACTS_DIALER_BACKGROUND -> ContactsDialerBackgroundPage(back)
+        PageId.SIDEBAR -> SidebarPage({ openPage(PageId.SIDEBAR_GLASS) }, back)
+        PageId.SIDEBAR_GLASS -> SidebarGlassPage(back)
+        PageId.PERSONAL_ASSISTANT -> PersonalAssistantPage(back)
         PageId.PORTAL -> PortalPage({ openPage(PageId.PORTAL_MATERIAL) }, back)
         PageId.PORTAL_MATERIAL -> PortalMaterialPage(back)
         PageId.APP_NAVIGATION -> AppNavigationPage(back)
@@ -6978,6 +7028,7 @@ internal fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, onSelected: 
 @Composable
 private fun SoftGlassParametersPage(openPage: (PageId) -> Unit, back: () -> Unit) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    var showResetConfirmation by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     val service by HookApplication.service.collectAsStateWithLifecycle()
     val changed = LocalNotificationSettingsChanged.current
@@ -7009,7 +7060,7 @@ private fun SoftGlassParametersPage(openPage: (PageId) -> Unit, back: () -> Unit
                     SharedViewArrowPreference(title = tr("softGlassPresets", "柔光玻璃预设"), onClick = { openPage(PageId.SOFT_GLASS_PRESETS) })
                     SharedViewArrowPreference(
                         title = tr("softGlassReset", "恢复柔光玻璃默认参数"),
-                        onClick = { updateGlass { it.resetParameters() } },
+                        onClick = { showResetConfirmation = true },
                     )
                 }
             }
@@ -7045,6 +7096,29 @@ private fun SoftGlassParametersPage(openPage: (PageId) -> Unit, back: () -> Unit
                     }
                 }
             }
+        }
+    }
+    WindowDialog(
+        show = showResetConfirmation,
+        title = tr("softGlassReset", "恢复柔光玻璃默认参数"),
+        summary = tr("softGlassResetConfirm", "确定将柔光玻璃的玻璃参数和背景参数恢复为默认值吗？"),
+        titleTextAlign = TextAlign.Left,
+        summaryTextAlign = TextAlign.Left,
+        onDismissRequest = { showResetConfirmation = false },
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            GlassDialogButton(
+                onClick = { showResetConfirmation = false },
+                modifier = Modifier.weight(1f),
+            ) { Text(tr("取消", "取消")) }
+            GlassDialogButton(
+                onClick = {
+                    showResetConfirmation = false
+                    updateGlass { it.resetParameters() }
+                },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColorsPrimary(),
+            ) { Text(tr("确认", "确认")) }
         }
     }
 }
@@ -13760,12 +13834,24 @@ private data class OpenProject(
     val license: String = tr("Apache License 2.0", "Apache License 2.0"),
 )
 private fun openProjects() = listOf(
-    OpenProject("MIUIX", "0.9.3", tr("HyperOS \u98ce\u683c\u754c\u9762\u3001\u504f\u597d\u8bbe\u7f6e\u3001\u56fe\u6807\u4e0e\u6a21\u7cca\u6548\u679c", "HyperOS \u98ce\u683c\u754c\u9762\u3001\u504f\u597d\u8bbe\u7f6e\u3001\u56fe\u6807\u4e0e\u6a21\u7cca\u6548\u679c"), "https://github.com/compose-miuix-ui/miuix"),
+    OpenProject(
+        tr("MIUIX", "MIUIX"),
+        tr("miuixVersion", "0.9.4"),
+        tr("miuixAttribution", "提供 HyperOS 风格界面组件、偏好设置、图标与模糊效果，构成本模块设置界面的基础。感谢 MIUIX 作者与贡献者。"),
+        "https://github.com/compose-miuix-ui/miuix",
+    ),
     OpenProject("LSPosed API", "102", tr("LSPosed \u6a21\u5757 API \u4e0e\u670d\u52a1\u901a\u4fe1", "LSPosed \u6a21\u5757 API \u4e0e\u670d\u52a1\u901a\u4fe1"), "https://github.com/LSPosed/LSPosed"),
     OpenProject("Backdrop / AndroidLiquidGlass", "2.0.0", tr("\u6db2\u6001\u73bb\u7483\u6e32\u67d3\u4e0e\u5e95\u90e8\u5bfc\u822a\u4ea4\u4e92", "\u6db2\u6001\u73bb\u7483\u6e32\u67d3\u4e0e\u5e95\u90e8\u5bfc\u822a\u4ea4\u4e92"), "https://github.com/Kyant0/AndroidLiquidGlass"),
     OpenProject("Compose Multiplatform", "1.11.x", tr("\u58f0\u660e\u5f0f\u754c\u9762\u3001\u5e03\u5c40\u4e0e\u52a8\u753b", "\u58f0\u660e\u5f0f\u754c\u9762\u3001\u5e03\u5c40\u4e0e\u52a8\u753b"), "https://github.com/JetBrains/compose-multiplatform"),
     OpenProject("AndroidX", tr("\u591a\u4e2a\u7ec4\u4ef6", "\u591a\u4e2a\u7ec4\u4ef6"), tr("Activity\u3001Lifecycle\u3001Core \u7b49 Android \u57fa\u7840\u5e93", "Activity\u3001Lifecycle\u3001Core \u7b49 Android \u57fa\u7840\u5e93"), "https://github.com/androidx/androidx"),
     OpenProject(tr("HyperMusicCover", "HyperMusicCover"), tr("hmcSnapshot", "源码快照 2026-10-30"), tr("hmcAttribution", "音乐锁屏、歌词与锁屏胶囊；保留旧通知中心实现"), "https://github.com/zyl6932/HyperMusicCover", tr("hmcLicense", "AGPL-3.0-only；部分代码为 Apache-2.0 / GPL-3.0")),
+    OpenProject(
+        tr("HyperCeiler", "HyperCeiler"),
+        tr("hyperCeilerVersions", "多个版本"),
+        tr("hyperCeilerAttribution", "省电与电池、视频工具箱温控去除相关代码"),
+        "https://github.com/ReChronoRain/HyperCeiler",
+        tr("hyperCeilerLicense", "AGPL-3.0 / MIT"),
+    ),
     OpenProject(
         tr("HyperIsland", "HyperIsland"),
         tr("3.1.8", "3.1.8"),
@@ -13811,6 +13897,7 @@ internal fun AppPage(
     navigationIcon: (@Composable () -> Unit)? = null,
     restartScopes: Set<ScopeApplication> = emptySet(),
     restartEnabled: Boolean = true,
+    restartScrollableList: Boolean = false,
     compactTopBar: Boolean = false,
     actions: @Composable RowScope.() -> Unit = {},
     floatingToolbarPosition: ToolbarPosition = ToolbarPosition.BottomCenter,
@@ -13942,6 +14029,7 @@ internal fun AppPage(
                 showRestartScopeDialog = false
             },
             availableTargets = restartScopes,
+            scrollableList = restartScrollableList,
         )
     }
     }
