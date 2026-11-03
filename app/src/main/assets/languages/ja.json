@@ -3,6 +3,7 @@
   "creator": "btm_m",
   "locale": "ja",
   "strings": {
+    "sharedViewAnimation": "ワンカットのシームレスアニメーション",
     "cc_layout_title": "コントロールセンターのタイル配置",
     "cc_layout_enable": "カスタム配置を使用",
     "cc_media_hide_source": "メディアソースアイコンを隠す",
@@ -1964,9 +1965,6 @@
     "capsuleTypeFocus": "スーパーアイランド",
     "capsuleTypeOrdinary": "通常の通知",
     "capsuleTypeNone": "通知を追加しない",
-    "capsuleAutoCollapse": "ロック画面カプセルへ自動的に折りたたむ",
-    "capsuleAutoCollapseHint": "オフにすると、通知を手動で下にスワイプしたときだけロック画面カプセルになります。",
-    "锁屏胶囊图标圆角 (dp)": "ロック画面カプセルのアイコン角丸半径（dp）",
     "htmlViewerTitle": "HTML ビューア",
     "htmlViewerDisableCloudControlSummary": "HTML ビューアがクラウドへジョブデータを同期しないようにします",
     "joyoseTitle": "Joyose",
@@ -1979,7 +1977,7 @@
     "cloudControlGroup": "クラウドコントロール関連設定",
     "cloudControlNoticeIntro": "マスタースイッチは下のアプリ別スイッチを有効にします。アプリ別スイッチはマスタースイッチがオンのときだけ有効で、オフにするとすべてのクラウドコントロール遮断が直ちに無効になります。",
     "cloudControlNoticeRisk": "クラウドコントロールを遮断すると、対象アプリのクラウド機能やデータ同期に影響する場合があります。意図した動作であることを確認してから続行してください。本機能は現状のまま提供され、将来のシステムバージョンとの互換性は保証されません。",
-    "cloudControlNoticeIssue": "問題が発生した場合は ColdP/HyperChanger の GitHub リポジトリで Issue を作成し、モジュールログ、問題の説明、再現手順、端末のモデル、システムとモジュールのバージョンを添付してください。投稿前にログから個人情報を削除してください。"
+    "cloudControlNoticeIssue": "問題が発生した場合は ColdP/HyperChanger の GitHub リポジトリで Issue を作成し、モジュールログ、問題の説明、再現手順、端末のモデル、システムとモジュールのバージョンを添付してください。投稿前にログから個人情報を削除してください。",
     "capsuleAutoCollapse": "ロック画面カプセルへ自動的に折りたたむ通知の種類",
     "capsuleAutoCollapseNone": "通知を自動的に折りたたまない",
     "capsuleAutoCollapseHint": "選択した種類は自動的に折りたたまれます。その他の種類は手動で下にスワイプしてください。ロック画面カプセルへの追加を許可した種類にのみ適用されます。",

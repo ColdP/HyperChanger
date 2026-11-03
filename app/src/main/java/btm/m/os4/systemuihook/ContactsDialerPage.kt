@@ -18,10 +18,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 import java.util.Locale
-import top.yukonga.miuix.kmp.basic.Card
+import btm.m.os4.systemuihook.SeamlessCard as Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.preference.SwitchPreference
-import top.yukonga.miuix.kmp.preference.ArrowPreference
 
 @Composable
 internal fun ContactsDialerPage(openBackground: () -> Unit, back: () -> Unit) {
@@ -33,7 +32,7 @@ internal fun ContactsDialerPage(openBackground: () -> Unit, back: () -> Unit) {
                     insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp),
                 )
                 Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-                    ArrowPreference(title = tr("拨号盘背景", "拨号盘背景"), onClick = openBackground)
+                    SharedViewArrowPreference(title = tr("拨号盘背景", "拨号盘背景"), onClick = openBackground)
                 }
             }
         }

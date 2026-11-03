@@ -3,6 +3,7 @@
   "creator": "btm_m",
   "locale": "en",
   "strings": {
+    "sharedViewAnimation": "One-take seamless animations",
     "cc_layout_title": "Control Center tile layout",
     "cc_layout_enable": "Use custom layout",
     "cc_media_hide_source": "Hide media source icon",
@@ -1964,9 +1965,6 @@
     "capsuleTypeFocus": "Super island",
     "capsuleTypeOrdinary": "Ordinary notifications",
     "capsuleTypeNone": "Do not add notifications",
-    "capsuleAutoCollapse": "Automatically collapse into lockscreen capsules",
-    "capsuleAutoCollapseHint": "When off, swipe down a notification manually to turn it into a lockscreen capsule.",
-    "锁屏胶囊图标圆角 (dp)": "Lockscreen capsule icon corner radius (dp)",
     "htmlViewerTitle": "HTML Viewer",
     "htmlViewerDisableCloudControlSummary": "Stops the HTML viewer from syncing job data to the cloud",
     "joyoseTitle": "Joyose",
@@ -1979,7 +1977,7 @@
     "cloudControlGroup": "Cloud control settings",
     "cloudControlNoticeIntro": "The master switch enables the application switches below. Those switches only apply while the master switch is on, and turning it off disables every cloud control interception immediately.",
     "cloudControlNoticeRisk": "Blocking cloud control can affect cloud features or data syncing in the affected applications. Make sure this is the behaviour you want before continuing. This feature is provided as is, without a guarantee of compatibility with future system versions.",
-    "cloudControlNoticeIssue": "If you run into problems, open an issue at the ColdP/HyperChanger GitHub repository and include the module logs, a problem description, reproduction steps, device model, and system and module versions. Remove private information from the logs before posting."
+    "cloudControlNoticeIssue": "If you run into problems, open an issue at the ColdP/HyperChanger GitHub repository and include the module logs, a problem description, reproduction steps, device model, and system and module versions. Remove private information from the logs before posting.",
     "capsuleAutoCollapse": "Notification types to automatically collapse into lockscreen capsules",
     "capsuleAutoCollapseNone": "Do not collapse any notifications automatically",
     "capsuleAutoCollapseHint": "Selected types collapse automatically; swipe down other types manually. Only types allowed in lockscreen capsules are affected.",

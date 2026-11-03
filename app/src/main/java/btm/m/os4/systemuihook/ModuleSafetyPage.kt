@@ -120,7 +120,7 @@ internal fun ModuleSafetyPage(openLogs: () -> Unit, onEnterOobe: () -> Unit, bac
                             enabled = !busy && settings.logEnabled,
                             onSelectedIndexChange = { value -> update { it.copy(detailedLogs = value == 1) } }
                         )
-                        ArrowPreference(tr("safetyViewLogs", "查看日志"), onClick = openLogs)
+                        SharedViewArrowPreference(tr("safetyViewLogs", "查看日志"), onClick = openLogs)
                         ArrowPreference(
                             tr("safetyExportLogs", "导出日志"),
                             enabled = !exporter.busy,
