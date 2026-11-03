@@ -29,6 +29,8 @@ internal class RestartRecommendationTracker(
                 val scopes = changedKeys.flatMap { restartScopesForPreference(group, it) }.toMutableSet()
                 if (group == REMOTE_PREFERENCE_GROUP && changedKeys.any { it.startsWith("soft_glass_parameters_v3_") }
                     && homeGlassFollowsGlobal(prefs)) scopes += ScopeApplication.DESKTOP
+                if (group == REMOTE_PREFERENCE_GROUP && changedKeys.any { it.startsWith("soft_glass_parameters_v3_") }
+                    && readSidebarSettings(prefs).let { it.glass.enabled && it.useGlobal }) scopes += ScopeApplication.SECURITY_CENTER
                 if (scopes.isNotEmpty()) onChanged(scopes)
             }
         }
@@ -76,6 +78,10 @@ internal fun restartScopesForPreference(group: String, key: String): Set<ScopeAp
             "predictive_back_progress", "hide_app_icon", "user_shade_presets_v1", "soft_glass_custom_presets_v1",
         )) return emptySet()
 
+    if (btm.m.liquidglass.NavigationOffsetSettings.isGlobalPreference(key)) {
+        val packages = btm.m.liquidglass.ScopedSettings.apps.map { it.packageName }.toSet()
+        return ScopeApplication.entries.filter { it.packageName in packages }.toSet()
+    }
     if (key.startsWith("scope.")) {
         return ScopeApplication.entries.filter { key.startsWith("scope.${it.packageName}.") }.toSet()
     }
@@ -88,6 +94,13 @@ internal fun restartScopesForPreference(group: String, key: String): Set<ScopeAp
             ScopeApplication.THEME_MANAGER,
         )
         key.startsWith("contacts_dialer_background_") -> setOf(ScopeApplication.CONTACTS_DIALER)
+        key in setOf(KEY_REMOVE_ASSISTANT_WALLPAPER_BLUR, KEY_ASSISTANT_CUSTOM_WALLPAPER_BLUR,
+            KEY_ASSISTANT_WALLPAPER_BLUR_RADIUS, KEY_ASSISTANT_BACKGROUND_MODE,
+            KEY_ASSISTANT_BACKGROUND_IMAGE, KEY_ASSISTANT_BACKGROUND_NAME) -> setOf(ScopeApplication.PERSONAL_ASSISTANT)
+        key == KEY_REMOVE_VIDEO_TEMP_LIMIT -> setOf(ScopeApplication.SECURITY_CENTER)
+        PowerBatteryFeature.entries.any { it.key == key } -> setOf(ScopeApplication.SECURITY_CENTER)
+        key == KEY_REMOVE_HOTSPOT_TEMP_LIMIT -> setOf(ScopeApplication.SETTINGS)
+        key.startsWith(SIDEBAR_PREFIX) -> setOf(ScopeApplication.SECURITY_CENTER)
         key.startsWith("portal_") -> setOf(ScopeApplication.PORTAL)
         key.startsWith("home_") || key.startsWith("dock_") -> setOf(ScopeApplication.DESKTOP)
         key.startsWith("settings_") || key in setOf(

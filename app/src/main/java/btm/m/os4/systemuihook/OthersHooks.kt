@@ -55,11 +55,35 @@ internal class OthersHooks(
     private val screenshotHooks = ScreenshotHooks(module, hookDeoptimized, logTag)
     private val contactsDialerHooks = ContactsDialerHooks(module, hookDeoptimized, logTag)
     private val portalHooks = PortalHooks(module, hookDeoptimized, logTag)
+    private val sidebarHooks = SidebarHooks(module, hookDeoptimized, logTag)
+    private val personalAssistantWallpaperHooks = PersonalAssistantWallpaperHooks(module, hookDeoptimized)
+    private val videoToolboxHooks = VideoToolboxHooks(module)
+    private val powerBatteryHooks = PowerBatteryHooks(module, hookDeoptimized)
+    private val powerBatteryInfoHooks = PowerBatteryInfoHooks(module, hookDeoptimized)
+    private val hotspotTemperatureHooks = HotspotTemperatureHooks(module)
     private val htmlViewerHooks = HtmlViewerHooks(module)
     private val joyoseHooks = JoyoseHooks(module)
 
     fun installPortalHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
         portalHooks.install(classLoader, preferences)
+
+    fun installSidebarHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
+        sidebarHooks.install(classLoader, preferences)
+
+    fun installPersonalAssistantWallpaperHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
+        personalAssistantWallpaperHooks.install(classLoader, preferences)
+
+    fun installVideoToolboxHooks(param: PackageLoadedParam, preferences: SharedPreferences) =
+        videoToolboxHooks.install(param, preferences)
+
+    fun installPowerBatteryHooks(param: PackageLoadedParam, preferences: SharedPreferences, mainProcess: Boolean) =
+        powerBatteryHooks.install(param, preferences, mainProcess)
+
+    fun installPowerBatteryInfoHooks(param: PackageLoadedParam, preferences: SharedPreferences) =
+        powerBatteryInfoHooks.install(param, preferences)
+
+    fun installHotspotTemperatureHooks(param: PackageLoadedParam, preferences: SharedPreferences) =
+        hotspotTemperatureHooks.install(param, preferences)
 
     fun installContactsDialerHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
         contactsDialerHooks.install(classLoader, preferences)
@@ -277,7 +301,7 @@ internal class OthersHooks(
             packageName != "cmb.pb" && packageName != "com.tencent.mm" &&
             packageName != "com.tencent.mobileqq"
             && packageName != "com.xunmeng.pinduoduo" && packageName != "com.instagram.android" && packageName != "com.twitter.android"
-            && packageName != "com.github.android"
+            && packageName != "com.github.android" && packageName != "com.pinterest"
         ) return
         if (!runCatching { android.app.Application.getProcessName() == packageName }.getOrDefault(false)) return
         runCatching {
@@ -326,6 +350,7 @@ internal class OthersHooks(
                 }
                 "com.xunmeng.pinduoduo" -> AppBottomNavHooks.installPinduoduo(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 "com.instagram.android" -> AppBottomNavHooks.installInstagram(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
+                "com.pinterest" -> AppBottomNavHooks.installPinterest(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 "com.twitter.android" -> AppBottomNavHooks.installX(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 "com.github.android" -> AppBottomNavHooks.installGitHub(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 "com.lucky.luckyclient" -> {

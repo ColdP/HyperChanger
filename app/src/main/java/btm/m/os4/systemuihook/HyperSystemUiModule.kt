@@ -1044,6 +1044,17 @@ class HyperSystemUiModule : XposedModule() {
         }
         if (param.packageName == "com.miui.securitycenter") {
             val preferences = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
+            val batteryProcess = runCatching { android.app.Application.getProcessName() }.getOrNull()
+            if (batteryProcess == "com.miui.securitycenter" || batteryProcess == "com.miui.securitycenter.remote") {
+                othersHooks.installPowerBatteryHooks(param, preferences, batteryProcess == "com.miui.securitycenter")
+            }
+            if (batteryProcess == "com.miui.securitycenter") {
+                othersHooks.installPowerBatteryInfoHooks(param, preferences)
+            }
+            if (runCatching { android.app.Application.getProcessName() == "com.miui.securitycenter:ui" }.getOrDefault(false)) {
+                othersHooks.installSidebarHooks(param.defaultClassLoader, preferences)
+                othersHooks.installVideoToolboxHooks(param, preferences)
+            }
             if (preferences.isEnvironmentDetectionEnabled() && preferences.getBoolean(KEY_SECURITYCENTER_ROOTED_DIAGNOSTICS, false)) {
                 SecurityCenterRootDiagnostics.inspectRootedCheck(this, param)
             }
@@ -1131,7 +1142,7 @@ class HyperSystemUiModule : XposedModule() {
             param.packageName == "com.lucky.luckyclient" || param.packageName == "com.tencent.wemeet.app" ||
             param.packageName == "cmb.pb" || param.packageName == "com.tencent.mm" ||
             param.packageName == "com.tencent.mobileqq" ||
-            param.packageName == "com.xunmeng.pinduoduo" || param.packageName == "com.instagram.android" || param.packageName == "com.twitter.android" || param.packageName == "com.github.android"
+            param.packageName == "com.xunmeng.pinduoduo" || param.packageName == "com.instagram.android" || param.packageName == "com.pinterest" || param.packageName == "com.twitter.android" || param.packageName == "com.github.android"
         ) {
             othersHooks.installAppNavigation(param)
             return
@@ -1149,6 +1160,7 @@ class HyperSystemUiModule : XposedModule() {
             return
         }
         if (param.packageName == SETTINGS_PACKAGE) {
+            othersHooks.installHotspotTemperatureHooks(param, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
             runCatching {
                 othersHooks.installSettingsAdvancedColorStyleHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
             }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install Settings advanced color style hook", error) }
@@ -1442,6 +1454,9 @@ class HyperSystemUiModule : XposedModule() {
                     othersHooks.installRearScreenLeftSwipeHook(param.defaultClassLoader, preferences)
                 }
                 PERSONAL_ASSISTANT -> {
+                    if (runCatching { android.app.Application.getProcessName() == PERSONAL_ASSISTANT }.getOrDefault(false)) {
+                        othersHooks.installPersonalAssistantWallpaperHooks(param.defaultClassLoader, preferences)
+                    }
                     // The app-card store and its catalog filters are process-local data
                     // preparation, not an optional visual tweak. Install them even when an
                     // older preference key was not migrated; otherwise none of the catalog

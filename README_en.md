@@ -281,7 +281,9 @@ This combined distribution is provided under [GNU AGPL version 3](LICENSE). Orig
 
 - Music lockscreen, lyrics and lockscreen capsules are adapted from the 2026-10-30 source snapshot of [HyperMusicCover](https://github.com/zyl6932/HyperMusicCover) (AGPL-3.0-only, with Apache-2.0 / GPL-3.0 portions). Retained legacy notification-center code keeps its original Apache-2.0 grant. See the [integration audit](docs/hypermusiccover-upstream-sync.md) for source hashes and boundaries.
 - Collapsed-island smoothing, large/small island spacing, and face-unlock island implementations are adapted from [HyperIsland 3.1.8](https://github.com/1812z/HyperIsland) (Copyright 2026 1812z, MIT). The full notice is in [HyperIsland-MIT.txt](app/src/main/assets/licenses/HyperIsland-MIT.txt).
-- Thanks to MIUIX, AndroidLiquidGlass / Backdrop, and other dependencies. See the app's open-source notices for more information.
+- Power saving and battery features, and video toolbox temperature-limit removal, are adapted with reference to [HyperCeiler](https://github.com/ReChronoRain/HyperCeiler) (multiple versions · AGPL-3.0 / MIT, Copyright 2023–2026 HyperCeiler Contributions). Individual files retain their respective licenses; the battery and video toolbox source files adapted here are AGPL-3.0-or-later. See [NOTICE](NOTICE) and the upstream MIT notice in [HyperCeiler-MIT.txt](app/src/main/assets/licenses/HyperCeiler-MIT.txt).
+- The module's settings interface is built on [MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix) (Apache-2.0), using its HyperOS-style UI components, preferences, icons, and blur effects (`miuix-ui`, `miuix-preference`, `miuix-icons`, and `miuix-blur`). Thanks to the MIUIX authors and contributors for this UI foundation. See the [official documentation](https://compose-miuix-ui.github.io/miuix/) and [NOTICE](NOTICE).
+- Thanks to AndroidLiquidGlass / Backdrop and other dependencies. See the app's open-source notices for more information.
 
 ## Star History
 

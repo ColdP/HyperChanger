@@ -73,7 +73,7 @@ internal class ModuleSafetySettingsStore(context: Context) {
         p.edit().putBoolean(KEY_MODULE_ENABLED, s.enabled)
             .putBoolean(KEY_SYSTEM_UI_SAFE, s.systemUiSafe)
             .putBoolean(KEY_PARTIAL_SAFE, s.partialSafe)
-            .putStringSet(KEY_SAFE_SECTIONS, s.sections.map { it.name }.toSet())
+            .putFrameworkStringSet(KEY_SAFE_SECTIONS, s.sections.map { it.name })
             .putBoolean(KEY_LOG_ENABLED, s.logEnabled).putBoolean(KEY_LOG_DETAIL, s.detailedLogs)
             .putInt(KEY_LOG_RETENTION, s.retentionDays).apply()
     }

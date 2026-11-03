@@ -14,6 +14,15 @@ Apache-2.0 text is in app/src/main/assets/licenses/Apache-2.0.txt.
 Native source attribution is recorded in the file headers and in
 app/src/main/cpp/nativehook/THIRD_PARTY_NOTICES.md.
 
+MIUIX 0.9.4 (https://github.com/compose-miuix-ui/miuix)
+Licensed under the Apache License, Version 2.0.
+HyperChanger's settings interface uses MIUIX's HyperOS-style UI components,
+preferences, icons, and blur effects through miuix-ui, miuix-preference,
+miuix-icons, and miuix-blur. Thanks to the MIUIX authors and contributors
+for the UI foundation. Individual components retain their upstream notices.
+Documentation: https://compose-miuix-ui.github.io/miuix/
+License text: app/src/main/assets/licenses/Apache-2.0.txt.
+
 HyperMusicCover (https://github.com/zyl6932/HyperMusicCover)
 Copyright (C) 2026 zyl6932
 
@@ -49,6 +58,19 @@ Corresponding source for this modified distribution must include the complete
 HyperChanger source, the imported runtime and these modifications. The upstream
 URL alone is not the corresponding source of this modified distribution.
 Project source: https://github.com/ColdP/HyperChanger
+
+HyperCeiler (https://github.com/ReChronoRain/HyperCeiler)
+Copyright (C) 2023-2026 HyperCeiler Contributions
+Multiple versions; AGPL-3.0 / MIT across the referenced project components.
+Power saving and battery features, and video toolbox temperature-limit removal,
+are adapted with reference to HyperCeiler. The battery and video toolbox source
+files used for these adaptations are AGPL-3.0-or-later, not dual-licensed under MIT.
+Individual files retain their original licenses and copyright notices.
+Modifications by btm_m for HyperChanger, 2026-11-03: host-version adaptation,
+libxposed API 102 integration, independent settings and preset synchronization,
+battery-detail lifecycle handling, and localized module preferences.
+See app/src/main/assets/licenses/AGPL-3.0-or-later.txt for the AGPL text and
+app/src/main/assets/licenses/HyperCeiler-MIT.txt for the upstream MIT notice.
 
 Collapsed island smoothing (IslandSmoothingHook.kt and IslandSmoothingShape.kt)
 large-small island spacing (IslandSpacingHook.kt), and face-unlock island
