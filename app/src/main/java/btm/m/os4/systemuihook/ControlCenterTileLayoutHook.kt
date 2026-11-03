@@ -828,68 +828,65 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
      * Expanded card: cover, title, the system artist/lyric line, progress, transport row with a
      * favourite toggle, then the media volume slider and the output device row.
      */
+    /**
+     * 1:1 copy of BrokenS10's expanded card (QSControlMiPlayDetailHeader): the cover sits
+     * top-left, title and subtitle to its right, the transport chain is bottom-aligned with the
+     * cover, and the progress bar, volume row and device row stack underneath.
+     */
     private fun layoutExpandedMedia(root: View) {
         if (root.width <= 0 || root.height <= 0) return
         val context = root.context
         val density = root.resources.displayMetrics.density
         fun dp(value: Float) = (value * density).roundToInt()
-        // Stock measurements from the official control center plugin layout.
         val inset = CcMediaNative.dimension(context, "miplay_detail_header_padding_start_end", dp(16f))
         val gap = dp(8f)
+        val coverSize = CcMediaNative.dimension(context, "miplay_detail_header_cover_size", dp(96f))
+            .coerceAtMost(root.width / 2).coerceAtLeast(1)
+        val metaX = inset + coverSize + CcMediaNative.dimension(context, "miplay_detail_header_meta_left_margin", dp(28f))
+        val actionSize = CcMediaNative.dimension(context, "miplay_detail_header_action_size", dp(66f))
+        val textWidth = (root.width - metaX - inset).coerceAtLeast(1)
         val cover = find(root, "cover") ?: return
         mediaChildVisible(root, "title", true)
         mediaChildVisible(root, "artist", true)
         mediaChildVisible(root, "empty_state", true)
         mediaChildVisible(root, "audio_container", true)
         mediaChildVisible(root, "device_icon", false)
-        val coverSize = minOf(
-            CcMediaNative.dimension(context, "miplay_detail_header_cover_size", dp(96f)),
-            (root.width - inset * 2).coerceAtLeast(1),
-        )
-        box(cover, (root.width - coverSize) / 2, inset, coverSize, coverSize)
+        box(cover, inset, inset, coverSize, coverSize)
         syncCoverOutline(root)
-        var y = inset + coverSize + gap
-        // Title uses 18sp and the subtitle 13sp: force enough height or the glyphs get clipped.
         val titleHeight = dp(26f)
         val subtitleHeight = dp(20f)
-        val textWidth = (root.width - inset * 2).coerceAtLeast(1)
-        find(root, "title")?.let { box(it, inset, y, textWidth, titleHeight) }
-        find(root, "artist")?.let { box(it, inset, y + titleHeight, textWidth, subtitleHeight) }
-        find(root, "empty_state")?.let { box(it, inset, y, textWidth, titleHeight + subtitleHeight) }
-        y += titleHeight + subtitleHeight + gap
-        val progressHeight = CcMediaNative.dimension(context, "miplay_detail_header_media_progress_bar_top", dp(20f))
-        val progress = ensureMediaProgress(root)
-        box(progress, inset, y, textWidth, progressHeight)
-        progress.invalidate()
-        y += progressHeight + dp(14f)
-        val actionSize = CcMediaNative.dimension(context, "miplay_detail_header_action_size", dp(44f))
-        val actionRow = actionSize.coerceAtMost(root.height / 6).coerceAtLeast(dp(28f))
-        ensureFavorite(root)?.let {
-            val size = (actionRow * .6f).roundToInt().coerceAtLeast(1)
-            box(it, inset, y + (actionRow - size) / 2, size, size)
-        }
+        find(root, "title")?.let { box(it, metaX, inset, textWidth, titleHeight) }
+        find(root, "artist")?.let { box(it, metaX, inset + titleHeight, textWidth, subtitleHeight) }
+        find(root, "empty_state")?.let { box(it, metaX, inset, textWidth, titleHeight + subtitleHeight) }
+        // Transport: bottom-aligned with the cover, right of it, chain packed at the right edge.
         find(root, "audio_container")?.let { owner ->
-            val trackWidth = (textWidth - actionRow - gap).coerceAtLeast(1)
-            box(owner, inset + actionRow + gap, y, trackWidth, actionRow)
-            val slot = trackWidth / 3
-            listOf("prev", "play", "next").forEachIndexed { index, name ->
-                val child = find(owner, name) ?: return@forEachIndexed
-                val size = minOf(actionSize, slot, actionRow).coerceAtLeast(1)
-                box(child, slot * index + (slot - size) / 2, (actionRow - size) / 2, size, size)
+            val rowY = inset + coverSize - actionSize
+            val track = (root.width - metaX - inset).coerceAtLeast(1)
+            box(owner, metaX, rowY, track, actionSize)
+            val buttons = listOf("prev", "play", "next").mapNotNull { find(owner, it) }
+            val chain = buttons.size * actionSize
+            buttons.forEachIndexed { index, child ->
+                val x = (track - chain).coerceAtLeast(0) + index * actionSize
+                box(child, x, 0, actionSize, actionSize)
             }
         }
-        y += actionRow + gap
+        var y = inset + coverSize + CcMediaNative.dimension(context, "miplay_detail_header_seek_bar_margin_top_normal", dp(14f))
+        val progressHeight = CcMediaNative.dimension(context, "miplay_detail_header_media_progress_bar_top", dp(20f))
+        val progress = ensureMediaProgress(root)
+        box(progress, inset, y, (root.width - inset * 2).coerceAtLeast(1), progressHeight)
+        progress.invalidate()
+        y += progressHeight + gap
         if (findInPanel(root, "volume_row_slider") == null) {
             ensureVolumeRow(root)?.let { row ->
-                val height = CcMediaNative.dimension(context, "miplay_detail_item_volume_bar_height", dp(40f))
+                val height = CcMediaNative.dimension(context, "miplay_detail_item_volume_bar_height", dp(32f))
                     .coerceAtLeast(1)
-                box(row, inset, y, textWidth, height)
+                box(row, inset, y, (root.width - inset * 2).coerceAtLeast(1), height)
                 y += height + gap
             }
         }
         if (findInPanel(root, "list") == null) {
             ensureDeviceRow(root)?.let { row ->
-                box(row, inset, y, textWidth, dp(52f))
+                box(row, inset, y, (root.width - inset * 2).coerceAtLeast(1), dp(52f))
                 syncDeviceTitle(root)
             }
         }
