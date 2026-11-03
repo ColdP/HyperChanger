@@ -2,6 +2,9 @@
 // Copyright 2026 btm_m
 package btm.m.os4.systemuihook
 
+import btm.m.os4.systemuihook.cloudcontrol.CloudControlPage
+import btm.m.os4.systemuihook.joyose.JoyoseSettings
+import btm.m.os4.systemuihook.joyose.JoyoseSettingsStore
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsStore
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationExpansionSettingsStore
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationRefractionSettingsStore
@@ -313,6 +316,7 @@ private enum class PageId {
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
     SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, PORTAL_MATERIAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND, MODULE_PRESET_IMPORT_PREVIEW,
     STATUS_MOBILE_NETWORK_TYPE_TUNING,
+    CLOUD_CONTROL,
 }
 
 private data class CategorySearchItem(
@@ -2114,8 +2118,18 @@ private fun OtherPage(
     AppPage(
     tr("其他", "其他"),
     back,
-    restartScopes = setOf(ScopeApplication.SCREEN_RECORDER, ScopeApplication.XIAOMI_HEALTH, ScopeApplication.AIRDROP),
+    restartScopes = setOf(ScopeApplication.SCREEN_RECORDER, ScopeApplication.XIAOMI_HEALTH, ScopeApplication.AIRDROP, ScopeApplication.JOYOSE),
 ) { padding, scroll ->
+    val joyoseStore = remember(context) { JoyoseSettingsStore(context) }
+    var joyoseSettings by remember { mutableStateOf(joyoseStore.settings) }
+    LaunchedEffect(service) {
+        service?.let { live -> joyoseStore.syncRemote(live) }
+        joyoseSettings = joyoseStore.settings
+    }
+    val updateJoyose: ((JoyoseSettings) -> JoyoseSettings) -> Unit = { transform ->
+        joyoseStore.update(service, transform)
+        joyoseSettings = joyoseStore.settings
+    }
     var showSavePathDialog by remember { mutableStateOf(false) }
     var pathDraft by remember(screenRecorder.savePath) { mutableStateOf(screenRecorder.savePath) }
     val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -2145,6 +2159,20 @@ private fun OtherPage(
         }
         item {
             SmallTitle(
+                tr("joyoseTitle", "Joyose"),
+                insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp),
+            )
+            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                SwitchPreference(
+                    title = tr("joyoseEnableGpuTuner", "性能调度"),
+                    summary = tr("joyoseEnableGpuTunerSummary", "开启后「游戏空间」的底部中间增加游戏 GPU 相关设置"),
+                    checked = joyoseSettings.enableGpuTuner,
+                    onCheckedChange = { enabled -> updateJoyose { it.copy(enableGpuTuner = enabled) } },
+                )
+            }
+        }
+        item {
+            SmallTitle(
                 tr("系统应用优化", "系统应用优化"),
                 insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp),
             )
@@ -2153,6 +2181,11 @@ private fun OtherPage(
                     title = tr("环境检测", "环境检测"),
                     summary = tr("实验性功能", "实验性功能"),
                     onClick = { open(PageId.ENVIRONMENT_DETECTION) },
+                )
+                SharedViewArrowPreference(
+                    title = tr("cloudControlTitle", "云控"),
+                    summary = tr("实验性功能", "实验性功能"),
+                    onClick = { open(PageId.CLOUD_CONTROL) },
                 )
                 SharedViewArrowPreference(
                     title = tr("应用底部导航", "应用底部导航"),
@@ -5543,6 +5576,7 @@ private fun Detail(
         PageId.REAR_SWIPE_APP -> RearSwipeAppPicker(back)
         PageId.OTHER -> OtherPage(airDropSettings, updateAirDrop, screenRecorder, updateScreenRecorder, openPage, back)
         PageId.ENVIRONMENT_DETECTION -> EnvironmentDetectionPage(back)
+        PageId.CLOUD_CONTROL -> CloudControlPage(back)
         PageId.CONTACTS_DIALER -> ContactsDialerPage({ openPage(PageId.CONTACTS_DIALER_BACKGROUND) }, back)
         PageId.CONTACTS_DIALER_BACKGROUND -> ContactsDialerBackgroundPage(back)
         PageId.PORTAL -> PortalPage({ openPage(PageId.PORTAL_MATERIAL) }, back)

@@ -1136,6 +1136,18 @@ class HyperSystemUiModule : XposedModule() {
             othersHooks.installAppNavigation(param)
             return
         }
+        if (param.packageName == "com.android.htmlviewer") {
+            runCatching {
+                othersHooks.installHtmlViewerHooks(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+            }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install HTML viewer hooks", error) }
+            return
+        }
+        if (param.packageName == "com.xiaomi.joyose") {
+            runCatching {
+                othersHooks.installJoyoseHooks(param, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+            }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install Joyose hooks", error) }
+            return
+        }
         if (param.packageName == SETTINGS_PACKAGE) {
             runCatching {
                 othersHooks.installSettingsAdvancedColorStyleHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
