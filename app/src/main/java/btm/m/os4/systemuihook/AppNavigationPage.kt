@@ -23,6 +23,8 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -32,6 +34,8 @@ import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.ColorPalette
 import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.basic.PullToRefresh
+import top.yukonga.miuix.kmp.basic.rememberPullToRefreshState
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
@@ -59,6 +63,11 @@ import btm.m.liquidglass.momentumBackTransform
 import kotlin.math.roundToInt
 
 private data class AppNavItem(val name: String, val packageName: String)
+
+private enum class NavigationAppListPage { DISABLED, UNINSTALLED }
+
+// MIUIX defaults to .25; use 60% of the previous refresh distance.
+private const val NAVIGATION_REFRESH_THRESHOLD = .25f * .6f
 
 private val appNavItems = listOf(
     AppNavItem("QQ", "com.tencent.mobileqq"),
@@ -88,8 +97,12 @@ internal fun AppNavigationPage(back: () -> Unit) {
     val context = LocalContext.current
     val service by HookApplication.service.collectAsState()
     val store = remember(context) { AppNavigationSettingsStore(context) }
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    var searchQuery by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf<String?>(null) }
-    var uninstalledOpen by remember { mutableStateOf(false) }
+    var appListPage by remember { mutableStateOf<NavigationAppListPage?>(null) }
+    var lastAppListPage by remember { mutableStateOf(NavigationAppListPage.DISABLED) }
     var materialOpen by remember { mutableStateOf(false) }
     var materialPackage by remember { mutableStateOf<String?>(null) }
     var revision by remember { mutableIntStateOf(0) }
@@ -97,6 +110,29 @@ internal fun AppNavigationPage(back: () -> Unit) {
     val (installedApps, uninstalledApps) = remember(context, installationRevision) {
         appNavItems.partition { item ->
             runCatching { context.packageManager.getApplicationInfo(item.packageName, 0) }.isSuccess
+        }
+    }
+    // Membership changes only on entry/refresh; preference notifications still update switches.
+    val (enabledApps, disabledApps) = remember(installedApps, store, installationRevision) {
+        installedApps.partition { item ->
+            ScopedSettings.getBoolean(store.preferences, item.packageName, ScopedSettings.KEY_ENABLED, true)
+        }
+    }
+    val query = searchQuery.trim()
+    val visibleApps = enabledApps.filter { item ->
+        query.isEmpty() || item.name.contains(query, ignoreCase = true) ||
+            tr(item.name, item.name).contains(query, ignoreCase = true) ||
+            item.packageName.contains(query, ignoreCase = true)
+    }
+    val refreshApps: () -> Unit = {
+        revision++
+        installationRevision++
+    }
+    LaunchedEffect(appListPage, selected, materialOpen) {
+        if (selected == null && !materialOpen) refreshApps()
+        if (appListPage != null || selected != null || materialOpen) {
+            focusManager.clearFocus()
+            keyboard?.hide()
         }
     }
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -131,14 +167,14 @@ internal fun AppNavigationPage(back: () -> Unit) {
     val materialExitDirection = remember(materialOpen) { materialBack.exitDirection }
     LaunchedEffect(materialOpen) { if (materialOpen) materialBack.reset() }
     val materialCoveredBlur by animateFloatAsState(if (materialOpen) 12f else 0f, tween(252), label = "navigationMaterialCoveredBlur")
-    val uninstalledBack = rememberMomentumPredictiveBack(
-        enabled = uninstalledOpen && selected == null && !materialOpen,
-        onBack = { uninstalledOpen = false },
+    val appListBack = rememberMomentumPredictiveBack(
+        enabled = appListPage != null && selected == null && !materialOpen,
+        onBack = { appListPage = null },
     )
-    val uninstalledExitDirection = remember(uninstalledOpen) { uninstalledBack.exitDirection }
-    LaunchedEffect(uninstalledOpen) { if (uninstalledOpen) uninstalledBack.reset() }
-    val detailCoveredBlur by animateFloatAsState(if (selected != null || materialOpen) 12f else 0f, tween(252), label = "uninstalledNavigationCoveredBlur")
-    val overviewBlur by animateFloatAsState(if (uninstalledOpen || selected != null || materialOpen) 12f else 0f, tween(252), label = "appNavigationOverviewBlur")
+    val appListExitDirection = remember(appListPage) { appListBack.exitDirection }
+    LaunchedEffect(appListPage) { if (appListPage != null) appListBack.reset() }
+    val detailCoveredBlur by animateFloatAsState(if (selected != null || materialOpen) 12f else 0f, tween(252), label = "navigationAppListCoveredBlur")
+    val overviewBlur by animateFloatAsState(if (appListPage != null || selected != null || materialOpen) 12f else 0f, tween(252), label = "appNavigationOverviewBlur")
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().blur(overviewBlur.dp)) {
             AppPage(
@@ -148,48 +184,99 @@ internal fun AppNavigationPage(back: () -> Unit) {
                 }.toSet(),
                 restartEnabled = service != null,
                 restartScrollableList = true,
+                floatingToolbar = {
+                    NavigationAppSearchField(searchQuery, onQueryChange = { searchQuery = it })
+                },
             ) { padding, scroll ->
-                AppList(padding, scroll, 28) {
-                    item {
-                        Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-                            AppNavigationOffsetPreferences(store.preferences, service)
-                            SharedViewArrowPreference(
-                                title = tr("navMaterialTitle", "底部导航栏材质参数调整"),
-                                onClick = { materialPackage = null; materialOpen = true },
-                            )
+                // Keep the captured viewport full-size. IME space belongs to the scrollable
+                // content padding, not a smaller opaque list surface above the keyboard.
+                val listPadding = PaddingValues(
+                    top = padding.calculateTopPadding(),
+                    bottom = maxOf(
+                        padding.calculateBottomPadding(),
+                        WindowInsets.ime.asPaddingValues().calculateBottomPadding(),
+                    ),
+                )
+                PullToRefresh(
+                    isRefreshing = false,
+                    onRefresh = refreshApps,
+                    modifier = Modifier.fillMaxSize(),
+                    pullToRefreshState = rememberPullToRefreshState(refreshThreshold = NAVIGATION_REFRESH_THRESHOLD),
+                    contentPadding = padding,
+                    topAppBarScrollBehavior = scroll,
+                    color = MiuixTheme.colorScheme.primary,
+                    refreshTexts = navigationRefreshTexts(),
+                ) {
+                    AppList(listPadding, scroll, 112) {
+                        item {
+                            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                                AppNavigationOffsetPreferences(store.preferences, service)
+                                SharedViewArrowPreference(
+                                    title = tr("navMaterialTitle", "底部导航栏材质参数调整"),
+                                    onClick = { materialPackage = null; materialOpen = true },
+                                )
+                            }
                         }
-                    }
-                    item { SmallTitle(tr("支持的应用", "支持的应用"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp)) }
-                    items(installedApps, key = { it.packageName }) { item ->
-                        AppNavigationCard(item, store, service, revision) {
-                            lastSelected = item
-                            selected = item.packageName
+                        item { SmallTitle(tr("支持的应用", "支持的应用"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp)) }
+                        if (query.isNotEmpty() && visibleApps.isEmpty()) {
+                            item {
+                                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                                    BasicComponent(title = tr("appNavigationSearchEmpty", "没有找到匹配的应用"))
+                                }
+                            }
                         }
-                    }
-                    item {
-                        Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-                            SharedViewArrowPreference(
-                                title = tr("appNavigationUninstalledApps", "未安装的应用"),
-                                onClick = { uninstalledOpen = true },
-                            )
+                        items(visibleApps, key = { it.packageName }) { item ->
+                            AppNavigationCard(item, store, service, revision) {
+                                lastSelected = item
+                                selected = item.packageName
+                            }
+                        }
+                        item {
+                            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                                SharedViewArrowPreference(
+                                    title = tr("appNavigationDisabledApps", "未启用的应用"),
+                                    onClick = {
+                                        lastAppListPage = NavigationAppListPage.DISABLED
+                                        appListPage = NavigationAppListPage.DISABLED
+                                    },
+                                )
+                            }
+                        }
+                        item {
+                            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                                SharedViewArrowPreference(
+                                    title = tr("appNavigationUninstalledApps", "未安装的应用"),
+                                    onClick = {
+                                        lastAppListPage = NavigationAppListPage.UNINSTALLED
+                                        appListPage = NavigationAppListPage.UNINSTALLED
+                                    },
+                                )
+                            }
                         }
                     }
                 }
             }
         }
         AnimatedVisibility(
-            visible = uninstalledOpen,
+            visible = appListPage != null,
             modifier = Modifier.blur(detailCoveredBlur.dp),
             enter = slideInHorizontally(tween(252, easing = FastOutSlowInEasing)) { it / 7 } +
                 fadeIn(tween(189)) + scaleIn(tween(252, easing = FastOutSlowInEasing), initialScale = .985f),
-            exit = slideOutHorizontally(tween(207, easing = FastOutSlowInEasing)) { uninstalledExitDirection * it / 3 } +
+            exit = slideOutHorizontally(tween(207, easing = FastOutSlowInEasing)) { appListExitDirection * it / 3 } +
                 fadeOut(tween(162)) + scaleOut(tween(207, easing = FastOutSlowInEasing), targetScale = .975f),
         ) {
             val transitionBlur by transition.animateFloat(
-                transitionSpec = { tween(207, easing = FastOutSlowInEasing) }, label = "uninstalledNavigationTransitionBlur",
+                transitionSpec = { tween(207, easing = FastOutSlowInEasing) }, label = "navigationAppListTransitionBlur",
             ) { if (it == EnterExitState.Visible) 0f else 12f }
-            Box(Modifier.fillMaxSize().blur(transitionBlur.dp).momentumBackTransform(uninstalledBack)) {
-                UninstalledNavigationAppsPage(uninstalledApps) { uninstalledOpen = false }
+            Box(Modifier.fillMaxSize().blur(transitionBlur.dp).momentumBackTransform(appListBack)) {
+                when (lastAppListPage) {
+                    NavigationAppListPage.UNINSTALLED -> UninstalledNavigationAppsPage(uninstalledApps) { appListPage = null }
+                    NavigationAppListPage.DISABLED -> DisabledNavigationAppsPage(
+                        disabledApps, store, service, revision, refreshApps,
+                        onOpen = { item -> lastSelected = item; selected = item.packageName },
+                        back = { appListPage = null },
+                    )
+                }
             }
         }
         AnimatedVisibility(
@@ -218,6 +305,38 @@ internal fun AppNavigationPage(back: () -> Unit) {
         ) {
             Box(Modifier.fillMaxSize().momentumBackTransform(materialBack)) {
                 NavigationMaterialPage(materialPackage) { materialOpen = false }
+            }
+        }
+    }
+}
+
+private fun navigationRefreshTexts() = listOf(
+    tr("appNavigationPullToRefresh", "下拉刷新"),
+    tr("appNavigationReleaseToRefresh", "松开刷新"),
+    tr("appNavigationRefreshing", "正在刷新…"),
+    tr("appNavigationRefreshed", "刷新完成"),
+)
+
+@Composable
+private fun DisabledNavigationAppsPage(
+    apps: List<AppNavItem>, store: AppNavigationSettingsStore, service: XposedService?, revision: Int,
+    onRefresh: () -> Unit, onOpen: (AppNavItem) -> Unit, back: () -> Unit,
+) {
+    AppPage(tr("appNavigationDisabledApps", "未启用的应用"), back) { padding, scroll ->
+        PullToRefresh(
+            isRefreshing = false,
+            onRefresh = onRefresh,
+            modifier = Modifier.fillMaxSize(),
+            pullToRefreshState = rememberPullToRefreshState(refreshThreshold = NAVIGATION_REFRESH_THRESHOLD),
+            contentPadding = padding,
+            topAppBarScrollBehavior = scroll,
+            color = MiuixTheme.colorScheme.primary,
+            refreshTexts = navigationRefreshTexts(),
+        ) {
+            AppList(padding, scroll, 28) {
+                items(apps, key = { it.packageName }) { item ->
+                    AppNavigationCard(item, store, service, revision) { onOpen(item) }
+                }
             }
         }
     }
