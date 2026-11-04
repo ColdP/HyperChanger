@@ -1905,6 +1905,9 @@ private fun BottomBar(
             advancedMaterial = true,
             colorMode = settings.themeMode,
             accentColorOverride = monetAccentColor,
+            material = rememberModuleNavigationMaterial(navigationSettings.style),
+            hyperDockedLiquidGlassEnabled = rememberHyperDockedGlassEnabled(),
+            hyperDockedAccentEnabled = true,
             liquidBottomSpacingDp = 0,
             onHostPreDraw = {},
             backdropOverride = backdrop,
@@ -1999,7 +2002,7 @@ private fun CategoryHome(
                     CategoryGroup(
                         title = tr("其他", "其他"),
                         entries = listOf(
-                            CategoryPageEntry(tr("拨号与通话", "拨号与通话"), PageId.CONTACTS_DIALER),
+                            CategoryPageEntry(tr("应用底部导航", "应用底部导航"), PageId.APP_NAVIGATION),
                             CategoryPageEntry(tr("其他", "其他"), PageId.OTHER),
                         ),
                         enabled = connected,
@@ -2241,8 +2244,8 @@ private fun OtherPage(
                     onClick = { open(PageId.CLOUD_CONTROL) },
                 )
                 SharedViewArrowPreference(
-                    title = tr("应用底部导航", "应用底部导航"),
-                    onClick = { open(PageId.APP_NAVIGATION) },
+                    title = tr("拨号与通话", "拨号与通话"),
+                    onClick = { open(PageId.CONTACTS_DIALER) },
                 )
                 SwitchPreference(
                     title = tr("去除表盘试用10分钟限制", "去除表盘试用10分钟限制"),
@@ -3230,6 +3233,7 @@ private fun SettingsHome(
                     selectedIndex = navigationStyles.indexOfFirst { it.preferenceValue == navigationSettings.style }.coerceAtLeast(0),
                     onSelectedIndexChange = { i -> updateNavigation { it.copy(style = navigationStyles[i].preferenceValue) } }
                 )
+                if (navigationSettings.style == "hyper_os") HyperDockedGlassPreference(service)
                 OverlayDropdownPreference(
                     title = tr("\u5e95\u90e8\u5bfc\u822a\u680f\u6807\u7b7e\u663e\u793a\u65b9\u5f0f", "\u5e95\u90e8\u5bfc\u822a\u680f\u6807\u7b7e\u663e\u793a\u65b9\u5f0f"),
                     items = LabelMode.entries.map { mode ->
@@ -6990,7 +6994,11 @@ private fun Shade(
 }
 
 @Composable
-internal fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, onSelected: (Int) -> Unit) {
+internal fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, onSelected: (Int) -> Unit) =
+    SoftGlassHeaderTabs(tabs, selected, 1f, onSelected = onSelected)
+
+@Composable
+internal fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, widthScale: Float, finalWidthScale: Float = 1f, onSelected: (Int) -> Unit) {
     val backdrop = LocalToolbarBackdrop.current
     val surface = MiuixTheme.colorScheme.surfaceContainer
     val shape = remember { Capsule() }
@@ -7005,7 +7013,9 @@ internal fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, onSelected: 
         highlight = { Highlight.Default.copy(alpha = .62f) },
         onDrawSurface = { drawRect(surface.copy(alpha = .6f)) },
     ) else Modifier.background(surface, shape)
-    BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 8.dp)) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val tabsWidth = ((maxWidth - 56.dp).coerceAtLeast(0.dp) * widthScale).coerceAtMost(maxWidth) * finalWidthScale
+        BoxWithConstraints(Modifier.align(Alignment.Center).width(tabsWidth).padding(vertical = 8.dp)) {
         Box(
             Modifier.matchParentSize()
                 .clip(shape)
@@ -7037,6 +7047,7 @@ internal fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, onSelected: 
                 }
             }
         }
+    }
     }
 }
 

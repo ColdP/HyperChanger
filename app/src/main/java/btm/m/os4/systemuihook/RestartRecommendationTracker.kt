@@ -85,6 +85,12 @@ internal fun restartScopesForPreference(group: String, key: String): Set<ScopeAp
         val packages = btm.m.liquidglass.ScopedSettings.apps.map { it.packageName }.toSet()
         return ScopeApplication.entries.filter { it.packageName in packages }.toSet()
     }
+    if (key == btm.m.liquidglass.NavigationMaterialSettings.KEY_MODULE) return emptySet()
+    if ((btm.m.liquidglass.NavigationMaterialSettings.isPreference(key) || btm.m.liquidglass.HyperDockedNavigationSettings.isPreference(key)) && !key.startsWith("scope.")) {
+        return ScopeApplication.entries.filter { scope ->
+            btm.m.liquidglass.ScopedSettings.apps.any { it.packageName == scope.packageName }
+        }.toSet()
+    }
     if (key.startsWith("scope.")) {
         return ScopeApplication.entries.filter { key.startsWith("scope.${it.packageName}.") }.toSet()
     }

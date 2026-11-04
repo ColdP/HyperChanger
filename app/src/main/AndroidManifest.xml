@@ -25,6 +25,8 @@
         android:roundIcon="@drawable/ic_hyperchanger"
         android:supportsRtl="true"
         android:theme="@style/Theme.HyperSystemUIHook">
+        <provider android:name=".NavigationPreviewProvider"
+            android:authorities="${applicationId}.navigationpreview" android:exported="true" />
         <service android:name=".ModuleLogCleanupService" android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
         <provider android:name="androidx.core.content.FileProvider"

@@ -992,6 +992,15 @@ object AppBottomNavHooks {
         private var lastWeiboHierarchySearchAt = 0L
         private var lastXiaohongshuHierarchySearchAt = 0L
         private val xiaohongshuIcons = if (config === xiaohongshu) XiaohongshuNavIcons(activity) else null
+        private val navigationMaterial = btm.m.liquidglass.NavigationMaterialSettings.effective(
+            module.getRemotePreferences(btm.m.os4.systemuihook.REMOTE_PREFERENCE_GROUP),
+            NavigationStyle.fromPreference(navigationStyle), config.packageName)
+        private val hyperFloatingAccentEnabled = btm.m.liquidglass.HyperFloatingAccentSettings.isEnabled(
+            module.getRemotePreferences(btm.m.os4.systemuihook.REMOTE_PREFERENCE_GROUP), config.packageName)
+        private val hyperDockedGlassEnabled = btm.m.liquidglass.HyperDockedNavigationSettings.glassEnabled(
+            module.getRemotePreferences(btm.m.os4.systemuihook.REMOTE_PREFERENCE_GROUP))
+        private val hyperDockedAccentEnabled = btm.m.liquidglass.HyperDockedNavigationSettings.accentEnabled(
+            module.getRemotePreferences(btm.m.os4.systemuihook.REMOTE_PREFERENCE_GROUP), config.packageName)
         private val xiaohongshuPublish = if (config === xiaohongshu) XiaohongshuPublishSettings.load(
             module.getRemotePreferences(btm.m.os4.systemuihook.REMOTE_PREFERENCE_GROUP)) else null
         private var detectedTabs = emptyList<DetectedTab>()
@@ -1245,6 +1254,26 @@ object AppBottomNavHooks {
                     setContent {
                         val currentNavigationTabs = navigationTabs
                         val currentNavigationAction = navigationAction
+                        // Publish native labels/order/icons off the UI thread, only when the
+                        // topology or availability changes, not while selection animates.
+                        androidx.compose.runtime.LaunchedEffect(
+                            currentNavigationTabs.map { Triple(it.identity, it.displayLabel, it.nativeIcon != null) },
+                            currentNavigationAction?.identity,
+                        ) {
+                            val point = IntArray(2)
+                            val actionPosition = currentNavigationAction?.let { action ->
+                                action.view.getLocationOnScreen(point)
+                                val actionX = point[0]
+                                currentNavigationTabs.count { tab -> tab.view.getLocationOnScreen(point); point[0] < actionX }
+                            } ?: -1
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                runCatching {
+                                    btm.m.os4.systemuihook.publishNavigationPreview(activity, config.packageName,
+                                        currentNavigationTabs.mapIndexed { index, tab -> btm.m.os4.systemuihook.NavigationPreviewTab(tab.displayLabel, tab.key.name, tab.nativeIcon, index) },
+                                        currentNavigationAction?.let { action -> btm.m.os4.systemuihook.NavigationPreviewTab(action.displayLabel, action.key.name, action.nativeIcon, actionPosition) })
+                                }
+                            }
+                        }
                         val watchFaceBackdrop = if (config === xiaomiHealthWatchFaceMarket) {
                             rememberBitmapNativeViewBackdrop(
                                 sourceView = navigationBackdropSource,
@@ -1313,8 +1342,13 @@ object AppBottomNavHooks {
                                     it != 0 && NavigationStyle.fromPreference(navigationStyle) in setOf(
                                         NavigationStyle.LIQUID_GLASS,
                                         NavigationStyle.HARMONY_OS_FLOATING,
+                                        NavigationStyle.HYPER_OS_FLOATING,
                                     )
                                 }?.let { androidx.compose.ui.graphics.Color(it) },
+                                hyperFloatingAccentEnabled = hyperFloatingAccentEnabled,
+                                hyperDockedAccentEnabled = hyperDockedAccentEnabled,
+                                hyperDockedLiquidGlassEnabled = hyperDockedGlassEnabled,
+                                material = navigationMaterial,
                                 tabImageVector = when (config) {
                                     appleMusic -> ::appleMusicTabIcon
                                     weibo -> { index ->

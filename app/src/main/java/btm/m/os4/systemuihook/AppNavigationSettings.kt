@@ -4,6 +4,9 @@ import android.content.Context
 import android.content.SharedPreferences
 import btm.m.liquidglass.AppColorMode
 import btm.m.liquidglass.NavigationAccentSettings
+import btm.m.liquidglass.HyperFloatingAccentSettings
+import btm.m.liquidglass.HyperDockedNavigationSettings
+import btm.m.liquidglass.NavigationMaterialSettings
 import btm.m.liquidglass.NavigationBadgeSettings
 import btm.m.liquidglass.NavigationStyle
 import btm.m.liquidglass.NavigationOffsetSettings
@@ -26,14 +29,17 @@ internal class AppNavigationSettingsStore internal constructor(val preferences: 
     fun syncRemote(service: XposedService) = syncPreferences(service.getRemotePreferences(REMOTE_PREFERENCE_GROUP))
 
     internal fun syncPreferences(remote: SharedPreferences) {
-        val localValues = preferences.all.filterKeys { isAppNavigationPreference(it) && !NavigationOffsetSettings.isPreference(it) && !XiaohongshuPublishSettings.isPreference(it) }
-        val remoteValues = remote.all.filterKeys { isAppNavigationPreference(it) && !NavigationOffsetSettings.isPreference(it) && !XiaohongshuPublishSettings.isPreference(it) }
+        val localValues = preferences.all.filterKeys { isAppNavigationPreference(it) && !NavigationOffsetSettings.isPreference(it) && !XiaohongshuPublishSettings.isPreference(it) && !HyperFloatingAccentSettings.isPreference(it) && !NavigationMaterialSettings.isPreference(it) && !HyperDockedNavigationSettings.isPreference(it) }
+        val remoteValues = remote.all.filterKeys { isAppNavigationPreference(it) && !NavigationOffsetSettings.isPreference(it) && !XiaohongshuPublishSettings.isPreference(it) && !HyperFloatingAccentSettings.isPreference(it) && !NavigationMaterialSettings.isPreference(it) && !HyperDockedNavigationSettings.isPreference(it) }
         // Recover installations made by older versions; subsequent page edits save both copies.
         val merged = remoteValues + localValues
         writeValues(preferences, merged)
         writeValues(remote, merged)
         NavigationOffsetSettings.syncPreferences(preferences, remote)
         XiaohongshuPublishSettings.syncPreferences(preferences, remote)
+        HyperFloatingAccentSettings.syncPreferences(preferences, remote)
+        NavigationMaterialSettings.syncPreferences(preferences, remote)
+        HyperDockedNavigationSettings.syncPreferences(preferences, remote)
     }
 
     private fun writeValues(target: SharedPreferences, values: Map<String, *>) {
@@ -66,6 +72,9 @@ private val appNavigationSettingNames = setOf(
 )
 
 internal fun isAppNavigationPreference(key: String): Boolean =
+    HyperDockedNavigationSettings.isPreference(key) ||
+    NavigationMaterialSettings.isPreference(key) ||
+    HyperFloatingAccentSettings.isPreference(key) ||
     XiaohongshuPublishSettings.isPreference(key) ||
     NavigationOffsetSettings.isPreference(key) ||
         key.startsWith("scope.") && key.substringAfterLast('.') in appNavigationSettingNames ||
@@ -76,6 +85,9 @@ internal fun isAppNavigationPreference(key: String): Boolean =
 internal fun completeAppNavigationPreset(values: JSONObject, preferences: SharedPreferences) {
     NavigationOffsetSettings.completePreset(values)
     XiaohongshuPublishSettings.completePreset(values)
+    HyperFloatingAccentSettings.completePreset(values)
+    NavigationMaterialSettings.completePreset(values)
+    HyperDockedNavigationSettings.completePreset(values)
     fun put(packageName: String, setting: String, type: String, value: Any) {
         val key = ScopedSettings.key(packageName, setting)
         if (!values.has(key)) values.put(key, JSONObject().put("type", type).put("value", value))
