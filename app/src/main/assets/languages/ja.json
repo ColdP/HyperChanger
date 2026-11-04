@@ -2238,5 +2238,6 @@
   "appNavigationWidthScale": "ボトムナビゲーションバーの幅の拡大・縮小",
   "appNavigationHeightScale": "ボトムナビゲーションバーの高さの拡大・縮小",
   "appNavigationScalePercent": "%.2f%%",
-  "appNavigationCornerAdjustment": "角丸の調整"
+  "appNavigationCornerAdjustment": "角丸の調整",
+  "appNavigationUninstalledApps": "未インストールのアプリ"
 }

@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import io.github.libxposed.service.XposedService
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.ColorPalette
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -87,16 +88,26 @@ internal fun AppNavigationPage(back: () -> Unit) {
     val service by HookApplication.service.collectAsState()
     val store = remember(context) { AppNavigationSettingsStore(context) }
     var selected by remember { mutableStateOf<String?>(null) }
+    var uninstalledOpen by remember { mutableStateOf(false) }
     var materialOpen by remember { mutableStateOf(false) }
     var materialPackage by remember { mutableStateOf<String?>(null) }
     var revision by remember { mutableIntStateOf(0) }
+    var installationRevision by remember { mutableIntStateOf(0) }
+    val (installedApps, uninstalledApps) = remember(context, installationRevision) {
+        appNavItems.partition { item ->
+            runCatching { context.packageManager.getApplicationInfo(item.packageName, 0) }.isSuccess
+        }
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(store, lifecycleOwner) {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key == null || isAppNavigationPreference(key)) revision++
         }
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) revision++
+            if (event == Lifecycle.Event.ON_RESUME) {
+                revision++
+                installationRevision++
+            }
         }
         store.preferences.registerOnSharedPreferenceChangeListener(listener)
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -119,7 +130,14 @@ internal fun AppNavigationPage(back: () -> Unit) {
     val materialExitDirection = remember(materialOpen) { materialBack.exitDirection }
     LaunchedEffect(materialOpen) { if (materialOpen) materialBack.reset() }
     val materialCoveredBlur by animateFloatAsState(if (materialOpen) 12f else 0f, tween(252), label = "navigationMaterialCoveredBlur")
-    val overviewBlur by animateFloatAsState(if (selected != null || materialOpen) 12f else 0f, tween(252), label = "appNavigationOverviewBlur")
+    val uninstalledBack = rememberMomentumPredictiveBack(
+        enabled = uninstalledOpen && selected == null && !materialOpen,
+        onBack = { uninstalledOpen = false },
+    )
+    val uninstalledExitDirection = remember(uninstalledOpen) { uninstalledBack.exitDirection }
+    LaunchedEffect(uninstalledOpen) { if (uninstalledOpen) uninstalledBack.reset() }
+    val detailCoveredBlur by animateFloatAsState(if (selected != null || materialOpen) 12f else 0f, tween(252), label = "uninstalledNavigationCoveredBlur")
+    val overviewBlur by animateFloatAsState(if (uninstalledOpen || selected != null || materialOpen) 12f else 0f, tween(252), label = "appNavigationOverviewBlur")
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().blur(overviewBlur.dp)) {
             AppPage(
@@ -141,13 +159,36 @@ internal fun AppNavigationPage(back: () -> Unit) {
                         }
                     }
                     item { SmallTitle(tr("支持的应用", "支持的应用"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp)) }
-                    items(appNavItems, key = { it.packageName }) { item ->
+                    items(installedApps, key = { it.packageName }) { item ->
                         AppNavigationCard(item, store, service, revision) {
                             lastSelected = item
                             selected = item.packageName
                         }
                     }
+                    item {
+                        Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                            SharedViewArrowPreference(
+                                title = tr("appNavigationUninstalledApps", "未安装的应用"),
+                                onClick = { uninstalledOpen = true },
+                            )
+                        }
+                    }
                 }
+            }
+        }
+        AnimatedVisibility(
+            visible = uninstalledOpen,
+            modifier = Modifier.blur(detailCoveredBlur.dp),
+            enter = slideInHorizontally(tween(252, easing = FastOutSlowInEasing)) { it / 7 } +
+                fadeIn(tween(189)) + scaleIn(tween(252, easing = FastOutSlowInEasing), initialScale = .985f),
+            exit = slideOutHorizontally(tween(207, easing = FastOutSlowInEasing)) { uninstalledExitDirection * it / 3 } +
+                fadeOut(tween(162)) + scaleOut(tween(207, easing = FastOutSlowInEasing), targetScale = .975f),
+        ) {
+            val transitionBlur by transition.animateFloat(
+                transitionSpec = { tween(207, easing = FastOutSlowInEasing) }, label = "uninstalledNavigationTransitionBlur",
+            ) { if (it == EnterExitState.Visible) 0f else 12f }
+            Box(Modifier.fillMaxSize().blur(transitionBlur.dp).momentumBackTransform(uninstalledBack)) {
+                UninstalledNavigationAppsPage(uninstalledApps) { uninstalledOpen = false }
             }
         }
         AnimatedVisibility(
@@ -182,6 +223,22 @@ internal fun AppNavigationPage(back: () -> Unit) {
 }
 
 @Composable
+private fun UninstalledNavigationAppsPage(apps: List<AppNavItem>, back: () -> Unit) {
+    AppPage(tr("appNavigationUninstalledApps", "未安装的应用"), back) { padding, scroll ->
+        AppList(padding, scroll, 28) {
+            items(apps, key = { it.packageName }) { item ->
+                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                    BasicComponent(
+                        title = tr(item.name, item.name),
+                        summary = item.packageName,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun AppNavigationCard(item: AppNavItem, store: AppNavigationSettingsStore, service: XposedService?, revision: Int, onOpen: () -> Unit) {
     val prefs = store.preferences
     val context = LocalContext.current
@@ -196,7 +253,7 @@ private fun AppNavigationCard(item: AppNavItem, store: AppNavigationSettingsStor
             Column(Modifier.weight(1f)) {
                 Text(tr(item.name, item.name), style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(item.packageName, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(packageInfo?.let { "${it.versionName ?: "?"} (${it.longVersionCode})" } ?: tr("未安装", "未安装"), style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                Text(packageInfo?.versionName ?: "?", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             }
             Box(Modifier.padding(horizontal = 12.dp).width(1.dp).height(28.dp).background(MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = .35f)))
             Switch(

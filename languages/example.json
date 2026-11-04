@@ -2187,5 +2187,6 @@
   "appNavigationWidthScale": "底部导航栏宽度缩放",
   "appNavigationHeightScale": "底部导航栏高度缩放",
   "appNavigationScalePercent": "%.2f%%",
-  "appNavigationCornerAdjustment": "圆角调整"
+  "appNavigationCornerAdjustment": "圆角调整",
+  "appNavigationUninstalledApps": "未安装的应用"
 }
