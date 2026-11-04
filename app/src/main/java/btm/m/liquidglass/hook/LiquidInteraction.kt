@@ -11,6 +11,9 @@ import androidx.compose.foundation.MutatorMutex
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -35,6 +38,7 @@ import com.kyant.backdrop.RuntimeShader
 import com.kyant.backdrop.asComposeShader
 import com.kyant.backdrop.isRuntimeShaderSupported
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -53,6 +57,8 @@ internal class DampedDragAnimation(
     private val awaitTargetBeforeRelease: Boolean = true,
     private val followFingerImmediately: Boolean = false,
     private val onTap: (DampedDragAnimation.(size: IntSize, position: Offset) -> Unit)? = null,
+    private val onDragStarted: (DampedDragAnimation.(size: IntSize, position: Offset) -> Unit)? = null,
+    private val onDragCancelled: (DampedDragAnimation.() -> Unit)? = null,
 ) {
     private val valueAnimationSpec = spring(1f, 1000f, visibilityThreshold)
     private val velocityAnimationSpec = spring(0.5f, 300f, visibilityThreshold * 10f)
@@ -66,9 +72,13 @@ internal class DampedDragAnimation(
     private val scaleYAnimation = Animatable(initialScale, 0.001f)
     private val mutatorMutex = MutatorMutex()
     private val velocityTracker = VelocityTracker()
+    private var directValue by mutableStateOf<Float?>(null)
+    var isDragging by mutableStateOf(false)
+        private set
+    private var directValueJob: Job? = null
 
-    val value: Float get() = valueAnimation.value
-    val targetValue: Float get() = valueAnimation.targetValue
+    val value: Float get() = directValue ?: valueAnimation.value
+    val targetValue: Float get() = directValue ?: valueAnimation.targetValue
     val pressProgress: Float get() = pressProgressAnimation.value
     val scaleX: Float get() = scaleXAnimation.value
     val scaleY: Float get() = scaleYAnimation.value
@@ -77,20 +87,29 @@ internal class DampedDragAnimation(
     val modifier: Modifier = Modifier.pointerInput(Unit) {
         inspectDragGestures(
             ignoreConsumed = followFingerImmediately,
-            onDragStart = {
+            onDragStart = { change ->
+                if (followFingerImmediately) {
+                    directValueJob?.cancel()
+                    directValue = value
+                    isDragging = true
+                }
                 velocityTracker.resetTracking()
                 press()
+                onDragStarted?.invoke(this@DampedDragAnimation, size, change.position)
             },
             onDragEnd = {
+                isDragging = false
                 onDragStopped()
                 release()
             },
             onTap = { change ->
+                isDragging = false
                 onTap?.invoke(this@DampedDragAnimation, size, change.position)
                 release()
             },
             onDragCancel = {
-                onDragStopped()
+                isDragging = false
+                if (onDragCancelled != null) onDragCancelled.invoke(this@DampedDragAnimation) else onDragStopped()
                 release()
             },
             onDrag = { _, dragAmount -> onDrag(size, dragAmount) }
@@ -122,11 +141,13 @@ internal class DampedDragAnimation(
 
     fun updateValue(value: Float) {
         val target = value.coerceIn(valueRange)
+        if (followFingerImmediately) {
+            // Pointer deltas are already frame-paced. Write synchronously; queuing a
+            // snap/animation coroutine per event loses deltas and trails the finger.
+            directValue = target
+            return
+        }
         animationScope.launch {
-            if (followFingerImmediately) {
-                valueAnimation.snapTo(target)
-                return@launch
-            }
             valueAnimation.animateTo(target, valueAnimationSpec) {
                 velocityTracker.addPosition(SystemClock.uptimeMillis(), Offset(this.value, 0f))
                 val range = valueRange.endInclusive - valueRange.start
@@ -139,6 +160,16 @@ internal class DampedDragAnimation(
     }
 
     fun animateToValue(value: Float) {
+        if (followFingerImmediately) {
+            if (isDragging) return // Host selection updates cannot take ownership mid-drag.
+            directValueJob?.cancel()
+            directValueJob = animationScope.launch {
+                directValue?.let { valueAnimation.snapTo(it) }
+                directValue = null
+                valueAnimation.animateTo(value.coerceIn(valueRange), valueAnimationSpec)
+            }
+            return
+        }
         animationScope.launch {
             mutatorMutex.mutate {
                 press()

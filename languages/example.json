@@ -1980,7 +1980,15 @@
     "capsuleAutoCollapseHint": "仅选中的通知类型会自动收起，未选中的类型需要手动下滑。仅对允许加入锁屏胶囊的类型生效。",
     "锁屏胶囊图标圆角 (dp)": "锁屏胶囊图标圆角 (dp)",
     "负一屏小部件柔光玻璃参数调整": "负一屏小部件柔光玻璃参数调整",
-    "小部件": "小部件"
+    "小部件": "小部件",
+    "市集": "市集",
+    "发布": "发布",
+    "xhsPublishButton": "发布按钮",
+    "xhsSeparatePublish": "发布按钮独立",
+    "xhsPublishIconColor": "独立发布按钮图标颜色",
+    "xhsPublishBackground": "独立发布按钮背景颜色",
+    "xhsPublishFollowDefault": "跟随默认",
+    "xhsPublishCustomBackground": "自定义发布按钮背景颜色"
   },
   "Xiaomi 18 Pro 系列 AI 背屏": "Xiaomi 18 Pro Series AI Rear Screen",
   "解锁 AI 功能": "Unlock AI features",

@@ -96,6 +96,15 @@ internal fun AppNavigationPage(back: () -> Unit) {
         }
     }
     var lastSelected by remember { mutableStateOf<AppNavItem?>(null) }
+    val settingsBack = rememberMomentumPredictiveBack(
+        enabled = selected != null,
+        onBack = { selected = null },
+    )
+    // Capture before AnimatedVisibility disposes the page or the gesture resets.
+    val settingsExitDirection = remember(selected) { settingsBack.exitDirection }
+    LaunchedEffect(selected) {
+        if (selected != null) settingsBack.reset()
+    }
     val overviewBlur by animateFloatAsState(if (selected != null) 12f else 0f, tween(252), label = "appNavigationOverviewBlur")
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().blur(overviewBlur.dp)) {
@@ -127,17 +136,13 @@ internal fun AppNavigationPage(back: () -> Unit) {
             visible = selected != null,
             enter = slideInHorizontally(tween(252, easing = FastOutSlowInEasing)) { it / 7 } +
                 fadeIn(tween(189)) + scaleIn(tween(252, easing = FastOutSlowInEasing), initialScale = .985f),
-            exit = slideOutHorizontally(tween(207, easing = FastOutSlowInEasing)) { -it / 3 } +
+            exit = slideOutHorizontally(tween(207, easing = FastOutSlowInEasing)) { settingsExitDirection * it / 3 } +
                 fadeOut(tween(162)) + scaleOut(tween(207, easing = FastOutSlowInEasing), targetScale = .975f),
         ) {
             val selectedItem = lastSelected ?: return@AnimatedVisibility
             val transitionBlur by transition.animateFloat(
                 transitionSpec = { tween(207, easing = FastOutSlowInEasing) }, label = "appNavigationDetailBlur",
             ) { if (it == EnterExitState.Visible) 0f else 12f }
-            val settingsBack = rememberMomentumPredictiveBack(
-                enabled = selected != null,
-                onBack = { selected = null },
-            )
             Box(Modifier.fillMaxSize().blur(transitionBlur.dp).momentumBackTransform(settingsBack)) {
                 key(selectedItem.packageName) {
                     AppNavigationSettings(selectedItem, store, service, { revision++ }) { selected = null }
@@ -155,7 +160,7 @@ private fun AppNavigationCard(item: AppNavItem, store: AppNavigationSettingsStor
     val packageInfo = remember(item.packageName, revision) { runCatching { context.packageManager.getPackageInfo(item.packageName, 0) }.getOrNull() }
     var enabled by remember(item.packageName, revision, service) { mutableStateOf(ScopedSettings.getBoolean(prefs, item.packageName, ScopedSettings.KEY_ENABLED, true)) }
     val icon = remember(info) { info?.loadIcon(context.packageManager)?.toBitmap(96, 96)?.asImageBitmap() }
-    Card(Modifier.fillMaxWidth().clickable(onClick = onOpen), cornerRadius = 22.5.dp, insideMargin = PaddingValues(14.dp)) {
+    Card(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.5.dp)).clickable(onClick = onOpen), cornerRadius = 22.5.dp, insideMargin = PaddingValues(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             icon?.let { Image(it, tr("应用图标", "应用图标"), Modifier.size(54.dp).clip(RoundedCornerShape(14.dp)), contentScale = ContentScale.Crop) }
             Spacer(Modifier.width(14.dp))
@@ -230,6 +235,9 @@ private fun AppNavigationSettings(appItem: AppNavItem, store: AppNavigationSetti
                         }
                         Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
                             AppNavigationOffsetPreferences(prefs, service, appItem.packageName)
+                        }
+                        if (appItem.packageName == "com.xingin.xhs") {
+                            XiaohongshuPublishPreferences(prefs, service, onChanged)
                         }
                         if (appItem.packageName == "com.tencent.mobileqq" || appItem.packageName == "com.tencent.mm") {
                             Group(tr("appNavigationUnreadHints", "未读提示")) {
@@ -338,28 +346,33 @@ private fun AppNavigationOffsetPreferences(preferences: SharedPreferences, servi
 }
 
 @Composable
-private fun NavigationAccentPreference(color: Int, enabled: Boolean, onClick: () -> Unit) {
+internal fun NavigationAccentPreference(
+    color: Int, enabled: Boolean,
+    title: String = tr("底栏强调色", "底栏强调色"),
+    onClick: () -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(tr("底栏强调色", "底栏强调色"), modifier = Modifier.weight(1f), style = MiuixTheme.textStyles.body1, color = if (enabled) MiuixTheme.colorScheme.onSurface else MiuixTheme.colorScheme.onSurface.copy(alpha = .38f))
+        Text(title, modifier = Modifier.weight(1f), style = MiuixTheme.textStyles.body1, color = if (enabled) MiuixTheme.colorScheme.onSurface else MiuixTheme.colorScheme.onSurface.copy(alpha = .38f))
         Box(Modifier.size(28.dp).background(MiuixTheme.colorScheme.outline.copy(alpha = .45f), androidx.compose.foundation.shape.CircleShape).padding(2.dp).background(ComposeColor(color), androidx.compose.foundation.shape.CircleShape))
     }
 }
 
 @Composable
-private fun NavigationAccentDialog(
+internal fun NavigationAccentDialog(
     show: Boolean,
     initialColor: Int,
     defaultColor: Int,
     onDismiss: () -> Unit,
     onSave: (Int) -> Unit,
+    title: String = tr("底栏强调色", "底栏强调色"),
 ) {
     var draftColor by remember(show, initialColor) { mutableIntStateOf(initialColor) }
     WindowDialog(show = show, onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(tr("底栏强调色", "底栏强调色"), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
+            Text(title, style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
             ColorPalette(
                 color = ComposeColor(draftColor or 0xFF000000.toInt()),
                 onColorChanged = { draftColor = it.toArgb() or 0xFF000000.toInt() },

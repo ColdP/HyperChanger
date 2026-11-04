@@ -65,9 +65,9 @@ object AppBottomNavHooks {
         packageName = "com.xingin.xhs",
         activityName = "com.xingin.xhs.index.v2.IndexActivityV2",
         barResourceName = null,
-        anchorResourceName = "index_store",
-        requiredTabs = setOf(TabKey.HOME, TabKey.MARKET, TabKey.PUBLISH, TabKey.MESSAGES, TabKey.PROFILE),
-        targetVersion = "9.42.0 (9420805)"
+        anchorResourceName = null,
+        requiredTabs = emptySet(),
+        targetVersion = "feature detection (9.42.0 reference)"
     )
 
     private val tim = AppConfig(
@@ -990,6 +990,10 @@ object AppBottomNavHooks {
         private var qqLastMaintenanceBar: ViewGroup? = null
         private var qqLastMaintenanceContent: ViewGroup? = null
         private var lastWeiboHierarchySearchAt = 0L
+        private var lastXiaohongshuHierarchySearchAt = 0L
+        private val xiaohongshuIcons = if (config === xiaohongshu) XiaohongshuNavIcons(activity) else null
+        private val xiaohongshuPublish = if (config === xiaohongshu) XiaohongshuPublishSettings.load(
+            module.getRemotePreferences(btm.m.os4.systemuihook.REMOTE_PREFERENCE_GROUP)) else null
         private var detectedTabs = emptyList<DetectedTab>()
         private var navigationTabs by mutableStateOf(emptyList<DetectedTab>())
         private var navigationAction by mutableStateOf<DetectedTab?>(null)
@@ -1109,7 +1113,7 @@ object AppBottomNavHooks {
             if (config === github) GitHubNavigation.setActive(activity, false)
             nav?.visibility = View.GONE
             resetMiniPlayerPosition()
-            if (config === cmbBank) destroy()
+            if (config === cmbBank || config === xiaohongshu) destroy()
         }
 
         fun destroy() {
@@ -1125,6 +1129,8 @@ object AppBottomNavHooks {
                 (it.parent as? ViewGroup)?.removeView(it)
             }
             nav = null
+            xiaohongshuIcons?.clear()
+            lastXiaohongshuHierarchySearchAt = 0L
             pinduoduoNavigation?.clear()
             pinduoduoLastInsetMaintenanceAt = 0L
             instagramNavigation?.clear()
@@ -1161,6 +1167,7 @@ object AppBottomNavHooks {
             try {
                 originalBar = detected.container
                 detectedTabs = detected.tabs
+                if (config === xiaohongshu) navigationAction = detected.trailingAction
                 if (config === qq) {
                     qqCachedDetection = detected
                     qqLastDetectionAt = android.os.SystemClock.uptimeMillis()
@@ -1207,7 +1214,7 @@ object AppBottomNavHooks {
                 val overlayHost = activity.window.decorView as? ViewGroup ?: content
                 owner.attachTo(overlayHost)
                 val navigationBackdropSource = when (config) {
-                    cloudMusic, qqMusic -> content
+                    cloudMusic, qqMusic, xiaohongshu -> content
                     qq -> findResourceView(content, "main_desk_fragment_pager") ?: sourceView
                     appleMusic -> content
                     else -> sourceView
@@ -1260,19 +1267,25 @@ object AppBottomNavHooks {
                                             miHealthIcons?.icon(tab.key.name, selectedIndex.intValue == index)
                                                 ?: tab.nativeIcon
                                         } else tab.nativeIcon,
+                                        iconOnly = config === xiaohongshu && tab.key == TabKey.PUBLISH,
                                         badge = showBadges && tab.badge
                                     ) {
-                                        if (tab.key != TabKey.PUBLISH && config !== cmbBank) selectedIndex.intValue = index
+                                        if (tab.key != TabKey.PUBLISH && config !== cmbBank && config !== xiaohongshu) selectedIndex.intValue = index
                                         openTab(tab)
                                     }
                                 },
                                 trailingAction = currentNavigationAction?.let { action ->
                                     HostTab(
                                         label = action.displayLabel,
-                                        className = "search",
+                                        className = if (config === xiaohongshu) "publish" else "search",
                                         iconBitmap = action.nativeIcon,
-                                        badge = showBadges && action.badge
-                                    ) { action.clickTarget.performClick() }
+                                        badge = showBadges && action.badge,
+                                        actionBackgroundColor = xiaohongshuPublish?.takeIf { it.backgroundMode == "custom" }
+                                            ?.let { androidx.compose.ui.graphics.Color(it.background) },
+                                        actionIconColor = xiaohongshuPublish?.takeIf { it.backgroundMode == "custom" || it.iconMode != "auto" }
+                                            ?.let { androidx.compose.ui.graphics.Color(it.iconColor()) },
+                                        actionFollowsNavigationBackground = xiaohongshuPublish?.backgroundMode == "default",
+                                    ) { if (config === xiaohongshu) openTab(action) else action.clickTarget.performClick() }
                                 },
                                 selectedIndex = selectedIndex,
                                 blurRadius = blurRadius,
@@ -1286,7 +1299,7 @@ object AppBottomNavHooks {
                                 adaptiveLiquidWidth = config === xiaomiHealth ||
                                     config === xiaomiHealthWatchFaceMarket || config === appleMusic ||
                                     config === tencentMeeting || config === cmbBank || config === wechat ||
-                                    config === qq || config === twitter ||
+                                    config === qq || config === twitter || config === xiaohongshu ||
                                     config === github ||
                                     config.packageName == PinduoduoNavigation.PACKAGE ||
                                     config.packageName == InstagramNavigation.PACKAGE || config === pinterest,
@@ -1311,6 +1324,7 @@ object AppBottomNavHooks {
                                     else -> null
                                 },
                                 tabIconContent = if (
+                                    config === xiaohongshu ||
                                     config === tencentMeeting ||
                                     config === wechat ||
                                     config === qq ||
@@ -1330,8 +1344,9 @@ object AppBottomNavHooks {
                                             Image(
                                                 bitmap,
                                                 null,
-                                                Modifier.size(if (config === xiaomiHealth) 26.dp else 24.dp),
+                                                Modifier.size(if (config === xiaohongshu && tab.key == TabKey.PUBLISH) 32.dp else if (config === xiaomiHealth) 26.dp else 24.dp),
                                                 colorFilter = if (
+                                                    (config === xiaohongshu && tab.key == TabKey.PUBLISH) ||
                                                     (config === xiaomiHealth && selectedIndex.intValue == index) ||
                                                     ((config.packageName == InstagramNavigation.PACKAGE || config === pinterest) && tab.key == TabKey.PROFILE)
                                                 ) null else ColorFilter.tint(color)
@@ -1499,7 +1514,7 @@ object AppBottomNavHooks {
         private fun installGuard(content: ViewGroup) {
             if (guard != null) return
             guardRoot = content
-            if (config === cmbBank) {
+            if (config === cmbBank || config === xiaohongshu) {
                 cmbRootListener = object : View.OnAttachStateChangeListener {
                     override fun onViewAttachedToWindow(view: View) = Unit
                     override fun onViewDetachedFromWindow(view: View) {
@@ -1509,7 +1524,7 @@ object AppBottomNavHooks {
                 }.also(content::addOnAttachStateChangeListener)
             }
             guard = ViewTreeObserver.OnPreDrawListener {
-                if (config === twitter || config === github || config === tencentMeeting || config === cmbBank || config === wechat ||
+                if (config === xiaohongshu || config === twitter || config === github || config === tencentMeeting || config === cmbBank || config === wechat ||
                     config.packageName == PinduoduoNavigation.PACKAGE
                 ) {
                     // Discovery must continue while the host hides or replaces its native bar.
@@ -1545,7 +1560,41 @@ object AppBottomNavHooks {
             content.viewTreeObserver.addOnPreDrawListener(guard)
         }
 
+        private fun syncXiaohongshuHostState() {
+            if (!resumed || nav == null) return
+            val content = activity.findViewById<ViewGroup>(android.R.id.content)
+            val detected = content?.let(::detectBottomBar)
+            if (detected == null) {
+                nav?.visibility = View.GONE
+                restoreHostContentSpace()
+                restoreOriginalBar()
+                detectedTabs = emptyList()
+                ImmersiveNavigationHooks.deactivate(activity)
+                restoreSystemNavigationBar()
+                return
+            }
+            if (detected.container !== originalBar) {
+                restoreHostContentSpace()
+                restoreOriginalBar()
+                originalBar = detected.container
+                rememberOriginalNavigationLayers(content, detected.container)
+            }
+            detectedTabs = detected.tabs
+            if (navigationTabs != detected.tabs) navigationTabs = detected.tabs
+            if (navigationAction != detected.trailingAction) navigationAction = detected.trailingAction
+            configureSystemNavigationBar()
+            ImmersiveNavigationHooks.activate(activity)
+            releaseHostContentSpace()
+            hideOriginalBar()
+            updateNavigationOverlayHeight()
+            nav?.visibility = View.VISIBLE
+        }
+
         private fun syncHostState() {
+            if (config === xiaohongshu) {
+                syncXiaohongshuHostState()
+                return
+            }
             if (config === twitter) {
                 syncXHostState()
                 return
@@ -1703,7 +1752,7 @@ object AppBottomNavHooks {
             releaseOriginalBarSpace()
             hideOriginalBar()
             adaptMiniPlayer()
-            if (config !== xiaohongshu && config !== qqMusic && config !== weibo &&
+            if (config !== qqMusic && config !== weibo &&
                 config !== xiaomiHealthWatchFaceMarket && config !== tencentMeeting && config !== cmbBank && config !== wechat
             ) {
                 val hostSelected = navigationTabs.indexOfFirst {
@@ -1823,6 +1872,10 @@ object AppBottomNavHooks {
         }
 
         private fun openTab(tab: DetectedTab) {
+            if (config === xiaohongshu) {
+                openXiaohongshuTab(tab)
+                return
+            }
             if (config === github) {
                 if (githubNavigation?.open(tab.identity) == true) {
                     selectedIndex.intValue = navigationTabs.indexOfFirst { it.identity == tab.identity }
@@ -1867,10 +1920,6 @@ object AppBottomNavHooks {
                 openXiaomiHealthTab(tab)
                 return
             }
-            if (config === xiaohongshu) {
-                openXiaohongshuTab(tab)
-                return
-            }
             if (config === reddit) {
                 openRedditTab(tab)
                 return
@@ -1885,7 +1934,8 @@ object AppBottomNavHooks {
             }
             val content = activity.findViewById<ViewGroup>(android.R.id.content)
             val currentTab = if (config === weibo) {
-                content?.let(::refreshDetectedBar)?.tabs
+                content?.let(::refreshDetectedBar)
+                    ?.let { it.tabs + listOfNotNull(it.trailingAction) }
                     ?.firstOrNull { it.identity == tab.identity } ?: return
             } else if (content != null && config === qqMusic) {
                 refreshDetectedBar(content)?.tabs?.firstOrNull { it.key == tab.key } ?: tab
@@ -1906,6 +1956,34 @@ object AppBottomNavHooks {
                 btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, TAG, "${config.displayName} rejected click for ${tab.displayLabel}")
             }
             currentTab.view.postDelayed(::syncHostState, 120L)
+        }
+
+        private fun openXiaohongshuTab(tab: DetectedTab) {
+            val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
+            // Resolve only the business source here. Rendering icons or sampling
+            // selected state must not decide whether the navigation event is sent.
+            val bar = XiaohongshuBottomBarDetector.detect(content, originalBar)
+            val current = bar?.tabs?.firstOrNull { it.feature.identity == tab.identity }
+            if (bar == null || current == null) {
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, TAG,
+                    "Xiaohongshu click source missing: ${tab.identity}")
+                return
+            }
+            val clicked = XiaohongshuTabClick.perform(bar.container, current.feature.kind, current.view, current.clickTarget)
+            btm.m.os4.systemuihook.HookModuleLogger.log(module, if (clicked) Log.INFO else Log.WARN, TAG,
+                "Xiaohongshu click ${tab.identity}: dispatched=$clicked source=${current.view.javaClass.name}")
+            if (!clicked) return
+            if (tab.key != TabKey.PUBLISH) {
+                navigationTabs.indexOfFirst { it.identity == tab.identity }.takeIf { it >= 0 }
+                    ?.let { selectedIndex.intValue = it }
+            }
+            current.view.post(::syncHostState)
+            current.view.postDelayed({
+                syncHostState()
+                val selected = bar.tabs.filter { it.view.isSelected }.joinToString { it.feature.identity }
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, TAG,
+                    "Xiaohongshu click ${tab.identity}: native selection=$selected")
+            }, 160L)
         }
 
         private fun openXiaomiHealthWatchFaceMarketTab(tab: DetectedTab) {
@@ -1938,72 +2016,6 @@ object AppBottomNavHooks {
             selectedIndex.intValue = navigationTabs.indexOfFirst { it.key == tab.key }
                 .takeIf { it >= 0 } ?: selectedIndex.intValue
             nativeTab.postDelayed(::syncHostState, 120L)
-        }
-
-        private fun openXiaohongshuTab(tab: DetectedTab) {
-            val tabIndex = when (tab.key) {
-                TabKey.HOME -> 0
-                TabKey.MARKET -> 1
-                TabKey.MESSAGES -> 2
-                TabKey.PROFILE -> 3
-                TabKey.PUBLISH -> 5
-                else -> return
-            }
-            val handled = (if (tab.key != TabKey.PUBLISH) {
-                runCatching {
-                    val intent = android.content.Intent(activity, activity.javaClass).apply {
-                        addFlags(
-                            android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                                android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
-                        )
-                        putExtra("bottom_tab_index", tabIndex)
-                    }
-                    activity.startActivity(intent)
-                    activity.overridePendingTransition(0, 0)
-                    true
-                }
-            } else runCatching {
-                val interfaceClass = Class.forName(
-                    "android.xingin.com.spi.homepage.IMainTabBarProxy",
-                    false,
-                    activity.classLoader
-                )
-                val reflectionClass = Class.forName(
-                    "kotlin.jvm.internal.Reflection",
-                    false,
-                    activity.classLoader
-                )
-                val kotlinClass = reflectionClass.getMethod(
-                    "getOrCreateKotlinClass",
-                    Class::class.java
-                ).invoke(null, interfaceClass)
-                val serviceLoaderClass = Class.forName(
-                    "com.xingin.spi.service.ServiceLoaderKtKt",
-                    false,
-                    activity.classLoader
-                )
-                val serviceMethod = serviceLoaderClass.declaredMethods.first {
-                    it.name == "service\$default" && it.parameterTypes.size == 5
-                }.apply { isAccessible = true }
-                val proxy = serviceMethod.invoke(null, kotlinClass, null, null, 3, null)
-                    ?: error("IMainTabBarProxy service unavailable")
-                interfaceClass.getMethod(
-                    "dispatchTabClick",
-                    android.content.Context::class.java,
-                    Int::class.javaPrimitiveType
-                ).invoke(proxy, activity, tabIndex)
-                true
-            }).onFailure { error ->
-                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, TAG, "Xiaohongshu rejected click for ${tab.displayLabel}", error)
-            }.getOrDefault(false)
-            if (!handled) {
-                val currentTab = detectedTabs.firstOrNull { it.key == tab.key } ?: tab
-                currentTab.clickTarget.callOnClick() || currentTab.clickTarget.performClick()
-            } else if (tab.key != TabKey.PUBLISH) {
-                selectedIndex.intValue = navigationTabs.indexOfFirst { it.key == tab.key }
-                    .takeIf { it >= 0 } ?: selectedIndex.intValue
-            }
-            originalBar?.postDelayed(::syncHostState, 120L)
         }
 
         private fun openRedditTab(tab: DetectedTab) {
@@ -2125,7 +2137,7 @@ object AppBottomNavHooks {
 
         private fun releaseOriginalBarSpace() {
             // Pinterest's host hide/scroll logic compares translationY with measured height.
-            if (config === pinterest) return
+            if (config === pinterest || config === xiaohongshu) return
             if (config === twitter) return
             if (config === qq || config === qqMusic || config === weibo || config === xiaomiWallet ||
                 config.coordinateTabSurface
@@ -2167,15 +2179,7 @@ object AppBottomNavHooks {
             } else if (config === cmbBank) {
                 cmbBankPage?.let(::releaseCmbBankPageNavigationInset)
             } else if (config === xiaohongshu) {
-                val pager = descendants(content).firstOrNull {
-                    it.javaClass.simpleName == "ExploreScrollableViewPager"
-                } ?: return
-                val params = pager.layoutParams as? ViewGroup.MarginLayoutParams ?: return
-                originalContentBottomMargins.putIfAbsent(pager, params.bottomMargin)
-                if (params.bottomMargin != 0) {
-                    params.bottomMargin = 0
-                    pager.layoutParams = params
-                }
+                releaseXiaohongshuPageNavigationInset(content)
             } else if (config === cloudMusic) {
                 val header = descendants(content).firstOrNull {
                     it.javaClass.simpleName == "TopHeaderLayout"
@@ -2813,6 +2817,41 @@ object AppBottomNavHooks {
             }
         }
 
+        private fun releaseXiaohongshuPageNavigationInset(content: ViewGroup) {
+            val bar = originalBar ?: return
+            val inset = navigationBarInset()
+            val density = content.resources.displayMetrics.density
+            fun isPager(view: View): Boolean = generateSequence(view.javaClass as Class<*>?) { it.superclass }
+                .any { it.name.endsWith(".ViewPager") || it.name.endsWith(".ViewPager2") ||
+                    it.name.endsWith(".ExploreScrollableViewPager") }
+            for (view in descendants(content)) {
+                if (!view.isShown || view is ComposeView || view === bar ||
+                    isDescendantOf(view, bar) || isDescendantOf(bar, view) ||
+                    view.width < content.width * 0.75f || view.height < maxOf(inset * 4, (160 * density).toInt())
+                ) continue
+                val params = view.layoutParams as? ViewGroup.MarginLayoutParams
+                val isMainPager = isPager(view) &&
+                    generateSequence(view.parent as? View) { it.parent as? View }
+                        .takeWhile { it !== content }.none(::isPager)
+                // Both decompiled ContentView layouts reserve the native row's height.
+                // A renamed pager must still match the measured row before we change it.
+                val knownPager = view.javaClass.name == "com.xingin.redview.viewpage.ExploreScrollableViewPager"
+                if (params != null && params.bottomMargin > 0 &&
+                    ((isMainPager && (knownPager || params.bottomMargin == bar.height)) ||
+                        (inset > 0 && params.bottomMargin == inset))
+                ) {
+                    originalContentBottomMargins.putIfAbsent(view, params.bottomMargin)
+                    params.bottomMargin = 0
+                    view.layoutParams = params
+                }
+                if (inset > 0 && view.paddingBottom == inset) {
+                    originalContentPaddings.putIfAbsent(view,
+                        intArrayOf(view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom))
+                    view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, 0)
+                }
+            }
+        }
+
         private fun restoreHostContentSpace() {
             originalContentBottomMargins.forEach { (view, bottomMargin) ->
                 (view.layoutParams as? ViewGroup.MarginLayoutParams)?.let { params ->
@@ -3296,13 +3335,6 @@ object AppBottomNavHooks {
             }
             if (config.coordinateTabSurface) return
             rememberOriginalView(bar)
-            if (config !== xiaohongshu) return
-
-            var layer = bar.parent as? ViewGroup
-            while (layer != null && layer !== content && layer.childCount == 1) {
-                rememberOriginalView(layer)
-                layer = layer.parent as? ViewGroup
-            }
         }
 
         private fun rememberWatchFaceMarketBottomChrome(content: ViewGroup, bar: ViewGroup) {
@@ -4143,6 +4175,35 @@ object AppBottomNavHooks {
                     )
                 })
             }
+            if (config === xiaohongshu) {
+                val cached = XiaohongshuBottomBarDetector.detect(content, originalBar, searchHierarchy = false)
+                val bar = cached ?: run {
+                    val now = android.os.SystemClock.uptimeMillis()
+                    if (lastXiaohongshuHierarchySearchAt != 0L && now - lastXiaohongshuHierarchySearchAt < 500L) return null
+                    lastXiaohongshuHierarchySearchAt = now
+                    XiaohongshuBottomBarDetector.detect(content, null) ?: return null
+                }
+                val icons = xiaohongshuIcons ?: return null
+                icons.retain(bar.tabs.map { it.view })
+                val allTabs = bar.tabs.map { tab ->
+                    val key = if (tab.feature.kind == XiaohongshuTabFeatures.Kind.OTHER) TabKey.NATIVE
+                        else TabKey.valueOf(tab.feature.kind.name)
+                    val icon = icons.icon(tab.view, tab.feature.kind, isSelectedRecursively(tab.view)) ?: return null
+                    DetectedTab(key, xiaohongshuDisplayLabel(tab.feature), tab.view, tab.clickTarget,
+                        identity = tab.feature.identity, nativeIcon = icon)
+                }
+                val publish = if (xiaohongshuPublish?.separate == true) allTabs.first { it.key == TabKey.PUBLISH }
+                    .copy(nativeIcon = icons.publishActionIcon() ?: return null) else null
+                val tabs = if (publish != null) allTabs.filter { it.key != TabKey.PUBLISH } else allTabs
+                // TabBarView.set*Selected owns the cell's selected flag. An
+                // activated/selected animation, image or badge below it is not
+                // evidence that this business page is still the active tab.
+                selectedIndex.intValue = tabs.indexOfFirst { it.key != TabKey.PUBLISH && it.view.isSelected }
+                    .takeIf { it >= 0 } ?: navigationTabs.getOrNull(selectedIndex.intValue)?.identity?.let { identity ->
+                        tabs.indexOfFirst { it.identity == identity }.takeIf { it >= 0 }
+                    } ?: tabs.indexOfFirst { it.key == TabKey.HOME }
+                return DetectedBar(bar.container, tabs, publish)
+            }
             if (config === weibo) {
                 val cached = WeiboBottomBarDetector.detect(content, originalBar, searchHierarchy = false)
                 val bar = cached ?: run {
@@ -4304,6 +4365,16 @@ object AppBottomNavHooks {
             }
         }
 
+        private fun xiaohongshuDisplayLabel(tab: XiaohongshuTabFeatures.Tab): String = when (tab.kind) {
+            XiaohongshuTabFeatures.Kind.HOME -> tr("首页", "首页")
+            XiaohongshuTabFeatures.Kind.MARKET -> tr("市集", "市集")
+            XiaohongshuTabFeatures.Kind.PUBLISH -> tr("发布", "发布")
+            XiaohongshuTabFeatures.Kind.MESSAGES -> tr("消息", "消息")
+            XiaohongshuTabFeatures.Kind.PROFILE -> tr("我的", "我的")
+            XiaohongshuTabFeatures.Kind.VIDEO -> tr("视频", "视频")
+            XiaohongshuTabFeatures.Kind.OTHER -> tab.caption.orEmpty().let { tr(it, it) }
+        }
+
         private fun weiboDisplayLabel(key: TabKey): String = when (key) {
             TabKey.HOME -> tr("首页", "首页")
             TabKey.VIDEO -> tr("视频", "视频")
@@ -4432,7 +4503,6 @@ object AppBottomNavHooks {
         }
 
         private fun extractedTabIcon(key: TabKey) = when (config) {
-            xiaohongshu -> ExtractedNavIcons.forTab("xiaohongshu", key.name)
             qqMusic -> ExtractedNavIcons.forTab("qqmusic", key.name)
             weibo -> when (key) {
                 TabKey.HOME -> MiuixIcons.Regular.Home

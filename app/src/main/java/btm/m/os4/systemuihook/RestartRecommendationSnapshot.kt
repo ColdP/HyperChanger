@@ -29,6 +29,7 @@ internal fun restartRecommendationSnapshot(group: String, preferences: SharedPre
     ContactsDialerSettings.read(p)
     PortalSettings.read(p)
     readWidgetGlassSettings(p)
+    btm.m.liquidglass.hook.XiaohongshuPublishSettings.load(p)
     readSidebarSettings(p)
     readSidebarFeatureSettings(p)
     readPersonalAssistantSettings(p)

@@ -2030,7 +2030,15 @@
     "capsuleAutoCollapseHint": "選択した種類は自動的に折りたたまれます。その他の種類は手動で下にスワイプしてください。ロック画面カプセルへの追加を許可した種類にのみ適用されます。",
     "锁屏胶囊图标圆角 (dp)": "ロック画面カプセルのアイコン角丸半径（dp）",
     "负一屏小部件柔光玻璃参数调整": "アプリ保管庫ウィジェットのソフトガラス調整",
-    "小部件": "ウィジェット"
+    "小部件": "ウィジェット",
+    "市集": "ショップ",
+    "发布": "投稿",
+    "xhsPublishButton": "投稿ボタン",
+    "xhsSeparatePublish": "投稿ボタンを独立表示",
+    "xhsPublishIconColor": "独立した投稿ボタンのアイコン色",
+    "xhsPublishBackground": "独立した投稿ボタンの背景色",
+    "xhsPublishFollowDefault": "デフォルトに合わせる",
+    "xhsPublishCustomBackground": "投稿ボタンの背景色をカスタマイズ"
   },
   "Xiaomi 18 Pro 系列 AI 背屏": "Xiaomi 18 Pro シリーズ AI 背面画面",
   "解锁 AI 功能": "AI 機能を解放",

@@ -45,6 +45,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -127,6 +128,10 @@ data class HostTab(
     val icon: ImageVector? = null,
     val iconBitmap: ImageBitmap? = null,
     val badge: Boolean = false,
+    val actionBackgroundColor: Color? = null,
+    val actionIconColor: Color? = null,
+    val actionFollowsNavigationBackground: Boolean = false,
+    val iconOnly: Boolean = false,
     val onClick: () -> Unit
 )
 
@@ -310,7 +315,7 @@ internal fun CustomNavigation(
                             tab.onClick()
                         }
                     ) {
-                        if (effectiveMode != LabelMode.TEXT_ONLY) {
+                        if (effectiveMode != LabelMode.TEXT_ONLY || tab.iconOnly) {
                             if (tabImageVector != null) {
                                 Image(
                                     imageVector = tabImageVector(index),
@@ -327,7 +332,7 @@ internal fun CustomNavigation(
                                 TabIcon(tab.label, LocalLiquidContentColor.current)
                             }
                         }
-                        if (effectiveMode != LabelMode.ICON_ONLY && tab.label != "+") {
+                        if (effectiveMode != LabelMode.ICON_ONLY && !tab.iconOnly && tab.label != "+") {
                             BasicText(
                                 text = tab.label,
                                 style = TextStyle(
@@ -372,7 +377,7 @@ internal fun CustomNavigation(
                             tab.onClick()
                         }
                     ) {
-                        if (effectiveMode != LabelMode.TEXT_ONLY) {
+                        if (effectiveMode != LabelMode.TEXT_ONLY || tab.iconOnly) {
                             if (tabIconContent != null) {
                                 Box {
                                     tabIconContent(index, LocalLiquidContentColor.current)
@@ -380,7 +385,7 @@ internal fun CustomNavigation(
                                 }
                             } else TabIcon(tab.label, LocalLiquidContentColor.current)
                         }
-                        if (effectiveMode != LabelMode.ICON_ONLY) {
+                        if (effectiveMode != LabelMode.ICON_ONLY && !tab.iconOnly) {
                             BasicText(
                                 text = tab.label,
                                 style = TextStyle(
@@ -450,7 +455,16 @@ private fun TrailingActionButton(
     val liquid = style == NavigationStyle.LIQUID_GLASS
     val harmony = style == NavigationStyle.HARMONY_OS_FLOATING
     val floating = style == NavigationStyle.HYPER_OS_FLOATING || harmony
-    val surfaceColor = when (style) {
+    val useEffects = advancedMaterial && isRuntimeShaderSupported()
+    val surfaceColor = action.actionBackgroundColor ?: if (action.actionFollowsNavigationBackground && !liquid) {
+        when {
+            floating && !useEffects -> if (isDarkTheme) Color(0xFF242424).copy(alpha = .88f) else Color(0xFFF5F5F5).copy(alpha = .82f)
+            !floating && useEffects -> if (isDarkTheme) Color.Black.copy(alpha = .58f) else Color.White.copy(alpha = .62f)
+            !floating -> MiuixTheme.colorScheme.surface
+            harmony -> if (isDarkTheme) Color.Black.copy(alpha = .36f) else Color(0xFFF5F5F5).copy(alpha = .48f)
+            else -> if (isDarkTheme) Color.Black.copy(alpha = .30f) else Color(0xFFF5F5F5).copy(alpha = .42f)
+        }
+    } else when (style) {
         NavigationStyle.LIQUID_GLASS -> if (isDarkTheme) {
             Color(0xFF121212).copy(alpha = 0.4f)
         } else {
@@ -472,7 +486,6 @@ private fun TrailingActionButton(
             Color(0xFFF5F5F5).copy(alpha = 0.82f)
         }
     }
-    val useEffects = advancedMaterial && isRuntimeShaderSupported()
     val actionInteractionSource = remember { MutableInteractionSource() }
     val actionPressed by actionInteractionSource.collectIsPressedAsState()
     val actionPressProgress by animateFloatAsState(
@@ -520,7 +533,7 @@ private fun TrailingActionButton(
             onDrawSurface = { drawRect(surfaceColor) }
         )
     } else {
-        Modifier.background(surfaceColor)
+        Modifier.background(surfaceColor, CircleShape)
     }
     val floatingShadowModifier = if (floating && (!softBackdropShadow || !useEffects)) {
         val shadowColor = Color.Black.copy(alpha = if (softBackdropShadow) 0.1f else 0.35f)
@@ -535,6 +548,7 @@ private fun TrailingActionButton(
     Box(
         modifier
             .then(floatingShadowModifier)
+            .clip(CircleShape)
             .then(surface)
             .clickable(
                 interactionSource = actionInteractionSource,
@@ -545,7 +559,7 @@ private fun TrailingActionButton(
             },
         contentAlignment = Alignment.Center
     ) {
-        val color = if (isDarkTheme) Color.White else Color.Black
+        val color = action.actionIconColor ?: if (isDarkTheme) Color.White else Color.Black
         action.iconBitmap?.let { bitmap ->
             Image(bitmap, action.label, Modifier.size(24.dp), colorFilter = ColorFilter.tint(color))
         } ?: Image(
@@ -1125,6 +1139,7 @@ private fun HyperNavigation(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
+                        .padding(end = if (trailingAction?.className == "publish") 82.dp else 0.dp)
                         .graphicsLayer {
                             shape = androidx.compose.ui.graphics.RectangleShape
                             clip = true
@@ -1143,7 +1158,7 @@ private fun HyperNavigation(
                     }
                 ) {
                     tabs.forEachIndexed { index, tab ->
-                        if (textOnly) {
+                        if (textOnly && !tab.iconOnly) {
                             FontNavigationItem(
                                 selected = selectedIndex.intValue == index,
                                 onClick = { view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); tab.onClick() },
@@ -1157,11 +1172,11 @@ private fun HyperNavigation(
                             FontNavigationItem(
                                 selected = selectedIndex.intValue == index,
                                 onClick = { view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); tab.onClick() },
-                                label = if (showLabels) tab.label else "",
+                                label = if (showLabels && !tab.iconOnly) tab.label else "",
                                 modifier = Modifier.weight(1f),
                                 selectedColor = accentColorOverride,
                                 icon = { color ->
-                                    if (showIcons) {
+                                    if (showIcons || tab.iconOnly) {
                                         Box {
                                             tabIconContent(index, color)
                                             if (tab.badge) BadgeDot(Modifier.align(Alignment.TopEnd).offset(x = 8.dp, y = (-2).dp))
@@ -1173,12 +1188,12 @@ private fun HyperNavigation(
                             NavigationBarItem(
                                 selected = selectedIndex.intValue == index,
                                 onClick = { view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); tab.onClick() },
-                                icon = if (showIcons) {
+                                icon = if (showIcons || tab.iconOnly) {
                                     tab.icon ?: tabImageVector?.invoke(index) ?: hyperIcon(tab.label)
                                 } else {
                                     HyperIcons.Empty
                                 },
-                                label = tab.label
+                                label = if (tab.iconOnly) "" else tab.label
                             )
                         }
                     }
@@ -1231,6 +1246,8 @@ private fun HyperFloatingNavigationBar(
     val animationScope = rememberCoroutineScope()
     val tabCount = tabs.size.coerceAtLeast(1)
     val initialIndex = selectedIndex.intValue.coerceIn(0, tabCount - 1)
+    val currentOnTabSelected by rememberUpdatedState(onTabSelected)
+    val currentSelectedIndex by rememberUpdatedState(initialIndex)
     val dragAnimation = remember(tabCount) {
         DampedDragAnimation(
             animationScope = animationScope,
@@ -1243,7 +1260,7 @@ private fun HyperFloatingNavigationBar(
             onDragStopped = {
                 val target = targetValue.fastRoundToInt().fastCoerceIn(0, tabCount - 1)
                 animateToValue(target.toFloat())
-                if (target != selectedIndex.intValue) onTabSelected(target)
+                if (target != currentSelectedIndex) currentOnTabSelected(target)
             },
             onDrag = { size, amount ->
                 val slotWidth = size.width.toFloat() / tabCount.coerceAtLeast(1)
@@ -1253,15 +1270,20 @@ private fun HyperFloatingNavigationBar(
             },
             // OS4 restores the pressed scale as soon as the finger is released.
             awaitTargetBeforeRelease = false,
-            followFingerImmediately = dragWholeFloatingBar,
-            onTap = if (dragWholeFloatingBar) ({ size, position ->
+            followFingerImmediately = true,
+            onDragStarted = { size, position ->
+                val slotWidth = size.width.toFloat() / tabCount
+                if (slotWidth > 0f) updateValue((position.x / slotWidth - .5f).fastCoerceIn(0f, (tabCount - 1).toFloat()))
+            },
+            onTap = { size, position ->
                 val slotWidth = size.width.toFloat() / tabCount
                 if (slotWidth > 0f) {
                     val target = (position.x / slotWidth).toInt().fastCoerceIn(0, tabCount - 1)
                     animateToValue(target.toFloat())
-                    if (target != selectedIndex.intValue) onTabSelected(target)
+                    currentOnTabSelected(target)
                 }
-            }) else null,
+            },
+            onDragCancelled = { animateToValue(currentSelectedIndex.toFloat()) },
         )
     }
     val touchInteractionSource = remember { MutableInteractionSource() }
@@ -1280,8 +1302,8 @@ private fun HyperFloatingNavigationBar(
             )
         }
     }
-    LaunchedEffect(selectedIndex.intValue) {
-        dragAnimation.animateToValue(selectedIndex.intValue.coerceIn(0, tabCount - 1).toFloat())
+    LaunchedEffect(dragAnimation, selectedIndex.intValue) {
+        if (!dragAnimation.isDragging) dragAnimation.animateToValue(selectedIndex.intValue.coerceIn(0, tabCount - 1).toFloat())
     }
     val contentColor = if (isDarkTheme) Color.White else Color.Black
     // HyperOS floating keeps the native white/black foreground. Only HarmonyOS
@@ -1292,10 +1314,12 @@ private fun HyperFloatingNavigationBar(
     } else {
         contentColor
     }
-    val pressedIndex = if (dragAnimation.pressProgress > 0.001f) {
-        dragAnimation.value.fastRoundToInt().fastCoerceIn(0, tabCount - 1)
-    } else {
-        -1
+    val pressedIndex by remember(dragAnimation, tabCount) {
+        derivedStateOf {
+            if (dragAnimation.pressProgress > 0.001f) {
+                dragAnimation.value.fastRoundToInt().fastCoerceIn(0, tabCount - 1)
+            } else -1
+        }
     }
     val selectedSurface = if (isDarkTheme) {
         Color.White.copy(alpha = 0.18f)
@@ -1336,7 +1360,6 @@ private fun HyperFloatingNavigationBar(
         val innerWidthPx = with(density) { (maxWidth - innerPadding * 2).toPx() }
         val tabWidthPx = innerWidthPx / tabCount
         val tabWidth = with(density) { tabWidthPx.toDp() }
-        val selectedTranslation = dragAnimation.value * tabWidthPx
         Box(
             Modifier
                 .fillMaxSize()
@@ -1416,7 +1439,7 @@ private fun HyperFloatingNavigationBar(
                     .width(tabWidth)
                     .fillMaxHeight()
                     .graphicsLayer {
-                        translationX = selectedTranslation
+                        translationX = dragAnimation.value * tabWidthPx
                         scaleX = dragAnimation.scaleX
                         scaleY = dragAnimation.scaleY
                     }
@@ -1456,7 +1479,7 @@ private fun HyperFloatingNavigationBar(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center,
                     ) {
-                        if (showIcons) {
+                        if (showIcons || tab.iconOnly) {
                             val icon = tab.icon ?: tabImageVector?.invoke(index) ?: hyperIcon(tab.label)
                             if (tabIconContent != null) {
                                 Box {
@@ -1467,7 +1490,7 @@ private fun HyperFloatingNavigationBar(
                                 Image(icon, null, Modifier.size(28.dp * floatingScale), colorFilter = ColorFilter.tint(color))
                             }
                         }
-                        if (showLabels && tab.label != "+") {
+                        if (showLabels && !tab.iconOnly && tab.label != "+") {
                             BasicText(
                                 tab.label,
                                 style = TextStyle(
@@ -1482,18 +1505,7 @@ private fun HyperFloatingNavigationBar(
                     }
                 }
             }
-            Box(
-                Modifier
-                    .width(tabWidth)
-                    .fillMaxHeight()
-                    .graphicsLayer {
-                        translationX = selectedTranslation
-                        scaleX = dragAnimation.scaleX
-                        scaleY = dragAnimation.scaleY
-                    }
-                    .then(if (dragWholeFloatingBar || !enableDrag) Modifier else dragAnimation.modifier)
-            )
-            if (dragWholeFloatingBar && enableDrag) {
+            if (enableDrag) {
                 Box(
                     Modifier
                         .fillMaxSize()

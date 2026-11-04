@@ -38,18 +38,27 @@ internal class MomentumBackState {
         private set
     var swipeEdge by mutableIntStateOf(BackEventCompat.EDGE_LEFT)
         private set
+    private var hasGestureEvent = false
+
+    // A button/key back can complete with an empty event flow. It must retain
+    // the default exit instead of reusing a previous gesture's edge.
+    val exitDirection: Int
+        get() = if (isSwiping && hasGestureEvent && swipeEdge == BackEventCompat.EDGE_LEFT) 1 else -1
 
     internal fun reset() {
         progress = 0f
         gestureProgress = 0f
         isSwiping = false
+        hasGestureEvent = false
     }
 
     internal fun begin() {
+        hasGestureEvent = false
         isSwiping = true
     }
 
     internal fun update(event: BackEventCompat, maxProgress: Float) {
+        hasGestureEvent = true
         progress = min(event.progress, maxProgress)
         gestureProgress = progress
         swipeEdge = event.swipeEdge

@@ -1592,6 +1592,9 @@ private fun Shell(
         maxProgress = settings.predictiveBackProgress.coerceIn(10, 100) / 100f,
         onBack = dismissPage
     )
+    // Freeze the edge when this exit starts; resetting the shared gesture state
+    // after pop must not retarget the outgoing slide.
+    val ordinaryExitDirection = remember(ordinaryClosingIndex) { backState.exitDirection }
     // The revealed page must not inherit the outgoing page's gesture transform before
     // the existing stack-change effect has reset the shared momentum state.
     val momentumBackOwner = remember(backState.isSwiping) { pageStack.lastIndex to page }
@@ -1613,16 +1616,19 @@ private fun Shell(
     val maxBackProgress = settings.predictiveBackProgress.coerceIn(10, 100) / 100f
     val gestureBlur = if (seamlessEntry != null) 12f * seamlessEntry.progress.value
         else 12f - 8f * (backState.gestureProgress / maxBackProgress).coerceIn(0f, 1f)
+    // Start revealing the page while the outgoing one exits, not after the
+    // delayed stack pop. Match AppNavigationPage's concurrent 252ms unblur.
+    val revealingBase = page == null || ordinaryClosingIndex == 0
     val baseCoveredBlur by animateFloatAsState(
         targetValue = when {
-            page == null -> 0f
+            revealingBase -> 0f
             (backState.isSwiping || seamlessEntry != null) && pageStack.size == 1 -> gestureBlur
             else -> 12f
         },
         animationSpec = when {
-            page == null -> tween(300, easing = FastOutSlowInEasing)
+            revealingBase -> tween(252, easing = FastOutSlowInEasing)
             (backState.isSwiping || seamlessEntry != null) && pageStack.size == 1 -> snap()
-            else -> tween(520, easing = FastOutSlowInEasing)
+            else -> tween(252, easing = FastOutSlowInEasing)
         },
         label = "basePageCoveredBlur",
     )
@@ -1732,7 +1738,7 @@ private fun Shell(
             ),
             exit = if (seamless.rootWasSeamless) ExitTransition.None else slideOutHorizontally(
                 animationSpec = tween(207, easing = FastOutSlowInEasing),
-                targetOffsetX = { -it / 3 },
+                targetOffsetX = { ordinaryExitDirection * it / 3 },
             ) + fadeOut(tween(162)) + scaleOut(
                 animationSpec = tween(207, easing = FastOutSlowInEasing),
                 targetScale = .975f,
@@ -1755,16 +1761,17 @@ private fun Shell(
                         // fallback when its entry is removed from the navigation map.
                         val stackEntry = remember { seamless.entries[index] }
                         val isTop = index == pageStack.lastIndex
+                        val revealingPage = isTop || ordinaryClosingIndex == index + 1
                         val coveredPageBlur by animateFloatAsState(
                             targetValue = when {
-                                isTop -> 0f
+                                revealingPage -> 0f
                                 index == pageStack.lastIndex - 1 && (backState.isSwiping || seamlessEntry != null) -> gestureBlur
                                 else -> 12f
                             },
                             animationSpec = when {
-                                isTop -> tween(300, easing = FastOutSlowInEasing)
+                                revealingPage -> tween(252, easing = FastOutSlowInEasing)
                                 index == pageStack.lastIndex - 1 && (backState.isSwiping || seamlessEntry != null) -> snap()
-                                else -> tween(520, easing = FastOutSlowInEasing)
+                                else -> tween(252, easing = FastOutSlowInEasing)
                             },
                             label = "coveredPageBlur:$stackPage",
                         )
@@ -1786,7 +1793,7 @@ private fun Shell(
                                 )
                             } else EnterTransition.None,
                             exit = if (stackEntry == null) {
-                                slideOutHorizontally(tween(207, easing = FastOutSlowInEasing)) { -it / 3 } +
+                                slideOutHorizontally(tween(207, easing = FastOutSlowInEasing)) { ordinaryExitDirection * it / 3 } +
                                     fadeOut(tween(162)) + scaleOut(tween(207), targetScale = .975f)
                             } else ExitTransition.None,
                             modifier = Modifier.fillMaxSize(),
