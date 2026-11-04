@@ -15,6 +15,7 @@ import btm.m.liquidglass.NavigationCornerSettings
 import btm.m.liquidglass.ScopedSettings
 import btm.m.liquidglass.hook.WeChatAvatarRadiusSettings
 import btm.m.liquidglass.hook.XiaohongshuPublishSettings
+import btm.m.liquidglass.hook.RedditCreateSettings
 import io.github.libxposed.service.XposedService
 import org.json.JSONArray
 import org.json.JSONObject
@@ -31,8 +32,8 @@ internal class AppNavigationSettingsStore internal constructor(val preferences: 
     fun syncRemote(service: XposedService) = syncPreferences(service.getRemotePreferences(REMOTE_PREFERENCE_GROUP))
 
     internal fun syncPreferences(remote: SharedPreferences) {
-        val localValues = preferences.all.filterKeys { isAppNavigationPreference(it) && !NavigationCornerSettings.isPreference(it) && !NavigationScaleSettings.isPreference(it) && !NavigationOffsetSettings.isPreference(it) && !XiaohongshuPublishSettings.isPreference(it) && !HyperFloatingAccentSettings.isPreference(it) && !NavigationMaterialSettings.isPreference(it) && !HyperDockedNavigationSettings.isPreference(it) }
-        val remoteValues = remote.all.filterKeys { isAppNavigationPreference(it) && !NavigationCornerSettings.isPreference(it) && !NavigationScaleSettings.isPreference(it) && !NavigationOffsetSettings.isPreference(it) && !XiaohongshuPublishSettings.isPreference(it) && !HyperFloatingAccentSettings.isPreference(it) && !NavigationMaterialSettings.isPreference(it) && !HyperDockedNavigationSettings.isPreference(it) }
+        val localValues = preferences.all.filterKeys { isAppNavigationPreference(it) && !NavigationCornerSettings.isPreference(it) && !NavigationScaleSettings.isPreference(it) && !NavigationOffsetSettings.isPreference(it) && !XiaohongshuPublishSettings.isPreference(it) && !RedditCreateSettings.isPreference(it) && !HyperFloatingAccentSettings.isPreference(it) && !NavigationMaterialSettings.isPreference(it) && !HyperDockedNavigationSettings.isPreference(it) }
+        val remoteValues = remote.all.filterKeys { isAppNavigationPreference(it) && !NavigationCornerSettings.isPreference(it) && !NavigationScaleSettings.isPreference(it) && !NavigationOffsetSettings.isPreference(it) && !XiaohongshuPublishSettings.isPreference(it) && !RedditCreateSettings.isPreference(it) && !HyperFloatingAccentSettings.isPreference(it) && !NavigationMaterialSettings.isPreference(it) && !HyperDockedNavigationSettings.isPreference(it) }
         // Recover installations made by older versions; subsequent page edits save both copies.
         val merged = remoteValues + localValues
         writeValues(preferences, merged)
@@ -41,6 +42,7 @@ internal class AppNavigationSettingsStore internal constructor(val preferences: 
         NavigationScaleSettings.syncPreferences(preferences, remote)
         NavigationCornerSettings.syncPreferences(preferences, remote)
         XiaohongshuPublishSettings.syncPreferences(preferences, remote)
+        RedditCreateSettings.syncPreferences(preferences, remote)
         HyperFloatingAccentSettings.syncPreferences(preferences, remote)
         NavigationMaterialSettings.syncPreferences(preferences, remote)
         HyperDockedNavigationSettings.syncPreferences(preferences, remote)
@@ -82,6 +84,7 @@ internal fun isAppNavigationPreference(key: String): Boolean =
     NavigationMaterialSettings.isPreference(key) ||
     HyperFloatingAccentSettings.isPreference(key) ||
     XiaohongshuPublishSettings.isPreference(key) ||
+    RedditCreateSettings.isPreference(key) ||
     NavigationOffsetSettings.isPreference(key) ||
         key.startsWith("scope.") && key.substringAfterLast('.') in appNavigationSettingNames ||
         key == ScopedSettings.key("com.mipay.wallet", ScopedSettings.KEY_VISIBLE_TABS) ||
@@ -93,6 +96,7 @@ internal fun completeAppNavigationPreset(values: JSONObject, preferences: Shared
     NavigationScaleSettings.completePreset(values)
     NavigationCornerSettings.completePreset(values)
     XiaohongshuPublishSettings.completePreset(values)
+    RedditCreateSettings.completePreset(values)
     HyperFloatingAccentSettings.completePreset(values)
     NavigationMaterialSettings.completePreset(values)
     HyperDockedNavigationSettings.completePreset(values)

@@ -2239,5 +2239,11 @@
   "appNavigationHeightScale": "Bottom navigation height scale",
   "appNavigationScalePercent": "%.2f%%",
   "appNavigationCornerAdjustment": "Corner adjustment",
-  "appNavigationUninstalledApps": "Uninstalled apps"
+  "appNavigationUninstalledApps": "Uninstalled apps",
+  "Reddit": "Reddit",
+  "redditCreateButton": "Create button",
+  "redditSeparateCreate": "Separate create button",
+  "redditCreateIconColor": "Separate create button icon color",
+  "redditCreateBackground": "Separate create button background",
+  "redditCreateCustomBackground": "Custom create button background"
 }

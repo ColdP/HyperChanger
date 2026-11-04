@@ -8,57 +8,13 @@ import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.unit.dp
 
 internal object ExtractedNavIcons {
-    val RedditHome: ImageVector by lazy {
+    val WeiboSupergroup: ImageVector by lazy {
         extractedVector(
-            name = "RedditHome",
-            viewportWidth = 24f,
-            viewportHeight = 24f,
-            paths = listOf(
-            "M21.846,10.174a1.995,1.995 0,0 0,-0.437 -0.651l-7.994,-7.94a2.006,2.006 0,0 0,-2.83 0l-7.994,7.94A1.995,1.995 0,0 0,2 10.942V19a4.001,4.001 0,0 0,4 4h12a4.003,4.003 0,0 0,4 -4v-8.058c0,-0.264 -0.052,-0.525 -0.154,-0.768ZM20,19a2,2 0,0 1,-2 2h-4.8v-7h-2.4v7H6a2,2 0,0 1,-2 -2v-8.058L11.996,3H12l0.006,0.002L20,10.942V19Z"
-            )
-        )
-    }
-
-    val RedditCommunities: ImageVector by lazy {
-        extractedVector(
-            name = "RedditCommunities",
+            name = "WeiboSupergroup",
             viewportWidth = 20f,
             viewportHeight = 20f,
             paths = listOf(
             "M9.633,8.086c-0.27,0 -0.536,0.066 -0.799,0.199a1.665,1.665 0,0 0,-0.652 0.596c-0.173,0.265 -0.258,0.581 -0.258,0.948v3.961L5.999,13.79L5.999,6.321h1.876v1.074h0.035c0.251,-0.344 0.567,-0.628 0.948,-0.851a2.547,2.547 0,0 1,1.311 -0.335c0.172,0 0.335,0.014 0.488,0.042 0.153,0.028 0.267,0.058 0.342,0.091l-0.774,1.848a0.766,0.766 0,0 0,-0.244 -0.073,1.873 1.873,0 0,0 -0.349,-0.032l0.001,0.001ZM19,10a9,9 0,0 1,-9 9,9 9,0 0,1 -9,-9 9,9 0,0 1,9 -9,9 9,0 0,1 9,9ZM17.2,10a7.17,7.17 0,0 0,-1.661 -4.594L11.98,13.79h-1.955l4.108,-9.677A7.152,7.152 0,0 0,10 2.8c-3.97,0 -7.2,3.23 -7.2,7.2s3.23,7.2 7.2,7.2 7.2,-3.23 7.2,-7.2Z"
-            )
-        )
-    }
-
-    val RedditPublish: ImageVector by lazy {
-        extractedVector(
-            name = "RedditPublish",
-            viewportWidth = 20f,
-            viewportHeight = 20f,
-            paths = listOf(
-            "M17.1,9.1h-6.2V2.9c0,-0.5 -0.4,-0.9 -0.9,-0.9s-0.9,0.4 -0.9,0.9v6.2H2.9c-0.5,0 -0.9,0.4 -0.9,0.9s0.4,0.9 0.9,0.9h6.2v6.2c0,0.5 0.4,0.9 0.9,0.9s0.9,-0.4 0.9,-0.9v-6.2h6.2c0.5,0 0.9,-0.4 0.9,-0.9s-0.4,-0.9 -0.9,-0.9Z"
-            )
-        )
-    }
-
-    val RedditChat: ImageVector by lazy {
-        extractedVector(
-            name = "RedditChat",
-            viewportWidth = 24f,
-            viewportHeight = 24f,
-            paths = listOf(
-            "M11.678,23L0.988,23c-0.874,0 -1.312,-1.057 -0.694,-1.675l3.018,-3.019C1.815,16.42 1,14.212 1,12 1,5.935 5.935,1 12,1c6.415,0 11.566,5.52 10.95,12.06 -0.537,5.699 -5.548,9.94 -11.272,9.94ZM3.448,21L12,21c4.963,0 9,-4.038 9,-9s-4.037,-9 -9,-9 -9,4.038 -9,9c0,2.56 1.31,4.499 2.406,5.674l0.66,0.707L3.447,21ZM7.5,10.55a1.45,1.45 0,1 0,0 2.9,1.45 1.45,0 0,0 0,-2.9ZM12,10.55a1.45,1.45 0,1 0,0 2.9,1.45 1.45,0 0,0 0,-2.9ZM16.5,10.55a1.45,1.45 0,1 0,0 2.9,1.45 1.45,0 0,0 0,-2.9Z"
-            )
-        )
-    }
-
-    val RedditInbox: ImageVector by lazy {
-        extractedVector(
-            name = "RedditInbox",
-            viewportWidth = 24f,
-            viewportHeight = 24f,
-            paths = listOf(
-            "m22,17.068 l-1.17,-2.453a2.814,2.814 0,0 1,-0.274 -1.21L20.556,9.556C20.556,4.838 16.718,1 12,1 7.282,1 3.444,4.838 3.444,9.556v3.849c0,0.416 -0.095,0.834 -0.274,1.211l-1.169,2.45c-0.2,0.421 -0.173,0.908 0.076,1.303 0.248,0.395 0.676,0.631 1.143,0.631h4.151c0.341,2.258 2.277,4 4.63,4 2.351,0 4.287,-1.742 4.628,-4h4.151c0.467,0 0.895,-0.236 1.143,-0.631A1.34,1.34 0,0 0,22 17.068ZM12,21a2.696,2.696 0,0 1,-2.596 -2h5.193a2.697,2.697 0,0 1,-2.596 2ZM4.25,17 L4.975,15.478c0.308,-0.643 0.47,-1.359 0.47,-2.072L5.445,9.557a6.563,6.563 0,0 1,6.556 -6.556,6.563 6.563,0 0,1 6.556,6.556v3.849c0,0.713 0.162,1.43 0.47,2.071L19.753,17L4.25,17Z"
             )
         )
     }
@@ -163,14 +119,9 @@ internal object ExtractedNavIcons {
     }
 
     fun forTab(app: String, tab: String): ImageVector? = when ("$app:$tab") {
-        "reddit:HOME" -> RedditHome
-        "reddit:COMMUNITIES" -> RedditCommunities
-        "reddit:PUBLISH" -> RedditPublish
-        "reddit:CHAT" -> RedditChat
-        "reddit:INBOX" -> RedditInbox
         "weibo:HOME" -> WeiboHome
         "weibo:VIDEO", "weibo:SHORT_DRAMA" -> QqmusicVideo
-        "weibo:SUPERGROUP" -> RedditCommunities
+        "weibo:SUPERGROUP" -> WeiboSupergroup
         "weibo:FIND" -> WeiboDiscover
         "weibo:FEATURED" -> QqmusicStarlight
         "weibo:DISCOVER" -> WeiboDiscover

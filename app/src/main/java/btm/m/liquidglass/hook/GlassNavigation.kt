@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
@@ -459,7 +460,7 @@ internal fun CustomNavigation(
                 isDarkTheme = hostIsDarkTheme,
                 floatingShadow = floatingShadow,
                 softBackdropShadow = softBackdropShadow,
-                modifier = Modifier.size(width = 54.dp * scale.widthFactor, height = 54.dp * scale.heightFactor)
+                modifier = Modifier.requiredSize(54.dp * scale.heightFactor)
             )
         }
     }
@@ -1171,7 +1172,7 @@ private fun HyperNavigation(
                         isDarkTheme = isDarkTheme,
                         floatingShadow = floatingShadow,
                         softBackdropShadow = softBackdropShadow,
-                        modifier = Modifier.size(width = 54.dp * dimensionScale.widthFactor, height = 54.dp * dimensionScale.heightFactor)
+                        modifier = Modifier.requiredSize(54.dp * dimensionScale.heightFactor)
                     )
                 }
             } else {

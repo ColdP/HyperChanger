@@ -40,6 +40,7 @@ import btm.m.liquidglass.hook.CustomNavigation
 import btm.m.liquidglass.hook.ExtractedNavIcons
 import btm.m.liquidglass.hook.HostTab
 import btm.m.liquidglass.hook.XiaohongshuPublishSettings
+import btm.m.liquidglass.hook.RedditCreateSettings
 import btm.m.liquidglass.hook.appleMusicTabIcon
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -313,6 +314,7 @@ private fun BoxScope.NavigationMaterialPreview(
         value = withContext(Dispatchers.IO) { loadNavigationPreview(context, packageName) }
     }
     val publish = XiaohongshuPublishSettings.load(prefs)
+    val create = RedditCreateSettings.load(prefs)
     val raw = source?.first.orEmpty().toMutableList()
     var action = source?.second
     if (packageName == XiaohongshuPublishSettings.PACKAGE && raw.isNotEmpty()) {
@@ -321,6 +323,15 @@ private fun BoxScope.NavigationMaterialPreview(
         if (publish.separate) action = existing?.copy(image = remember(context) { context.getDrawable(R.drawable.xhs_nav_red_view_add)?.toBitmap(96, 96)?.asImageBitmap() })
         else {
             existing?.let { raw.add(it.position.takeIf { pos -> pos >= 0 }?.coerceAtMost(raw.size) ?: minOf(2, raw.size), it.copy(image = remember(context) { context.getDrawable(R.drawable.xhs_nav_red_view_new_post_v2)?.toBitmap(96, 96)?.asImageBitmap() })) }
+            action = null
+        }
+    }
+    if (packageName == RedditCreateSettings.PACKAGE && raw.isNotEmpty()) {
+        val existing = raw.firstOrNull { it.kind == "PUBLISH" } ?: action?.takeIf { it.kind == "PUBLISH" }
+        raw.removeAll { it.kind == "PUBLISH" }
+        if (create.separate) action = existing
+        else {
+            existing?.let { raw.add(it.position.takeIf { pos -> pos >= 0 }?.coerceAtMost(raw.size) ?: minOf(2, raw.size), it) }
             action = null
         }
     }
@@ -353,7 +364,7 @@ private fun BoxScope.NavigationMaterialPreview(
                 val tab = entries[index]
                 val icon = if (selected.intValue == index) tab.selectedImage ?: tab.image else tab.image
                 if (icon != null) Image(icon, null, Modifier.size(26.dp), colorFilter =
-                    if (packageName == XiaohongshuPublishSettings.PACKAGE && tab.kind == "PUBLISH") null else ColorFilter.tint(color))
+                    if (tab.preserveColor || (packageName == XiaohongshuPublishSettings.PACKAGE && tab.kind == "PUBLISH")) null else ColorFilter.tint(color))
                 else {
                     val vector = when (packageName) {
                         "com.apple.android.music" -> appleMusicTabIcon(index)
@@ -364,9 +375,10 @@ private fun BoxScope.NavigationMaterialPreview(
                 }
             },
             trailingAction = action?.let { item -> HostTab(tr(item.label, item.label), if (item.kind == "PUBLISH") "publish" else "search", iconBitmap = item.image,
-                actionBackgroundColor = if (packageName == XiaohongshuPublishSettings.PACKAGE && publish.backgroundMode == "custom") Color(publish.background) else null,
-                actionIconColor = if (packageName == XiaohongshuPublishSettings.PACKAGE && (publish.backgroundMode == "custom" || publish.iconMode != "auto")) Color(publish.iconColor()) else null,
-                actionFollowsNavigationBackground = packageName == XiaohongshuPublishSettings.PACKAGE && publish.backgroundMode == "default") { actionPressed = !actionPressed } },
+                actionBackgroundColor = if (packageName == XiaohongshuPublishSettings.PACKAGE && publish.backgroundMode == "custom") Color(publish.background) else if (packageName == RedditCreateSettings.PACKAGE && create.backgroundMode == "custom") Color(create.background) else null,
+                actionIconColor = if (packageName == XiaohongshuPublishSettings.PACKAGE && (publish.backgroundMode == "custom" || publish.iconMode != "auto")) Color(publish.iconColor()) else if (packageName == RedditCreateSettings.PACKAGE && (create.backgroundMode == "custom" || create.iconMode != "auto")) Color(create.iconColor()) else null,
+                actionFollowsNavigationBackground = (packageName == XiaohongshuPublishSettings.PACKAGE && publish.backgroundMode == "default") ||
+                    (packageName == RedditCreateSettings.PACKAGE && create.backgroundMode == "default")) { actionPressed = !actionPressed } },
         )
     }
 }
@@ -377,6 +389,7 @@ private data class MaterialPreviewTab(
     val image: ImageBitmap?,
     val position: Int = -1,
     val selectedImage: ImageBitmap? = null,
+    val preserveColor: Boolean = false,
 )
 
 // The slightly heavier outline belongs to the material preview only, never the shared asset.
@@ -420,7 +433,7 @@ private fun loadNavigationPreview(context: Context, packageName: String?): Pair<
             val bytes = Base64.decode(it, Base64.DEFAULT)
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
         }
-        return MaterialPreviewTab(data.getString("label"), data.getString("kind"), bitmap, data.optInt("position", -1))
+        return MaterialPreviewTab(data.getString("label"), data.getString("kind"), bitmap, data.optInt("position", -1), preserveColor = data.optBoolean("preserveColor", false))
     }
     val tabs = json.getJSONArray("tabs")
     (0 until tabs.length()).map { item(tabs.getJSONObject(it)) } to json.optJSONObject("action")?.let(::item)

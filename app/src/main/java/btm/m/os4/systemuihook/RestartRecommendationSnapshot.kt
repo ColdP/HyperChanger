@@ -30,6 +30,7 @@ internal fun restartRecommendationSnapshot(group: String, preferences: SharedPre
     PortalSettings.read(p)
     readWidgetGlassSettings(p)
     btm.m.liquidglass.hook.XiaohongshuPublishSettings.load(p)
+    btm.m.liquidglass.hook.RedditCreateSettings.load(p)
     btm.m.liquidglass.ScopedSettings.apps.forEach {
         btm.m.liquidglass.HyperFloatingAccentSettings.isEnabled(p, it.packageName)
     }

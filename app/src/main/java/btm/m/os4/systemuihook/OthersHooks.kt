@@ -303,6 +303,7 @@ internal class OthersHooks(
             packageName != "com.sina.weibo" && packageName != "com.xingin.xhs" &&
             packageName != "com.lucky.luckyclient" && packageName != "com.tencent.wemeet.app" &&
             packageName != "cmb.pb" && packageName != "com.tencent.mm" &&
+            packageName != "com.reddit.frontpage" &&
             packageName != "com.tencent.mobileqq"
             && packageName != "com.xunmeng.pinduoduo" && packageName != "com.instagram.android" && packageName != "com.twitter.android"
             && packageName != "com.github.android" && packageName != "com.pinterest"
@@ -353,6 +354,7 @@ internal class OthersHooks(
                 "com.sankuai.meituan" -> AppBottomNavHooks.installMeituan(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 "com.sankuai.meituan.takeoutnew" -> AppBottomNavHooks.installMeituanTakeout(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 "com.tencent.mobileqq" -> AppBottomNavHooks.installQQ(module, param.defaultClassLoader, blur, label, style, advanced, color, accent, showBadges)
+                "com.reddit.frontpage" -> AppBottomNavHooks.installReddit(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 "cmb.pb" -> AppBottomNavHooks.installCmbBank(module, blur, label, style, advanced, color, accent)
                 "com.tencent.mm" -> {
                     AppBottomNavHooks.installWeChat(module, param.defaultClassLoader, blur, label, style, advanced, color, accent, showBadges)

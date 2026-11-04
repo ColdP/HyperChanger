@@ -69,6 +69,7 @@ private val appNavItems = listOf(
     AppNavItem("小米钱包", "com.mipay.wallet"),
     AppNavItem("小米运动健康", "com.mi.health"),
     AppNavItem("瑞幸咖啡", "com.lucky.luckyclient"),
+    AppNavItem("Reddit", "com.reddit.frontpage"),
     AppNavItem("腾讯会议", "com.tencent.wemeet.app"),
     AppNavItem("抖省省", "com.ss.android.ugc.lifeservices"),
     AppNavItem("美团", "com.sankuai.meituan"),
@@ -343,8 +344,6 @@ private fun AppNavigationSettings(appItem: AppNavItem, store: AppNavigationSetti
                             PortalAppearanceVisibility(NavigationCornerSettings.supports(NavigationStyle.entries[styleIndex])) {
                                 AppNavigationCornerPreferences(prefs, service, appItem.packageName, onChanged)
                             }
-                        }
-                        Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
                             SwitchPreference(
                                 title = tr("navMaterialUseGlobal", "使用全局导航栏材质参数"),
                                 checked = followsMaterial,
@@ -363,6 +362,9 @@ private fun AppNavigationSettings(appItem: AppNavItem, store: AppNavigationSetti
                         }
                         if (appItem.packageName == "com.xingin.xhs") {
                             XiaohongshuPublishPreferences(prefs, service, onChanged)
+                        }
+                        if (appItem.packageName == "com.reddit.frontpage") {
+                            RedditCreatePreferences(prefs, service, onChanged)
                         }
                         if (appItem.packageName == "com.tencent.mobileqq" || appItem.packageName == "com.tencent.mm") {
                             Group(tr("appNavigationUnreadHints", "未读提示")) {

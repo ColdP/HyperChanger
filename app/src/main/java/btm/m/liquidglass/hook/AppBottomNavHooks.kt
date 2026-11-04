@@ -158,18 +158,12 @@ object AppBottomNavHooks {
 
     private val reddit = AppConfig(
         displayName = "Reddit",
-        packageName = "com.reddit.frontpage",
-        activityName = "com.reddit.launch.main.MainActivity",
-        barResourceName = "main_activity_navhost",
+        packageName = RedditNavigation.PACKAGE,
+        activityName = RedditNavigation.ACTIVITY,
+        barResourceName = null,
         anchorResourceName = null,
-        requiredTabs = setOf(
-            TabKey.HOME, TabKey.COMMUNITIES, TabKey.PUBLISH, TabKey.CHAT, TabKey.INBOX
-        ),
-        targetVersion = "2026.31.1 (2631040)",
-        fallbackTabOrder = listOf(
-            TabKey.HOME, TabKey.COMMUNITIES, TabKey.PUBLISH, TabKey.CHAT, TabKey.INBOX
-        ),
-        coordinateTabSurface = true
+        requiredTabs = emptySet(),
+        targetVersion = "2026.44.0",
     )
 
     private val xiaomiStore = AppConfig(
@@ -358,6 +352,10 @@ object AppBottomNavHooks {
     )
 
     private val sessions = WeakHashMap<Activity, Session>()
+
+    internal fun onRedditNavigationChanged(activity: Activity) {
+        synchronized(sessions) { sessions[activity] }?.onRedditNavigationChanged()
+    }
 
     internal fun onGitHubNavigationChanged(activity: Activity) {
         synchronized(sessions) { sessions[activity] }?.onGitHubNavigationChanged()
@@ -571,23 +569,9 @@ object AppBottomNavHooks {
         colorMode: String,
         accentColor: Int = 0
     ) {
-        installRedditBottomBarHook(module, loader)
+        RedditNavigation.install(module, loader)
+        ImmersiveNavigationHooks.install(module)
         install(module, loader, reddit, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
-    }
-
-    private fun installRedditBottomBarHook(module: XposedModule, loader: ClassLoader) {
-        val bottomNavScreen = Class.forName(
-            "com.reddit.launch.bottomnav.BottomNavScreen",
-            false,
-            loader
-        )
-        val bottomBarContent = bottomNavScreen.declaredMethods.single {
-            it.name == "l5" && it.parameterCount == 3
-        }.apply { isAccessible = true }
-        module.hook(bottomBarContent)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { Unit }
-        btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, TAG, "Reddit native bottom navigation content hook installed")
     }
 
     @JvmStatic
@@ -1027,7 +1011,10 @@ object AppBottomNavHooks {
         )
         private val selectedIndex = mutableIntStateOf(0)
         private val isMeituan = config === meituan || config === meituanTakeout
-        private val isNativeViewNavigation = isMeituan || config === douShengSheng
+        // These adapters provide authoritative host state and share the existing restore/rebind path.
+        private val isNativeViewNavigation = isMeituan || config === douShengSheng ||
+            config === reddit
+        private val redditNavigation = if (config === reddit) RedditNavigation.Detector(activity) else null
         private val douShengShengNavigation = if (config === douShengSheng) DouShengShengNavigation() else null
         private val douShengShengIcons = if (config === douShengSheng) DouShengShengNavIcons(activity) else null
         private var douShengShengBackdropSource by mutableStateOf<View?>(null)
@@ -1078,6 +1065,10 @@ object AppBottomNavHooks {
             module.getRemotePreferences(btm.m.os4.systemuihook.REMOTE_PREFERENCE_GROUP), config.packageName)
         private val xiaohongshuPublish = if (config === xiaohongshu) XiaohongshuPublishSettings.load(
             module.getRemotePreferences(btm.m.os4.systemuihook.REMOTE_PREFERENCE_GROUP)) else null
+        private val redditCreate = if (config === reddit) RedditCreateSettings.load(
+            module.getRemotePreferences(btm.m.os4.systemuihook.REMOTE_PREFERENCE_GROUP)) else null
+        private var redditVisibilityFraction = 1f
+        private var redditActionPosition = -1
         private var detectedTabs = emptyList<DetectedTab>()
         private var navigationTabs by mutableStateOf(emptyList<DetectedTab>())
         private var navigationAction by mutableStateOf<DetectedTab?>(null)
@@ -1088,6 +1079,7 @@ object AppBottomNavHooks {
             PinduoduoNavigation.Detector(activity)
         } else null
         private var pinduoduoLastInsetMaintenanceAt = 0L
+        private var pinduoduoSlide: NavigationSlideTransition? = null
         private val instagramNavigation = if (config.packageName == InstagramNavigation.PACKAGE) {
             InstagramNavigation.Detector(activity)
         } else null
@@ -1166,6 +1158,14 @@ object AppBottomNavHooks {
             forceQQMusicVisiblePageChain(pager)
         }
 
+        fun onRedditNavigationChanged() {
+            if (config !== reddit || !resumed) return
+            activity.window.decorView.post {
+                if (!resumed) return@post
+                if (nav == null) attachOrRetry() else syncHostState()
+            }
+        }
+
         fun onGitHubNavigationChanged() {
             if (config !== github || !resumed) return
             activity.window.decorView.post {
@@ -1176,7 +1176,9 @@ object AppBottomNavHooks {
 
         fun resume() {
             resumed = true
-            if (config === twitter || config === github) {
+            if (config.packageName == PinduoduoNavigation.PACKAGE) {
+                if (nav != null) syncHostState()
+            } else if (config === twitter || config === github) {
                 // A resumed Activity may still be showing a secondary X surface. Let the
                 // Compose page flag and detector decide whether the overlay can be shown;
                 // never expose the stale main-Tab overlay during that transition.
@@ -1193,6 +1195,7 @@ object AppBottomNavHooks {
 
         fun pause() {
             resumed = false
+            pinduoduoSlide?.hideImmediately()
             xNavigation?.setActive(false)
             if (config === github) GitHubNavigation.setActive(activity, false)
             nav?.visibility = View.GONE
@@ -1201,6 +1204,8 @@ object AppBottomNavHooks {
         }
 
         fun destroy() {
+            pinduoduoSlide?.hideImmediately()
+            pinduoduoSlide = null
             cmbRootListener?.let { guardRoot?.removeOnAttachStateChangeListener(it) }
             cmbRootListener = null
             guard?.let { listener ->
@@ -1230,6 +1235,7 @@ object AppBottomNavHooks {
             xNavigation?.clear()
             xLastInsetMaintenanceAt = 0L
             githubNavigation?.clear()
+            redditNavigation?.clear()
             if (config === github) GitHubNavigation.setActive(activity, false)
             githubLastInsetMaintenanceAt = 0L
             removeMiniPlayerBackground()
@@ -1257,7 +1263,7 @@ object AppBottomNavHooks {
             try {
                 originalBar = detected.container
                 detectedTabs = detected.tabs
-                if (config === xiaohongshu) navigationAction = detected.trailingAction
+                if (config === xiaohongshu || config === reddit) navigationAction = detected.trailingAction
                 if (config === qq) {
                     qqCachedDetection = detected
                     qqLastDetectionAt = android.os.SystemClock.uptimeMillis()
@@ -1339,19 +1345,22 @@ object AppBottomNavHooks {
                         // Publish native labels/order/icons off the UI thread, only when the
                         // topology or availability changes, not while selection animates.
                         androidx.compose.runtime.LaunchedEffect(
-                            currentNavigationTabs.map { Triple(it.identity, it.displayLabel, it.nativeIcon != null) },
+                            currentNavigationTabs.map { Triple(it.identity, it.displayLabel,
+                                if (config === reddit) it.nativeIcon else it.nativeIcon != null) },
                             currentNavigationAction?.identity,
                         ) {
                             val point = IntArray(2)
                             val actionPosition = currentNavigationAction?.let { action ->
-                                action.view.getLocationOnScreen(point)
-                                val actionX = point[0]
-                                currentNavigationTabs.count { tab -> tab.view.getLocationOnScreen(point); point[0] < actionX }
+                                if (config === reddit) redditActionPosition else {
+                                    action.view.getLocationOnScreen(point)
+                                    val actionX = point[0]
+                                    currentNavigationTabs.count { tab -> tab.view.getLocationOnScreen(point); point[0] < actionX }
+                                }
                             } ?: -1
                             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                                 runCatching {
                                     btm.m.os4.systemuihook.publishNavigationPreview(activity, config.packageName,
-                                        currentNavigationTabs.mapIndexed { index, tab -> btm.m.os4.systemuihook.NavigationPreviewTab(tab.displayLabel, tab.key.name, tab.nativeIcon, index) },
+                                        currentNavigationTabs.mapIndexed { index, tab -> btm.m.os4.systemuihook.NavigationPreviewTab(tab.displayLabel, tab.key.name, tab.nativeIcon, index, tab.preserveIconColor) },
                                         currentNavigationAction?.let { action -> btm.m.os4.systemuihook.NavigationPreviewTab(action.displayLabel, action.key.name, action.nativeIcon, actionPosition) })
                                 }
                             }
@@ -1393,15 +1402,20 @@ object AppBottomNavHooks {
                                 trailingAction = currentNavigationAction?.let { action ->
                                     HostTab(
                                         label = action.displayLabel,
-                                        className = if (config === xiaohongshu) "publish" else "search",
+                                        className = if (config === xiaohongshu || config === reddit) "publish" else "search",
                                         iconBitmap = action.nativeIcon,
                                         badge = showBadges && action.badge,
                                         actionBackgroundColor = xiaohongshuPublish?.takeIf { it.backgroundMode == "custom" }
-                                            ?.let { androidx.compose.ui.graphics.Color(it.background) },
+                                            ?.let { androidx.compose.ui.graphics.Color(it.background) }
+                                            ?: redditCreate?.takeIf { it.backgroundMode == "custom" }
+                                                ?.let { androidx.compose.ui.graphics.Color(it.background) },
                                         actionIconColor = xiaohongshuPublish?.takeIf { it.backgroundMode == "custom" || it.iconMode != "auto" }
-                                            ?.let { androidx.compose.ui.graphics.Color(it.iconColor()) },
-                                        actionFollowsNavigationBackground = xiaohongshuPublish?.backgroundMode == "default",
-                                    ) { if (config === xiaohongshu) openTab(action) else action.clickTarget.performClick() }
+                                            ?.let { androidx.compose.ui.graphics.Color(it.iconColor()) }
+                                            ?: redditCreate?.takeIf { it.backgroundMode == "custom" || it.iconMode != "auto" }
+                                                ?.let { androidx.compose.ui.graphics.Color(it.iconColor()) },
+                                        actionFollowsNavigationBackground = xiaohongshuPublish?.backgroundMode == "default" ||
+                                            redditCreate?.backgroundMode == "default",
+                                    ) { if (config === xiaohongshu || config === reddit) openTab(action) else action.clickTarget.performClick() }
                                 },
                                 selectedIndex = selectedIndex,
                                 blurRadius = blurRadius,
@@ -1488,7 +1502,7 @@ object AppBottomNavHooks {
                                     config === qqMusic || config === appleMusic,
                                 onHostPreDraw = ::syncHostState,
                                 backdropOverride = bitmapBackdrop,
-                                recordBackdropChildren = config === qq || config === twitter
+                                recordBackdropChildren = config === qq || config === twitter || config === reddit
                             )
                             if (config === cloudMusic || config === appleMusic || config === qqMusic) {
                                 val playerNavigationStyle =
@@ -1609,6 +1623,11 @@ object AppBottomNavHooks {
                     }
                 }
                 nav = composeView
+                if (config.packageName == PinduoduoNavigation.PACKAGE) {
+                    pinduoduoSlide = NavigationSlideTransition(composeView) {
+                        -verticalOffsetDp * activity.resources.displayMetrics.density
+                    }
+                }
                 overlayHost.addView(
                     composeView,
                     FrameLayout.LayoutParams(
@@ -1618,9 +1637,12 @@ object AppBottomNavHooks {
                     )
                 )
                 installGuard(content)
+                pinduoduoSlide?.setVisible(true)
+                if (config === reddit) applyRedditNavigationTransition()
                 // Activate only after the overlay has been successfully added. Host snapshot
                 // state triggers composition and removes the native row on the next frame.
                 xNavigation?.setActive(true, navigationOccupiedHeight())
+                if (config === reddit) RedditNavigation.setActive(activity, true)
                 if (config === github) GitHubNavigation.setActive(activity, true, navigationOccupiedHeight())
                 composeView.post(::syncHostState)
                 btm.m.os4.systemuihook.HookModuleLogger.log(module,
@@ -1690,6 +1712,7 @@ object AppBottomNavHooks {
             val before = selectedIndex.intValue
             val detected = detectBottomBar(content)
             if (detected == null) {
+                if (config === reddit) RedditNavigation.setActive(activity, false)
                 meituanTakeoutBackdropSource = null
                 douShengShengBackdropSource = null
                 nav?.visibility = View.GONE
@@ -1710,6 +1733,7 @@ object AppBottomNavHooks {
             }
             detectedTabs = detected.tabs
             if (navigationTabs != detected.tabs) navigationTabs = detected.tabs
+            if (navigationAction != detected.trailingAction) navigationAction = detected.trailingAction
             if (config === douShengSheng) {
                 douShengShengBackdropSource = DouShengShengNavigation.page(detected.container)
                 DouShengShengNavigation.divider(detected.container)?.let(::rememberOriginalView)
@@ -1729,7 +1753,20 @@ object AppBottomNavHooks {
                 updateNavigationOverlayHeight()
             }
             hideOriginalBar()
+            if (config === reddit) RedditNavigation.setActive(activity, true)
             nav?.visibility = View.VISIBLE
+            if (config === reddit) applyRedditNavigationTransition()
+        }
+
+        private fun applyRedditNavigationTransition() {
+            val overlay = nav ?: return
+            val offset = verticalOffsetDp * activity.resources.displayMetrics.density
+            // Follow the host Animatable continuously in both directions. Keeping
+            // the composition mounted at zero avoids a native flash on scroll return.
+            overlay.translationY = -offset + (1f - redditVisibilityFraction) *
+                (maxOf(overlay.height, navigationOverlayHeight()) + offset.coerceAtLeast(0f))
+            overlay.importantForAccessibility = if (redditVisibilityFraction <= .01f)
+                View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS else View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
         }
 
         private fun syncXiaohongshuHostState() {
@@ -1814,7 +1851,8 @@ object AppBottomNavHooks {
                 val detected = if (config === qq) content?.let(::cachedQQDetection)
                 else content?.let(::detectBottomBar)
                 if (detected == null) {
-                    nav?.visibility = View.GONE
+                    if (config.packageName == PinduoduoNavigation.PACKAGE) pinduoduoSlide?.setVisible(false)
+                    else nav?.visibility = View.GONE
                     // Keep the main-page native bar state while a QQ detail
                     // page is active. Restoring it on every pre-draw causes a
                     // visible full-screen flash during page transitions.
@@ -1843,7 +1881,9 @@ object AppBottomNavHooks {
                     ) navigationTabs = detected.tabs
                 } else if (navigationTabs != detected.tabs) navigationTabs = detected.tabs
                 if (navigationAction != detected.trailingAction) navigationAction = detected.trailingAction
-                nav?.visibility = if (resumed) View.VISIBLE else View.GONE
+                if (config.packageName == PinduoduoNavigation.PACKAGE) {
+                    if (resumed) pinduoduoSlide?.setVisible(true) else pinduoduoSlide?.hideImmediately()
+                } else nav?.visibility = if (resumed) View.VISIBLE else View.GONE
                 if (config === qq) {
                     val maintenanceChanged = qqLastMaintenanceBar !== detected.container ||
                         qqLastMaintenanceContent !== content || qqDetectionDirty
@@ -2050,8 +2090,11 @@ object AppBottomNavHooks {
         private fun openTab(tab: DetectedTab) {
             if (isNativeViewNavigation) {
                 val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
-                val dispatched = if (config === douShengSheng) douShengShengNavigation?.open(content, tab.identity) == true
-                    else meituanNavigation?.open(content, tab.identity) == true
+                val dispatched = when (config) {
+                    reddit -> redditNavigation?.open(content, tab.identity) == true
+                    douShengSheng -> douShengShengNavigation?.open(content, tab.identity) == true
+                    else -> meituanNavigation?.open(content, tab.identity) == true
+                }
                 btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, TAG,
                     "${config.displayName} click ${tab.identity}: dispatched=$dispatched")
                 syncHostState()
@@ -2104,10 +2147,6 @@ object AppBottomNavHooks {
             }
             if (config === xiaomiHealth) {
                 openXiaomiHealthTab(tab)
-                return
-            }
-            if (config === reddit) {
-                openRedditTab(tab)
                 return
             }
             if (config.coordinateTabSurface) {
@@ -2204,35 +2243,6 @@ object AppBottomNavHooks {
             nativeTab.postDelayed(::syncHostState, 120L)
         }
 
-        private fun openRedditTab(tab: DetectedTab) {
-            val redditTabName = when (tab.key) {
-                TabKey.HOME -> "Home"
-                TabKey.COMMUNITIES -> "Communities"
-                TabKey.PUBLISH -> "Post"
-                TabKey.CHAT -> "Chat"
-                TabKey.INBOX -> "Inbox"
-                else -> return
-            }
-            runCatching {
-                val bottomNavTab = Class.forName(
-                    "com.reddit.launch.bottomnav.BottomNavTab",
-                    false,
-                    activity.classLoader
-                )
-                val tabValue = bottomNavTab.enumConstants.first {
-                    (it as Enum<*>).name == redditTabName
-                }
-                activity.javaClass.getMethod(
-                    "J2",
-                    bottomNavTab,
-                    Boolean::class.javaPrimitiveType
-                ).invoke(activity, tabValue, false)
-            }.onFailure { error ->
-                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, TAG, "Reddit rejected click for ${tab.displayLabel}", error)
-            }
-            originalBar?.postDelayed(::syncHostState, 120L)
-        }
-
         private fun openCoordinateTab(tab: DetectedTab) {
             val index = detectedTabs.indexOfFirst { it.key == tab.key }
             val surface = originalBar ?: return
@@ -2298,7 +2308,7 @@ object AppBottomNavHooks {
 
         private fun hideOriginalBar() {
             // X's host is also the business page. Its own Compose hide flag owns concealment.
-            if (config === twitter) return
+            if (config === twitter || config === reddit) return
             if (config === xiaomiWallet ||
                 (config.coordinateTabSurface && config !== xiaomiHealthWatchFaceMarket)
             ) return
@@ -2575,28 +2585,27 @@ object AppBottomNavHooks {
             }
         }
 
-        /** Releases only Reddit host containers that reserve the real system navigation inset. */
         private fun releaseRedditPageNavigationInset(content: ViewGroup) {
-            val navigationInset = navigationBarInset()
-            if (navigationInset <= 0) return
-            val injectedNav = nav
-            sequenceOf<View>(content).plus(descendants(content)).forEach { view ->
-                if (!view.isShown || view === injectedNav ||
-                    (injectedNav != null && isDescendantOf(view, injectedNav)) ||
-                    view.height < navigationInset * 4 ||
-                    view.width < content.width * 3 / 4
-                ) return@forEach
+            val id = content.resources.getIdentifier("main_activity_navhost", "id", RedditNavigation.PACKAGE)
+            val page = content.findViewById<ViewGroup>(id) ?: return
+            releaseVerifiedPageNavigationInset(page)
+        }
 
-                if (view.paddingBottom == navigationInset) {
-                    originalContentPaddings.putIfAbsent(
-                        view,
-                        intArrayOf(view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom)
-                    )
+        /** Only the verified Reddit business tree uses this inset rule. */
+        private fun releaseVerifiedPageNavigationInset(page: ViewGroup) {
+            val inset = navigationBarInset()
+            if (inset <= 0) return
+            sequenceOf<View>(page).plus(descendants(page)).forEach { view ->
+                if (!view.isShown || view === nav || (nav != null && isDescendantOf(view, nav!!)) ||
+                    view.height < inset * 4 || view.width < page.width * 3 / 4
+                ) return@forEach
+                if (view.paddingBottom == inset) {
+                    originalContentPaddings.putIfAbsent(view, intArrayOf(
+                        view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom))
                     view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, 0)
                 }
-
                 val params = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return@forEach
-                if (params.bottomMargin == navigationInset) {
+                if (params.bottomMargin == inset) {
                     originalContentBottomMargins.putIfAbsent(view, params.bottomMargin)
                     params.bottomMargin = 0
                     view.layoutParams = params
@@ -3596,7 +3605,7 @@ object AppBottomNavHooks {
         }
 
         private fun rememberOriginalNavigationLayers(content: ViewGroup, bar: ViewGroup) {
-            if (config === twitter || config === xiaomiWallet) return
+            if (config === twitter || config === reddit || config === xiaomiWallet) return
             if (config === xiaomiHealthWatchFaceMarket) {
                 rememberWatchFaceMarketBottomChrome(content, bar)
                 return
@@ -4251,6 +4260,8 @@ object AppBottomNavHooks {
                 params.height = targetHeight
                 overlay.layoutParams = params
             }
+            if (config === reddit) applyRedditNavigationTransition()
+            pinduoduoSlide?.refresh()
         }
 
         private fun navigationOccupiedHeight(): Int =
@@ -4317,6 +4328,22 @@ object AppBottomNavHooks {
         }
 
         private fun detectBottomBar(content: ViewGroup): DetectedBar? {
+            if (config === reddit) {
+                val native = redditNavigation?.detect(content) ?: return null
+                redditVisibilityFraction = native.fraction
+                val action = native.items.singleOrNull { it.action }?.takeIf { redditCreate?.separate == true }
+                redditActionPosition = native.items.indexOf(action)
+                val items = native.items.filter { it !== action }
+                val selectedIdentity = native.items.getOrNull(native.selected)?.identity
+                val selected = items.indexOfFirst { it.identity == selectedIdentity }
+                if (selected < 0) return null
+                selectedIndex.intValue = selected
+                fun tab(item: RedditNavigation.Item) =
+                    DetectedTab(if (item.action) TabKey.PUBLISH else if (item.identity.startsWith("Profile:")) TabKey.PROFILE else TabKey.NATIVE,
+                        item.label, native.container, native.container,
+                        identity = item.identity, nativeIcon = item.icon, preserveIconColor = item.preserveColor)
+                return DetectedBar(native.container, items.map(::tab), action?.let(::tab))
+            }
             if (config === douShengSheng) {
                 val native = douShengShengNavigation?.detect(content) ?: return null
                 selectedIndex.intValue = native.selectedIndex
@@ -4804,7 +4831,6 @@ object AppBottomNavHooks {
                 TabKey.PROFILE -> MiuixIcons.Regular.Contacts
                 else -> null
             }
-            reddit -> ExtractedNavIcons.forTab("reddit", key.name)
             else -> null
         }
 

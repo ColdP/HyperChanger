@@ -43,6 +43,7 @@ The project is still in testing and primarily targets **HyperOS 4 (Android 17)**
 - Customize header icons, text, scale, and spacing, plus the clear button's style and material. Add the lock screen's left and right shortcuts to the notification center with their existing actions and drag gestures; shortcut mode saves its notification bottom offset separately.
 - Customize the Control Center large clock, date spacing, red “1”, carrier text, network indicators, and header height.
 - Adjust icon scale, landscape visibility, and backgrounds under “Status bar & Control center → Control center top buttons”. Choose solid color, advanced material, or soft glass, with independent or global soft-glass parameters.
+- Customize the Control Center layout for WLAN, mobile data, media, brightness, and volume tiles, with automatic small-tile filling, media-source icon hiding, and layout reset.
 - Adjust volume-panel blur, glass strength, background opacity, corners, and volume-slider width and height.
 - Use built-in or user presets and share notification-shade and Control Center settings through JSON or QR codes.
 
@@ -61,6 +62,7 @@ The project is still in testing and primarily targets **HyperOS 4 (Android 17)**
 - Edit lock-screen widgets with weather, battery, sunrise/sunset, steps, alarms, schedules, and signature images. Reorder widgets and tune their layout, colors, and materials.
 - Use music-cover lock screens, a mini player, and lyrics; manage local lyrics in the lyrics library.
 - Configure raster-effect live wallpapers and export the current home and lock-screen wallpapers.
+- Import, manage, preview, and activate HyperChanger depth-wallpaper packs.
 - Preserve soft-glass effects after applying global themes and remove OTA conversion restrictions on glass and overlay AOD clock materials.
 
 ### Launcher and recent apps
@@ -74,7 +76,9 @@ The project is still in testing and primarily targets **HyperOS 4 (Android 17)**
 ### Settings and rear screen
 
 - Customize Settings home and device pages with backgrounds, device cards, logos, device images, and displayed specifications; add a module shortcut.
-- Customize Settings entry labels, icons, module entries, and sound-effect badges; adjust home-page entry icon and text scaling and row spacing; add more auto-lock and refresh-rate options, show Google services entries and saved Wi-Fi passwords, and configure BOSE audio effects and badges.
+- Browse local and cloud device-profile presets to preview, download, or apply device specifications.
+- Customize Settings entry labels, icons, module entries, and sound-effect badges; adjust home-page entry icon and text scaling and row spacing; add more auto-lock and refresh-rate options and show Google services entries and saved Wi-Fi passwords.
+- Unlock BOSE tuning and customize sound-effect badges on compatible devices. This exposes existing system profiles and does not guarantee improved sound quality.
 - Unlock selected rear-screen AI features, manage imported rear-screen apps, and choose apps for the rear-screen music widget.
 - Swipe left from the rear screen's right edge to launch a selected app, and optionally allow all Activities to open on the rear screen. Apps may still need their own adaptations.
 - Customize the rear-screen wallpaper count limit and fix conflicts between theme modifications and rear-screen theme/wallpaper authorization. These options require the Themes scope.
@@ -96,9 +100,25 @@ The project is still in testing and primarily targets **HyperOS 4 (Android 17)**
 - Enhance Chinese, Japanese, and English text recognition in Portal, with in-app download, management, and deletion of local OCR models. Download the models before using enhanced recognition.
 - Other → Environment detection provides an experimental master switch and related detection adjustments for Xiaomi Trust Service and Security. The master switch defaults to off and reveals the individual options when enabled; confirm the on-screen notices before first enabling it. Select the required scopes. These options do not guarantee changes to every app's environment checks.
 
+### Sidebar, App Vault, and system apps
+
+- Tune Sidebar soft glass independently or use global parameters, unify card materials, and adjust the video toolbox temperature restriction.
+- Use the default, home-screen, or a custom App Vault background; remove or customize wallpaper blur and configure widget soft glass independently.
+- Show battery temperature, health percentage, additional information, and full consumption statistics. Expose wireless charging, low-temperature endurance, and other charging options on compatible devices.
+- Expose game GPU settings through Joyose.
+- Other → Cloud control offers an experimental master switch, off by default, with separate controls to block cloud-task synchronization in HTML Viewer and Joyose. Confirm the on-screen notices before first use.
+
+### App bottom navigation
+
+- Supports QQ, Apple Music, Weibo, Xiaohongshu, Xiaomi Store, Mi Wallet, Mi Fitness, Luckin Coffee, Tencent Meeting, DouShengSheng, Meituan, Meituan Waimai, China Merchants Bank, WeChat, Pinduoduo, Instagram, Pinterest, X, and GitHub. Choose styles, labels, and colors per app; unread indicators and other options depend on each adaptation.
+- Choose Liquid Glass, docked HyperOS, floating HyperOS, or floating HarmonyOS navigation. Liquid glass for docked HyperOS is an experimental option, off by default, that applies to the module and target apps after confirmation.
+- For the three floating styles, adjust width and height independently per app (-100.00% to 100.00%, in 0.01% steps), vertical offset, and corners (-96 to 0; 0 retains the default capsule, -96 gives square corners). Backgrounds and existing selection capsules share the corner adjustment. Docked navigation hides scale and corner controls.
+- Use global or per-app material recipes for blur, opacity, refraction, highlights, and dispersion, with previews and optional global-recipe synchronization to the module's navigation. Set a global vertical offset or per-app overrides. App-specific options include a separate Xiaohongshu publish button, WeChat avatar corners, and Mi Wallet tab filtering.
+- The main list shows installed apps and their version names. Uninstalled apps appear on a separate display-only page with names and package IDs.
+- Adaptation baselines include China Merchants Bank 14.4.6, Meituan 12.68.202, and Meituan Waimai 8.85.1. App updates require renewed verification; a successful build does not establish device coverage for every page.
+
 ### Other apps and system updates
 
-- Customize bottom navigation in QQ, Apple Music, Weibo, Xiaohongshu, Xiaomi Store, Mi Wallet, Mi Fitness, Luckin Coffee, Tencent Meeting, China Merchants Bank, WeChat, Pinduoduo, Instagram, X, and GitHub, including styles, labels, colors, and badges. Available effects vary by app. China Merchants Bank support is based on 14.4.6; other versions require verification.
 - Remove the 10-minute watch-face trial limit in Mi Fitness.
 - Override MiShare's AirDrop availability checks. Actual transfers still depend on system components, hardware, and the receiving device.
 - Add screen-recording frame-rate and bitrate options and configure a custom output directory.
@@ -111,7 +131,7 @@ The project is still in testing and primarily targets **HyperOS 4 (Android 17)**
 - A MIUIX settings interface with light, dark, and system themes, multiple bottom navigation styles, and predictive back animations. Enable Monet colors and choose system colors, one of 10 built-in themes, or a custom color.
 - Search feature entries by setting name, description, or scope.
 - Built-in Simplified Chinese, English, and Japanese, with language-pack import, export, and editing.
-- Import and export module settings as JSON and manage scoped app restarts from the app.
+- Import and export module settings as JSON or ZIP with supported resources, preview settings and assets before import, and manage scoped app restarts from the app.
 - Check for module updates through GitHub or Gitee, download them, and install manually or silently with root.
 - Provide a module master switch, per-section safety disable policy, and module log levels, filters, retention, and ZIP export.
 - Settings → Module safety lists running targets, sends manual hot reload requests, and reports per-process results. Module-side hot reload support is not complete, so this interface does not replace required restarts.
@@ -174,6 +194,9 @@ Enable the module in Vector / LSPosed and select the scopes required by your fea
 | Xiaomi sound | `com.miui.misound` |
 | Xiaomi Settings | `com.xiaomi.misettings` |
 | Tencent Meeting | `com.tencent.wemeet.app` |
+| DouShengSheng | `com.ss.android.ugc.lifeservices` |
+| Meituan | `com.sankuai.meituan` |
+| Meituan Waimai | `com.sankuai.meituan.takeoutnew` |
 | China Merchants Bank | `cmb.pb` |
 | WeChat | `com.tencent.mm` |
 | QQ | `com.tencent.mobileqq` |
@@ -181,10 +204,13 @@ Enable the module in Vector / LSPosed and select the scopes required by your fea
 | Xiaomi Trust Service | `com.xiaomi.trustservice` |
 | Security | `com.miui.securitycenter` |
 | Instagram | `com.instagram.android` |
+| Pinterest | `com.pinterest` |
 | Dialer and calls | `com.android.contacts` |
 | Content extension (Portal) | `com.miui.contentextension` |
 | X | `com.twitter.android` |
 | GitHub | `com.github.android` |
+| HTML Viewer | `com.android.htmlviewer` |
+| Joyose | `com.xiaomi.joyose` |
 
 Some packages are absent on certain devices. Select only the scopes you use. A declared scope does not guarantee support for every version of that app.
 
@@ -202,7 +228,7 @@ The Process hot reload switch under Settings → Module safety defaults to on an
 
 - **Notification-shade and Control Center presets:** use built-in or user presets. Long-press to export JSON or a QR code; import from a file or QR-code image.
 - **Soft-glass presets:** use built-in or custom parameter presets and share them through JSON or QR codes. Surfaces configured to follow global parameters use the corresponding global soft-glass values.
-- **Module settings presets:** import and export multiple configuration groups as JSON from the app's Settings page. Imports validate format and version. Exports do not bundle image files and also skip selected image-reference fields; prepare assets separately when moving to another device.
+- **Module settings presets:** choose configuration only (JSON) or configuration and resources (ZIP) in Settings. ZIP includes supported local Settings appearance assets, icons, lyrics, screenshot shells, lock-screen assets, App Vault backgrounds, and navigation material preview images. JSON contains no file payloads. Preview groups and resources before confirming an import that overwrites settings. External image references and depth-wallpaper packs are excluded and must be transferred separately. App-navigation fields absent from older presets retain their current values.
 - **Language packs:** choose Chinese, English, Japanese, or the system language. Use [languages/example.json](languages/example.json) as a template and import, edit, or export packs in the app.
 
 Use the matching import entry for each preset type. Review imported settings and follow the prompts for options that require a restart.
@@ -240,7 +266,7 @@ Windows PowerShell:
 
 Debug APK output: `app/build/outputs/apk/debug/app-debug.apk`.
 
-Targeted regression scripts are in `tests/`; `tests/vector-compatibility/run.ps1` checks framework identity and offline detection edge cases. Scripts require local build output and their respective toolchains; consult each script for paths. Host tests and APK builds do not replace device testing.
+`docs/`, `tests/`, and reverse-engineering outputs are local maintenance material, ignored by Git and absent from repository checkouts. APK builds verify compilation and packaging; system hooks, GPU materials, and target-app interactions still require testing on the relevant devices and versions.
 
 Configure release signing with the Gradle properties `releaseStoreFile`, `releaseStorePassword`, `releaseKeyAlias`, and `releaseKeyPassword`, keeping the keystore outside the repository. Signed builds are output to `app/build/outputs/apk/release/`. Name the published file `HyperChanger-v<VersionName>.apk`, replacing spaces in the version with hyphens, for example `HyperChanger-v1.2.1.apk`. Do not commit keystores, passwords, or build outputs.
 
@@ -250,15 +276,13 @@ Configure release signing with the Gradle properties `releaseStoreFile`, `releas
 HyperChanger/
 |-- app/
 |   |-- src/main/java/       Kotlin / Java module and UI sources
-|   |-- src/main/assets/     Language packs, legal documents, and third-party notices
+|   |-- src/main/assets/     Language packs, app-navigation assets, legal documents, and third-party notices
 |   |-- src/main/cpp/        ARM64 native sources for Dock, folder, and related patches
 |   |-- src/main/jniLibs/    Prebuilt ARM64 libhyperpatch.so
 |   |-- src/main/res/        Android resources
 |   `-- src/main/resources/  libxposed entries, metadata, and scopes
 |-- languages/example.json   Language-pack template
 |-- gradle/                  Gradle Wrapper
-|-- docs/                    Feature implementation and verification notes
-|-- tests/                   Focused regression tests and runner scripts
 |-- README.md                Primary Chinese README
 |-- README_en.md             English README
 |-- README_ja.md             Japanese README
@@ -279,7 +303,7 @@ HyperChanger is an experimental community module with no affiliation with or off
 
 This combined distribution is provided under [GNU AGPL version 3](LICENSE). Original HyperChanger files retain AGPL-3.0-or-later; the newer HyperMusicCover snapshot is AGPL-3.0-only, so the combined distribution uses version 3. See [NOTICE](NOTICE) for historical grants, third-party notices and modifications.
 
-- Music lockscreen, lyrics and lockscreen capsules are adapted from the 2026-10-30 source snapshot of [HyperMusicCover](https://github.com/zyl6932/HyperMusicCover) (AGPL-3.0-only, with Apache-2.0 / GPL-3.0 portions). Retained legacy notification-center code keeps its original Apache-2.0 grant. See the [integration audit](docs/hypermusiccover-upstream-sync.md) for source hashes and boundaries.
+- Music lockscreen, lyrics and lockscreen capsules are adapted from the 2026-10-30 source snapshot of [HyperMusicCover](https://github.com/zyl6932/HyperMusicCover) (AGPL-3.0-only, with Apache-2.0 / GPL-3.0 portions). Retained legacy notification-center code keeps its original Apache-2.0 grant. See [NOTICE](NOTICE) for licensing and modification details.
 - Collapsed-island smoothing, large/small island spacing, and face-unlock island implementations are adapted from [HyperIsland 3.1.8](https://github.com/1812z/HyperIsland) (Copyright 2026 1812z, MIT). The full notice is in [HyperIsland-MIT.txt](app/src/main/assets/licenses/HyperIsland-MIT.txt).
 - Power saving and battery features, and video toolbox temperature-limit removal, are adapted with reference to [HyperCeiler](https://github.com/ReChronoRain/HyperCeiler) (multiple versions · AGPL-3.0 / MIT, Copyright 2023–2026 HyperCeiler Contributions). Individual files retain their respective licenses; the battery and video toolbox source files adapted here are AGPL-3.0-or-later. See [NOTICE](NOTICE) and the upstream MIT notice in [HyperCeiler-MIT.txt](app/src/main/assets/licenses/HyperCeiler-MIT.txt).
 - The module's settings interface is built on [MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix) (Apache-2.0), using its HyperOS-style UI components, preferences, icons, and blur effects (`miuix-ui`, `miuix-preference`, `miuix-icons`, and `miuix-blur`). Thanks to the MIUIX authors and contributors for this UI foundation. See the [official documentation](https://compose-miuix-ui.github.io/miuix/) and [NOTICE](NOTICE).

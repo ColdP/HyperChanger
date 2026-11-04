@@ -23,6 +23,7 @@ object NavigationAccentSettings {
         "com.tencent.mobileqq" to 0xFF12B7F5.toInt(),
         "com.xunmeng.pinduoduo" to 0xFFE02E24.toInt(),
         "com.instagram.android" to 0xFFE1306C.toInt(),
+        "com.reddit.frontpage" to 0xFFFF4500.toInt(),
         "com.pinterest" to 0xFFE60023.toInt(),
         "com.twitter.android" to 0xFF1D9BF0.toInt(),
         "com.github.android" to 0xFF0969DA.toInt(),
