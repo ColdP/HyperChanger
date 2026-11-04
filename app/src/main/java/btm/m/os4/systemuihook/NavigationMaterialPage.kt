@@ -40,6 +40,7 @@ import btm.m.liquidglass.hook.CustomNavigation
 import btm.m.liquidglass.hook.ExtractedNavIcons
 import btm.m.liquidglass.hook.HostTab
 import btm.m.liquidglass.hook.XiaohongshuPublishSettings
+import btm.m.liquidglass.hook.RedditCreateSettings
 import btm.m.liquidglass.hook.appleMusicTabIcon
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -72,8 +73,9 @@ internal fun rememberModuleNavigationMaterial(style: String): NavigationMaterial
     val p = remember(context) { context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE) }
     val revision = rememberNavigationMaterialRevision(p)
     return remember(p, revision, style) {
-        if (NavigationMaterialSettings.moduleEnabled(p)) NavigationMaterialSettings.read(p, NavigationStyle.fromPreference(style))
-        else NavigationMaterial()
+        val navigationStyle = NavigationStyle.fromPreference(style)
+        if (NavigationMaterialSettings.moduleEnabled(p)) NavigationMaterialSettings.read(p, navigationStyle)
+        else NavigationMaterialSettings.defaults(navigationStyle)
     }
 }
 
@@ -123,6 +125,7 @@ internal fun NavigationMaterialPage(packageName: String?, back: () -> Unit) {
             NavigationStyle.PREFERENCE_KEY, NavigationStyle.DEFAULT_VALUE))).coerceAtLeast(0)) }
     val activeTab = tab.takeIf { it in availableStyles.indices } ?: 0
     val style = availableStyles[activeTab]
+    val defaults = NavigationMaterialSettings.defaults(style)
     var material by rememberNavigationMaterialDraft(prefs, style, packageName, service)
     var moduleEnabled by remember(revision) { mutableStateOf(NavigationMaterialSettings.moduleEnabled(prefs)) }
     var imageRevision by remember { mutableIntStateOf(0) }
@@ -199,21 +202,21 @@ internal fun NavigationMaterialPage(packageName: String?, back: () -> Unit) {
             item {
                 key(packageName, style) {
                 Group(tr("参数调整", "参数调整")) {
-                    MaterialPercent(tr("navMaterialBlur", "模糊度"), material.blur, 300,
+                    MaterialPercent(tr("navMaterialBlur", "模糊度"), material.blur, 300, defaults.blur,
                         { material = material.copy(blur = it) }, { save() })
-                    MaterialPercent(tr("navMaterialOpacity", "背景不透明度"), material.opacity, 250,
+                    MaterialPercent(tr("navMaterialOpacity", "背景不透明度"), material.opacity, 250, defaults.opacity,
                         { material = material.copy(opacity = it) }, { save() })
-                    MaterialPercent(tr("navMaterialRefraction", "折射强度"), material.refraction, 200,
+                    MaterialPercent(tr("navMaterialRefraction", "折射强度"), material.refraction, 200, defaults.refraction,
                         { material = material.copy(refraction = it) }, { save() })
-                    MaterialPercent(tr("navMaterialThickness", "折射厚度"), material.thickness, 200,
+                    MaterialPercent(tr("navMaterialThickness", "折射厚度"), material.thickness, 200, defaults.thickness,
                         { material = material.copy(thickness = it) }, { save() })
-                    MaterialPercent(tr("navMaterialHighlight", "高光强度"), material.highlight, 200,
+                    MaterialPercent(tr("navMaterialHighlight", "高光强度"), material.highlight, 200, defaults.highlight,
                         { material = material.copy(highlight = it) }, { save() })
                     if (style == NavigationStyle.HYPER_OS_FLOATING) {
-                        MaterialPercent(tr("navMaterialSelectionOpacity", "选中胶囊不透明度"), material.selectionOpacity, 300,
+                        MaterialPercent(tr("navMaterialSelectionOpacity", "选中胶囊不透明度"), material.selectionOpacity, 300, defaults.selectionOpacity,
                             { material = material.copy(selectionOpacity = it) }, { save() })
                     } else if (style != NavigationStyle.HYPER_OS) {
-                        MaterialPercent(tr("navMaterialPressBoost", "按压折射增强"), material.pressBoost, 200,
+                        MaterialPercent(tr("navMaterialPressBoost", "按压折射增强"), material.pressBoost, 200, defaults.pressBoost,
                             { material = material.copy(pressBoost = it) }, { save() })
                     }
                     SwitchPreference(title = tr("navMaterialDispersion", "色散"),
@@ -236,7 +239,7 @@ internal fun NavigationMaterialPage(packageName: String?, back: () -> Unit) {
         Text(tr("navMaterialResetConfirm", "确定恢复当前样式的默认材质参数吗？"))
         Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             GlassDialogButton(onClick = { confirmParameters = false }, modifier = Modifier.weight(1f)) { Text(tr("取消", "取消")) }
-            GlassDialogButton(onClick = { confirmParameters = false; material = NavigationMaterial(); save() }, modifier = Modifier.weight(1f)) { Text(tr("恢复默认", "恢复默认")) }
+            GlassDialogButton(onClick = { confirmParameters = false; material = defaults; save() }, modifier = Modifier.weight(1f)) { Text(tr("恢复默认", "恢复默认")) }
         }
     }
     WindowDialog(show = confirmRestore, title = tr("navMaterialRestoreImage", "恢复默认预览图"), onDismissRequest = { confirmRestore = false }) {
@@ -257,9 +260,9 @@ internal fun NavigationMaterialPage(packageName: String?, back: () -> Unit) {
 }
 
 @Composable
-private fun MaterialPercent(title: String, value: Int, max: Int, change: (Int) -> Unit, save: () -> Unit) {
+private fun MaterialPercent(title: String, value: Int, max: Int, default: Int, change: (Int) -> Unit, save: () -> Unit) {
     EditableSliderPreference(title = title, value = value.toFloat(), valueText = tr("navMaterialPercent", "%d%%").format(value), valueRange = 0f..max.toFloat(),
-        steps = max - 1, defaultValue = 100f, onValueChange = { change(it.roundToInt()) }, onValueChangeFinished = save)
+        steps = max - 1, defaultValue = default.toFloat(), onValueChange = { change(it.roundToInt()) }, onValueChangeFinished = save)
 }
 
 internal fun decodeNavigationPreview(bytes: ByteArray): Bitmap {
@@ -313,6 +316,7 @@ private fun BoxScope.NavigationMaterialPreview(
         value = withContext(Dispatchers.IO) { loadNavigationPreview(context, packageName) }
     }
     val publish = XiaohongshuPublishSettings.load(prefs)
+    val create = RedditCreateSettings.load(prefs)
     val raw = source?.first.orEmpty().toMutableList()
     var action = source?.second
     if (packageName == XiaohongshuPublishSettings.PACKAGE && raw.isNotEmpty()) {
@@ -321,6 +325,15 @@ private fun BoxScope.NavigationMaterialPreview(
         if (publish.separate) action = existing?.copy(image = remember(context) { context.getDrawable(R.drawable.xhs_nav_red_view_add)?.toBitmap(96, 96)?.asImageBitmap() })
         else {
             existing?.let { raw.add(it.position.takeIf { pos -> pos >= 0 }?.coerceAtMost(raw.size) ?: minOf(2, raw.size), it.copy(image = remember(context) { context.getDrawable(R.drawable.xhs_nav_red_view_new_post_v2)?.toBitmap(96, 96)?.asImageBitmap() })) }
+            action = null
+        }
+    }
+    if (packageName == RedditCreateSettings.PACKAGE && raw.isNotEmpty()) {
+        val existing = raw.firstOrNull { it.kind == "PUBLISH" } ?: action?.takeIf { it.kind == "PUBLISH" }
+        raw.removeAll { it.kind == "PUBLISH" }
+        if (create.separate) action = existing
+        else {
+            existing?.let { raw.add(it.position.takeIf { pos -> pos >= 0 }?.coerceAtMost(raw.size) ?: minOf(2, raw.size), it) }
             action = null
         }
     }
@@ -353,7 +366,7 @@ private fun BoxScope.NavigationMaterialPreview(
                 val tab = entries[index]
                 val icon = if (selected.intValue == index) tab.selectedImage ?: tab.image else tab.image
                 if (icon != null) Image(icon, null, Modifier.size(26.dp), colorFilter =
-                    if (packageName == XiaohongshuPublishSettings.PACKAGE && tab.kind == "PUBLISH") null else ColorFilter.tint(color))
+                    if (tab.preserveColor || (packageName == XiaohongshuPublishSettings.PACKAGE && tab.kind == "PUBLISH")) null else ColorFilter.tint(color))
                 else {
                     val vector = when (packageName) {
                         "com.apple.android.music" -> appleMusicTabIcon(index)
@@ -364,9 +377,10 @@ private fun BoxScope.NavigationMaterialPreview(
                 }
             },
             trailingAction = action?.let { item -> HostTab(tr(item.label, item.label), if (item.kind == "PUBLISH") "publish" else "search", iconBitmap = item.image,
-                actionBackgroundColor = if (packageName == XiaohongshuPublishSettings.PACKAGE && publish.backgroundMode == "custom") Color(publish.background) else null,
-                actionIconColor = if (packageName == XiaohongshuPublishSettings.PACKAGE && (publish.backgroundMode == "custom" || publish.iconMode != "auto")) Color(publish.iconColor()) else null,
-                actionFollowsNavigationBackground = packageName == XiaohongshuPublishSettings.PACKAGE && publish.backgroundMode == "default") { actionPressed = !actionPressed } },
+                actionBackgroundColor = if (packageName == XiaohongshuPublishSettings.PACKAGE && publish.backgroundMode == "custom") Color(publish.background) else if (packageName == RedditCreateSettings.PACKAGE && create.backgroundMode == "custom") Color(create.background) else null,
+                actionIconColor = if (packageName == XiaohongshuPublishSettings.PACKAGE && (publish.backgroundMode == "custom" || publish.iconMode != "auto")) Color(publish.iconColor()) else if (packageName == RedditCreateSettings.PACKAGE && (create.backgroundMode == "custom" || create.iconMode != "auto")) Color(create.iconColor()) else null,
+                actionFollowsNavigationBackground = (packageName == XiaohongshuPublishSettings.PACKAGE && publish.backgroundMode == "default") ||
+                    (packageName == RedditCreateSettings.PACKAGE && create.backgroundMode == "default")) { actionPressed = !actionPressed } },
         )
     }
 }
@@ -377,6 +391,7 @@ private data class MaterialPreviewTab(
     val image: ImageBitmap?,
     val position: Int = -1,
     val selectedImage: ImageBitmap? = null,
+    val preserveColor: Boolean = false,
 )
 
 // The slightly heavier outline belongs to the material preview only, never the shared asset.
@@ -420,7 +435,7 @@ private fun loadNavigationPreview(context: Context, packageName: String?): Pair<
             val bytes = Base64.decode(it, Base64.DEFAULT)
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
         }
-        return MaterialPreviewTab(data.getString("label"), data.getString("kind"), bitmap, data.optInt("position", -1))
+        return MaterialPreviewTab(data.getString("label"), data.getString("kind"), bitmap, data.optInt("position", -1), preserveColor = data.optBoolean("preserveColor", false))
     }
     val tabs = json.getJSONArray("tabs")
     (0 until tabs.length()).map { item(tabs.getJSONObject(it)) } to json.optJSONObject("action")?.let(::item)

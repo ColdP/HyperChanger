@@ -118,6 +118,7 @@ enum class ScopeApplication(val title: String, val packageName: String) {
     XIAOMI_WALLET("小米钱包", "com.mipay.wallet"),
     XIAOMI_HEALTH("小米运动健康", "com.mi.health"),
     LUCKIN_COFFEE("瑞幸咖啡", "com.lucky.luckyclient"),
+    REDDIT("Reddit", "com.reddit.frontpage"),
     TENCENT_MEETING("腾讯会议", "com.tencent.wemeet.app"),
     DOUSHENGSHENG("抖省省", "com.ss.android.ugc.lifeservices"),
     MEITUAN("美团", "com.sankuai.meituan"),

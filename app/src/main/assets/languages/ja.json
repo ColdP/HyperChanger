@@ -2256,5 +2256,19 @@
   "appNavigationWidthScale": "ボトムナビゲーションバーの幅の拡大・縮小",
   "appNavigationHeightScale": "ボトムナビゲーションバーの高さの拡大・縮小",
   "appNavigationScalePercent": "%.2f%%",
-  "appNavigationCornerAdjustment": "角丸の調整"
+  "appNavigationCornerAdjustment": "角丸の調整",
+  "appNavigationUninstalledApps": "未インストールのアプリ",
+  "appNavigationDisabledApps": "無効にしたアプリ",
+  "appNavigationPullToRefresh": "下に引いて更新",
+  "appNavigationReleaseToRefresh": "指を離して更新",
+  "appNavigationRefreshing": "更新中…",
+  "appNavigationRefreshed": "更新完了",
+  "appNavigationSearchHint": "アプリ名またはパッケージ名で検索",
+  "appNavigationSearchEmpty": "一致するアプリが見つかりません",
+  "Reddit": "Reddit",
+  "redditCreateButton": "作成ボタン",
+  "redditSeparateCreate": "作成ボタンを独立させる",
+  "redditCreateIconColor": "独立した作成ボタンのアイコン色",
+  "redditCreateBackground": "独立した作成ボタンの背景色",
+  "redditCreateCustomBackground": "作成ボタンのカスタム背景色"
 }

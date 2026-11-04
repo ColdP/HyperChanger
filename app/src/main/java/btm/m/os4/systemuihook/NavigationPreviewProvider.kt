@@ -63,12 +63,12 @@ internal fun navigationPreviewFile(context: Context, packageName: String): File 
     return File(context.filesDir, "navigation_preview/$packageName.json")
 }
 
-internal data class NavigationPreviewTab(val label: String, val kind: String, val image: ImageBitmap?, val position: Int = -1)
+internal data class NavigationPreviewTab(val label: String, val kind: String, val image: ImageBitmap?, val position: Int = -1, val preserveColor: Boolean = false)
 
 /** Run on IO only, once per topology/icon-availability change; never from pre-draw. */
 internal fun publishNavigationPreview(context: Context, packageName: String, tabs: List<NavigationPreviewTab>, action: NavigationPreviewTab?) {
     if (tabs.size !in 2..8) return
-    fun encode(tab: NavigationPreviewTab): JSONObject = JSONObject().put("label", tab.label.take(80)).put("kind", tab.kind.take(80)).put("position", tab.position).apply {
+    fun encode(tab: NavigationPreviewTab): JSONObject = JSONObject().put("label", tab.label.take(80)).put("kind", tab.kind.take(80)).put("position", tab.position).put("preserveColor", tab.preserveColor).apply {
         tab.image?.let { image ->
             val source = image.asAndroidBitmap()
             val scale = 96f / maxOf(source.width, source.height).coerceAtLeast(1)

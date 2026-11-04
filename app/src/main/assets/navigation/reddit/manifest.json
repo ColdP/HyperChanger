@@ -1,0 +1,119 @@
+{
+  "package": "com.reddit.frontpage",
+  "version": "2026.44.0",
+  "apk_sha256": "13de3949ba08b08c5c0bb138927d5e6ba49ae29310bcf7027d9861617c8d6ce0",
+  "icons": [
+    {
+      "decoded": "res/drawable/icon_home_24.xml",
+      "decoded_sha256": "8c6df9aec5dd0044185be1af44d90ac16b46aacbe1ff02b3a5491cca15f6c6da",
+      "apk_entry": "res/drawable/icon_home_24.xml",
+      "apk_entry_sha256": "e9d3b49e62b9faefdc182b20a4dd709901e9fd232f5c809997203997ff61ba63",
+      "module_path": "app/src/main/res/drawable/reddit_nav_icon_home_24.xml",
+      "module_sha256": "8c6df9aec5dd0044185be1af44d90ac16b46aacbe1ff02b3a5491cca15f6c6da"
+    },
+    {
+      "decoded": "res/drawable/icon_home_24_fill.xml",
+      "decoded_sha256": "9ea4e0a034aa73a8018728da10b23e1f768a352365771eaa62ecd082215f26d2",
+      "apk_entry": "res/drawable/icon_home_24_fill.xml",
+      "apk_entry_sha256": "258be5c4b4ce08db8741e8a55dac0c2271069bc9ce549ce3a1c3a7dcb434cb4c",
+      "module_path": "app/src/main/res/drawable/reddit_nav_icon_home_24_fill.xml",
+      "module_sha256": "9ea4e0a034aa73a8018728da10b23e1f768a352365771eaa62ecd082215f26d2"
+    },
+    {
+      "decoded": "res/drawable/icon_communities_24.xml",
+      "decoded_sha256": "5f223114a596ef94eeb1da7389486c85e31e2315cb01440a23db1a3ea314a336",
+      "apk_entry": "res/drawable/icon_communities_24.xml",
+      "apk_entry_sha256": "07c0a8592a6352d4a2dbe574268155561427f85ba9dd44423ceeef698d438588",
+      "module_path": "app/src/main/res/drawable/reddit_nav_icon_communities_24.xml",
+      "module_sha256": "5f223114a596ef94eeb1da7389486c85e31e2315cb01440a23db1a3ea314a336"
+    },
+    {
+      "decoded": "res/drawable/icon_communities_24_fill.xml",
+      "decoded_sha256": "0dcfaf4afc9120f24744c1ea2480af70ac5e1df15878f70f42a5012aa21590ee",
+      "apk_entry": "res/drawable/icon_communities_24_fill.xml",
+      "apk_entry_sha256": "a897d54e7c423cf384383ea0e126751eca4748a7e47fcdc47ec3d607107065f5",
+      "module_path": "app/src/main/res/drawable/reddit_nav_icon_communities_24_fill.xml",
+      "module_sha256": "0dcfaf4afc9120f24744c1ea2480af70ac5e1df15878f70f42a5012aa21590ee"
+    },
+    {
+      "decoded": "res/drawable/icon_answers_24.xml",
+      "decoded_sha256": "54a9a485588be2a27c40ed6def7780f58913054aa240b10694ac023d0537e1a1",
+      "apk_entry": "res/drawable/icon_answers_24.xml",
+      "apk_entry_sha256": "eaea4a5f61d7dd8384dd63ba219caecfc43faaf885b3ba3dcab86df5b10a0768",
+      "module_path": "app/src/main/res/drawable/reddit_nav_icon_answers_24.xml",
+      "module_sha256": "54a9a485588be2a27c40ed6def7780f58913054aa240b10694ac023d0537e1a1"
+    },
+    {
+      "decoded": "res/drawable/icon_answers_24_fill.xml",
+      "decoded_sha256": "b09a6d79bff221b375d89fbe3e24a1c1d14ef3c96bc1b3899558bb7f4da43fc6",
+      "apk_entry": "res/drawable/icon_answers_24_fill.xml",
+      "apk_entry_sha256": "2ed39bc0fb734b254ca5613b68b3f53a88615eba6c6dc7e41105499fda9e6ac7",
+      "module_path": "app/src/main/res/drawable/reddit_nav_icon_answers_24_fill.xml",
+      "module_sha256": "b09a6d79bff221b375d89fbe3e24a1c1d14ef3c96bc1b3899558bb7f4da43fc6"
+    },
+    {
+      "decoded": "res/drawable/icon_game_controller_24.xml",
+      "decoded_sha256": "bbc81ce0e2ccf1592415957a4fd4df0abed9632e4a6e104415e6f39e71a54f09",
+      "apk_entry": "res/drawable/icon_game_controller_24.xml",
+      "apk_entry_sha256": "6693bf3db5cdfdae7a576d7f1963d3ecef4ce840d16d6918fcaa81e120bbcc4d",
+      "module_path": "app/src/main/res/drawable/reddit_nav_icon_game_controller_24.xml",
+      "module_sha256": "bbc81ce0e2ccf1592415957a4fd4df0abed9632e4a6e104415e6f39e71a54f09"
+    },
+    {
+      "decoded": "res/drawable/icon_game_controller_24_fill.xml",
+      "decoded_sha256": "b3704f893dea09f5ce6e32d4897522b133866e7fb0f16d6d20718f4f7e982039",
+      "apk_entry": "res/drawable/icon_game_controller_24_fill.xml",
+      "apk_entry_sha256": "8945ef62ba2b58b43494773dfb153587066a9d892b430195f18dfbc34c43f4f5",
+      "module_path": "app/src/main/res/drawable/reddit_nav_icon_game_controller_24_fill.xml",
+      "module_sha256": "b3704f893dea09f5ce6e32d4897522b133866e7fb0f16d6d20718f4f7e982039"
+    },
+    {
+      "decoded": "res/drawable/icon_notifications_24.xml",
+      "decoded_sha256": "900dc26c86a53f930bb673d3213fbbdcfa6d3feb3f64537369ba1337db836846",
+      "apk_entry": "res/drawable/icon_notifications_24.xml",
+      "apk_entry_sha256": "90ccf8b62a8d4cfc4ff9bc53e41ecb480907bcabb72701463feca4e6982e865b",
+      "module_path": "app/src/main/res/drawable/reddit_nav_icon_notifications_24.xml",
+      "module_sha256": "900dc26c86a53f930bb673d3213fbbdcfa6d3feb3f64537369ba1337db836846"
+    },
+    {
+      "decoded": "res/drawable/icon_notifications_24_fill.xml",
+      "decoded_sha256": "ada262b0367f44d0c3c2b8467d2f317f67d66b5b530acecf8c29f031e20c00d8",
+      "apk_entry": "res/drawable/icon_notifications_24_fill.xml",
+      "apk_entry_sha256": "74a8208b66886ac14c948381ab4bc2b4f2f4d40af1d0be239380926271e63657",
+      "module_path": "app/src/main/res/drawable/reddit_nav_icon_notifications_24_fill.xml",
+      "module_sha256": "ada262b0367f44d0c3c2b8467d2f317f67d66b5b530acecf8c29f031e20c00d8"
+    },
+    {
+      "decoded": "res/drawable/icon_add.xml",
+      "decoded_sha256": "13b4d04dc29ae5d1376cc7769ba4537ef782e3795dbdd61bdc283a8afefa93d7",
+      "apk_entry": "res/drawable/icon_add.xml",
+      "apk_entry_sha256": "ea7b338928f1bc4ff0ff6e0659dad5664540bb5dc61518d66a05a2d77b943f54",
+      "module_path": "app/src/main/res/drawable/reddit_nav_icon_add.xml",
+      "module_sha256": "13b4d04dc29ae5d1376cc7769ba4537ef782e3795dbdd61bdc283a8afefa93d7"
+    },
+    {
+      "decoded": "res/drawable/icon_add_fill.xml",
+      "decoded_sha256": "13b4d04dc29ae5d1376cc7769ba4537ef782e3795dbdd61bdc283a8afefa93d7",
+      "apk_entry": "res/drawable/icon_add_fill.xml",
+      "apk_entry_sha256": "ea7b338928f1bc4ff0ff6e0659dad5664540bb5dc61518d66a05a2d77b943f54",
+      "module_path": "app/src/main/res/drawable/reddit_nav_icon_add_fill.xml",
+      "module_sha256": "13b4d04dc29ae5d1376cc7769ba4537ef782e3795dbdd61bdc283a8afefa93d7"
+    },
+    {
+      "decoded": "res/drawable/icon_profile.xml",
+      "decoded_sha256": "1d3c89fba8ed9b4bf948df4b8b83f9a798072199b763eed03174c5f3475c505f",
+      "apk_entry": "res/drawable/icon_profile.xml",
+      "apk_entry_sha256": "798df31dfd25348cec8169cd82223af828bb5a195db11b14249fcad0ecd9deaa",
+      "module_path": "app/src/main/res/drawable/reddit_nav_icon_profile.xml",
+      "module_sha256": "1d3c89fba8ed9b4bf948df4b8b83f9a798072199b763eed03174c5f3475c505f"
+    },
+    {
+      "decoded": "res/drawable/icon_profile_fill.xml",
+      "decoded_sha256": "2d475793f29e69be6050a5045f551f3ee97b67948ef61b70aec5eb3f17f6b3c3",
+      "apk_entry": "res/drawable/icon_profile_fill.xml",
+      "apk_entry_sha256": "754b3ef2b31a4702a281ae5db877487a57f7474fbc6cc0cac54d04f862eb4bb3",
+      "module_path": "app/src/main/res/drawable/reddit_nav_icon_profile_fill.xml",
+      "module_sha256": "2d475793f29e69be6050a5045f551f3ee97b67948ef61b70aec5eb3f17f6b3c3"
+    }
+  ]
+}
