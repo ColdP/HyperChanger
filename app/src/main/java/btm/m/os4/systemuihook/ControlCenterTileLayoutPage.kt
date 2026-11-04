@@ -76,12 +76,6 @@ internal fun ControlCenterTileLayoutPage(back: () -> Unit) = AppPage(
                         settings = settings.copy(smallTileAutoFill = it)
                         store.update(service, settings)
                     })
-                SwitchPreference(title = tr("cc_media_expanded_style", "媒体卡片展开新样式"), checked = settings.mediaExpandedStyle,
-                    enabled = settings.enabled,
-                    onCheckedChange = {
-                        settings = settings.copy(mediaExpandedStyle = it)
-                        store.update(service, settings)
-                    })
                 ArrowPreference(title = tr("cc_layout_reset", "还原初始布局"), onClick = { confirmReset = true })
             }
         }
