@@ -2256,6 +2256,8 @@ private fun OtherPage(
                 SharedViewArrowPreference(
                     title = tr("应用底部导航", "应用底部导航"),
                     onClick = { open(PageId.APP_NAVIGATION) },
+                )
+                SharedViewArrowPreference(
                     title = tr("拨号与通话", "拨号与通话"),
                     onClick = { open(PageId.CONTACTS_DIALER) },
                 )
