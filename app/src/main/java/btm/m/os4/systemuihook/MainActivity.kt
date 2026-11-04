@@ -5,6 +5,7 @@ package btm.m.os4.systemuihook
 import btm.m.os4.systemuihook.cloudcontrol.CloudControlPage
 import btm.m.os4.systemuihook.joyose.JoyoseSettings
 import btm.m.os4.systemuihook.joyose.JoyoseSettingsStore
+import btm.m.os4.systemuihook.privacy.PrivacyGuardPage
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterSettingsStore
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationExpansionSettingsStore
 import btm.m.os4.systemuihook.newnotificationcenter.IosNotificationRefractionSettingsStore
@@ -319,6 +320,7 @@ private enum class PageId {
     SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, SIDEBAR, SIDEBAR_GLASS, PERSONAL_ASSISTANT, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, PORTAL_MATERIAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND, MODULE_PRESET_IMPORT_PREVIEW,
     STATUS_MOBILE_NETWORK_TYPE_TUNING,
     CLOUD_CONTROL,
+    PRIVACY_GUARD,
 }
 
 private data class CategorySearchItem(
@@ -2225,6 +2227,11 @@ private fun OtherPage(
                     title = tr("cloudControlTitle", "云控"),
                     summary = tr("实验性功能", "实验性功能"),
                     onClick = { open(PageId.CLOUD_CONTROL) },
+                )
+                SharedViewArrowPreference(
+                    title = tr("privacyGuardTitle", "预装隐私拦截"),
+                    summary = tr("privacyGuardEntrySummary", "拦截预装组件的应用清单、设备标识与录屏上报"),
+                    onClick = { open(PageId.PRIVACY_GUARD) },
                 )
                 SharedViewArrowPreference(
                     title = tr("应用底部导航", "应用底部导航"),
@@ -5634,6 +5641,7 @@ private fun Detail(
         PageId.OTHER -> OtherPage(airDropSettings, updateAirDrop, screenRecorder, updateScreenRecorder, openPage, back)
         PageId.ENVIRONMENT_DETECTION -> EnvironmentDetectionPage(back)
         PageId.CLOUD_CONTROL -> CloudControlPage(back)
+        PageId.PRIVACY_GUARD -> PrivacyGuardPage(back)
         PageId.CONTACTS_DIALER -> ContactsDialerPage({ openPage(PageId.CONTACTS_DIALER_BACKGROUND) }, back)
         PageId.CONTACTS_DIALER_BACKGROUND -> ContactsDialerBackgroundPage(back)
         PageId.SIDEBAR -> SidebarPage({ openPage(PageId.SIDEBAR_GLASS) }, back)
