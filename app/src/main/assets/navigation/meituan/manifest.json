@@ -1,0 +1,143 @@
+{
+  "apk": "美团_12.68.202.apk",
+  "version": "12.68.202",
+  "runtime": "Host getIcon()/ImageView Drawable first; host packaged original resources as fallback. These copies preserve the APK reference artwork.",
+  "files": [
+    {
+      "apk_entry": "r/khr.xml",
+      "decoded_resource": "res/drawable/cpr.xml",
+      "module_copy": "app/src/main/assets/navigation/meituan/res/drawable/cpr.xml",
+      "sha256": "4d787c3f6e5832962797d9dd98c9f9774cf4df5722b2ae443bdf0abd27bc87cc",
+      "source_sha256": "4b3ce374c7de53593c60fa5d193eab25bbd3977b214c5e886a60d43190731fde",
+      "raw_local_copy": ".reverse-tmp/Meituan-12.68.202/navigation-icons/raw/r/khr.xml"
+    },
+    {
+      "apk_entry": "r/khq.xml",
+      "decoded_resource": "res/drawable/jpw.xml",
+      "module_copy": "app/src/main/assets/navigation/meituan/res/drawable/jpw.xml",
+      "sha256": "5bb6780cc8197bccfed46975481147f719727f6de9e55e2f2cba9059394160fa",
+      "source_sha256": "e0b46229f1be2866dde72d306b93feef86cb0d02078e4d562e7e5cd183b5ba20",
+      "raw_local_copy": ".reverse-tmp/Meituan-12.68.202/navigation-icons/raw/r/khq.xml"
+    },
+    {
+      "apk_entry": "r/khp.xml",
+      "decoded_resource": "res/drawable/ls6.xml",
+      "module_copy": "app/src/main/assets/navigation/meituan/res/drawable/ls6.xml",
+      "sha256": "43232ac3af1f507bbf118dcde024017f840ee461087b0643837897c8c8298892",
+      "source_sha256": "1cf07d1b943ce3c5f11742adaa59014564f385c42d724f7295c0bff7f77950ee",
+      "raw_local_copy": ".reverse-tmp/Meituan-12.68.202/navigation-icons/raw/r/khp.xml"
+    },
+    {
+      "apk_entry": "r/ng5.webp",
+      "decoded_resource": "res/drawable-xhdpi/bnm.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan/res/drawable-xhdpi/bnm.webp",
+      "sha256": "c7fec659496197cac885c199c160e931466c38e66a15a6f3a62250200d3f68a8",
+      "source_sha256": "c7fec659496197cac885c199c160e931466c38e66a15a6f3a62250200d3f68a8",
+      "raw_local_copy": ".reverse-tmp/Meituan-12.68.202/navigation-icons/raw/r/ng5.webp"
+    },
+    {
+      "apk_entry": "r/nfz.webp",
+      "decoded_resource": "res/drawable-xhdpi/bub.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan/res/drawable-xhdpi/bub.webp",
+      "sha256": "6dfedd582eacc2f84b53380ac5f9ee1a65a93cf95c080fef7c4d08608961fbfe",
+      "source_sha256": "6dfedd582eacc2f84b53380ac5f9ee1a65a93cf95c080fef7c4d08608961fbfe",
+      "raw_local_copy": ".reverse-tmp/Meituan-12.68.202/navigation-icons/raw/r/nfz.webp"
+    },
+    {
+      "apk_entry": "r/ng9.webp",
+      "decoded_resource": "res/drawable-xhdpi/dr.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan/res/drawable-xhdpi/dr.webp",
+      "sha256": "d8f01175088afcf46d90dc38507b993ec4d15e855b7e6761f78ee83915e3a4cd",
+      "source_sha256": "d8f01175088afcf46d90dc38507b993ec4d15e855b7e6761f78ee83915e3a4cd",
+      "raw_local_copy": ".reverse-tmp/Meituan-12.68.202/navigation-icons/raw/r/ng9.webp"
+    },
+    {
+      "apk_entry": "r/ng7.webp",
+      "decoded_resource": "res/drawable-xhdpi/fo_.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan/res/drawable-xhdpi/fo_.webp",
+      "sha256": "ed5c00af74a8847acf2586701e25c8b399d494fd7265c6334dc5668f13e5afd0",
+      "source_sha256": "ed5c00af74a8847acf2586701e25c8b399d494fd7265c6334dc5668f13e5afd0",
+      "raw_local_copy": ".reverse-tmp/Meituan-12.68.202/navigation-icons/raw/r/ng7.webp"
+    },
+    {
+      "apk_entry": "r/ng_.webp",
+      "decoded_resource": "res/drawable-xhdpi/g2e.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan/res/drawable-xhdpi/g2e.webp",
+      "sha256": "7834f19eb6b4ec8c5515737319ba61466ec2aa749688225c42a82c685c2f78a5",
+      "source_sha256": "7834f19eb6b4ec8c5515737319ba61466ec2aa749688225c42a82c685c2f78a5",
+      "raw_local_copy": ".reverse-tmp/Meituan-12.68.202/navigation-icons/raw/r/ng_.webp"
+    },
+    {
+      "apk_entry": "r/ng2.webp",
+      "decoded_resource": "res/drawable-xhdpi/ic_tab_dark_state_usermine_membership.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan/res/drawable-xhdpi/ic_tab_dark_state_usermine_membership.webp",
+      "sha256": "8787fc98df26c9785628a415b94d3862a7368c5f9e4ed7144989c73639ad6f91",
+      "source_sha256": "8787fc98df26c9785628a415b94d3862a7368c5f9e4ed7144989c73639ad6f91",
+      "raw_local_copy": ".reverse-tmp/Meituan-12.68.202/navigation-icons/raw/r/ng2.webp"
+    },
+    {
+      "apk_entry": "r/ng3.webp",
+      "decoded_resource": "res/drawable-xhdpi/ic_tab_dark_state_usermine_vip.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan/res/drawable-xhdpi/ic_tab_dark_state_usermine_vip.webp",
+      "sha256": "c91df7dc1abd3fed576b18240aa9d9727cb5dd696660fdd7db1691d0f7f58724",
+      "source_sha256": "c91df7dc1abd3fed576b18240aa9d9727cb5dd696660fdd7db1691d0f7f58724",
+      "raw_local_copy": ".reverse-tmp/Meituan-12.68.202/navigation-icons/raw/r/ng3.webp"
+    },
+    {
+      "apk_entry": "r/ngy.webp",
+      "decoded_resource": "res/drawable-xhdpi/ic_vector_xiaotuan.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan/res/drawable-xhdpi/ic_vector_xiaotuan.webp",
+      "sha256": "7febd85c80f0e85d11ae763b2bbb8d257676d60532302d5cfc3f5ae22199fb96",
+      "source_sha256": "7febd85c80f0e85d11ae763b2bbb8d257676d60532302d5cfc3f5ae22199fb96",
+      "raw_local_copy": ".reverse-tmp/Meituan-12.68.202/navigation-icons/raw/r/ngy.webp"
+    },
+    {
+      "apk_entry": "r/ng0.webp",
+      "decoded_resource": "res/drawable-xhdpi/ozc.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan/res/drawable-xhdpi/ozc.webp",
+      "sha256": "c2c67d51dc08df73c8ae8c079433ccf58594c48922c5832248b0704971378d52",
+      "source_sha256": "c2c67d51dc08df73c8ae8c079433ccf58594c48922c5832248b0704971378d52",
+      "raw_local_copy": ".reverse-tmp/Meituan-12.68.202/navigation-icons/raw/r/ng0.webp"
+    },
+    {
+      "apk_entry": "r/ng6.webp",
+      "decoded_resource": "res/drawable-xhdpi/pfq.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan/res/drawable-xhdpi/pfq.webp",
+      "sha256": "9c208911138abe84e6231bc1de403dcca94ab0e5bdf72b719030fe603d0b7bdf",
+      "source_sha256": "9c208911138abe84e6231bc1de403dcca94ab0e5bdf72b719030fe603d0b7bdf",
+      "raw_local_copy": ".reverse-tmp/Meituan-12.68.202/navigation-icons/raw/r/ng6.webp"
+    },
+    {
+      "apk_entry": "r/ng8.webp",
+      "decoded_resource": "res/drawable-xhdpi/r9q.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan/res/drawable-xhdpi/r9q.webp",
+      "sha256": "cab993825ada4bc72243aa3ec59deb4135bc9bcf6d02a0e30fb952b713008a64",
+      "source_sha256": "cab993825ada4bc72243aa3ec59deb4135bc9bcf6d02a0e30fb952b713008a64",
+      "raw_local_copy": ".reverse-tmp/Meituan-12.68.202/navigation-icons/raw/r/ng8.webp"
+    },
+    {
+      "apk_entry": "r/ng4.webp",
+      "decoded_resource": "res/drawable-xhdpi/ti2.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan/res/drawable-xhdpi/ti2.webp",
+      "sha256": "3661c8391110de5d1b02808a23c8898a3fe2bbbecc9b43d2d46c9d1646056c72",
+      "source_sha256": "3661c8391110de5d1b02808a23c8898a3fe2bbbecc9b43d2d46c9d1646056c72",
+      "raw_local_copy": ".reverse-tmp/Meituan-12.68.202/navigation-icons/raw/r/ng4.webp"
+    },
+    {
+      "apk_entry": "r/ng1.webp",
+      "decoded_resource": "res/drawable-xhdpi/tk4.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan/res/drawable-xhdpi/tk4.webp",
+      "sha256": "39d73cfa29f5369f78aeef261479fccf4c581fe773158835ce2877939aed68ac",
+      "source_sha256": "39d73cfa29f5369f78aeef261479fccf4c581fe773158835ce2877939aed68ac",
+      "raw_local_copy": ".reverse-tmp/Meituan-12.68.202/navigation-icons/raw/r/ng1.webp"
+    },
+    {
+      "apk_entry": "r/nfy.webp",
+      "decoded_resource": "res/drawable-xhdpi/v7b.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan/res/drawable-xhdpi/v7b.webp",
+      "sha256": "aad861ee6cbe0a0dec98cb54480612f96fcf54313628037984768d4328962fc4",
+      "source_sha256": "aad861ee6cbe0a0dec98cb54480612f96fcf54313628037984768d4328962fc4",
+      "raw_local_copy": ".reverse-tmp/Meituan-12.68.202/navigation-icons/raw/r/nfy.webp"
+    }
+  ]
+}

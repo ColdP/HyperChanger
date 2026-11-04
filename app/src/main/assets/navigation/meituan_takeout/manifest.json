@@ -1,0 +1,95 @@
+{
+  "apk": "美团外卖_8.85.1.apk",
+  "version": "8.85.1",
+  "runtime": "Host getIcon()/ImageView Drawable first; host packaged original resources as fallback. These copies preserve the APK reference artwork.",
+  "files": [
+    {
+      "apk_entry": "r/fp3.webp",
+      "decoded_resource": "res/drawable-xhdpi/waimai_c_yi_queshitu.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan_takeout/res/drawable-xhdpi/waimai_c_yi_queshitu.webp",
+      "sha256": "84ff78205c4665a4e8b072d227541ec63fdd36babd40440be703188dc300e487",
+      "source_sha256": "84ff78205c4665a4e8b072d227541ec63fdd36babd40440be703188dc300e487",
+      "raw_local_copy": ".reverse-tmp/MeituanWaimai-8.85.1/navigation-icons/raw/r/fp3.webp"
+    },
+    {
+      "apk_entry": "r/fu9.webp",
+      "decoded_resource": "res/drawable-xhdpi/wm_main_tab_home_refresh.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan_takeout/res/drawable-xhdpi/wm_main_tab_home_refresh.webp",
+      "sha256": "d55026edf8e04f37a96089aa5ac6ed50e55f7b057859bdbacd5d2aa0e8b54427",
+      "source_sha256": "d55026edf8e04f37a96089aa5ac6ed50e55f7b057859bdbacd5d2aa0e8b54427",
+      "raw_local_copy": ".reverse-tmp/MeituanWaimai-8.85.1/navigation-icons/raw/r/fu9.webp"
+    },
+    {
+      "apk_entry": "r/fu_.webp",
+      "decoded_resource": "res/drawable-xhdpi/wm_main_tab_home_select.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan_takeout/res/drawable-xhdpi/wm_main_tab_home_select.webp",
+      "sha256": "33d9ee4f8ad2c7d1a3f0700c44b5842a5f3b14b3c2cb364f89b4bdd96fc7e448",
+      "source_sha256": "33d9ee4f8ad2c7d1a3f0700c44b5842a5f3b14b3c2cb364f89b4bdd96fc7e448",
+      "raw_local_copy": ".reverse-tmp/MeituanWaimai-8.85.1/navigation-icons/raw/r/fu_.webp"
+    },
+    {
+      "apk_entry": "r/fua.webp",
+      "decoded_resource": "res/drawable-xhdpi/wm_main_tab_home_totop.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan_takeout/res/drawable-xhdpi/wm_main_tab_home_totop.webp",
+      "sha256": "afb93759b103ffe6b90fb059af85c78c9373a3782e4a1b2a0e5470fc29f03774",
+      "source_sha256": "afb93759b103ffe6b90fb059af85c78c9373a3782e4a1b2a0e5470fc29f03774",
+      "raw_local_copy": ".reverse-tmp/MeituanWaimai-8.85.1/navigation-icons/raw/r/fua.webp"
+    },
+    {
+      "apk_entry": "r/fub.webp",
+      "decoded_resource": "res/drawable-xhdpi/wm_main_tab_home_unselect.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan_takeout/res/drawable-xhdpi/wm_main_tab_home_unselect.webp",
+      "sha256": "dd708ab03d3e4da28e718c4bc179b0fbea0967fe45b9c2f21a817c69b50f46ee",
+      "source_sha256": "dd708ab03d3e4da28e718c4bc179b0fbea0967fe45b9c2f21a817c69b50f46ee",
+      "raw_local_copy": ".reverse-tmp/MeituanWaimai-8.85.1/navigation-icons/raw/r/fub.webp"
+    },
+    {
+      "apk_entry": "r/fuc.webp",
+      "decoded_resource": "res/drawable-xhdpi/wm_main_tab_mine_select.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan_takeout/res/drawable-xhdpi/wm_main_tab_mine_select.webp",
+      "sha256": "c1027824cff32093379df2e36bf6829c615bb514c251148b5c1f1a7684745119",
+      "source_sha256": "c1027824cff32093379df2e36bf6829c615bb514c251148b5c1f1a7684745119",
+      "raw_local_copy": ".reverse-tmp/MeituanWaimai-8.85.1/navigation-icons/raw/r/fuc.webp"
+    },
+    {
+      "apk_entry": "r/fud.webp",
+      "decoded_resource": "res/drawable-xhdpi/wm_main_tab_mine_unselect.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan_takeout/res/drawable-xhdpi/wm_main_tab_mine_unselect.webp",
+      "sha256": "220b853d972804c4d3939990de47075ae0905c372c5636109257e3b0acd719a7",
+      "source_sha256": "220b853d972804c4d3939990de47075ae0905c372c5636109257e3b0acd719a7",
+      "raw_local_copy": ".reverse-tmp/MeituanWaimai-8.85.1/navigation-icons/raw/r/fud.webp"
+    },
+    {
+      "apk_entry": "r/fue.webp",
+      "decoded_resource": "res/drawable-xhdpi/wm_main_tab_order_select.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan_takeout/res/drawable-xhdpi/wm_main_tab_order_select.webp",
+      "sha256": "87a55a5fe8102888398f77b7e560b7d89196a5e1b103346ffe89c35e1b6c2f90",
+      "source_sha256": "87a55a5fe8102888398f77b7e560b7d89196a5e1b103346ffe89c35e1b6c2f90",
+      "raw_local_copy": ".reverse-tmp/MeituanWaimai-8.85.1/navigation-icons/raw/r/fue.webp"
+    },
+    {
+      "apk_entry": "r/fuf.webp",
+      "decoded_resource": "res/drawable-xhdpi/wm_main_tab_order_unselect.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan_takeout/res/drawable-xhdpi/wm_main_tab_order_unselect.webp",
+      "sha256": "ded2c614977e854e62912a1998e6a9c7495a35c74c7287e83cd0cb19d1972b7f",
+      "source_sha256": "ded2c614977e854e62912a1998e6a9c7495a35c74c7287e83cd0cb19d1972b7f",
+      "raw_local_copy": ".reverse-tmp/MeituanWaimai-8.85.1/navigation-icons/raw/r/fuf.webp"
+    },
+    {
+      "apk_entry": "r/fug.webp",
+      "decoded_resource": "res/drawable-xhdpi/wm_main_tab_shen_select.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan_takeout/res/drawable-xhdpi/wm_main_tab_shen_select.webp",
+      "sha256": "42d6779814ff83712916b7ea7d72bf51d965e1b8508c62ab060ab8ee0ae5f3cd",
+      "source_sha256": "42d6779814ff83712916b7ea7d72bf51d965e1b8508c62ab060ab8ee0ae5f3cd",
+      "raw_local_copy": ".reverse-tmp/MeituanWaimai-8.85.1/navigation-icons/raw/r/fug.webp"
+    },
+    {
+      "apk_entry": "r/fuh.webp",
+      "decoded_resource": "res/drawable-xhdpi/wm_main_tab_shen_unselect.webp",
+      "module_copy": "app/src/main/assets/navigation/meituan_takeout/res/drawable-xhdpi/wm_main_tab_shen_unselect.webp",
+      "sha256": "d5c8bdd3aeadeda4d6e51bef6916db58de2abb9c3ce3772d1e61018eda3a7f9f",
+      "source_sha256": "d5c8bdd3aeadeda4d6e51bef6916db58de2abb9c3ce3772d1e61018eda3a7f9f",
+      "raw_local_copy": ".reverse-tmp/MeituanWaimai-8.85.1/navigation-icons/raw/r/fuh.webp"
+    }
+  ]
+}

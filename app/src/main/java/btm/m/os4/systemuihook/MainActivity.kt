@@ -317,7 +317,7 @@ private enum class PageId {
     DEVICE_PROFILE_PRESETS, DEVICE_PROFILE_CLOUD_PRESETS, CUSTOM_DEPTH_WALLPAPER,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, SETTINGS_ENTRY_ICONS, SETTINGS_ENTRY_APPEARANCE, THEME_AND_COLOR, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
-    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, SIDEBAR, SIDEBAR_GLASS, PERSONAL_ASSISTANT, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, PORTAL_MATERIAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND, MODULE_PRESET_IMPORT_PREVIEW,
+    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, SIDEBAR, SIDEBAR_GLASS, PERSONAL_ASSISTANT, ASSISTANT_WIDGET_GLASS, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, PORTAL_MATERIAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND, MODULE_PRESET_IMPORT_PREVIEW,
     STATUS_MOBILE_NETWORK_TYPE_TUNING,
     CLOUD_CONTROL,
     PRIVACY_GUARD,
@@ -421,6 +421,12 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
         PageId.PERSONAL_ASSISTANT,
     ),
     CategorySearchItem(
+        tr("负一屏小部件柔光玻璃参数调整", "负一屏小部件柔光玻璃参数调整"),
+        tr("柔光玻璃参数调整", "柔光玻璃参数调整"),
+        setOf(ScopeApplication.PERSONAL_ASSISTANT),
+        PageId.ASSISTANT_WIDGET_GLASS,
+    ),
+    CategorySearchItem(
         tr("拨号与通话", "拨号与通话"),
         tr("category_search_contacts_dialer_description", "调整拨号盘背景模糊、模糊度与不透明度。"),
         setOf(ScopeApplication.CONTACTS_DIALER),
@@ -516,6 +522,9 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
             ScopeApplication.XIAOMI_HEALTH,
             ScopeApplication.LUCKIN_COFFEE,
             ScopeApplication.TENCENT_MEETING,
+            ScopeApplication.DOUSHENGSHENG,
+            ScopeApplication.MEITUAN,
+            ScopeApplication.MEITUAN_TAKEOUT,
             ScopeApplication.CMB_BANK,
             ScopeApplication.WECHAT,
             ScopeApplication.QQ,
@@ -1005,6 +1014,7 @@ private fun Root(
                 SidebarSettingsStore(context).syncRemote(it)
                 SidebarFeatureSettingsStore(context).syncRemote(it)
                 PersonalAssistantSettingsStore(context).syncRemote(it)
+                WidgetGlassSettingsStore(context).syncRemote(it)
                 PowerBatterySettingsStore(context).syncRemote(it)
                 PortalSettings.syncRemote(context, it)
                 globalSoftGlassStore.syncRemote(it)
@@ -1587,6 +1597,9 @@ private fun Shell(
         maxProgress = settings.predictiveBackProgress.coerceIn(10, 100) / 100f,
         onBack = dismissPage
     )
+    // Freeze the edge when this exit starts; resetting the shared gesture state
+    // after pop must not retarget the outgoing slide.
+    val ordinaryExitDirection = remember(ordinaryClosingIndex) { backState.exitDirection }
     // The revealed page must not inherit the outgoing page's gesture transform before
     // the existing stack-change effect has reset the shared momentum state.
     val momentumBackOwner = remember(backState.isSwiping) { pageStack.lastIndex to page }
@@ -1608,16 +1621,19 @@ private fun Shell(
     val maxBackProgress = settings.predictiveBackProgress.coerceIn(10, 100) / 100f
     val gestureBlur = if (seamlessEntry != null) 12f * seamlessEntry.progress.value
         else 12f - 8f * (backState.gestureProgress / maxBackProgress).coerceIn(0f, 1f)
+    // Start revealing the page while the outgoing one exits, not after the
+    // delayed stack pop. Match AppNavigationPage's concurrent 252ms unblur.
+    val revealingBase = page == null || ordinaryClosingIndex == 0
     val baseCoveredBlur by animateFloatAsState(
         targetValue = when {
-            page == null -> 0f
+            revealingBase -> 0f
             (backState.isSwiping || seamlessEntry != null) && pageStack.size == 1 -> gestureBlur
             else -> 12f
         },
         animationSpec = when {
-            page == null -> tween(300, easing = FastOutSlowInEasing)
+            revealingBase -> tween(252, easing = FastOutSlowInEasing)
             (backState.isSwiping || seamlessEntry != null) && pageStack.size == 1 -> snap()
-            else -> tween(520, easing = FastOutSlowInEasing)
+            else -> tween(252, easing = FastOutSlowInEasing)
         },
         label = "basePageCoveredBlur",
     )
@@ -1727,7 +1743,7 @@ private fun Shell(
             ),
             exit = if (seamless.rootWasSeamless) ExitTransition.None else slideOutHorizontally(
                 animationSpec = tween(207, easing = FastOutSlowInEasing),
-                targetOffsetX = { -it / 3 },
+                targetOffsetX = { ordinaryExitDirection * it / 3 },
             ) + fadeOut(tween(162)) + scaleOut(
                 animationSpec = tween(207, easing = FastOutSlowInEasing),
                 targetScale = .975f,
@@ -1750,16 +1766,17 @@ private fun Shell(
                         // fallback when its entry is removed from the navigation map.
                         val stackEntry = remember { seamless.entries[index] }
                         val isTop = index == pageStack.lastIndex
+                        val revealingPage = isTop || ordinaryClosingIndex == index + 1
                         val coveredPageBlur by animateFloatAsState(
                             targetValue = when {
-                                isTop -> 0f
+                                revealingPage -> 0f
                                 index == pageStack.lastIndex - 1 && (backState.isSwiping || seamlessEntry != null) -> gestureBlur
                                 else -> 12f
                             },
                             animationSpec = when {
-                                isTop -> tween(300, easing = FastOutSlowInEasing)
+                                revealingPage -> tween(252, easing = FastOutSlowInEasing)
                                 index == pageStack.lastIndex - 1 && (backState.isSwiping || seamlessEntry != null) -> snap()
-                                else -> tween(520, easing = FastOutSlowInEasing)
+                                else -> tween(252, easing = FastOutSlowInEasing)
                             },
                             label = "coveredPageBlur:$stackPage",
                         )
@@ -1781,7 +1798,7 @@ private fun Shell(
                                 )
                             } else EnterTransition.None,
                             exit = if (stackEntry == null) {
-                                slideOutHorizontally(tween(207, easing = FastOutSlowInEasing)) { -it / 3 } +
+                                slideOutHorizontally(tween(207, easing = FastOutSlowInEasing)) { ordinaryExitDirection * it / 3 } +
                                     fadeOut(tween(162)) + scaleOut(tween(207), targetScale = .975f)
                             } else ExitTransition.None,
                             modifier = Modifier.fillMaxSize(),
@@ -1893,6 +1910,9 @@ private fun BottomBar(
             advancedMaterial = true,
             colorMode = settings.themeMode,
             accentColorOverride = monetAccentColor,
+            material = rememberModuleNavigationMaterial(navigationSettings.style),
+            hyperDockedLiquidGlassEnabled = rememberHyperDockedGlassEnabled(),
+            hyperDockedAccentEnabled = true,
             liquidBottomSpacingDp = 0,
             onHostPreDraw = {},
             backdropOverride = backdrop,
@@ -1987,7 +2007,7 @@ private fun CategoryHome(
                     CategoryGroup(
                         title = tr("其他", "其他"),
                         entries = listOf(
-                            CategoryPageEntry(tr("拨号与通话", "拨号与通话"), PageId.CONTACTS_DIALER),
+                            CategoryPageEntry(tr("应用底部导航", "应用底部导航"), PageId.APP_NAVIGATION),
                             CategoryPageEntry(tr("其他", "其他"), PageId.OTHER),
                         ),
                         enabled = connected,
@@ -2236,6 +2256,8 @@ private fun OtherPage(
                 SharedViewArrowPreference(
                     title = tr("应用底部导航", "应用底部导航"),
                     onClick = { open(PageId.APP_NAVIGATION) },
+                    title = tr("拨号与通话", "拨号与通话"),
+                    onClick = { open(PageId.CONTACTS_DIALER) },
                 )
                 SwitchPreference(
                     title = tr("去除表盘试用10分钟限制", "去除表盘试用10分钟限制"),
@@ -3223,6 +3245,7 @@ private fun SettingsHome(
                     selectedIndex = navigationStyles.indexOfFirst { it.preferenceValue == navigationSettings.style }.coerceAtLeast(0),
                     onSelectedIndexChange = { i -> updateNavigation { it.copy(style = navigationStyles[i].preferenceValue) } }
                 )
+                if (navigationSettings.style == "hyper_os") HyperDockedGlassPreference(service)
                 OverlayDropdownPreference(
                     title = tr("\u5e95\u90e8\u5bfc\u822a\u680f\u6807\u7b7e\u663e\u793a\u65b9\u5f0f", "\u5e95\u90e8\u5bfc\u822a\u680f\u6807\u7b7e\u663e\u793a\u65b9\u5f0f"),
                     items = LabelMode.entries.map { mode ->
@@ -3480,6 +3503,9 @@ private fun RestartScopesPage(
         ScopeApplication.XIAOMI_WALLET,
         ScopeApplication.XIAOMI_HEALTH,
         ScopeApplication.TENCENT_MEETING,
+        ScopeApplication.DOUSHENGSHENG,
+        ScopeApplication.MEITUAN,
+        ScopeApplication.MEITUAN_TAKEOUT,
         ScopeApplication.CMB_BANK,
         ScopeApplication.WECHAT,
         ScopeApplication.QQ,
@@ -5646,7 +5672,8 @@ private fun Detail(
         PageId.CONTACTS_DIALER_BACKGROUND -> ContactsDialerBackgroundPage(back)
         PageId.SIDEBAR -> SidebarPage({ openPage(PageId.SIDEBAR_GLASS) }, back)
         PageId.SIDEBAR_GLASS -> SidebarGlassPage(back)
-        PageId.PERSONAL_ASSISTANT -> PersonalAssistantPage(back)
+        PageId.PERSONAL_ASSISTANT -> PersonalAssistantPage({ openPage(PageId.ASSISTANT_WIDGET_GLASS) }, back)
+        PageId.ASSISTANT_WIDGET_GLASS -> AssistantWidgetGlassPage(back)
         PageId.PORTAL -> PortalPage({ openPage(PageId.PORTAL_MATERIAL) }, back)
         PageId.PORTAL_MATERIAL -> PortalMaterialPage(back)
         PageId.APP_NAVIGATION -> AppNavigationPage(back)
@@ -6983,7 +7010,11 @@ private fun Shade(
 }
 
 @Composable
-internal fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, onSelected: (Int) -> Unit) {
+internal fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, onSelected: (Int) -> Unit) =
+    SoftGlassHeaderTabs(tabs, selected, 1f, onSelected = onSelected)
+
+@Composable
+internal fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, widthScale: Float, finalWidthScale: Float = 1f, onSelected: (Int) -> Unit) {
     val backdrop = LocalToolbarBackdrop.current
     val surface = MiuixTheme.colorScheme.surfaceContainer
     val shape = remember { Capsule() }
@@ -6998,7 +7029,9 @@ internal fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, onSelected: 
         highlight = { Highlight.Default.copy(alpha = .62f) },
         onDrawSurface = { drawRect(surface.copy(alpha = .6f)) },
     ) else Modifier.background(surface, shape)
-    BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 8.dp)) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val tabsWidth = ((maxWidth - 56.dp).coerceAtLeast(0.dp) * widthScale).coerceAtMost(maxWidth) * finalWidthScale
+        BoxWithConstraints(Modifier.align(Alignment.Center).width(tabsWidth).padding(vertical = 8.dp)) {
         Box(
             Modifier.matchParentSize()
                 .clip(shape)
@@ -7030,6 +7063,7 @@ internal fun SoftGlassHeaderTabs(tabs: List<String>, selected: Int, onSelected: 
                 }
             }
         }
+    }
     }
 }
 

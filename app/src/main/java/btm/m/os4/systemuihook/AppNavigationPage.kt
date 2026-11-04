@@ -45,8 +45,13 @@ import btm.m.liquidglass.LabelMode
 import btm.m.liquidglass.NavigationStyle
 import btm.m.liquidglass.ScopedSettings
 import btm.m.liquidglass.NavigationAccentSettings
+import btm.m.liquidglass.HyperDockedNavigationSettings
+import btm.m.liquidglass.HyperFloatingAccentSettings
 import btm.m.liquidglass.NavigationBadgeSettings
 import btm.m.liquidglass.NavigationOffsetSettings
+import btm.m.liquidglass.NavigationScaleSettings
+import btm.m.liquidglass.NavigationCornerSettings
+import btm.m.liquidglass.NavigationMaterialSettings
 import btm.m.liquidglass.hook.WeChatAvatarRadiusSettings
 import btm.m.liquidglass.rememberMomentumPredictiveBack
 import btm.m.liquidglass.momentumBackTransform
@@ -64,6 +69,9 @@ private val appNavItems = listOf(
     AppNavItem("小米运动健康", "com.mi.health"),
     AppNavItem("瑞幸咖啡", "com.lucky.luckyclient"),
     AppNavItem("腾讯会议", "com.tencent.wemeet.app"),
+    AppNavItem("抖省省", "com.ss.android.ugc.lifeservices"),
+    AppNavItem("美团", "com.sankuai.meituan"),
+    AppNavItem("美团外卖", "com.sankuai.meituan.takeoutnew"),
     AppNavItem("招商银行", "cmb.pb"),
     AppNavItem("微信", "com.tencent.mm"),
     AppNavItem("拼多多", "com.xunmeng.pinduoduo"),
@@ -79,6 +87,8 @@ internal fun AppNavigationPage(back: () -> Unit) {
     val service by HookApplication.service.collectAsState()
     val store = remember(context) { AppNavigationSettingsStore(context) }
     var selected by remember { mutableStateOf<String?>(null) }
+    var materialOpen by remember { mutableStateOf(false) }
+    var materialPackage by remember { mutableStateOf<String?>(null) }
     var revision by remember { mutableIntStateOf(0) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(store, lifecycleOwner) {
@@ -96,7 +106,20 @@ internal fun AppNavigationPage(back: () -> Unit) {
         }
     }
     var lastSelected by remember { mutableStateOf<AppNavItem?>(null) }
-    val overviewBlur by animateFloatAsState(if (selected != null) 12f else 0f, tween(252), label = "appNavigationOverviewBlur")
+    val settingsBack = rememberMomentumPredictiveBack(
+        enabled = selected != null && !materialOpen,
+        onBack = { selected = null },
+    )
+    // Capture before AnimatedVisibility disposes the page or the gesture resets.
+    val settingsExitDirection = remember(selected) { settingsBack.exitDirection }
+    LaunchedEffect(selected) {
+        if (selected != null) settingsBack.reset()
+    }
+    val materialBack = rememberMomentumPredictiveBack(enabled = materialOpen, onBack = { materialOpen = false })
+    val materialExitDirection = remember(materialOpen) { materialBack.exitDirection }
+    LaunchedEffect(materialOpen) { if (materialOpen) materialBack.reset() }
+    val materialCoveredBlur by animateFloatAsState(if (materialOpen) 12f else 0f, tween(252), label = "navigationMaterialCoveredBlur")
+    val overviewBlur by animateFloatAsState(if (selected != null || materialOpen) 12f else 0f, tween(252), label = "appNavigationOverviewBlur")
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().blur(overviewBlur.dp)) {
             AppPage(
@@ -111,6 +134,10 @@ internal fun AppNavigationPage(back: () -> Unit) {
                     item {
                         Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
                             AppNavigationOffsetPreferences(store.preferences, service)
+                            SharedViewArrowPreference(
+                                title = tr("navMaterialTitle", "底部导航栏材质参数调整"),
+                                onClick = { materialPackage = null; materialOpen = true },
+                            )
                         }
                     }
                     item { SmallTitle(tr("支持的应用", "支持的应用"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp)) }
@@ -125,23 +152,30 @@ internal fun AppNavigationPage(back: () -> Unit) {
         }
         AnimatedVisibility(
             visible = selected != null,
+            modifier = Modifier.blur(materialCoveredBlur.dp),
             enter = slideInHorizontally(tween(252, easing = FastOutSlowInEasing)) { it / 7 } +
                 fadeIn(tween(189)) + scaleIn(tween(252, easing = FastOutSlowInEasing), initialScale = .985f),
-            exit = slideOutHorizontally(tween(207, easing = FastOutSlowInEasing)) { -it / 3 } +
+            exit = slideOutHorizontally(tween(207, easing = FastOutSlowInEasing)) { settingsExitDirection * it / 3 } +
                 fadeOut(tween(162)) + scaleOut(tween(207, easing = FastOutSlowInEasing), targetScale = .975f),
         ) {
             val selectedItem = lastSelected ?: return@AnimatedVisibility
             val transitionBlur by transition.animateFloat(
                 transitionSpec = { tween(207, easing = FastOutSlowInEasing) }, label = "appNavigationDetailBlur",
             ) { if (it == EnterExitState.Visible) 0f else 12f }
-            val settingsBack = rememberMomentumPredictiveBack(
-                enabled = selected != null,
-                onBack = { selected = null },
-            )
             Box(Modifier.fillMaxSize().blur(transitionBlur.dp).momentumBackTransform(settingsBack)) {
                 key(selectedItem.packageName) {
-                    AppNavigationSettings(selectedItem, store, service, { revision++ }) { selected = null }
+                    AppNavigationSettings(selectedItem, store, service, { revision++ },
+                        openMaterial = { materialPackage = selectedItem.packageName; materialOpen = true }) { selected = null }
                 }
+            }
+        }
+        AnimatedVisibility(
+            visible = materialOpen,
+            enter = slideInHorizontally(tween(252, easing = FastOutSlowInEasing)) { it / 7 } + fadeIn(tween(189)),
+            exit = slideOutHorizontally(tween(207, easing = FastOutSlowInEasing)) { materialExitDirection * it / 3 } + fadeOut(tween(162)),
+        ) {
+            Box(Modifier.fillMaxSize().momentumBackTransform(materialBack)) {
+                NavigationMaterialPage(materialPackage) { materialOpen = false }
             }
         }
     }
@@ -155,7 +189,7 @@ private fun AppNavigationCard(item: AppNavItem, store: AppNavigationSettingsStor
     val packageInfo = remember(item.packageName, revision) { runCatching { context.packageManager.getPackageInfo(item.packageName, 0) }.getOrNull() }
     var enabled by remember(item.packageName, revision, service) { mutableStateOf(ScopedSettings.getBoolean(prefs, item.packageName, ScopedSettings.KEY_ENABLED, true)) }
     val icon = remember(info) { info?.loadIcon(context.packageManager)?.toBitmap(96, 96)?.asImageBitmap() }
-    Card(Modifier.fillMaxWidth().clickable(onClick = onOpen), cornerRadius = 22.5.dp, insideMargin = PaddingValues(14.dp)) {
+    Card(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.5.dp)).clickable(onClick = onOpen), cornerRadius = 22.5.dp, insideMargin = PaddingValues(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             icon?.let { Image(it, tr("应用图标", "应用图标"), Modifier.size(54.dp).clip(RoundedCornerShape(14.dp)), contentScale = ContentScale.Crop) }
             Spacer(Modifier.width(14.dp))
@@ -182,7 +216,7 @@ private fun AppNavigationCard(item: AppNavItem, store: AppNavigationSettingsStor
 }
 
 @Composable
-private fun AppNavigationSettings(appItem: AppNavItem, store: AppNavigationSettingsStore, service: XposedService?, onChanged: () -> Unit, back: () -> Unit) {
+private fun AppNavigationSettings(appItem: AppNavItem, store: AppNavigationSettingsStore, service: XposedService?, onChanged: () -> Unit, openMaterial: () -> Unit, back: () -> Unit) {
     val prefs = store.preferences
     val enabledKey = ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_ENABLED)
     var enabled by remember(appItem.packageName, service) { mutableStateOf(ScopedSettings.getBoolean(prefs, appItem.packageName, ScopedSettings.KEY_ENABLED, true)) }
@@ -190,9 +224,14 @@ private fun AppNavigationSettings(appItem: AppNavItem, store: AppNavigationSetti
     var labelIndex by remember(appItem.packageName, service) { mutableIntStateOf(LabelMode.fromPreference(ScopedSettings.getLabelMode(prefs, appItem.packageName)).ordinal) }
     var colorIndex by remember(appItem.packageName, service) { mutableIntStateOf(AppColorMode.fromPreference(ScopedSettings.getString(prefs, appItem.packageName, ScopedSettings.KEY_COLOR_MODE, AppColorMode.DEFAULT_VALUE)).ordinal) }
     var accentColor by remember(appItem.packageName, service) { mutableIntStateOf(NavigationAccentSettings.getColor(prefs, appItem.packageName)) }
+    var hyperAccentEnabled by remember(appItem.packageName, service) { mutableStateOf(HyperFloatingAccentSettings.isEnabled(prefs, appItem.packageName)) }
+    var hyperDockedAccentEnabled by remember(appItem.packageName, service) { mutableStateOf(HyperDockedNavigationSettings.accentEnabled(prefs, appItem.packageName)) }
     var showBadges by remember(appItem.packageName, service) { mutableStateOf(NavigationBadgeSettings.getShowBadges(prefs, appItem.packageName)) }
     var showAccentDialog by remember { mutableStateOf(false) }
-    val accentEnabled = NavigationStyle.entries.getOrNull(styleIndex) in setOf(
+    var followsMaterial by remember(appItem.packageName, service) { mutableStateOf(NavigationMaterialSettings.followsGlobal(prefs, appItem.packageName)) }
+    val hyperFloating = NavigationStyle.entries.getOrNull(styleIndex) == NavigationStyle.HYPER_OS_FLOATING
+    val hyperDocked = NavigationStyle.entries.getOrNull(styleIndex) == NavigationStyle.HYPER_OS
+    val accentEnabled = (hyperDocked && hyperDockedAccentEnabled) || (hyperFloating && hyperAccentEnabled) || NavigationStyle.entries.getOrNull(styleIndex) in setOf(
         NavigationStyle.LIQUID_GLASS,
         NavigationStyle.HARMONY_OS_FLOATING,
     )
@@ -224,18 +263,55 @@ private fun AppNavigationSettings(appItem: AppNavItem, store: AppNavigationSetti
                             OverlayDropdownPreference(title = tr("导航栏样式", "导航栏样式"), items = NavigationStyle.entries.map { tr(it.displayName, it.displayName) }, selectedIndex = styleIndex) { value -> styleIndex = value; store.edit(service) { putString(ScopedSettings.key(appItem.packageName, NavigationStyle.PREFERENCE_KEY), NavigationStyle.entries[value].preferenceValue) }; onChanged() }
                             OverlayDropdownPreference(title = tr("标签显示方式", "标签显示方式"), items = LabelMode.entries.map { tr(it.displayName, it.displayName) }, selectedIndex = labelIndex) { value -> labelIndex = value; store.edit(service) { putString(ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_LABEL_MODE), LabelMode.entries[value].preferenceValue) }; onChanged() }
                             OverlayDropdownPreference(title = tr("颜色模式", "颜色模式"), items = AppColorMode.entries.map { tr(it.displayName, it.displayName) }, selectedIndex = colorIndex) { value -> colorIndex = value; store.edit(service) { putString(ScopedSettings.key(appItem.packageName, ScopedSettings.KEY_COLOR_MODE), AppColorMode.entries[value].preferenceValue) }; onChanged() }
+                            PortalAppearanceVisibility(hyperFloating || hyperDocked) {
+                                SwitchPreference(
+                                    title = tr("启用强调色", "启用强调色"),
+                                    checked = if (hyperDocked) hyperDockedAccentEnabled else hyperAccentEnabled,
+                                    onCheckedChange = { value ->
+                                        if (hyperDocked) {
+                                            hyperDockedAccentEnabled = value
+                                            HyperDockedNavigationSettings.saveAccent(prefs, service, appItem.packageName, value)
+                                        } else {
+                                            hyperAccentEnabled = value
+                                            HyperFloatingAccentSettings.save(prefs, service, appItem.packageName, value)
+                                        }
+                                        if (!value) showAccentDialog = false
+                                        onChanged()
+                                    },
+                                )
+                            }
                             PortalAppearanceVisibility(accentEnabled) {
                                 NavigationAccentPreference(color = accentColor, enabled = enabled, onClick = { showAccentDialog = true })
                             }
+                            PortalAppearanceVisibility(NavigationCornerSettings.supports(NavigationStyle.entries[styleIndex])) {
+                                AppNavigationCornerPreferences(prefs, service, appItem.packageName, onChanged)
+                            }
                         }
                         Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-                            AppNavigationOffsetPreferences(prefs, service, appItem.packageName)
+                            SwitchPreference(
+                                title = tr("navMaterialUseGlobal", "使用全局导航栏材质参数"),
+                                checked = followsMaterial,
+                                onCheckedChange = { value ->
+                                    followsMaterial = value
+                                    NavigationMaterialSettings.saveFollow(prefs, service, appItem.packageName, value)
+                                    onChanged()
+                                },
+                            )
+                            PortalAppearanceVisibility(!followsMaterial) {
+                                SharedViewArrowPreference(title = tr("navMaterialAppTitle", "材质参数单独调整"), onClick = openMaterial)
+                            }
+                        }
+                        PortalAppearanceVisibility(NavigationScaleSettings.supports(NavigationStyle.entries[styleIndex])) {
+                            AppNavigationScalePreferences(prefs, service, appItem.packageName, onChanged)
+                        }
+                        if (appItem.packageName == "com.xingin.xhs") {
+                            XiaohongshuPublishPreferences(prefs, service, onChanged)
                         }
                         if (appItem.packageName == "com.tencent.mobileqq" || appItem.packageName == "com.tencent.mm") {
                             Group(tr("appNavigationUnreadHints", "未读提示")) {
                                 SwitchPreference(
                                     title = tr("显示小红点", "显示小红点"),
-                                    summary = tr("在自定义底栏图标旁显示未读提示", "在自定义底栏图标旁显示未读提示"),
+                                    summary = tr("在自定义底部导航栏图标旁显示未读提示", "在自定义底部导航栏图标旁显示未读提示"),
                                     checked = showBadges,
                                     onCheckedChange = { value ->
                                         showBadges = value
@@ -298,6 +374,103 @@ private fun AppNavigationSettings(appItem: AppNavItem, store: AppNavigationSetti
 }
 
 @Composable
+private fun AppNavigationScalePreferences(
+    preferences: SharedPreferences, service: XposedService?, packageName: String, onChanged: () -> Unit,
+) {
+    var settings by remember(preferences, packageName, service) { mutableStateOf(NavigationScaleSettings.load(preferences, packageName)) }
+    var width by remember(settings.widthHundredths) { mutableFloatStateOf(settings.widthHundredths / 100f) }
+    var height by remember(settings.heightHundredths) { mutableFloatStateOf(settings.heightHundredths / 100f) }
+    DisposableEffect(preferences, packageName) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == null || (NavigationScaleSettings.isPreference(key) && key.startsWith("scope.$packageName."))) {
+                settings = NavigationScaleSettings.load(preferences, packageName)
+            }
+        }
+        preferences.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+    fun save(value: NavigationScaleSettings.Settings) {
+        settings = value.normalized()
+        NavigationScaleSettings.save(preferences, service, packageName, settings)
+        onChanged()
+    }
+    Group(tr("appNavigationScale", "缩放与定位")) {
+        SwitchPreference(
+            title = tr("appNavigationWidthScale", "底部导航栏宽度缩放"),
+            checked = settings.widthEnabled,
+            onCheckedChange = { save(settings.copy(widthEnabled = it)) },
+        )
+        PortalAppearanceVisibility(settings.widthEnabled) {
+            EditableSliderPreference(
+                title = tr("appNavigationWidthScale", "底部导航栏宽度缩放"),
+                value = width,
+                valueText = tr("appNavigationScalePercent", "%.2f%%").format(java.util.Locale.getDefault(), width),
+                valueRange = -100f..100f, steps = 19999, defaultValue = 0f, centerValue = 0f,
+                onValueChange = { width = NavigationScaleSettings.hundredths(it) / 100f },
+                onValueChangeFinished = { save(settings.copy(widthHundredths = NavigationScaleSettings.hundredths(width))) },
+            )
+        }
+        SwitchPreference(
+            title = tr("appNavigationHeightScale", "底部导航栏高度缩放"),
+            checked = settings.heightEnabled,
+            onCheckedChange = { save(settings.copy(heightEnabled = it)) },
+        )
+        PortalAppearanceVisibility(settings.heightEnabled) {
+            EditableSliderPreference(
+                title = tr("appNavigationHeightScale", "底部导航栏高度缩放"),
+                value = height,
+                valueText = tr("appNavigationScalePercent", "%.2f%%").format(java.util.Locale.getDefault(), height),
+                valueRange = -100f..100f, steps = 19999, defaultValue = 0f, centerValue = 0f,
+                onValueChange = { height = NavigationScaleSettings.hundredths(it) / 100f },
+                onValueChangeFinished = { save(settings.copy(heightHundredths = NavigationScaleSettings.hundredths(height))) },
+            )
+        }
+        AppNavigationOffsetPreferences(preferences, service, packageName)
+    }
+}
+
+@Composable
+private fun AppNavigationCornerPreferences(
+    preferences: SharedPreferences, service: XposedService?, packageName: String, onChanged: () -> Unit,
+) {
+    var settings by remember(preferences, packageName, service) { mutableStateOf(NavigationCornerSettings.load(preferences, packageName)) }
+    var draft by remember(settings.value) { mutableFloatStateOf(settings.value.toFloat()) }
+    DisposableEffect(preferences, packageName) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == null || (NavigationCornerSettings.isPreference(key) && key.startsWith("scope.$packageName."))) {
+                settings = NavigationCornerSettings.load(preferences, packageName)
+            }
+        }
+        preferences.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+    fun save(value: NavigationCornerSettings.Settings) {
+        settings = value.normalized()
+        NavigationCornerSettings.save(preferences, service, packageName, settings)
+        onChanged()
+    }
+    Column(Modifier.fillMaxWidth()) {
+        SwitchPreference(
+            title = tr("appNavigationCornerAdjustment", "圆角调整"),
+            checked = settings.enabled,
+            onCheckedChange = { save(settings.copy(enabled = it)) },
+        )
+        PortalAppearanceVisibility(settings.enabled) {
+            EditableSliderPreference(
+                title = tr("appNavigationCornerAdjustment", "圆角调整"),
+                value = draft,
+                valueText = draft.roundToInt().toString(),
+                valueRange = NavigationCornerSettings.MIN.toFloat()..NavigationCornerSettings.MAX.toFloat(),
+                steps = NavigationCornerSettings.MAX - NavigationCornerSettings.MIN - 1,
+                defaultValue = 0f,
+                onValueChange = { draft = it },
+                onValueChangeFinished = { save(settings.copy(value = draft.roundToInt())) },
+            )
+        }
+    }
+}
+
+@Composable
 private fun AppNavigationOffsetPreferences(preferences: SharedPreferences, service: XposedService?, packageName: String? = null) {
     var settings by remember(preferences, packageName, service) { mutableStateOf(NavigationOffsetSettings.load(preferences, packageName)) }
     var draft by remember(settings.valueDp) { mutableFloatStateOf(settings.valueDp.toFloat()) }
@@ -338,28 +511,33 @@ private fun AppNavigationOffsetPreferences(preferences: SharedPreferences, servi
 }
 
 @Composable
-private fun NavigationAccentPreference(color: Int, enabled: Boolean, onClick: () -> Unit) {
+internal fun NavigationAccentPreference(
+    color: Int, enabled: Boolean,
+    title: String = tr("底部导航栏强调色", "底部导航栏强调色"),
+    onClick: () -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(tr("底栏强调色", "底栏强调色"), modifier = Modifier.weight(1f), style = MiuixTheme.textStyles.body1, color = if (enabled) MiuixTheme.colorScheme.onSurface else MiuixTheme.colorScheme.onSurface.copy(alpha = .38f))
+        Text(title, modifier = Modifier.weight(1f), style = MiuixTheme.textStyles.body1, color = if (enabled) MiuixTheme.colorScheme.onSurface else MiuixTheme.colorScheme.onSurface.copy(alpha = .38f))
         Box(Modifier.size(28.dp).background(MiuixTheme.colorScheme.outline.copy(alpha = .45f), androidx.compose.foundation.shape.CircleShape).padding(2.dp).background(ComposeColor(color), androidx.compose.foundation.shape.CircleShape))
     }
 }
 
 @Composable
-private fun NavigationAccentDialog(
+internal fun NavigationAccentDialog(
     show: Boolean,
     initialColor: Int,
     defaultColor: Int,
     onDismiss: () -> Unit,
     onSave: (Int) -> Unit,
+    title: String = tr("底部导航栏强调色", "底部导航栏强调色"),
 ) {
     var draftColor by remember(show, initialColor) { mutableIntStateOf(initialColor) }
     WindowDialog(show = show, onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(tr("底栏强调色", "底栏强调色"), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
+            Text(title, style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
             ColorPalette(
                 color = ComposeColor(draftColor or 0xFF000000.toInt()),
                 onColorChanged = { draftColor = it.toArgb() or 0xFF000000.toInt() },

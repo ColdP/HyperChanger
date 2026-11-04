@@ -1,0 +1,51 @@
+{
+  "version": "9.42.0",
+  "icons": [
+    {
+      "source": ".reverse-tmp/Xiaohongshu-9.42.0/resources/res/drawable/red_view_home.xml",
+      "module": "app/src/main/res/drawable/xhs_nav_red_view_home.xml",
+      "sha256": "4ac31e2124fd0a311774d08ae96215c50f10bce3c228e3e48aed5847becc4fed"
+    },
+    {
+      "source": ".reverse-tmp/Xiaohongshu-9.42.0/resources/res/drawable/red_view_home_f.xml",
+      "module": "app/src/main/res/drawable/xhs_nav_red_view_home_f.xml",
+      "sha256": "32caa2b0e413003dcc84210b91b68bd28c09fe5d6beb86617812bfbc75a9a490"
+    },
+    {
+      "source": ".reverse-tmp/Xiaohongshu-9.42.0/resources/res/drawable/red_view_store.xml",
+      "module": "app/src/main/res/drawable/xhs_nav_red_view_store.xml",
+      "sha256": "9e5c7a7dfeeea7b0d5ceb58dd5246604d653462078c803142aa6a3e41075becd"
+    },
+    {
+      "source": ".reverse-tmp/Xiaohongshu-9.42.0/resources/res/drawable/red_view_store_f.xml",
+      "module": "app/src/main/res/drawable/xhs_nav_red_view_store_f.xml",
+      "sha256": "28c703851ee106acb625e89cdd801241b31d2748c00f1ec5a9547a3edb379ea9"
+    },
+    {
+      "source": ".reverse-tmp/Xiaohongshu-9.42.0/resources/res/drawable/red_view_new_post_v2.xml",
+      "module": "app/src/main/res/drawable/xhs_nav_red_view_new_post_v2.xml",
+      "sha256": "edcd6e318d11b3535556ebfbb8a0e5470cfbeb1997648937d4c65277957436ae"
+    },
+    {
+      "source": ".reverse-tmp/Xiaohongshu-9.42.0/resources/res/drawable/red_view_message_b.xml",
+      "module": "app/src/main/res/drawable/xhs_nav_red_view_message_b.xml",
+      "sha256": "78fa7eff20bbd505c236d1fdf7703a0e2e6e8f0ca606c839c1ae9c237db59ce3"
+    },
+    {
+      "source": ".reverse-tmp/Xiaohongshu-9.42.0/resources/res/drawable/red_view_me.xml",
+      "module": "app/src/main/res/drawable/xhs_nav_red_view_me.xml",
+      "sha256": "131dd5eb97032de1f0ae435ebf5630904a82dd1455a98e71f8210f81952c3a22"
+    },
+    {
+      "source": ".reverse-tmp/Xiaohongshu-9.42.0/resources/res/drawable/red_view_me_f.xml",
+      "module": "app/src/main/res/drawable/xhs_nav_red_view_me_f.xml",
+      "sha256": "053fa03559859cdfda1b7f9254d127a63ac67d48627965289d464f304a3ae781"
+    },
+    {
+      "source": ".reverse-tmp/Xiaohongshu-9.42.0/resources/res/drawable/red_view_add.xml",
+      "module": "app/src/main/res/drawable/xhs_nav_red_view_add.xml",
+      "sha256": "f8cb2fefe7093b621887190394ae852608604e81be9d1da551d60a1c243e6db7"
+    }
+  ],
+  "note": "The native default tabs are text; these are APK vector fallbacks. Publish is the exact tab layout resource. Runtime tab drawables take priority."
+}

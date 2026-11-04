@@ -7,7 +7,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 
 @Composable
-internal fun PersonalAssistantPage(back: () -> Unit) {
+internal fun PersonalAssistantPage(openWidgetGlass: () -> Unit, back: () -> Unit) {
     val context = LocalContext.current
     val service by HookApplication.service.collectAsStateWithLifecycle()
     val store = remember(context) { PersonalAssistantSettingsStore(context) }
@@ -67,6 +67,14 @@ internal fun PersonalAssistantPage(back: () -> Unit) {
                             if (settings.customBlurActive) update { it.copy(wallpaperBlurRadius = value) }
                         }
                     }
+                }
+            }
+            item {
+                Group(tr("小部件", "小部件")) {
+                    SharedViewArrowPreference(
+                        title = tr("负一屏小部件柔光玻璃参数调整", "负一屏小部件柔光玻璃参数调整"),
+                        onClick = openWidgetGlass,
+                    )
                 }
             }
         }

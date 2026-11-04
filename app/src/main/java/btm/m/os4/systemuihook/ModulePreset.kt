@@ -96,6 +96,7 @@ object ModulePresetCodec {
                 completeSidebarPreset(values)
                 completeSidebarFeaturePreset(values)
                 completePersonalAssistantPreset(values)
+                completeWidgetGlassPreset(values)
                 completePowerBatteryPreset(values)
             }
             groups.put(groupName, values)
@@ -154,6 +155,7 @@ object ModulePresetCodec {
                 completeSidebarPreset(values)
                 completeSidebarFeaturePreset(values)
                 completePersonalAssistantPreset(values)
+                completeWidgetGlassPreset(values)
                 completePowerBatteryPreset(values)
             }
             PreviewGroup(
@@ -218,6 +220,7 @@ object ModulePresetCodec {
                 completeSidebarPreset(values)
                 completeSidebarFeaturePreset(values)
                 completePersonalAssistantPreset(values)
+                completeWidgetGlassPreset(values)
                 completePowerBatteryPreset(values)
             }
             val preserveMissingNavigation = groupName == REMOTE_PREFERENCE_GROUP
@@ -290,6 +293,7 @@ object ModulePresetCodec {
             File(root, "status_bar_icons.zip"),
             File(root, "lockscreen_editor_background.bin"),
             File(root, "lockscreen_widget/preview_background.bin"),
+            File(root, btm.m.liquidglass.NavigationMaterialSettings.PREVIEW_FILE),
             File(root, "lockscreen_widget/signature.bin"),
             File(root, "normal_notification_image.webp"),
             File(root, "media_notification_cover.webp"),
@@ -343,6 +347,7 @@ object ModulePresetCodec {
         File(context.filesDir, "status_bar_icons.zip"),
         File(context.filesDir, "lockscreen_editor_background.bin"),
         File(context.filesDir, "lockscreen_widget"),
+        File(context.filesDir, "navigation_material"),
         File(context.filesDir, "normal_notification_image.webp"),
         File(context.filesDir, "media_notification_cover.webp"),
         File(context.filesDir, "settings_appearance"),

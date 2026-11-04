@@ -28,6 +28,11 @@ internal fun restartRecommendationSnapshot(group: String, preferences: SharedPre
     readCcTileLayoutSettings(p)
     ContactsDialerSettings.read(p)
     PortalSettings.read(p)
+    readWidgetGlassSettings(p)
+    btm.m.liquidglass.hook.XiaohongshuPublishSettings.load(p)
+    btm.m.liquidglass.ScopedSettings.apps.forEach {
+        btm.m.liquidglass.HyperFloatingAccentSettings.isEnabled(p, it.packageName)
+    }
     readSidebarSettings(p)
     readSidebarFeatureSettings(p)
     readPersonalAssistantSettings(p)
@@ -59,6 +64,16 @@ internal fun restartRecommendationSnapshot(group: String, preferences: SharedPre
     readSuperXiaoAiInputGlassSettings(p)
     readSystemUpdatePreferences(p)
     readSoftGlassSettings(p)
+    btm.m.liquidglass.HyperDockedNavigationSettings.glassEnabled(p)
+    btm.m.liquidglass.ScopedSettings.apps.forEach { btm.m.liquidglass.HyperDockedNavigationSettings.accentEnabled(p, it.packageName) }
+    btm.m.liquidglass.NavigationMaterialSettings.moduleEnabled(p)
+    for (style in btm.m.liquidglass.NavigationMaterialSettings.styles) {
+        btm.m.liquidglass.NavigationMaterialSettings.read(p, style)
+        btm.m.liquidglass.ScopedSettings.apps.forEach {
+            btm.m.liquidglass.NavigationMaterialSettings.followsGlobal(p, it.packageName)
+            btm.m.liquidglass.NavigationMaterialSettings.read(p, style, it.packageName)
+        }
+    }
     readLockscreenShortcutBackgroundSettings(p)
     readLockscreenCapsuleGlassSettings(p)
     readCapsuleNotificationTypes(p)

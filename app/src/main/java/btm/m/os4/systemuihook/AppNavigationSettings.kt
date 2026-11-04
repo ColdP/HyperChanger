@@ -4,11 +4,17 @@ import android.content.Context
 import android.content.SharedPreferences
 import btm.m.liquidglass.AppColorMode
 import btm.m.liquidglass.NavigationAccentSettings
+import btm.m.liquidglass.HyperFloatingAccentSettings
+import btm.m.liquidglass.HyperDockedNavigationSettings
+import btm.m.liquidglass.NavigationMaterialSettings
 import btm.m.liquidglass.NavigationBadgeSettings
 import btm.m.liquidglass.NavigationStyle
 import btm.m.liquidglass.NavigationOffsetSettings
+import btm.m.liquidglass.NavigationScaleSettings
+import btm.m.liquidglass.NavigationCornerSettings
 import btm.m.liquidglass.ScopedSettings
 import btm.m.liquidglass.hook.WeChatAvatarRadiusSettings
+import btm.m.liquidglass.hook.XiaohongshuPublishSettings
 import io.github.libxposed.service.XposedService
 import org.json.JSONArray
 import org.json.JSONObject
@@ -25,13 +31,19 @@ internal class AppNavigationSettingsStore internal constructor(val preferences: 
     fun syncRemote(service: XposedService) = syncPreferences(service.getRemotePreferences(REMOTE_PREFERENCE_GROUP))
 
     internal fun syncPreferences(remote: SharedPreferences) {
-        val localValues = preferences.all.filterKeys { isAppNavigationPreference(it) && !NavigationOffsetSettings.isPreference(it) }
-        val remoteValues = remote.all.filterKeys { isAppNavigationPreference(it) && !NavigationOffsetSettings.isPreference(it) }
+        val localValues = preferences.all.filterKeys { isAppNavigationPreference(it) && !NavigationCornerSettings.isPreference(it) && !NavigationScaleSettings.isPreference(it) && !NavigationOffsetSettings.isPreference(it) && !XiaohongshuPublishSettings.isPreference(it) && !HyperFloatingAccentSettings.isPreference(it) && !NavigationMaterialSettings.isPreference(it) && !HyperDockedNavigationSettings.isPreference(it) }
+        val remoteValues = remote.all.filterKeys { isAppNavigationPreference(it) && !NavigationCornerSettings.isPreference(it) && !NavigationScaleSettings.isPreference(it) && !NavigationOffsetSettings.isPreference(it) && !XiaohongshuPublishSettings.isPreference(it) && !HyperFloatingAccentSettings.isPreference(it) && !NavigationMaterialSettings.isPreference(it) && !HyperDockedNavigationSettings.isPreference(it) }
         // Recover installations made by older versions; subsequent page edits save both copies.
         val merged = remoteValues + localValues
         writeValues(preferences, merged)
         writeValues(remote, merged)
         NavigationOffsetSettings.syncPreferences(preferences, remote)
+        NavigationScaleSettings.syncPreferences(preferences, remote)
+        NavigationCornerSettings.syncPreferences(preferences, remote)
+        XiaohongshuPublishSettings.syncPreferences(preferences, remote)
+        HyperFloatingAccentSettings.syncPreferences(preferences, remote)
+        NavigationMaterialSettings.syncPreferences(preferences, remote)
+        HyperDockedNavigationSettings.syncPreferences(preferences, remote)
     }
 
     private fun writeValues(target: SharedPreferences, values: Map<String, *>) {
@@ -64,6 +76,12 @@ private val appNavigationSettingNames = setOf(
 )
 
 internal fun isAppNavigationPreference(key: String): Boolean =
+    NavigationCornerSettings.isPreference(key) ||
+    NavigationScaleSettings.isPreference(key) ||
+    HyperDockedNavigationSettings.isPreference(key) ||
+    NavigationMaterialSettings.isPreference(key) ||
+    HyperFloatingAccentSettings.isPreference(key) ||
+    XiaohongshuPublishSettings.isPreference(key) ||
     NavigationOffsetSettings.isPreference(key) ||
         key.startsWith("scope.") && key.substringAfterLast('.') in appNavigationSettingNames ||
         key == ScopedSettings.key("com.mipay.wallet", ScopedSettings.KEY_VISIBLE_TABS) ||
@@ -72,6 +90,12 @@ internal fun isAppNavigationPreference(key: String): Boolean =
 /** Export defaults explicitly so a new preset can also restore a default over a custom value. */
 internal fun completeAppNavigationPreset(values: JSONObject, preferences: SharedPreferences) {
     NavigationOffsetSettings.completePreset(values)
+    NavigationScaleSettings.completePreset(values)
+    NavigationCornerSettings.completePreset(values)
+    XiaohongshuPublishSettings.completePreset(values)
+    HyperFloatingAccentSettings.completePreset(values)
+    NavigationMaterialSettings.completePreset(values)
+    HyperDockedNavigationSettings.completePreset(values)
     fun put(packageName: String, setting: String, type: String, value: Any) {
         val key = ScopedSettings.key(packageName, setting)
         if (!values.has(key)) values.put(key, JSONObject().put("type", type).put("value", value))
