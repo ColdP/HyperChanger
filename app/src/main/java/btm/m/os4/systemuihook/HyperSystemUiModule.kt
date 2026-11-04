@@ -1456,6 +1456,7 @@ class HyperSystemUiModule : XposedModule() {
                 PERSONAL_ASSISTANT -> {
                     if (runCatching { android.app.Application.getProcessName() == PERSONAL_ASSISTANT }.getOrDefault(false)) {
                         othersHooks.installPersonalAssistantWallpaperHooks(param.defaultClassLoader, preferences)
+                        othersHooks.installWidgetGlassHooks(param.defaultClassLoader, preferences)
                     }
                     // The app-card store and its catalog filters are process-local data
                     // preparation, not an optional visual tweak. Install them even when an

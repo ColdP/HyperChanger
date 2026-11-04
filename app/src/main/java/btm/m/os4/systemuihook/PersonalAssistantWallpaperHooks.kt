@@ -29,7 +29,11 @@ internal class PersonalAssistantWallpaperHooks(
                 hookDeoptimized(method).setExceptionMode(ExceptionMode.PROTECTIVE)
                     .setId("hyperchanger:personal-assistant:wallpaper:$name")
                     .intercept { chain ->
-                        if (settings.removeWallpaperBlur || backgroundHooks?.replacesBackground(chain.thisObject) == true) {
+                        if (backgroundHooks?.replacesBackground(chain.thisObject) == true) {
+                            // The image owns its blur settings. Keep native backdrop blur for the
+                            // desktop exposed during entry/exit, including native progress and cleanup.
+                            chain.proceed()
+                        } else if (settings.removeWallpaperBlur) {
                             chain.proceed(arrayOf(0.0f))
                         } else if (settings.customBlurActive) {
                             val instance = chain.thisObject

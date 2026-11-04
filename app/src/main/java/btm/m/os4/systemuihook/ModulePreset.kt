@@ -96,6 +96,7 @@ object ModulePresetCodec {
                 completeSidebarPreset(values)
                 completeSidebarFeaturePreset(values)
                 completePersonalAssistantPreset(values)
+                completeWidgetGlassPreset(values)
                 completePowerBatteryPreset(values)
             }
             groups.put(groupName, values)
@@ -154,6 +155,7 @@ object ModulePresetCodec {
                 completeSidebarPreset(values)
                 completeSidebarFeaturePreset(values)
                 completePersonalAssistantPreset(values)
+                completeWidgetGlassPreset(values)
                 completePowerBatteryPreset(values)
             }
             PreviewGroup(
@@ -218,6 +220,7 @@ object ModulePresetCodec {
                 completeSidebarPreset(values)
                 completeSidebarFeaturePreset(values)
                 completePersonalAssistantPreset(values)
+                completeWidgetGlassPreset(values)
                 completePowerBatteryPreset(values)
             }
             val preserveMissingNavigation = groupName == REMOTE_PREFERENCE_GROUP

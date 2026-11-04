@@ -28,6 +28,8 @@ class HookApplication : Application(), XposedServiceHelper.OnServiceListener {
             .onFailure { ModuleLog.w("PowerBattery", "Could not sync battery settings", it) }
         runCatching { SidebarFeatureSettingsStore(this).syncRemote(service) }
             .onFailure { ModuleLog.w("SidebarFeatures", "Could not sync temperature settings", it) }
+        runCatching { WidgetGlassSettingsStore(this).syncRemote(service) }
+            .onFailure { ModuleLog.w("WidgetGlass", "Could not sync widget settings", it) }
         runCatching { SidebarSettingsStore(this).syncRemote(service) }
             .onFailure { ModuleLog.w("Sidebar", "Could not sync sidebar settings", it) }
         runCatching { PortalSettings.syncRemote(this, service) }

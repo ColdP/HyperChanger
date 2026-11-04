@@ -316,7 +316,7 @@ private enum class PageId {
     DEVICE_PROFILE_PRESETS, DEVICE_PROFILE_CLOUD_PRESETS, CUSTOM_DEPTH_WALLPAPER,
     SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, SETTINGS_ENTRY_ICONS, SETTINGS_ENTRY_APPEARANCE, THEME_AND_COLOR, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
-    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, SIDEBAR, SIDEBAR_GLASS, PERSONAL_ASSISTANT, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, PORTAL_MATERIAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND, MODULE_PRESET_IMPORT_PREVIEW,
+    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, SIDEBAR, SIDEBAR_GLASS, PERSONAL_ASSISTANT, ASSISTANT_WIDGET_GLASS, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, PORTAL_MATERIAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND, MODULE_PRESET_IMPORT_PREVIEW,
     STATUS_MOBILE_NETWORK_TYPE_TUNING,
     CLOUD_CONTROL,
 }
@@ -417,6 +417,12 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
         tr("负一屏背景壁纸模糊值", "负一屏背景壁纸模糊值"),
         setOf(ScopeApplication.PERSONAL_ASSISTANT),
         PageId.PERSONAL_ASSISTANT,
+    ),
+    CategorySearchItem(
+        tr("负一屏小部件柔光玻璃参数调整", "负一屏小部件柔光玻璃参数调整"),
+        tr("柔光玻璃参数调整", "柔光玻璃参数调整"),
+        setOf(ScopeApplication.PERSONAL_ASSISTANT),
+        PageId.ASSISTANT_WIDGET_GLASS,
     ),
     CategorySearchItem(
         tr("拨号与通话", "拨号与通话"),
@@ -1003,6 +1009,7 @@ private fun Root(
                 SidebarSettingsStore(context).syncRemote(it)
                 SidebarFeatureSettingsStore(context).syncRemote(it)
                 PersonalAssistantSettingsStore(context).syncRemote(it)
+                WidgetGlassSettingsStore(context).syncRemote(it)
                 PowerBatterySettingsStore(context).syncRemote(it)
                 PortalSettings.syncRemote(context, it)
                 globalSoftGlassStore.syncRemote(it)
@@ -5638,7 +5645,8 @@ private fun Detail(
         PageId.CONTACTS_DIALER_BACKGROUND -> ContactsDialerBackgroundPage(back)
         PageId.SIDEBAR -> SidebarPage({ openPage(PageId.SIDEBAR_GLASS) }, back)
         PageId.SIDEBAR_GLASS -> SidebarGlassPage(back)
-        PageId.PERSONAL_ASSISTANT -> PersonalAssistantPage(back)
+        PageId.PERSONAL_ASSISTANT -> PersonalAssistantPage({ openPage(PageId.ASSISTANT_WIDGET_GLASS) }, back)
+        PageId.ASSISTANT_WIDGET_GLASS -> AssistantWidgetGlassPage(back)
         PageId.PORTAL -> PortalPage({ openPage(PageId.PORTAL_MATERIAL) }, back)
         PageId.PORTAL_MATERIAL -> PortalMaterialPage(back)
         PageId.APP_NAVIGATION -> AppNavigationPage(back)

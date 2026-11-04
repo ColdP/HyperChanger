@@ -95,7 +95,7 @@ internal class PersonalAssistantBackgroundHooks(
                 }
                 result
             }
-        // A partially installed lifecycle must never suppress the original background.
+        // A partially installed lifecycle must never change native blur handling.
         enabled = true
         HookModuleLogger.log(module, ModuleLog.INFO, TAG, "Installed replacement background lifecycle")
     }
@@ -184,7 +184,8 @@ internal class PersonalAssistantBackgroundHooks(
                     ready = true
                     lastBlur = -1f
                     update(progress)
-                    // Reapply once after async loading to clear the previous desktop blur.
+                    // Reapply once after loading to restore native desktop transition blur;
+                    // remove/custom blur settings now belong to the replacement image only.
                     reapplyNativeBlur()
                 }.onFailure(::fallback)
             } else {

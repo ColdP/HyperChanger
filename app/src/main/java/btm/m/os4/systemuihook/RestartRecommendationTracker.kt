@@ -31,6 +31,9 @@ internal class RestartRecommendationTracker(
                     && homeGlassFollowsGlobal(prefs)) scopes += ScopeApplication.DESKTOP
                 if (group == REMOTE_PREFERENCE_GROUP && changedKeys.any { it.startsWith("soft_glass_parameters_v3_") }
                     && readSidebarSettings(prefs).let { it.glass.enabled && it.useGlobal }) scopes += ScopeApplication.SECURITY_CENTER
+                if (group == REMOTE_PREFERENCE_GROUP && changedKeys.any { it.startsWith("soft_glass_parameters_v3_") }) {
+                    if (readWidgetGlassSettings(prefs).let { it.glass.enabled && it.useGlobal }) scopes += ScopeApplication.PERSONAL_ASSISTANT
+                }
                 if (scopes.isNotEmpty()) onChanged(scopes)
             }
         }
@@ -100,6 +103,7 @@ internal fun restartScopesForPreference(group: String, key: String): Set<ScopeAp
         key == KEY_REMOVE_VIDEO_TEMP_LIMIT -> setOf(ScopeApplication.SECURITY_CENTER)
         PowerBatteryFeature.entries.any { it.key == key } -> setOf(ScopeApplication.SECURITY_CENTER)
         key == KEY_REMOVE_HOTSPOT_TEMP_LIMIT -> setOf(ScopeApplication.SETTINGS)
+        key.startsWith(ASSISTANT_WIDGET_GLASS_PREFIX) -> setOf(ScopeApplication.PERSONAL_ASSISTANT)
         key.startsWith(SIDEBAR_PREFIX) -> setOf(ScopeApplication.SECURITY_CENTER)
         key.startsWith("portal_") -> setOf(ScopeApplication.PORTAL)
         key.startsWith("home_") || key.startsWith("dock_") -> setOf(ScopeApplication.DESKTOP)

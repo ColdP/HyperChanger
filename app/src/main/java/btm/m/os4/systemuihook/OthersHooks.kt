@@ -56,6 +56,7 @@ internal class OthersHooks(
     private val contactsDialerHooks = ContactsDialerHooks(module, hookDeoptimized, logTag)
     private val portalHooks = PortalHooks(module, hookDeoptimized, logTag)
     private val sidebarHooks = SidebarHooks(module, hookDeoptimized, logTag)
+    private val widgetGlassHooks = WidgetGlassHooks(module, hookDeoptimized, logTag)
     private val personalAssistantWallpaperHooks = PersonalAssistantWallpaperHooks(module, hookDeoptimized)
     private val videoToolboxHooks = VideoToolboxHooks(module)
     private val powerBatteryHooks = PowerBatteryHooks(module, hookDeoptimized)
@@ -69,6 +70,9 @@ internal class OthersHooks(
 
     fun installSidebarHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
         sidebarHooks.install(classLoader, preferences)
+
+    fun installWidgetGlassHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
+        widgetGlassHooks.install(classLoader, preferences)
 
     fun installPersonalAssistantWallpaperHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
         personalAssistantWallpaperHooks.install(classLoader, preferences)

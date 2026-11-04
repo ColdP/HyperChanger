@@ -28,6 +28,7 @@ internal fun restartRecommendationSnapshot(group: String, preferences: SharedPre
     readCcTileLayoutSettings(p)
     ContactsDialerSettings.read(p)
     PortalSettings.read(p)
+    readWidgetGlassSettings(p)
     readSidebarSettings(p)
     readSidebarFeatureSettings(p)
     readPersonalAssistantSettings(p)

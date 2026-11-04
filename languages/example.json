@@ -1978,7 +1978,9 @@
     "capsuleAutoCollapse": "自动收起为锁屏胶囊的通知类型",
     "capsuleAutoCollapseNone": "不自动收起任何通知",
     "capsuleAutoCollapseHint": "仅选中的通知类型会自动收起，未选中的类型需要手动下滑。仅对允许加入锁屏胶囊的类型生效。",
-    "锁屏胶囊图标圆角 (dp)": "锁屏胶囊图标圆角 (dp)"
+    "锁屏胶囊图标圆角 (dp)": "锁屏胶囊图标圆角 (dp)",
+    "负一屏小部件柔光玻璃参数调整": "负一屏小部件柔光玻璃参数调整",
+    "小部件": "小部件"
   },
   "Xiaomi 18 Pro 系列 AI 背屏": "Xiaomi 18 Pro Series AI Rear Screen",
   "解锁 AI 功能": "Unlock AI features",
