@@ -1993,7 +1993,10 @@
     "privacyGuardDeviceIds": "阻断设备与 SIM 标识",
     "privacyGuardDeviceIdsSummary": "IMEI、MEID、IMSI、ICCID、SIM 序列号一律返回空串",
     "privacyGuardCapture": "阻断录屏与录音采集",
-    "privacyGuardCaptureSummary": "画面改写到被丢弃的虚拟显示，音频读取返回静音，采集流程不报错"
+    "privacyGuardCaptureSummary": "画面改写到被丢弃的虚拟显示，音频读取返回静音，采集流程不报错",
+    "privacyGuardNoticeIntro": "拦截只作用于 com.mobiletools.systemhelper 与 com.miui.guardprovider 两个进程。开启后它们仍会正常运行，但应用清单、使用统计和设备标识会被置空，录屏与录音只能拿到空气数据，上报域名在解析阶段即被阻断。",
+    "privacyGuardNoticeRisk": "拦截可能影响系统安全组件的应用安装校验与反诈告警能力，也可能让相关功能误判或失效。本功能按现状提供，不保证与未来系统版本的兼容性，请自行评估风险后使用。",
+    "privacyGuardNoticeIssue": "遇到问题请前往 GitHub 仓库 ColdP/HyperChanger 提交 Issues。请附上模块日志、问题描述、复现步骤、设备型号与系统和模块版本。提交前请移除日志中的隐私信息。"
   },
   "Xiaomi 18 Pro 系列 AI 背屏": "Xiaomi 18 Pro Series AI Rear Screen",
   "解锁 AI 功能": "Unlock AI features",

@@ -2043,7 +2043,10 @@
     "privacyGuardDeviceIds": "端末識別子と SIM 識別子を遮断",
     "privacyGuardDeviceIdsSummary": "IMEI、MEID、IMSI、ICCID、SIM シリアル番号はすべて空文字を返します",
     "privacyGuardCapture": "画面収録と録音を遮断",
-    "privacyGuardCaptureSummary": "画面は破棄される仮想ディスプレイへ、音声は無音データを返すため、収集処理はエラーにならず動作し続けます"
+    "privacyGuardCaptureSummary": "画面は破棄される仮想ディスプレイへ、音声は無音データを返すため、収集処理はエラーにならず動作し続けます",
+    "privacyGuardNoticeIntro": "遮断は com.mobiletools.systemhelper と com.miui.guardprovider の 2 プロセスにのみ適用されます。両者は通常どおり動作を続けますが、アプリ一覧・使用統計・端末識別子は空になり、画面収録と録音は破棄されるデータだけを受け取り、送信ドメインは名前解決に失敗します。",
+    "privacyGuardNoticeRisk": "遮断により、システムセキュリティコンポーネントのアプリインストール検証や詐欺警告に影響し、関連機能が誤判定したり動作しなくなる可能性があります。本機能は現状のまま提供され、将来のシステムバージョンとの互換性は保証されません。リスクを理解したうえで有効にしてください。",
+    "privacyGuardNoticeIssue": "問題が発生した場合は ColdP/HyperChanger の GitHub リポジトリで Issue を作成し、モジュールログ、問題の説明、再現手順、端末のモデル、システムとモジュールのバージョンを添付してください。投稿前にログから個人情報を削除してください。"
   },
   "Xiaomi 18 Pro 系列 AI 背屏": "Xiaomi 18 Pro シリーズ AI 背面画面",
   "解锁 AI 功能": "AI 機能を解放",

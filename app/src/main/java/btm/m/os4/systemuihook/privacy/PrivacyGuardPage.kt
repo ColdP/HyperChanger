@@ -15,33 +15,63 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import btm.m.os4.systemuihook.AppList
 import btm.m.os4.systemuihook.AppPage
+import btm.m.os4.systemuihook.GlassDialogButton
 import btm.m.os4.systemuihook.HookApplication
 import btm.m.os4.systemuihook.ScopeApplication
+import btm.m.os4.systemuihook.WindowDialog
 import btm.m.os4.systemuihook.tr
+import kotlinx.coroutines.delay
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 
-/** Per-framework blocking switches for com.mobiletools.systemhelper and com.miui.guardprovider. */
+/** Experimental notice first, then the scope description, disclaimer and issue guidance. */
+private const val NOTICE_STEPS = 4
+
+/**
+ * Per-framework blocking switches for com.mobiletools.systemhelper and com.miui.guardprovider.
+ * Shaped like EnvironmentDetectionPage: the master switch stays disabled until the acknowledgement
+ * flow has been dismissed, and it is off by default so the user has to opt in.
+ */
 @Composable
 internal fun PrivacyGuardPage(back: () -> Unit) {
     val context = LocalContext.current
     val service by HookApplication.service.collectAsState()
     val store = remember(context) { PrivacyGuardSettingsStore(context) }
     var settings by remember { mutableStateOf(store.settings) }
+    var noticeStep by remember { mutableIntStateOf(if (store.settings.enabled) NOTICE_STEPS else 0) }
+    var showNotice by remember { mutableStateOf(!store.settings.enabled) }
+    var secondsRemaining by remember(noticeStep) { mutableIntStateOf(5) }
 
     LaunchedEffect(service) {
         service?.let {
             store.syncRemote(it)
             settings = store.settings
+            if (store.settings.enabled) {
+                noticeStep = NOTICE_STEPS
+                showNotice = false
+            }
+        }
+    }
+    LaunchedEffect(noticeStep, showNotice) {
+        if (showNotice && noticeStep < NOTICE_STEPS) {
+            secondsRemaining = 5
+            while (secondsRemaining > 0) {
+                delay(1_000)
+                secondsRemaining--
+            }
         }
     }
     fun update(transform: (PrivacyGuardSettings) -> PrivacyGuardSettings) {
@@ -61,6 +91,7 @@ internal fun PrivacyGuardPage(back: () -> Unit) {
                         title = tr("privacyGuardMaster", "拦截总开关"),
                         summary = tr("privacyGuardMasterSummary", "仅对系统助手与系统安全组件生效，关闭后全部放开"),
                         checked = settings.enabled,
+                        enabled = noticeStep == NOTICE_STEPS,
                         onCheckedChange = { value -> update { it.copy(enabled = value) } },
                     )
                 }
@@ -116,6 +147,61 @@ internal fun PrivacyGuardPage(back: () -> Unit) {
                         }
                     }
                 }
+            }
+        }
+
+        val noticeTitle = when (noticeStep) {
+            0 -> tr("实验性功能", "实验性功能")
+            1 -> tr("privacyGuardTitle", "预装隐私拦截")
+            2 -> tr("免责声明", "免责声明")
+            else -> tr("问题反馈", "问题反馈")
+        }
+        val noticeMessage = when (noticeStep) {
+            0 -> tr(
+                "environmentDetectionExperimentalNotice",
+                "本功能为实验性功能，可能导致应用异常或设备无法正常启动。使用前必须确保自己具备停用模块、恢复设备和还原数据的能力。",
+            )
+            1 -> tr(
+                "privacyGuardNoticeIntro",
+                "拦截只作用于 com.mobiletools.systemhelper 与 com.miui.guardprovider 两个进程。开启后它们仍会正常运行，但应用清单、使用统计和设备标识会被置空，录屏与录音只能拿到空气数据，上报域名在解析阶段即被阻断。",
+            )
+            2 -> tr(
+                "privacyGuardNoticeRisk",
+                "拦截可能影响系统安全组件的应用安装校验与反诈告警能力，也可能让相关功能误判或失效。本功能按现状提供，不保证与未来系统版本的兼容性，请自行评估风险后使用。",
+            )
+            else -> tr(
+                "privacyGuardNoticeIssue",
+                "遇到问题请前往 GitHub 仓库 ColdP/HyperChanger 提交 Issues。请附上模块日志、问题描述、复现步骤、设备型号与系统和模块版本。提交前请移除日志中的隐私信息。",
+            )
+        }
+        WindowDialog(
+            show = showNotice && noticeStep < NOTICE_STEPS,
+            title = noticeTitle,
+            summary = noticeMessage,
+            titleTextAlign = TextAlign.Start,
+            summaryTextAlign = TextAlign.Start,
+            onDismissRequest = back,
+            onDismissFinished = {
+                if (noticeStep < NOTICE_STEPS) {
+                    noticeStep++
+                    secondsRemaining = 5
+                    showNotice = noticeStep < NOTICE_STEPS
+                }
+            },
+        ) {
+            GlassDialogButton(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = showNotice && secondsRemaining == 0,
+                colors = ButtonDefaults.buttonColorsPrimary(),
+                onClick = { if (secondsRemaining == 0) showNotice = false },
+            ) {
+                Text(
+                    if (secondsRemaining > 0) {
+                        tr("environmentDetectionConfirmCountdown", "确定（%d 秒）").format(secondsRemaining)
+                    } else {
+                        tr("确定", "确定")
+                    },
+                )
             }
         }
     }

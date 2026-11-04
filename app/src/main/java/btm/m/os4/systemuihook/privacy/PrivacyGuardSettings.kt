@@ -14,7 +14,7 @@ internal const val KEY_PRIVACY_BLOCK_DEVICE_IDS = "preinstalled_privacy_block_de
 internal const val KEY_PRIVACY_BLOCK_CAPTURE = "preinstalled_privacy_block_capture"
 
 internal data class PrivacyGuardSettings(
-    val enabled: Boolean = true,
+    val enabled: Boolean = false,
     val blockReports: Boolean = true,
     val blockInventory: Boolean = true,
     val blockDeviceIds: Boolean = true,
@@ -22,7 +22,7 @@ internal data class PrivacyGuardSettings(
 )
 
 internal fun readPrivacyGuardSettings(preferences: SharedPreferences) = PrivacyGuardSettings(
-    enabled = preferences.getBoolean(KEY_PRIVACY_MASTER, true),
+    enabled = preferences.getBoolean(KEY_PRIVACY_MASTER, false),
     blockReports = preferences.getBoolean(KEY_PRIVACY_BLOCK_REPORTS, true),
     blockInventory = preferences.getBoolean(KEY_PRIVACY_BLOCK_INVENTORY, true),
     blockDeviceIds = preferences.getBoolean(KEY_PRIVACY_BLOCK_DEVICE_IDS, true),

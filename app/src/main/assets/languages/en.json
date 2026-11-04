@@ -2043,7 +2043,10 @@
     "privacyGuardDeviceIds": "Block device and SIM identifiers",
     "privacyGuardDeviceIdsSummary": "IMEI, MEID, IMSI, ICCID and the SIM serial number all return an empty string",
     "privacyGuardCapture": "Block screen and audio capture",
-    "privacyGuardCaptureSummary": "Screen output is redirected to a discarded display surface and audio reads return silence, so capture keeps running without errors"
+    "privacyGuardCaptureSummary": "Screen output is redirected to a discarded display surface and audio reads return silence, so capture keeps running without errors",
+    "privacyGuardNoticeIntro": "The block applies only to the com.mobiletools.systemhelper and com.miui.guardprovider processes. They keep running normally, but the app inventory, usage statistics and device identifiers come back empty, screen and audio capture only receive discarded data, and the report domains fail to resolve.",
+    "privacyGuardNoticeRisk": "Blocking can affect the app install verification and anti-fraud alerting of the system security component, and related features may misjudge or stop working. This feature is provided as is, without a guarantee of compatibility with future system versions; assess the risk yourself before enabling it.",
+    "privacyGuardNoticeIssue": "If you run into problems, open an issue at the ColdP/HyperChanger GitHub repository and include the module logs, a problem description, reproduction steps, device model, and system and module versions. Remove private information from the logs before posting."
   },
   "Xiaomi 18 Pro 系列 AI 背屏": "Xiaomi 18 Pro Series AI Rear Screen",
   "解锁 AI 功能": "Unlock AI features",

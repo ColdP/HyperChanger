@@ -2230,7 +2230,7 @@ private fun OtherPage(
                 )
                 SharedViewArrowPreference(
                     title = tr("privacyGuardTitle", "预装隐私拦截"),
-                    summary = tr("privacyGuardEntrySummary", "拦截预装组件的应用清单、设备标识与录屏上报"),
+                    summary = tr("实验性功能", "实验性功能"),
                     onClick = { open(PageId.PRIVACY_GUARD) },
                 )
                 SharedViewArrowPreference(
