@@ -44,6 +44,8 @@ import androidx.core.view.WindowCompat
 import btm.m.liquidglass.AppColorMode
 import btm.m.liquidglass.NavigationStyle
 import btm.m.liquidglass.NavigationOffsetSettings
+import btm.m.liquidglass.NavigationScaleSettings
+import btm.m.liquidglass.NavigationCornerSettings
 import btm.m.os4.systemuihook.tr
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
@@ -257,6 +259,37 @@ object AppBottomNavHooks {
         anchorResourceName = null,
         requiredTabs = emptySet(),
         targetVersion = "3.47.2.410 (2024081672)"
+    )
+
+    private val douShengSheng = AppConfig(
+        displayName = "DouShengSheng",
+        packageName = DouShengShengNavigation.PACKAGE,
+        activityName = DouShengShengNavigation.ACTIVITY,
+        barResourceName = null,
+        anchorResourceName = null,
+        requiredTabs = emptySet(),
+        targetVersion = "38.3.6 (380307)"
+    )
+
+    private val meituan = AppConfig(
+        displayName = "Meituan",
+        packageName = MeituanNavigation.MAIN_PACKAGE,
+        activityName = MeituanNavigation.MAIN_ACTIVITY,
+        barResourceName = null,
+        anchorResourceName = null,
+        requiredTabs = emptySet(),
+        targetVersion = "12.68.202 (1200680202)"
+    )
+
+    private val meituanTakeout = AppConfig(
+        displayName = "Meituan Takeout",
+        packageName = MeituanNavigation.TAKEOUT_PACKAGE,
+        activityName = MeituanNavigation.TAKEOUT_ACTIVITY,
+        barResourceName = null,
+        anchorResourceName = null,
+        requiredTabs = emptySet(),
+        targetVersion = "8.85.1 (800850001)",
+        navigationLayerResourceNames = setOf("indicator_bg_container")
     )
 
     private val wechat = AppConfig(
@@ -656,6 +689,33 @@ object AppBottomNavHooks {
     ) = install(module, loader, tencentMeeting, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
 
     @JvmStatic
+    fun installDouShengSheng(
+        module: XposedModule, loader: ClassLoader, blurRadius: Int, labelMode: String,
+        navigationStyle: String, advancedMaterial: Boolean, colorMode: String, accentColor: Int = 0
+    ) {
+        ImmersiveNavigationHooks.install(module)
+        install(module, loader, douShengSheng, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
+    }
+
+    @JvmStatic
+    fun installMeituan(
+        module: XposedModule, loader: ClassLoader, blurRadius: Int, labelMode: String,
+        navigationStyle: String, advancedMaterial: Boolean, colorMode: String, accentColor: Int = 0
+    ) {
+        ImmersiveNavigationHooks.install(module)
+        install(module, loader, meituan, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
+    }
+
+    @JvmStatic
+    fun installMeituanTakeout(
+        module: XposedModule, loader: ClassLoader, blurRadius: Int, labelMode: String,
+        navigationStyle: String, advancedMaterial: Boolean, colorMode: String, accentColor: Int = 0
+    ) {
+        ImmersiveNavigationHooks.install(module)
+        install(module, loader, meituanTakeout, blurRadius, labelMode, navigationStyle, advancedMaterial, colorMode, accentColor)
+    }
+
+    @JvmStatic
     @Throws(ReflectiveOperationException::class)
     fun installWeChat(
         module: XposedModule,
@@ -966,6 +1026,15 @@ object AppBottomNavHooks {
             module.getRemotePreferences(btm.m.os4.systemuihook.REMOTE_PREFERENCE_GROUP), config.packageName,
         )
         private val selectedIndex = mutableIntStateOf(0)
+        private val isMeituan = config === meituan || config === meituanTakeout
+        private val isNativeViewNavigation = isMeituan || config === douShengSheng
+        private val douShengShengNavigation = if (config === douShengSheng) DouShengShengNavigation() else null
+        private val douShengShengIcons = if (config === douShengSheng) DouShengShengNavIcons(activity) else null
+        private var douShengShengBackdropSource by mutableStateOf<View?>(null)
+        private val meituanNavigation = if (isMeituan) MeituanNavigation(activity, config === meituanTakeout) else null
+        private var nativeViewLastInsetMaintenanceAt = 0L
+        private var meituanTakeoutBackdropSource by mutableStateOf<View?>(null)
+        private val meituanTakeoutOrderLayout = if (config === meituanTakeout) MeituanTakeoutOrderLayout() else null
         private val originalViews = linkedSetOf<View>()
         private val originalStates = IdentityHashMap<View, OriginalViewState>()
         private val originalContentBottomMargins = IdentityHashMap<View, Int>()
@@ -995,6 +1064,12 @@ object AppBottomNavHooks {
         private val navigationMaterial = btm.m.liquidglass.NavigationMaterialSettings.effective(
             module.getRemotePreferences(btm.m.os4.systemuihook.REMOTE_PREFERENCE_GROUP),
             NavigationStyle.fromPreference(navigationStyle), config.packageName)
+        private val navigationScale = NavigationScaleSettings.effective(
+            module.getRemotePreferences(btm.m.os4.systemuihook.REMOTE_PREFERENCE_GROUP),
+            config.packageName, NavigationStyle.fromPreference(navigationStyle))
+        private val navigationCorners = NavigationCornerSettings.effective(
+            module.getRemotePreferences(btm.m.os4.systemuihook.REMOTE_PREFERENCE_GROUP),
+            config.packageName, NavigationStyle.fromPreference(navigationStyle))
         private val hyperFloatingAccentEnabled = btm.m.liquidglass.HyperFloatingAccentSettings.isEnabled(
             module.getRemotePreferences(btm.m.os4.systemuihook.REMOTE_PREFERENCE_GROUP), config.packageName)
         private val hyperDockedGlassEnabled = btm.m.liquidglass.HyperDockedNavigationSettings.glassEnabled(
@@ -1122,7 +1197,7 @@ object AppBottomNavHooks {
             if (config === github) GitHubNavigation.setActive(activity, false)
             nav?.visibility = View.GONE
             resetMiniPlayerPosition()
-            if (config === cmbBank || config === xiaohongshu) destroy()
+            if (config === cmbBank || config === xiaohongshu || isNativeViewNavigation) destroy()
         }
 
         fun destroy() {
@@ -1138,6 +1213,12 @@ object AppBottomNavHooks {
                 (it.parent as? ViewGroup)?.removeView(it)
             }
             nav = null
+            meituanNavigation?.clear()
+            douShengShengNavigation?.clear()
+            douShengShengIcons?.clear()
+            douShengShengBackdropSource = null
+            nativeViewLastInsetMaintenanceAt = 0L
+            meituanTakeoutBackdropSource = null
             xiaohongshuIcons?.clear()
             lastXiaohongshuHierarchySearchAt = 0L
             pinduoduoNavigation?.clear()
@@ -1196,6 +1277,7 @@ object AppBottomNavHooks {
 
                 rememberOriginalNavigationLayers(content, detected.container)
                 config.navigationLayerResourceNames.forEach { rememberResourceView(content, it) }
+                if (config === meituanTakeout) maintainMeituanTakeoutSurface()
                 if (config === cmbBank) cmbBankBackground?.let(::rememberOriginalView)
                 config.miniPlayerResourceName?.let { resourceName ->
                     miniPlayer = findResourceView(content, resourceName)?.also {
@@ -1207,7 +1289,7 @@ object AppBottomNavHooks {
                 syncCloudMusicMiniPlayer(content)
                 syncAppleMusicMiniPlayer(content)
                 syncQQMusicMiniPlayer(content)
-                if (config !== twitter && config !== tencentMeeting && config !== cmbBank && config !== wechat) selectedIndex.intValue = navigationTabs.indexOfFirst { tab ->
+                if (config !== twitter && config !== tencentMeeting && config !== cmbBank && config !== wechat && !isNativeViewNavigation) selectedIndex.intValue = navigationTabs.indexOfFirst { tab ->
                     tab.key != TabKey.PUBLISH && (
                         isSelectedRecursively(tab.view) ||
                             (config === xiaomiHealthWatchFaceMarket &&
@@ -1274,19 +1356,24 @@ object AppBottomNavHooks {
                                 }
                             }
                         }
-                        val watchFaceBackdrop = if (config === xiaomiHealthWatchFaceMarket) {
+                        val nativeBackdropSource = if (config === meituanTakeout) {
+                            meituanTakeoutBackdropSource ?: originalBar ?: navigationBackdropSource
+                        } else if (config === douShengSheng) douShengShengBackdropSource ?: navigationBackdropSource
+                        else navigationBackdropSource
+                        val bitmapBackdrop = if (config === xiaomiHealthWatchFaceMarket || config === meituanTakeout) {
                             rememberBitmapNativeViewBackdrop(
-                                sourceView = navigationBackdropSource,
+                                sourceView = nativeBackdropSource,
                                 // An upward offset exposes content above the original bottom band.
                                 sampleHeightPx = maxOf(navigationOverlayHeight(), navigationOccupiedHeight()),
-                                onHostPreDraw = ::syncHostState
+                                // Takeout already synchronizes through the content guard.
+                                onHostPreDraw = if (config === meituanTakeout) ({}) else ::syncHostState
                             )
                         } else {
                             null
                         }
                         Box(Modifier.fillMaxSize()) {
                             CustomNavigation(
-                                sourceView = navigationBackdropSource,
+                                sourceView = nativeBackdropSource,
                                 tabs = currentNavigationTabs.mapIndexed { index, tab ->
                                     HostTab(
                                         label = tab.displayLabel,
@@ -1299,7 +1386,7 @@ object AppBottomNavHooks {
                                         iconOnly = config === xiaohongshu && tab.key == TabKey.PUBLISH,
                                         badge = showBadges && tab.badge
                                     ) {
-                                        if (tab.key != TabKey.PUBLISH && config !== cmbBank && config !== xiaohongshu) selectedIndex.intValue = index
+                                        if (tab.key != TabKey.PUBLISH && config !== cmbBank && config !== xiaohongshu && !isNativeViewNavigation) selectedIndex.intValue = index
                                         openTab(tab)
                                     }
                                 },
@@ -1329,7 +1416,7 @@ object AppBottomNavHooks {
                                     config === xiaomiHealthWatchFaceMarket || config === appleMusic ||
                                     config === tencentMeeting || config === cmbBank || config === wechat ||
                                     config === qq || config === twitter || config === xiaohongshu ||
-                                    config === github ||
+                                    config === github || isNativeViewNavigation ||
                                     config.packageName == PinduoduoNavigation.PACKAGE ||
                                     config.packageName == InstagramNavigation.PACKAGE || config === pinterest,
                                 softBackdropShadow = config === tencentMeeting,
@@ -1349,6 +1436,8 @@ object AppBottomNavHooks {
                                 hyperDockedAccentEnabled = hyperDockedAccentEnabled,
                                 hyperDockedLiquidGlassEnabled = hyperDockedGlassEnabled,
                                 material = navigationMaterial,
+                                dimensionScale = navigationScale,
+                                cornerSettings = navigationCorners,
                                 tabImageVector = when (config) {
                                     appleMusic -> ::appleMusicTabIcon
                                     weibo -> { index ->
@@ -1364,7 +1453,7 @@ object AppBottomNavHooks {
                                     config === qq ||
                                     config === xiaomiHealth ||
                                     config === twitter ||
-                                    config === github ||
+                                    config === github || isNativeViewNavigation ||
                                     config.packageName == PinduoduoNavigation.PACKAGE ||
                                     config.packageName == InstagramNavigation.PACKAGE || config === pinterest
                                 ) {
@@ -1381,6 +1470,7 @@ object AppBottomNavHooks {
                                                 Modifier.size(if (config === xiaohongshu && tab.key == TabKey.PUBLISH) 32.dp else if (config === xiaomiHealth) 26.dp else 24.dp),
                                                 colorFilter = if (
                                                     (config === xiaohongshu && tab.key == TabKey.PUBLISH) ||
+                                                    tab.preserveIconColor ||
                                                     (config === xiaomiHealth && selectedIndex.intValue == index) ||
                                                     ((config.packageName == InstagramNavigation.PACKAGE || config === pinterest) && tab.key == TabKey.PROFILE)
                                                 ) null else ColorFilter.tint(color)
@@ -1397,18 +1487,18 @@ object AppBottomNavHooks {
                                 redrawNativeText = config === cloudMusic ||
                                     config === qqMusic || config === appleMusic,
                                 onHostPreDraw = ::syncHostState,
-                                backdropOverride = watchFaceBackdrop,
+                                backdropOverride = bitmapBackdrop,
                                 recordBackdropChildren = config === qq || config === twitter
                             )
                             if (config === cloudMusic || config === appleMusic || config === qqMusic) {
                                 val playerNavigationStyle =
                                     NavigationStyle.fromPreference(navigationStyle)
-                                val miniPlayerBottomPadding = when (playerNavigationStyle) {
+                                val miniPlayerBottomPadding = (when (playerNavigationStyle) {
                                     NavigationStyle.HYPER_OS -> 64.dp
                                     NavigationStyle.LIQUID_GLASS,
                                     NavigationStyle.HYPER_OS_FLOATING,
                                     NavigationStyle.HARMONY_OS_FLOATING -> 86.dp
-                                }
+                                }) + navigationHeightAdjustmentDp().dp
                                 val miniPlayerHorizontalPadding =
                                     if (playerNavigationStyle == NavigationStyle.HYPER_OS) 0.dp else 14.dp
                                 if (config === appleMusic) {
@@ -1548,7 +1638,7 @@ object AppBottomNavHooks {
         private fun installGuard(content: ViewGroup) {
             if (guard != null) return
             guardRoot = content
-            if (config === cmbBank || config === xiaohongshu) {
+            if (config === cmbBank || config === xiaohongshu || isNativeViewNavigation) {
                 cmbRootListener = object : View.OnAttachStateChangeListener {
                     override fun onViewAttachedToWindow(view: View) = Unit
                     override fun onViewDetachedFromWindow(view: View) {
@@ -1558,7 +1648,7 @@ object AppBottomNavHooks {
                 }.also(content::addOnAttachStateChangeListener)
             }
             guard = ViewTreeObserver.OnPreDrawListener {
-                if (config === xiaohongshu || config === twitter || config === github || config === tencentMeeting || config === cmbBank || config === wechat ||
+                if (isNativeViewNavigation || config === xiaohongshu || config === twitter || config === github || config === tencentMeeting || config === cmbBank || config === wechat ||
                     config.packageName == PinduoduoNavigation.PACKAGE
                 ) {
                     // Discovery must continue while the host hides or replaces its native bar.
@@ -1594,6 +1684,54 @@ object AppBottomNavHooks {
             content.viewTreeObserver.addOnPreDrawListener(guard)
         }
 
+        private fun syncNativeViewHostState() {
+            if (!resumed || nav == null) return
+            val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
+            val before = selectedIndex.intValue
+            val detected = detectBottomBar(content)
+            if (detected == null) {
+                meituanTakeoutBackdropSource = null
+                douShengShengBackdropSource = null
+                nav?.visibility = View.GONE
+                detectedTabs = emptyList()
+                restoreHostContentSpace()
+                restoreOriginalBar()
+                ImmersiveNavigationHooks.deactivate(activity)
+                restoreSystemNavigationBar()
+                return
+            }
+            val changed = detected.container !== originalBar
+            if (changed) {
+                restoreHostContentSpace()
+                restoreOriginalBar()
+                originalBar = detected.container
+                rememberOriginalNavigationLayers(content, detected.container)
+                if (isMeituan) config.navigationLayerResourceNames.forEach { rememberResourceView(content, it) }
+            }
+            detectedTabs = detected.tabs
+            if (navigationTabs != detected.tabs) navigationTabs = detected.tabs
+            if (config === douShengSheng) {
+                douShengShengBackdropSource = DouShengShengNavigation.page(detected.container)
+                DouShengShengNavigation.divider(detected.container)?.let(::rememberOriginalView)
+            }
+            if (config === meituanTakeout) maintainMeituanTakeoutSurface()
+            val now = android.os.SystemClock.uptimeMillis()
+            if (changed || before != selectedIndex.intValue || now - nativeViewLastInsetMaintenanceAt >= 500L) {
+                nativeViewLastInsetMaintenanceAt = now
+                configureSystemNavigationBar()
+                if (config !== meituanTakeout) ImmersiveNavigationHooks.activate(activity)
+                releaseHostContentSpace()
+                if (config === meituanTakeout) {
+                    meituanTakeoutBackdropSource?.let { it as? ViewGroup }?.let { page ->
+                        meituanTakeoutOrderLayout?.maintain(page, detected.container.height)
+                    } ?: meituanTakeoutOrderLayout?.restore()
+                }
+                updateNavigationOverlayHeight()
+            }
+            hideOriginalBar()
+            nav?.visibility = View.VISIBLE
+        }
+
         private fun syncXiaohongshuHostState() {
             if (!resumed || nav == null) return
             val content = activity.findViewById<ViewGroup>(android.R.id.content)
@@ -1625,6 +1763,10 @@ object AppBottomNavHooks {
         }
 
         private fun syncHostState() {
+            if (isNativeViewNavigation) {
+                syncNativeViewHostState()
+                return
+            }
             if (config === xiaohongshu) {
                 syncXiaohongshuHostState()
                 return
@@ -1906,6 +2048,16 @@ object AppBottomNavHooks {
         }
 
         private fun openTab(tab: DetectedTab) {
+            if (isNativeViewNavigation) {
+                val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
+                val dispatched = if (config === douShengSheng) douShengShengNavigation?.open(content, tab.identity) == true
+                    else meituanNavigation?.open(content, tab.identity) == true
+                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, TAG,
+                    "${config.displayName} click ${tab.identity}: dispatched=$dispatched")
+                syncHostState()
+                content.postDelayed({ if (resumed) syncHostState() }, 160L)
+                return
+            }
             if (config === xiaohongshu) {
                 openXiaohongshuTab(tab)
                 return
@@ -2171,7 +2323,7 @@ object AppBottomNavHooks {
 
         private fun releaseOriginalBarSpace() {
             // Pinterest's host hide/scroll logic compares translationY with measured height.
-            if (config === pinterest || config === xiaohongshu) return
+            if (config === pinterest || config === xiaohongshu || isNativeViewNavigation) return
             if (config === twitter) return
             if (config === qq || config === qqMusic || config === weibo || config === xiaomiWallet ||
                 config.coordinateTabSurface
@@ -2188,7 +2340,11 @@ object AppBottomNavHooks {
 
         private fun releaseHostContentSpace() {
             val content = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
-            if (config === appleMusic) {
+            if (config === douShengSheng) {
+                releaseDouShengShengPageNavigationInset()
+            } else if (isMeituan) {
+                releaseMeituanPageNavigationInset(content)
+            } else if (config === appleMusic) {
                 releaseAppleMusicPageNavigationInset(content)
             } else if (config === reddit) {
                 releaseRedditPageNavigationInset(content)
@@ -2619,6 +2775,83 @@ object AppBottomNavHooks {
             }
         }
 
+        private fun releaseDouShengShengPageNavigationInset() {
+            val page = originalBar?.let(DouShengShengNavigation::page) ?: return
+            val inset = navigationBarInset()
+            if (inset <= 0) return
+            // The verified koc layout already fills its parent. Only remove a real
+            // system inset on large live business containers, never guessed tab heights.
+            descendants(page).filterIsInstance<ViewGroup>().filter {
+                it.isShown && it.width >= page.width * .75f && it.height >= page.height * .5f
+            }.forEach { view ->
+                if (view.paddingBottom == inset) {
+                    originalContentPaddings.putIfAbsent(view, intArrayOf(
+                        view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom))
+                    view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, 0)
+                }
+                val params = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return@forEach
+                if (params.bottomMargin == inset) {
+                    originalContentBottomMargins.putIfAbsent(view, params.bottomMargin)
+                    params.bottomMargin = 0
+                    view.layoutParams = params
+                }
+            }
+        }
+
+        private fun releaseMeituanPageNavigationInset(content: ViewGroup) {
+            if (config === meituanTakeout) {
+                maintainMeituanTakeoutSurface()
+                return
+            }
+            val bar = originalBar ?: return
+            val page = findResourceView(content, "main") as? ViewGroup ?: return
+            // Only the verified main page; never clear detail/MSC reservations.
+            val parent = bar.parent as? ViewGroup ?: return
+            if (page.parent !== parent && page.parent !== parent.parent) return
+            val params = page.layoutParams as? ViewGroup.MarginLayoutParams ?: return
+            val inset = navigationBarInset()
+            val density = page.resources.displayMetrics.density
+            val hostHeights = setOf((48 * density + .5f).toInt(), (52 * density + .5f).toInt())
+            if (params.bottomMargin > 0 && (params.bottomMargin in hostHeights ||
+                    hostHeights.any { params.bottomMargin == it + inset } ||
+                    (inset > 0 && params.bottomMargin == inset))) {
+                originalContentBottomMargins.putIfAbsent(page, params.bottomMargin)
+                params.bottomMargin = 0
+                page.layoutParams = params
+            }
+            if (inset > 0 && page.paddingBottom == inset) {
+                originalContentPaddings.putIfAbsent(page, intArrayOf(
+                    page.paddingLeft, page.paddingTop, page.paddingRight, page.paddingBottom))
+                page.setPadding(page.paddingLeft, page.paddingTop, page.paddingRight, 0)
+            }
+        }
+
+        private fun maintainMeituanTakeoutSurface() {
+            val surface = originalBar?.let(MeituanTakeoutLayout::resolve)
+            meituanTakeoutBackdropSource = surface?.page
+            surface ?: return
+            // This sibling owns the white plate, divider and asynchronous skin.
+            // Remove its own drawable too, and reapply after host skin/page updates.
+            rememberOriginalView(surface.background)
+            if (surface.background.background != null) surface.background.background = null
+            if (surface.background.alpha != 0f) surface.background.alpha = 0f
+            surface.background.setWillNotDraw(true)
+            val page = surface.page
+            val inset = navigationBarInset()
+            val params = page.layoutParams as? ViewGroup.MarginLayoutParams
+            if (params != null && params.bottomMargin > 0 &&
+                params.bottomMargin in MeituanTakeoutLayout.reservedHeights(surface, inset)) {
+                originalContentBottomMargins.putIfAbsent(page, params.bottomMargin)
+                params.bottomMargin = 0
+                page.layoutParams = params
+            }
+            if (inset > 0 && page.paddingBottom == inset) {
+                originalContentPaddings.putIfAbsent(page, intArrayOf(
+                    page.paddingLeft, page.paddingTop, page.paddingRight, page.paddingBottom))
+                page.setPadding(page.paddingLeft, page.paddingTop, page.paddingRight, 0)
+            }
+        }
+
         private fun releasePinduoduoPageNavigationInset(content: ViewGroup) {
             val inset = navigationBarInset()
             if (inset <= 0) return
@@ -2887,6 +3120,7 @@ object AppBottomNavHooks {
         }
 
         private fun restoreHostContentSpace() {
+            meituanTakeoutOrderLayout?.restore()
             originalContentBottomMargins.forEach { (view, bottomMargin) ->
                 (view.layoutParams as? ViewGroup.MarginLayoutParams)?.let { params ->
                     if (params.bottomMargin != bottomMargin) {
@@ -3998,7 +4232,14 @@ object AppBottomNavHooks {
             // action in the lower-right content area. Reserve a separate vertical
             // band so the injected navigation surface cannot cover that action.
             val githubActionAvoidanceDp = 0
-            return ((baseHeightDp + miniPlayerHeightDp + githubActionAvoidanceDp) * density).toInt() + navigationInset
+            return ((baseHeightDp + navigationHeightAdjustmentDp() + miniPlayerHeightDp + githubActionAvoidanceDp) * density).toInt() + navigationInset
+        }
+
+        private fun navigationHeightAdjustmentDp(): Float = when (NavigationStyle.fromPreference(navigationStyle)) {
+            NavigationStyle.HYPER_OS -> 0f
+            NavigationStyle.LIQUID_GLASS -> 64f * (navigationScale.heightFactor - 1f)
+            NavigationStyle.HYPER_OS_FLOATING, NavigationStyle.HARMONY_OS_FLOATING ->
+                (72f * .82f) * (navigationScale.heightFactor - 1f)
         }
 
         private fun updateNavigationOverlayHeight() {
@@ -4076,6 +4317,23 @@ object AppBottomNavHooks {
         }
 
         private fun detectBottomBar(content: ViewGroup): DetectedBar? {
+            if (config === douShengSheng) {
+                val native = douShengShengNavigation?.detect(content) ?: return null
+                selectedIndex.intValue = native.selectedIndex
+                douShengShengIcons?.retain(native.items)
+                return DetectedBar(native.container, native.items.map { item ->
+                    DetectedTab(TabKey.NATIVE, tr(item.label, item.label), item.view, item.view,
+                        identity = item.identity, nativeIcon = douShengShengIcons?.icon(item))
+                })
+            }
+            if (isMeituan) {
+                val native = meituanNavigation?.detect(content) ?: return null
+                selectedIndex.intValue = native.selectedIndex
+                return DetectedBar(native.container, native.items.map { item ->
+                    DetectedTab(TabKey.NATIVE, tr(item.label, item.label), item.view, item.clickTarget,
+                        identity = item.identity, nativeIcon = item.icon, preserveIconColor = item.preserveColor)
+                })
+            }
             if (config === github) {
                 val native = githubNavigation?.detect(content) ?: return null
                 selectedIndex.intValue = native.selectedIndex
@@ -4667,7 +4925,8 @@ object AppBottomNavHooks {
         val clickTarget: View,
         val identity: String = key.name,
         val nativeIcon: ImageBitmap? = null,
-        val badge: Boolean = false
+        val badge: Boolean = false,
+        val preserveIconColor: Boolean = false
     )
 
     private data class OriginalViewState(

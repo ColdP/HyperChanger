@@ -74,6 +74,7 @@ import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalConfiguration
@@ -92,6 +93,9 @@ import androidx.compose.ui.util.fastRoundToInt
 import androidx.compose.ui.util.lerp
 import btm.m.liquidglass.LabelMode
 import btm.m.liquidglass.NavigationStyle
+import btm.m.liquidglass.NavigationScaleSettings
+import btm.m.liquidglass.NavigationCornerSettings
+import com.kyant.shapes.RoundedRectangularShape
 import btm.m.liquidglass.AppColorMode
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
@@ -183,6 +187,23 @@ private class NativeViewMiuixBackdrop(
 }
 
 private val LocalNavigationMaterial = androidx.compose.runtime.staticCompositionLocalOf { btm.m.liquidglass.NavigationMaterial() }
+private val LocalNavigationCornerShape = staticCompositionLocalOf<RoundedRectangularShape> { Capsule() }
+
+/** Measure the surface at its real new width so gestures and backdrop coordinates agree. */
+private fun Modifier.floatingNavigationWidth(fraction: Float, factor: Float): Modifier {
+    if (factor == 1f) return fillMaxWidth(fraction)
+    return layout { measurable, constraints ->
+        if (!constraints.hasBoundedWidth) {
+            val child = measurable.measure(constraints)
+            layout(child.width, child.height) { child.placeRelative(0, 0) }
+        } else {
+            val width = (constraints.maxWidth * fraction * factor).fastRoundToInt().coerceAtLeast(1)
+            val child = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
+            // Compose centers any excess width within the available parent viewport.
+            layout(child.width, child.height) { child.placeRelative(0, 0) }
+        }
+    }
+}
 
 @Composable
 internal fun CustomNavigation(
@@ -208,6 +229,8 @@ internal fun CustomNavigation(
     hyperDockedLiquidGlassEnabled: Boolean = false,
     applyNavigationBarInsets: Boolean = true,
     material: btm.m.liquidglass.NavigationMaterial = btm.m.liquidglass.NavigationMaterial(),
+    dimensionScale: NavigationScaleSettings.Settings = NavigationScaleSettings.Settings(),
+    cornerSettings: NavigationCornerSettings.Settings = NavigationCornerSettings.Settings(),
     redrawNativeText: Boolean = false,
     onHostPreDraw: () -> Unit,
     backdropOverride: Backdrop? = null,
@@ -219,9 +242,19 @@ internal fun CustomNavigation(
     floatingShadow: Shadow = Shadow.Default,
     softBackdropShadow: Boolean = false
 ) {
-    CompositionLocalProvider(LocalNavigationMaterial provides material.normalized()) {
+    val cornerShape = remember(navigationStyle, cornerSettings) {
+        navigationCornerShape(
+            if (NavigationCornerSettings.supports(NavigationStyle.fromPreference(navigationStyle)))
+                cornerSettings else NavigationCornerSettings.Settings()
+        )
+    }
+    CompositionLocalProvider(
+        LocalNavigationMaterial provides material.normalized(),
+        LocalNavigationCornerShape provides cornerShape,
+    ) {
     if (tabs.isEmpty()) return@CompositionLocalProvider
     val style = NavigationStyle.fromPreference(navigationStyle)
+    val scale = if (NavigationScaleSettings.supports(style)) dimensionScale else NavigationScaleSettings.Settings()
     val requestedMode = LabelMode.fromPreference(labelMode)
     val effectiveMode = requestedMode
     val systemIsDarkTheme = LocalConfiguration.current.uiMode and
@@ -238,6 +271,7 @@ internal fun CustomNavigation(
         useRecordedChildren = recordBackdropChildren
     )
     val density = LocalDensity.current
+    if (scale.widthFactor == 0f || scale.heightFactor == 0f) return@CompositionLocalProvider
     if (style != NavigationStyle.LIQUID_GLASS) {
         Box(Modifier.fillMaxSize()) {
             if (concealHostBottomBar) {
@@ -269,6 +303,7 @@ internal fun CustomNavigation(
                 suppressFloatingShadow = suppressFloatingShadow,
                 floatingShadow = floatingShadow,
                 softBackdropShadow = softBackdropShadow,
+                dimensionScale = scale,
             )
         }
         return@CompositionLocalProvider
@@ -308,16 +343,17 @@ internal fun CustomNavigation(
                 softBackdropShadow = softBackdropShadow,
                 isDarkTheme = hostIsDarkTheme,
                 accentColorOverride = accentColorOverride,
+                heightScale = scale.heightFactor,
                 modifier = Modifier
                     .align(liquidBarAlignment)
-                    .fillMaxWidth(
+                    .floatingNavigationWidth(
                         if (adaptiveLiquidWidth) {
                             liquidBarWidthFraction.coerceIn(0.5f, 1f)
                         } else {
                             0.53f * 0.82f * 1.10f
-                        }
+                        }, scale.widthFactor
                     )
-                    .height(64.dp)
+                    .height(64.dp * scale.heightFactor)
             ) {
                 tabs.forEachIndexed { index, tab ->
                     LiquidBottomTab(
@@ -358,8 +394,11 @@ internal fun CustomNavigation(
                 }
             }
         } else Row(
-            liquidModifier.align(Alignment.BottomCenter),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier.align(Alignment.BottomCenter)
+                .fillMaxHeight().navigationBarsPadding()
+                .padding(start = 14.dp, end = 14.dp, top = 6.dp, bottom = liquidBottomSpacingDp.dp)
+                .floatingNavigationWidth(1f, scale.widthFactor),
+            horizontalArrangement = Arrangement.spacedBy(8.dp * scale.widthFactor),
             verticalAlignment = Alignment.CenterVertically
         ) {
             LiquidBottomTabs(
@@ -379,7 +418,8 @@ internal fun CustomNavigation(
                 softBackdropShadow = softBackdropShadow,
                 isDarkTheme = hostIsDarkTheme,
                 accentColorOverride = accentColorOverride,
-                modifier = Modifier.weight(1f).height(64.dp)
+                heightScale = scale.heightFactor,
+                modifier = Modifier.weight(1f).height(64.dp * scale.heightFactor)
             ) {
                 tabs.forEachIndexed { index, tab ->
                     LiquidBottomTab(
@@ -419,7 +459,7 @@ internal fun CustomNavigation(
                 isDarkTheme = hostIsDarkTheme,
                 floatingShadow = floatingShadow,
                 softBackdropShadow = softBackdropShadow,
-                modifier = Modifier.size(54.dp)
+                modifier = Modifier.size(width = 54.dp * scale.widthFactor, height = 54.dp * scale.heightFactor)
             )
         }
     }
@@ -1041,7 +1081,8 @@ private fun HyperNavigation(
     trailingAction: HostTab? = null,
     suppressFloatingShadow: Boolean = false,
     floatingShadow: Shadow = Shadow.Default,
-    softBackdropShadow: Boolean = false
+    softBackdropShadow: Boolean = false,
+    dimensionScale: NavigationScaleSettings.Settings = NavigationScaleSettings.Settings(),
 ) {
     val controller = remember(hostIsDarkTheme) {
         ThemeController(
@@ -1075,6 +1116,7 @@ private fun HyperNavigation(
                     suppressShadow = suppressFloatingShadow,
                     floatingShadow = floatingShadow,
                     softBackdropShadow = softBackdropShadow,
+                    dimensionScale = dimensionScale,
                     enableDrag = !harmonyFloating,
                     tabImageVector = tabImageVector,
                     tabIconContent = tabIconContent,
@@ -1086,11 +1128,11 @@ private fun HyperNavigation(
                 else Row(
                     Modifier
                         .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
                         .navigationBarsPadding()
                         .padding(start = 14.dp, end = 14.dp, bottom = 6.dp)
-                        .height(72.dp * 0.82f),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        .floatingNavigationWidth(1f, dimensionScale.widthFactor)
+                        .height(72.dp * 0.82f * dimensionScale.heightFactor),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp * dimensionScale.widthFactor),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     HyperFloatingNavigationBar(
@@ -1109,6 +1151,7 @@ private fun HyperNavigation(
                         suppressShadow = suppressFloatingShadow,
                         floatingShadow = floatingShadow,
                         softBackdropShadow = softBackdropShadow,
+                        dimensionScale = dimensionScale,
                         enableDrag = !harmonyFloating,
                         tabImageVector = tabImageVector,
                         tabIconContent = tabIconContent,
@@ -1128,7 +1171,7 @@ private fun HyperNavigation(
                         isDarkTheme = isDarkTheme,
                         floatingShadow = floatingShadow,
                         softBackdropShadow = softBackdropShadow,
-                        modifier = Modifier.size(54.dp)
+                        modifier = Modifier.size(width = 54.dp * dimensionScale.widthFactor, height = 54.dp * dimensionScale.heightFactor)
                     )
                 }
             } else {
@@ -1270,6 +1313,7 @@ private fun HyperFloatingNavigationBar(
     suppressShadow: Boolean = false,
     floatingShadow: Shadow = Shadow.Default,
     softBackdropShadow: Boolean = false,
+    dimensionScale: NavigationScaleSettings.Settings = NavigationScaleSettings.Settings(),
     enableDrag: Boolean,
     tabImageVector: ((Int) -> ImageVector)?,
     tabIconContent: (@Composable (Int, Color) -> Unit)?,
@@ -1367,7 +1411,7 @@ private fun HyperFloatingNavigationBar(
     } else {
         Color(0xFFF5F5F5).copy(alpha = 0.82f)
     }
-    val capsule = Capsule()
+    val capsule = LocalNavigationCornerShape.current
     val shadowColor = Color.Black.copy(alpha = 0.35f)
 
     val widthFraction = if (adaptiveFloatingWidth) {
@@ -1376,19 +1420,19 @@ private fun HyperFloatingNavigationBar(
         0.53f * floatingScale
     }
     val barModifier = if (fillAvailableWidth) {
-        modifier.fillMaxWidth().height(72.dp * floatingScale)
+        modifier.fillMaxWidth().height(72.dp * floatingScale * dimensionScale.heightFactor)
     } else {
-        modifier.fillMaxWidth(widthFraction)
+        modifier.floatingNavigationWidth(widthFraction, dimensionScale.widthFactor)
             .navigationBarsPadding()
             .padding(bottom = 8.dp * floatingScale)
-            .height(72.dp * floatingScale)
+            .height(72.dp * floatingScale * dimensionScale.heightFactor)
     }
     BoxWithConstraints(
         barModifier,
         contentAlignment = Alignment.CenterStart,
     ) {
         val innerPadding = 4.dp * floatingScale
-        val innerWidthPx = with(density) { (maxWidth - innerPadding * 2).toPx() }
+        val innerWidthPx = with(density) { (maxWidth - innerPadding * 2).toPx().coerceAtLeast(0f) }
         val tabWidthPx = innerWidthPx / tabCount
         val tabWidth = with(density) { tabWidthPx.toDp() }
         Box(
@@ -1870,7 +1914,7 @@ private fun RowScope.LiquidBottomTab(
     val scale = LocalLiquidBottomTabScale.current
     Column(
         Modifier
-            .clip(Capsule())
+            .clip(LocalNavigationCornerShape.current)
             .clickable(
                 interactionSource = null,
                 indication = null,
@@ -1904,10 +1948,12 @@ private fun LiquidBottomTabs(
     softBackdropShadow: Boolean = false,
     isDarkTheme: Boolean,
     accentColorOverride: Color? = null,
+    heightScale: Float = 1f,
     modifier: Modifier,
     content: @Composable RowScope.() -> Unit
 ) {
     val material = LocalNavigationMaterial.current
+    val cornerShape = LocalNavigationCornerShape.current
     val isLightTheme = !isDarkTheme
     val accentColor = accentColorOverride ?:
         if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
@@ -1922,12 +1968,12 @@ private fun LiquidBottomTabs(
     BoxWithConstraints(modifier, contentAlignment = Alignment.CenterStart) {
         val density = LocalDensity.current
         val tabWidth = with(density) {
-            (constraints.maxWidth.toFloat() - 8.dp.toPx()) / tabsCount
+            (constraints.maxWidth.toFloat() - 8.dp.toPx()).coerceAtLeast(1f) / tabsCount
         }
         val offsetAnimation = remember { Animatable(0f) }
         val panelOffset by remember(density) {
             derivedStateOf {
-                val fraction = (offsetAnimation.value / constraints.maxWidth)
+                val fraction = (offsetAnimation.value / constraints.maxWidth.coerceAtLeast(1))
                     .fastCoerceIn(-1f, 1f)
                 with(density) {
                     4.dp.toPx() * fraction.sign * EaseOut.transform(abs(fraction))
@@ -1989,7 +2035,7 @@ private fun LiquidBottomTabs(
                     .graphicsLayer { translationX = panelOffset }
                     .drawBackdrop(
                         backdrop = backdrop,
-                        shape = { Capsule() },
+                        shape = { cornerShape },
                         effects = {
                             if (advancedMaterial) {
                                 vibrancy()
@@ -2001,14 +2047,14 @@ private fun LiquidBottomTabs(
                         shadow = if (suppressShadow) null else ({ floatingShadow }),
                         layerBlock = {
                             val progress = dragAnimation.pressProgress
-                            val scale = lerp(1f, 1f + 16.dp.toPx() / size.width, progress)
+                            val scale = lerp(1f, 1f + 16.dp.toPx() / size.width.coerceAtLeast(1f), progress)
                             scaleX = scale
                             scaleY = scale
                         },
                         onDrawSurface = { drawRect(containerColor.copy(alpha = material.alpha(containerColor.alpha))) }
                     )
                     .then(interactiveHighlight.modifier)
-                    .height(64.dp)
+                    .height(64.dp * heightScale)
                     .fillMaxWidth()
                     .padding(4.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -2030,7 +2076,7 @@ private fun LiquidBottomTabs(
                     .graphicsLayer { translationX = panelOffset }
                     .drawBackdrop(
                         backdrop = backdrop,
-                        shape = { Capsule() },
+                        shape = { cornerShape },
                         effects = {
                             if (advancedMaterial) {
                                 val progress = dragAnimation.pressProgress
@@ -2045,7 +2091,7 @@ private fun LiquidBottomTabs(
                         onDrawSurface = { drawRect(containerColor.copy(alpha = material.alpha(containerColor.alpha))) }
                     )
                     .then(interactiveHighlight.modifier)
-                    .height(56.dp)
+                    .height(56.dp * heightScale)
                     .fillMaxWidth()
                     .padding(horizontal = 4.dp)
                     .graphicsLayer(colorFilter = ColorFilter.tint(accentColor)),
@@ -2068,7 +2114,7 @@ private fun LiquidBottomTabs(
                 .then(dragAnimation.modifier)
                 .drawBackdrop(
                     backdrop = rememberCombinedBackdrop(backdrop, tabsBackdrop),
-                    shape = { Capsule() },
+                    shape = { cornerShape },
                     effects = {
                         val progress = dragAnimation.pressProgress
                         lens(
@@ -2104,7 +2150,7 @@ private fun LiquidBottomTabs(
                         drawRect(Color.Black.copy(alpha = 0.03f * progress))
                     }
                 )
-                .height(56.dp)
+                .height(56.dp * heightScale)
                 .fillMaxWidth(1f / tabsCount)
         )
     }

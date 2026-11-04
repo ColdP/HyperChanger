@@ -1,0 +1,45 @@
+{
+  "apk": "抖省省_38.3.6.apk",
+  "package": "com.ss.android.ugc.lifeservices",
+  "version": "38.3.6",
+  "evidence": "LSHomePageTabConfigApiImpl.LIZLLL; original unmodified WebP files. Home/orders share the native resource across selected states; shop/community have two variants.",
+  "runtime": "Live native content Drawable first; extracted original artwork for text-only tabs.",
+  "files": [
+    {
+      "resource_id": "0x7f081264",
+      "apk_entry": "lib/arm64-v8a/libresources.so!/r/cgm.webp",
+      "module_copy": "app/src/main/res/drawable-xxhdpi/dss_nav_community_selected.webp",
+      "sha256": "de01f9dccc687d984f5b90a7a9fdfa32708ec65bb46c368d99cc02461c5991d4"
+    },
+    {
+      "resource_id": "0x7f081265",
+      "apk_entry": "lib/arm64-v8a/libresources.so!/r/cgn.webp",
+      "module_copy": "app/src/main/res/drawable-xxhdpi/dss_nav_community.webp",
+      "sha256": "738f61c165f98572b2de1538003a1f64c3c8dccd79a4b67b95ab76113c9601ab"
+    },
+    {
+      "resource_id": "0x7f081266",
+      "apk_entry": "lib/arm64-v8a/libresources.so!/r/cgo.webp",
+      "module_copy": "app/src/main/res/drawable-xxhdpi/dss_nav_home.webp",
+      "sha256": "82547ed910ced8606a812ba58f1a109a2ac9ab957e29741765826ed36d145772"
+    },
+    {
+      "resource_id": "0x7f081267",
+      "apk_entry": "lib/arm64-v8a/libresources.so!/r/cgp.webp",
+      "module_copy": "app/src/main/res/drawable-xxhdpi/dss_nav_orders.webp",
+      "sha256": "1ac44cbc2033e045f60601d437acbd5b82832b2c5a0a09aa305877b58ffdb231"
+    },
+    {
+      "resource_id": "0x7f081268",
+      "apk_entry": "lib/arm64-v8a/libresources.so!/r/cgq.webp",
+      "module_copy": "app/src/main/res/drawable-xxhdpi/dss_nav_shop_selected.webp",
+      "sha256": "47f84df80df9145c216e8dd1f54163722731cc8ab3866f3e7fe0f76cc591cd54"
+    },
+    {
+      "resource_id": "0x7f081269",
+      "apk_entry": "lib/arm64-v8a/libresources.so!/r/cgr.webp",
+      "module_copy": "app/src/main/res/drawable-xxhdpi/dss_nav_shop.webp",
+      "sha256": "b48dcfe911fd98f6fde255ddd731127321f9601065b1120166d8b59ec3f8b284"
+    }
+  ]
+}

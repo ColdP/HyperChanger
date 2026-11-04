@@ -2221,5 +2221,22 @@
   "解除系统设置中开启热点的高温拦截，不影响底层温控。": "Allow enabling the hotspot in Settings at high temperatures. Lower-level thermal protection remains active.",
   "高温警告": "High temperature warning",
   "温度限制免责声明": "Removing temperature limits may cause overheating, instability or hardware damage.\n\nDisclaimer: Enable this feature only if you understand and accept these risks. You are responsible for any consequences of using it.",
-  "去除负一屏背景壁纸模糊": "Remove App Vault wallpaper blur"
+  "去除负一屏背景壁纸模糊": "Remove App Vault wallpaper blur",
+  "抖省省": "DouShengSheng",
+  "美团": "Meituan",
+  "美团外卖": "Meituan Waimai",
+  "推荐": "Recommended",
+  "订单": "Orders",
+  "神券": "Coupons",
+  "神券节": "Coupon festival",
+  "活动": "Offers",
+  "外卖": "Food delivery",
+  "小团": "Xiaotuan",
+  "会员": "Membership",
+  "AI": "AI",
+  "appNavigationScale": "Scale and position",
+  "appNavigationWidthScale": "Bottom navigation width scale",
+  "appNavigationHeightScale": "Bottom navigation height scale",
+  "appNavigationScalePercent": "%.2f%%",
+  "appNavigationCornerAdjustment": "Corner adjustment"
 }

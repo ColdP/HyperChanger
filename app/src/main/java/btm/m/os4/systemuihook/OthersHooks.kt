@@ -306,6 +306,8 @@ internal class OthersHooks(
             packageName != "com.tencent.mobileqq"
             && packageName != "com.xunmeng.pinduoduo" && packageName != "com.instagram.android" && packageName != "com.twitter.android"
             && packageName != "com.github.android" && packageName != "com.pinterest"
+            && packageName != "com.ss.android.ugc.lifeservices"
+            && packageName != "com.sankuai.meituan" && packageName != "com.sankuai.meituan.takeoutnew"
         ) return
         if (!runCatching { android.app.Application.getProcessName() == packageName }.getOrDefault(false)) return
         runCatching {
@@ -347,6 +349,9 @@ internal class OthersHooks(
                 "com.sina.weibo" -> AppBottomNavHooks.installWeibo(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 "com.xingin.xhs" -> AppBottomNavHooks.installXiaohongshu(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 "com.tencent.wemeet.app" -> AppBottomNavHooks.installTencentMeeting(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
+                "com.ss.android.ugc.lifeservices" -> AppBottomNavHooks.installDouShengSheng(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
+                "com.sankuai.meituan" -> AppBottomNavHooks.installMeituan(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
+                "com.sankuai.meituan.takeoutnew" -> AppBottomNavHooks.installMeituanTakeout(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 "com.tencent.mobileqq" -> AppBottomNavHooks.installQQ(module, param.defaultClassLoader, blur, label, style, advanced, color, accent, showBadges)
                 "cmb.pb" -> AppBottomNavHooks.installCmbBank(module, blur, label, style, advanced, color, accent)
                 "com.tencent.mm" -> {

@@ -49,6 +49,8 @@ import btm.m.liquidglass.HyperDockedNavigationSettings
 import btm.m.liquidglass.HyperFloatingAccentSettings
 import btm.m.liquidglass.NavigationBadgeSettings
 import btm.m.liquidglass.NavigationOffsetSettings
+import btm.m.liquidglass.NavigationScaleSettings
+import btm.m.liquidglass.NavigationCornerSettings
 import btm.m.liquidglass.NavigationMaterialSettings
 import btm.m.liquidglass.hook.WeChatAvatarRadiusSettings
 import btm.m.liquidglass.rememberMomentumPredictiveBack
@@ -67,6 +69,9 @@ private val appNavItems = listOf(
     AppNavItem("小米运动健康", "com.mi.health"),
     AppNavItem("瑞幸咖啡", "com.lucky.luckyclient"),
     AppNavItem("腾讯会议", "com.tencent.wemeet.app"),
+    AppNavItem("抖省省", "com.ss.android.ugc.lifeservices"),
+    AppNavItem("美团", "com.sankuai.meituan"),
+    AppNavItem("美团外卖", "com.sankuai.meituan.takeoutnew"),
     AppNavItem("招商银行", "cmb.pb"),
     AppNavItem("微信", "com.tencent.mm"),
     AppNavItem("拼多多", "com.xunmeng.pinduoduo"),
@@ -278,9 +283,11 @@ private fun AppNavigationSettings(appItem: AppNavItem, store: AppNavigationSetti
                             PortalAppearanceVisibility(accentEnabled) {
                                 NavigationAccentPreference(color = accentColor, enabled = enabled, onClick = { showAccentDialog = true })
                             }
+                            PortalAppearanceVisibility(NavigationCornerSettings.supports(NavigationStyle.entries[styleIndex])) {
+                                AppNavigationCornerPreferences(prefs, service, appItem.packageName, onChanged)
+                            }
                         }
                         Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-                            AppNavigationOffsetPreferences(prefs, service, appItem.packageName)
                             SwitchPreference(
                                 title = tr("navMaterialUseGlobal", "使用全局导航栏材质参数"),
                                 checked = followsMaterial,
@@ -293,6 +300,9 @@ private fun AppNavigationSettings(appItem: AppNavItem, store: AppNavigationSetti
                             PortalAppearanceVisibility(!followsMaterial) {
                                 SharedViewArrowPreference(title = tr("navMaterialAppTitle", "材质参数单独调整"), onClick = openMaterial)
                             }
+                        }
+                        PortalAppearanceVisibility(NavigationScaleSettings.supports(NavigationStyle.entries[styleIndex])) {
+                            AppNavigationScalePreferences(prefs, service, appItem.packageName, onChanged)
                         }
                         if (appItem.packageName == "com.xingin.xhs") {
                             XiaohongshuPublishPreferences(prefs, service, onChanged)
@@ -361,6 +371,103 @@ private fun AppNavigationSettings(appItem: AppNavItem, store: AppNavigationSetti
             showAccentDialog = false
         },
     )
+}
+
+@Composable
+private fun AppNavigationScalePreferences(
+    preferences: SharedPreferences, service: XposedService?, packageName: String, onChanged: () -> Unit,
+) {
+    var settings by remember(preferences, packageName, service) { mutableStateOf(NavigationScaleSettings.load(preferences, packageName)) }
+    var width by remember(settings.widthHundredths) { mutableFloatStateOf(settings.widthHundredths / 100f) }
+    var height by remember(settings.heightHundredths) { mutableFloatStateOf(settings.heightHundredths / 100f) }
+    DisposableEffect(preferences, packageName) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == null || (NavigationScaleSettings.isPreference(key) && key.startsWith("scope.$packageName."))) {
+                settings = NavigationScaleSettings.load(preferences, packageName)
+            }
+        }
+        preferences.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+    fun save(value: NavigationScaleSettings.Settings) {
+        settings = value.normalized()
+        NavigationScaleSettings.save(preferences, service, packageName, settings)
+        onChanged()
+    }
+    Group(tr("appNavigationScale", "缩放与定位")) {
+        SwitchPreference(
+            title = tr("appNavigationWidthScale", "底部导航栏宽度缩放"),
+            checked = settings.widthEnabled,
+            onCheckedChange = { save(settings.copy(widthEnabled = it)) },
+        )
+        PortalAppearanceVisibility(settings.widthEnabled) {
+            EditableSliderPreference(
+                title = tr("appNavigationWidthScale", "底部导航栏宽度缩放"),
+                value = width,
+                valueText = tr("appNavigationScalePercent", "%.2f%%").format(java.util.Locale.getDefault(), width),
+                valueRange = -100f..100f, steps = 19999, defaultValue = 0f, centerValue = 0f,
+                onValueChange = { width = NavigationScaleSettings.hundredths(it) / 100f },
+                onValueChangeFinished = { save(settings.copy(widthHundredths = NavigationScaleSettings.hundredths(width))) },
+            )
+        }
+        SwitchPreference(
+            title = tr("appNavigationHeightScale", "底部导航栏高度缩放"),
+            checked = settings.heightEnabled,
+            onCheckedChange = { save(settings.copy(heightEnabled = it)) },
+        )
+        PortalAppearanceVisibility(settings.heightEnabled) {
+            EditableSliderPreference(
+                title = tr("appNavigationHeightScale", "底部导航栏高度缩放"),
+                value = height,
+                valueText = tr("appNavigationScalePercent", "%.2f%%").format(java.util.Locale.getDefault(), height),
+                valueRange = -100f..100f, steps = 19999, defaultValue = 0f, centerValue = 0f,
+                onValueChange = { height = NavigationScaleSettings.hundredths(it) / 100f },
+                onValueChangeFinished = { save(settings.copy(heightHundredths = NavigationScaleSettings.hundredths(height))) },
+            )
+        }
+        AppNavigationOffsetPreferences(preferences, service, packageName)
+    }
+}
+
+@Composable
+private fun AppNavigationCornerPreferences(
+    preferences: SharedPreferences, service: XposedService?, packageName: String, onChanged: () -> Unit,
+) {
+    var settings by remember(preferences, packageName, service) { mutableStateOf(NavigationCornerSettings.load(preferences, packageName)) }
+    var draft by remember(settings.value) { mutableFloatStateOf(settings.value.toFloat()) }
+    DisposableEffect(preferences, packageName) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == null || (NavigationCornerSettings.isPreference(key) && key.startsWith("scope.$packageName."))) {
+                settings = NavigationCornerSettings.load(preferences, packageName)
+            }
+        }
+        preferences.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+    fun save(value: NavigationCornerSettings.Settings) {
+        settings = value.normalized()
+        NavigationCornerSettings.save(preferences, service, packageName, settings)
+        onChanged()
+    }
+    Column(Modifier.fillMaxWidth()) {
+        SwitchPreference(
+            title = tr("appNavigationCornerAdjustment", "圆角调整"),
+            checked = settings.enabled,
+            onCheckedChange = { save(settings.copy(enabled = it)) },
+        )
+        PortalAppearanceVisibility(settings.enabled) {
+            EditableSliderPreference(
+                title = tr("appNavigationCornerAdjustment", "圆角调整"),
+                value = draft,
+                valueText = draft.roundToInt().toString(),
+                valueRange = NavigationCornerSettings.MIN.toFloat()..NavigationCornerSettings.MAX.toFloat(),
+                steps = NavigationCornerSettings.MAX - NavigationCornerSettings.MIN - 1,
+                defaultValue = 0f,
+                onValueChange = { draft = it },
+                onValueChangeFinished = { save(settings.copy(value = draft.roundToInt())) },
+            )
+        }
+    }
 }
 
 @Composable
