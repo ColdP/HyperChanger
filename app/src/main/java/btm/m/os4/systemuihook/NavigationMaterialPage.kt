@@ -73,8 +73,9 @@ internal fun rememberModuleNavigationMaterial(style: String): NavigationMaterial
     val p = remember(context) { context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE) }
     val revision = rememberNavigationMaterialRevision(p)
     return remember(p, revision, style) {
-        if (NavigationMaterialSettings.moduleEnabled(p)) NavigationMaterialSettings.read(p, NavigationStyle.fromPreference(style))
-        else NavigationMaterial()
+        val navigationStyle = NavigationStyle.fromPreference(style)
+        if (NavigationMaterialSettings.moduleEnabled(p)) NavigationMaterialSettings.read(p, navigationStyle)
+        else NavigationMaterialSettings.defaults(navigationStyle)
     }
 }
 
@@ -124,6 +125,7 @@ internal fun NavigationMaterialPage(packageName: String?, back: () -> Unit) {
             NavigationStyle.PREFERENCE_KEY, NavigationStyle.DEFAULT_VALUE))).coerceAtLeast(0)) }
     val activeTab = tab.takeIf { it in availableStyles.indices } ?: 0
     val style = availableStyles[activeTab]
+    val defaults = NavigationMaterialSettings.defaults(style)
     var material by rememberNavigationMaterialDraft(prefs, style, packageName, service)
     var moduleEnabled by remember(revision) { mutableStateOf(NavigationMaterialSettings.moduleEnabled(prefs)) }
     var imageRevision by remember { mutableIntStateOf(0) }
@@ -200,21 +202,21 @@ internal fun NavigationMaterialPage(packageName: String?, back: () -> Unit) {
             item {
                 key(packageName, style) {
                 Group(tr("参数调整", "参数调整")) {
-                    MaterialPercent(tr("navMaterialBlur", "模糊度"), material.blur, 300,
+                    MaterialPercent(tr("navMaterialBlur", "模糊度"), material.blur, 300, defaults.blur,
                         { material = material.copy(blur = it) }, { save() })
-                    MaterialPercent(tr("navMaterialOpacity", "背景不透明度"), material.opacity, 250,
+                    MaterialPercent(tr("navMaterialOpacity", "背景不透明度"), material.opacity, 250, defaults.opacity,
                         { material = material.copy(opacity = it) }, { save() })
-                    MaterialPercent(tr("navMaterialRefraction", "折射强度"), material.refraction, 200,
+                    MaterialPercent(tr("navMaterialRefraction", "折射强度"), material.refraction, 200, defaults.refraction,
                         { material = material.copy(refraction = it) }, { save() })
-                    MaterialPercent(tr("navMaterialThickness", "折射厚度"), material.thickness, 200,
+                    MaterialPercent(tr("navMaterialThickness", "折射厚度"), material.thickness, 200, defaults.thickness,
                         { material = material.copy(thickness = it) }, { save() })
-                    MaterialPercent(tr("navMaterialHighlight", "高光强度"), material.highlight, 200,
+                    MaterialPercent(tr("navMaterialHighlight", "高光强度"), material.highlight, 200, defaults.highlight,
                         { material = material.copy(highlight = it) }, { save() })
                     if (style == NavigationStyle.HYPER_OS_FLOATING) {
-                        MaterialPercent(tr("navMaterialSelectionOpacity", "选中胶囊不透明度"), material.selectionOpacity, 300,
+                        MaterialPercent(tr("navMaterialSelectionOpacity", "选中胶囊不透明度"), material.selectionOpacity, 300, defaults.selectionOpacity,
                             { material = material.copy(selectionOpacity = it) }, { save() })
                     } else if (style != NavigationStyle.HYPER_OS) {
-                        MaterialPercent(tr("navMaterialPressBoost", "按压折射增强"), material.pressBoost, 200,
+                        MaterialPercent(tr("navMaterialPressBoost", "按压折射增强"), material.pressBoost, 200, defaults.pressBoost,
                             { material = material.copy(pressBoost = it) }, { save() })
                     }
                     SwitchPreference(title = tr("navMaterialDispersion", "色散"),
@@ -237,7 +239,7 @@ internal fun NavigationMaterialPage(packageName: String?, back: () -> Unit) {
         Text(tr("navMaterialResetConfirm", "确定恢复当前样式的默认材质参数吗？"))
         Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             GlassDialogButton(onClick = { confirmParameters = false }, modifier = Modifier.weight(1f)) { Text(tr("取消", "取消")) }
-            GlassDialogButton(onClick = { confirmParameters = false; material = NavigationMaterial(); save() }, modifier = Modifier.weight(1f)) { Text(tr("恢复默认", "恢复默认")) }
+            GlassDialogButton(onClick = { confirmParameters = false; material = defaults; save() }, modifier = Modifier.weight(1f)) { Text(tr("恢复默认", "恢复默认")) }
         }
     }
     WindowDialog(show = confirmRestore, title = tr("navMaterialRestoreImage", "恢复默认预览图"), onDismissRequest = { confirmRestore = false }) {
@@ -258,9 +260,9 @@ internal fun NavigationMaterialPage(packageName: String?, back: () -> Unit) {
 }
 
 @Composable
-private fun MaterialPercent(title: String, value: Int, max: Int, change: (Int) -> Unit, save: () -> Unit) {
+private fun MaterialPercent(title: String, value: Int, max: Int, default: Int, change: (Int) -> Unit, save: () -> Unit) {
     EditableSliderPreference(title = title, value = value.toFloat(), valueText = tr("navMaterialPercent", "%d%%").format(value), valueRange = 0f..max.toFloat(),
-        steps = max - 1, defaultValue = 100f, onValueChange = { change(it.roundToInt()) }, onValueChangeFinished = save)
+        steps = max - 1, defaultValue = default.toFloat(), onValueChange = { change(it.roundToInt()) }, onValueChangeFinished = save)
 }
 
 internal fun decodeNavigationPreview(bytes: ByteArray): Bitmap {

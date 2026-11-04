@@ -30,6 +30,17 @@ object NavigationMaterialSettings {
     const val PREVIEW_FILE = "navigation_material/preview.jpg"
     val styles = listOf(NavigationStyle.HYPER_OS_FLOATING, NavigationStyle.LIQUID_GLASS, NavigationStyle.HARMONY_OS_FLOATING, NavigationStyle.HYPER_OS)
     private val fields = listOf("blur", "opacity", "refraction", "thickness", "highlight", "dispersion", "selection_opacity", "press_boost")
+    fun defaults(style: NavigationStyle): NavigationMaterial = when (style) {
+        NavigationStyle.HYPER_OS_FLOATING -> NavigationMaterial(
+            blur = 244, opacity = 42, refraction = 0, thickness = 0,
+            highlight = 160, selectionOpacity = 169, dispersion = false,
+        )
+        NavigationStyle.HARMONY_OS_FLOATING -> NavigationMaterial(
+            blur = 160, opacity = 110, refraction = 61, thickness = 140,
+            highlight = 155, dispersion = true,
+        )
+        else -> NavigationMaterial()
+    }
     fun key(style: NavigationStyle, field: String, packageName: String? = null): String {
         val name = "$PREFIX${style.preferenceValue}_$field"
         return packageName?.let { ScopedSettings.key(it, name) } ?: name
@@ -51,14 +62,18 @@ object NavigationMaterialSettings {
     }
     fun moduleEnabled(p: SharedPreferences?): Boolean = p?.getBoolean(KEY_MODULE, false) ?: false
     fun read(p: SharedPreferences?, style: NavigationStyle, packageName: String? = null): NavigationMaterial {
-        if (style !in styles || p == null) return NavigationMaterial()
+        val default = defaults(style)
+        if (style !in styles || p == null) return default
         return NavigationMaterial(
-            p.getInt(key(style, "blur", packageName), 100), p.getInt(key(style, "opacity", packageName), 100),
-            p.getInt(key(style, "refraction", packageName), 100), p.getInt(key(style, "thickness", packageName), 100),
-            p.getInt(key(style, "highlight", packageName), 100),
-            p.getInt(key(style, "dispersion", packageName), -1).let { if (it < 0) null else it != 0 },
-            p.getInt(key(style, "selection_opacity", packageName), 100),
-            p.getInt(key(style, "press_boost", packageName), 100),
+            blur = p.getInt(key(style, "blur", packageName), default.blur),
+            opacity = p.getInt(key(style, "opacity", packageName), default.opacity),
+            refraction = p.getInt(key(style, "refraction", packageName), default.refraction),
+            thickness = p.getInt(key(style, "thickness", packageName), default.thickness),
+            highlight = p.getInt(key(style, "highlight", packageName), default.highlight),
+            dispersion = p.getInt(key(style, "dispersion", packageName), default.dispersion?.let { if (it) 1 else 0 } ?: -1)
+                .let { if (it < 0) null else it != 0 },
+            selectionOpacity = p.getInt(key(style, "selection_opacity", packageName), default.selectionOpacity),
+            pressBoost = p.getInt(key(style, "press_boost", packageName), default.pressBoost),
         ).normalized()
     }
     fun save(p: SharedPreferences, service: XposedService?, style: NavigationStyle, material: NavigationMaterial, packageName: String? = null) {
@@ -96,9 +111,15 @@ object NavigationMaterialSettings {
         for (packageName in listOf<String?>(null) + ScopedSettings.apps.map { it.packageName }) {
         if (packageName != null) put(ScopedSettings.key(packageName, KEY_FOLLOW), "boolean", true)
         for (style in styles) {
-            for (field in fields.filter { it != "dispersion" }) put(key(style, field, packageName), "int", 100)
-            // -1 preserves each optical layer's original dispersion behavior.
-            put(key(style, "dispersion", packageName), "int", -1)
+            val default = defaults(style)
+            val fieldDefaults = mapOf(
+                "blur" to default.blur, "opacity" to default.opacity,
+                "refraction" to default.refraction, "thickness" to default.thickness,
+                "highlight" to default.highlight, "selection_opacity" to default.selectionOpacity,
+                "press_boost" to default.pressBoost,
+                "dispersion" to (default.dispersion?.let { if (it) 1 else 0 } ?: -1),
+            )
+            for ((field, value) in fieldDefaults) put(key(style, field, packageName), "int", value)
         }
         }
     }

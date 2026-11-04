@@ -229,7 +229,7 @@ internal fun CustomNavigation(
     hyperDockedAccentEnabled: Boolean = false,
     hyperDockedLiquidGlassEnabled: Boolean = false,
     applyNavigationBarInsets: Boolean = true,
-    material: btm.m.liquidglass.NavigationMaterial = btm.m.liquidglass.NavigationMaterial(),
+    material: btm.m.liquidglass.NavigationMaterial = btm.m.liquidglass.NavigationMaterialSettings.defaults(NavigationStyle.fromPreference(navigationStyle)),
     dimensionScale: NavigationScaleSettings.Settings = NavigationScaleSettings.Settings(),
     cornerSettings: NavigationCornerSettings.Settings = NavigationCornerSettings.Settings(),
     redrawNativeText: Boolean = false,
