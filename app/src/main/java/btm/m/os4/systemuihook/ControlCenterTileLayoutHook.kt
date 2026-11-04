@@ -825,70 +825,67 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         mediaFavorite.containsKey(root) || mediaVolume.containsKey(root) || mediaDevice.containsKey(root)
 
     /**
-     * Expanded card: cover, title, the system artist/lyric line, progress, transport row with a
-     * favourite toggle, then the media volume slider and the output device row.
-     */
-    /**
-     * 1:1 copy of BrokenS10's expanded card (QSControlMiPlayDetailHeader): the cover sits
-     * top-left, title and subtitle to its right, the transport chain is bottom-aligned with the
-     * cover, and the progress bar, volume row and device row stack underneath.
+     * Expanded card, top to bottom: centred cover, title, artist/lyric line, progress bar, then
+     * one row holding favourite + previous + play/pause + next, followed by the volume bar and
+     * the playback device row.
      */
     private fun layoutExpandedMedia(root: View) {
         if (root.width <= 0 || root.height <= 0) return
         val context = root.context
         val density = root.resources.displayMetrics.density
         fun dp(value: Float) = (value * density).roundToInt()
-        val inset = CcMediaNative.dimension(context, "miplay_detail_header_padding_start_end", dp(16f))
+        val inset = dp(16f)
         val gap = dp(8f)
-        val coverSize = CcMediaNative.dimension(context, "miplay_detail_header_cover_size", dp(96f))
-            .coerceAtMost(root.width / 2).coerceAtLeast(1)
-        val metaX = inset + coverSize + CcMediaNative.dimension(context, "miplay_detail_header_meta_left_margin", dp(28f))
-        val actionSize = CcMediaNative.dimension(context, "miplay_detail_header_action_size", dp(66f))
-        val textWidth = (root.width - metaX - inset).coerceAtLeast(1)
+        val rowWidth = (root.width - inset * 2).coerceAtLeast(1)
         val cover = find(root, "cover") ?: return
         mediaChildVisible(root, "title", true)
         mediaChildVisible(root, "artist", true)
         mediaChildVisible(root, "empty_state", true)
         mediaChildVisible(root, "audio_container", true)
         mediaChildVisible(root, "device_icon", false)
-        box(cover, inset, inset, coverSize, coverSize)
+        val coverSize = dp(96f).coerceAtMost(rowWidth).coerceAtLeast(1)
+        box(cover, (root.width - coverSize) / 2, inset, coverSize, coverSize)
         syncCoverOutline(root)
+        var y = inset + coverSize + dp(10f)
         val titleHeight = dp(26f)
-        val subtitleHeight = dp(20f)
-        find(root, "title")?.let { box(it, metaX, inset, textWidth, titleHeight) }
-        find(root, "artist")?.let { box(it, metaX, inset + titleHeight, textWidth, subtitleHeight) }
-        find(root, "empty_state")?.let { box(it, metaX, inset, textWidth, titleHeight + subtitleHeight) }
-        // Transport: bottom-aligned with the cover, right of it, chain packed at the right edge.
-        find(root, "audio_container")?.let { owner ->
-            val rowY = inset + coverSize - actionSize
-            val track = (root.width - metaX - inset).coerceAtLeast(1)
-            box(owner, metaX, rowY, track, actionSize)
-            val buttons = listOf("prev", "play", "next").mapNotNull { find(owner, it) }
-            val chain = buttons.size * actionSize
-            buttons.forEachIndexed { index, child ->
-                val x = (track - chain).coerceAtLeast(0) + index * actionSize
-                box(child, x, 0, actionSize, actionSize)
-            }
-        }
-        var y = inset + coverSize + CcMediaNative.dimension(context, "miplay_detail_header_seek_bar_margin_top_normal", dp(14f))
-        val progressHeight = CcMediaNative.dimension(context, "miplay_detail_header_media_progress_bar_top", dp(20f))
+        val artistHeight = dp(20f)
+        find(root, "title")?.let { box(it, inset, y, rowWidth, titleHeight) }
+        find(root, "artist")?.let { box(it, inset, y + titleHeight, rowWidth, artistHeight) }
+        find(root, "empty_state")?.let { box(it, inset, y, rowWidth, titleHeight + artistHeight) }
+        y += titleHeight + artistHeight + gap
+        val progressHeight = dp(20f)
         val progress = ensureMediaProgress(root)
-        box(progress, inset, y, (root.width - inset * 2).coerceAtLeast(1), progressHeight)
+        box(progress, inset, y, rowWidth, progressHeight)
         progress.invalidate()
         y += progressHeight + gap
-        if (findInPanel(root, "volume_row_slider") == null) {
-            ensureVolumeRow(root)?.let { row ->
-                val height = CcMediaNative.dimension(context, "miplay_detail_item_volume_bar_height", dp(32f))
-                    .coerceAtLeast(1)
-                box(row, inset, y, (root.width - inset * 2).coerceAtLeast(1), height)
-                y += height + gap
+        // favourite, previous, play/pause, next in four equal slots
+        val actionHeight = dp(44f)
+        val slot = rowWidth / 4
+        val actionSize = minOf(dp(44f), slot, actionHeight).coerceAtLeast(1)
+        ensureFavorite(root)?.let { box(it, inset, y, slot, actionHeight) }
+        find(root, "audio_container")?.let { owner ->
+            box(owner, inset + slot, y, slot * 3, actionHeight)
+            listOf("prev", "play", "next").forEachIndexed { index, name ->
+                find(owner, name)?.let { child ->
+                    box(
+                        child,
+                        slot * index + (slot - actionSize) / 2,
+                        (actionHeight - actionSize) / 2,
+                        actionSize,
+                        actionSize,
+                    )
+                }
             }
         }
-        if (findInPanel(root, "list") == null) {
-            ensureDeviceRow(root)?.let { row ->
-                box(row, inset, y, (root.width - inset * 2).coerceAtLeast(1), dp(52f))
-                syncDeviceTitle(root)
-            }
+        y += actionHeight + gap
+        ensureVolumeRow(root)?.let { row ->
+            val height = dp(32f)
+            box(row, inset, y, rowWidth, height)
+            y += height + gap
+        }
+        ensureDeviceRow(root)?.let { row ->
+            box(row, inset, y, rowWidth, dp(52f))
+            syncDeviceTitle(root)
         }
         syncEmptyMedia(root)
     }
@@ -963,10 +960,6 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
             if (view.text?.toString() != text) view.text = text
         }
     }
-
-    /** Looks for a stock view on the card and, failing that, on the panel hosting it. */
-    private fun findInPanel(root: View, name: String): View? =
-        find(root, name) ?: ((root.parent as? View)?.let { find(it, name) })
 
     private fun clearExpandedControls(root: View) {
         mediaFavorite.remove(root)?.get()?.let { (it.parent as? ViewGroup)?.removeView(it) }
