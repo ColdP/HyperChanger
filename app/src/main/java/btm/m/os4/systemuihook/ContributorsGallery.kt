@@ -3,8 +3,6 @@
 package btm.m.os4.systemuihook
 
 import android.graphics.Bitmap
-import android.view.RoundedCorner
-import android.view.View
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.animateColorAsState
@@ -54,8 +52,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
-import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -545,38 +541,6 @@ private fun <T> ContributorCrossfade(
 }
 
 @Composable
-private fun rememberContributorCardRadius(inset: Dp): Dp {
-    val view = LocalView.current
-    val density = LocalDensity.current
-    val orientation = LocalConfiguration.current.orientation
-    var radius by remember(view) { mutableStateOf(28.dp) }
-    DisposableEffect(view, density, orientation, inset) {
-        var disposed = false
-        fun updateRadius() {
-            if (disposed) return
-            val insets = view.rootWindowInsets
-            val corners = listOfNotNull(
-                insets?.getRoundedCorner(RoundedCorner.POSITION_BOTTOM_LEFT),
-                insets?.getRoundedCorner(RoundedCorner.POSITION_BOTTOM_RIGHT),
-            )
-            val pixels = corners.maxOfOrNull { it.radius }
-            if (pixels != null) {
-                // Concentric with the device corner after accounting for the card's side inset.
-                radius = with(density) { pixels.toDp() }.minus(inset).coerceAtLeast(0.dp)
-            }
-        }
-        val listener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> updateRadius() }
-        view.addOnLayoutChangeListener(listener)
-        view.post { updateRadius() }
-        onDispose {
-            disposed = true
-            view.removeOnLayoutChangeListener(listener)
-        }
-    }
-    return radius
-}
-
-@Composable
 private fun ContributorDetails(
     contributor: ContributorGalleryEntry,
     backdrop: LayerBackdrop,
@@ -584,7 +548,7 @@ private fun ContributorDetails(
     cardInset: Dp,
     modifier: Modifier,
 ) {
-    val cardRadius = rememberContributorCardRadius(cardInset)
+    val cardRadius = rememberBottomScreenCornerRadius(cardInset)
     val shape = remember(cardRadius) { RoundedRectangle(cardRadius, RoundedCornerStyle.Continuous) }
     val buttonShape = remember { Capsule(RoundedCornerStyle.Continuous) }
     val surface = MiuixTheme.colorScheme.surface

@@ -119,11 +119,13 @@ internal fun AppNavigationPage(back: () -> Unit) {
         }
     }
     val query = searchQuery.trim()
-    val visibleApps = enabledApps.filter { item ->
-        query.isEmpty() || item.name.contains(query, ignoreCase = true) ||
-            tr(item.name, item.name).contains(query, ignoreCase = true) ||
-            item.packageName.contains(query, ignoreCase = true)
+    val searchDocuments = enabledApps.map { item ->
+        SettingsSearchDocument(item, tr(item.name, item.name), "", listOf(item.packageName), item.name)
     }
+    val matches = rememberSettingsSearch(searchDocuments, query)
+    // Search changes membership only; the established application order remains stable.
+    val matchedPackages = matches.orEmpty().mapTo(HashSet()) { it.packageName }
+    val visibleApps = enabledApps.filter { it.packageName in matchedPackages }
     val refreshApps: () -> Unit = {
         revision++
         installationRevision++
@@ -221,7 +223,8 @@ internal fun AppNavigationPage(back: () -> Unit) {
                         if (query.isNotEmpty() && visibleApps.isEmpty()) {
                             item {
                                 Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-                                    BasicComponent(title = tr("appNavigationSearchEmpty", "没有找到匹配的应用"))
+                                    BasicComponent(title = if (matches == null) tr("category_search_loading", "正在搜索…")
+                                        else tr("appNavigationSearchEmpty", "没有找到匹配的应用"))
                                 }
                             }
                         }

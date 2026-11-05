@@ -119,6 +119,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalFocusManager
@@ -127,6 +128,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
@@ -209,6 +211,7 @@ import top.yukonga.miuix.kmp.icon.extended.Import
 import top.yukonga.miuix.kmp.icon.extended.More
 import top.yukonga.miuix.kmp.icon.extended.MoreCircle
 import top.yukonga.miuix.kmp.icon.extended.Refresh
+import top.yukonga.miuix.kmp.icon.extended.Search
 import top.yukonga.miuix.kmp.icon.extended.Settings
 import top.yukonga.miuix.kmp.icon.extended.SelectAll
 import top.yukonga.miuix.kmp.icon.extended.Home
@@ -439,7 +442,7 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
         tr("iosNotificationCenter", "iOS 风格通知中心"),
         tr("iosNotificationCenterSummary", "下拉时展示圆角壁纸面板、锁屏时钟及景深效果。动态壁纸暂不支持。"),
         setOf(ScopeApplication.SYSTEM_UI),
-        PageId.SHADE,
+        PageId.IOS_NOTIFICATION_CENTER,
     ),
     CategorySearchItem(
         tr("iosNotificationHideClear", "隐藏通知中心清除按钮"),
@@ -540,6 +543,98 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
         PageId.APP_NAVIGATION,
     ),
 )
+
+// These destinations use the same PageId dispatcher as normal navigation, including nested pages.
+private fun categoryDeepSearchItems(): List<CategorySearchItem> {
+    fun entry(key: String, fallback: String, page: PageId, vararg scopes: ScopeApplication) =
+        CategorySearchItem(tr(key, fallback), tr("category_search_open_page", "打开此功能的设置页面"), scopes.toSet(), page)
+    val ui = ScopeApplication.SYSTEM_UI
+    val settings = ScopeApplication.SETTINGS
+    return listOf(
+        entry("桌面材质调整", "桌面材质调整", PageId.DESKTOP_MATERIAL, ScopeApplication.DESKTOP),
+        entry("手势提示线样式自定义", "手势提示线样式自定义", PageId.GESTURE_HANDLE_STYLE, ui),
+        entry("iosNotificationClockGlass", "通知中心大时钟柔光玻璃", PageId.IOS_NOTIFICATION_CLOCK_GLASS, ui),
+        entry("iosNotificationHeaderSettings", "通知横条设置", PageId.IOS_NOTIFICATION_HEADER_SETTINGS, ui),
+        entry("islandCollapsedPage", "超级岛收起态", PageId.ISLAND_COLLAPSED, ui),
+        entry("islandExpandedPage", "超级岛展开态", PageId.ISLAND_EXPANDED, ui),
+        entry("超级岛展开态背景参数", "超级岛展开态背景参数", PageId.ISLAND_EXPANDED_BACKGROUND, ui),
+        entry("unlockIslandPage", "解锁岛", PageId.UNLOCK_ISLAND, ui),
+        entry("通知限制去除", "通知限制去除", PageId.NOTIFICATION_RESTRICTIONS, ui),
+        entry("notificationMediaCard", "媒体卡片", PageId.NOTIFICATION_MEDIA_CARD, ui),
+        entry("状态栏调整", "状态栏调整", PageId.STATUS_ADJUSTMENT, ui),
+        entry("状态栏信号自定义", "状态栏信号自定义", PageId.STATUS_SIGNAL_CUSTOMIZATION, ui),
+        entry("控制中心顶部按钮", "控制中心顶部按钮", PageId.CONTROL_CENTER_TOP_BUTTONS, ui),
+        entry("cc_layout_title", "控制中心磁贴布局自定义", PageId.CONTROL_CENTER_TILE_LAYOUT, ui),
+        entry("音乐锁屏", "音乐锁屏", PageId.LOCKSCREEN_MUSIC, ui),
+        entry("锁屏快捷功能背景", "锁屏快捷功能背景", PageId.LOCKSCREEN_SHORTCUT_BACKGROUND, ui, ScopeApplication.AOD),
+        entry("定时抬起亮屏", "定时抬起亮屏", PageId.LIFT_TO_WAKE_SCHEDULE, ui),
+        entry("自定义景深壁纸", "自定义景深壁纸", PageId.CUSTOM_DEPTH_WALLPAPER, ui, ScopeApplication.AOD),
+        entry("我的设备与全部参数", "我的设备与全部参数", PageId.DEVICE_PROFILE, settings),
+        entry("settingsEntryLabels", "自定义系统设置入口文案", PageId.SETTINGS_ENTRY_LABELS, settings),
+        entry("settingsEntryIcons", "自定义系统设置入口图标", PageId.SETTINGS_ENTRY_ICONS, settings),
+        entry("设置主界面背景", "设置主界面背景", PageId.SETTINGS_APPEARANCE_HOME, settings),
+        entry("我的设备界面背景", "我的设备界面背景", PageId.SETTINGS_APPEARANCE_DEVICE, settings),
+        entry("传送门", "传送门", PageId.PORTAL, ScopeApplication.PORTAL),
+        entry("传送门材质调整", "传送门材质调整", PageId.PORTAL_MATERIAL, ScopeApplication.PORTAL),
+        entry("环境检测", "环境检测", PageId.ENVIRONMENT_DETECTION, ScopeApplication.SECURITY_CENTER),
+        entry("cloudControlTitle", "云控", PageId.CLOUD_CONTROL, ScopeApplication.SECURITY_CENTER),
+        entry("privacyGuardTitle", "预装隐私拦截", PageId.PRIVACY_GUARD, ScopeApplication.HTML_VIEWER),
+        entry("背屏音乐控件白名单", "背屏音乐控件白名单", PageId.REAR_MUSIC_APPS, ScopeApplication.SUBSCREEN_CENTER),
+        entry("rear_mini_player_title", "在背屏启动小折叠版迷你音乐播放器", PageId.REAR_MINI_PLAYER, ScopeApplication.SUBSCREEN_CENTER),
+    )
+}
+
+// Search-only synonyms are deliberately independent of the display language.
+private fun categorySearchKeywords(page: PageId): String = when (page) {
+    PageId.DESKTOP -> "桌面 启动器 文件夹 最近任务 launcher home folder recents"
+    PageId.DESKTOP_MATERIAL -> "桌面 材质 玻璃 模糊 launcher blur glass material"
+    PageId.SHADE -> "系统界面 通知中心 液态玻璃 手势提示线 notification shade liquid glass"
+    PageId.GESTURE_HANDLE_STYLE -> "手势提示线 小白条 gesture handle navigation bar"
+    PageId.ISLAND -> "通知 超级岛 灵动岛 dynamic island notifications"
+    PageId.ISLAND_COLLAPSED -> "超级岛 收起态 胶囊 dynamic island collapsed capsule"
+    PageId.ISLAND_EXPANDED, PageId.ISLAND_EXPANDED_BACKGROUND -> "超级岛 展开态 背景 dynamic island expanded background"
+    PageId.IOS_NOTIFICATION_CENTER -> "苹果 通知中心 分段展开 清除按钮 ios notification center"
+    PageId.IOS_NOTIFICATION_HEADER_SETTINGS -> "通知 横条 标题 清除 ios notification header clear"
+    PageId.IOS_NOTIFICATION_CLOCK_GLASS -> "通知中心 大时钟 玻璃 notification clock glass"
+    PageId.NOTIFICATION_RESTRICTIONS -> "通知 限制 黑名单 白名单 notification restrictions blacklist whitelist"
+    PageId.NOTIFICATION_MEDIA_CARD -> "通知 音乐 媒体 封面 notification music media cover"
+    PageId.STATUS -> "状态栏 控制中心 信号 电池 网速 运营商 status bar control center carrier battery"
+    PageId.STATUS_ADJUSTMENT -> "状态栏 布局 图标 秒数 status bar layout icons seconds"
+    PageId.STATUS_SIGNAL_CUSTOMIZATION -> "状态栏 信号 移动网络 双排 网络类型 status bar signal mobile network"
+    PageId.CONTROL_CENTER_TOP_BUTTONS -> "控制中心 顶部按钮 玻璃 control center top buttons glass"
+    PageId.CONTROL_CENTER_TILE_LAYOUT -> "控制中心 磁贴 布局 control center tiles layout"
+    PageId.LOCK -> "锁屏 时钟 壁纸 小组件 keyguard lockscreen clock wallpaper widgets"
+    PageId.LOCKSCREEN_MUSIC -> "锁屏 音乐 专辑 封面 歌词 lockscreen music album cover lyrics"
+    PageId.LOCKSCREEN_CAPSULE -> "锁屏 胶囊 通知 媒体 lockscreen capsule notification media"
+    PageId.LOCKSCREEN_WIDGET_EDITOR -> "锁屏 小组件 编辑 电量 天气 lockscreen widgets editor battery weather"
+    PageId.LOCKSCREEN_SHORTCUT_BACKGROUND -> "锁屏 快捷功能 背景 手电筒 相机 lockscreen shortcuts flashlight camera"
+    PageId.UNLOCK_ISLAND -> "解锁岛 指纹 人脸 动画 unlock island fingerprint face animation"
+    PageId.LIFT_TO_WAKE_SCHEDULE -> "抬起亮屏 时间段 定时 raise lift wake schedule"
+    PageId.CUSTOM_DEPTH_WALLPAPER -> "锁屏 景深 壁纸 depth wallpaper lockscreen"
+    PageId.RASTER_WALLPAPER -> "光栅 壁纸 倾斜 raster wallpaper tilt"
+    PageId.SYSTEM_FRAMEWORK -> "系统框架 小窗 音量 截图 system framework floating window volume screenshot"
+    PageId.SYSTEM_SETTINGS -> "系统设置 我的设备 外观 settings device appearance"
+    PageId.DEVICE_PROFILE -> "我的设备 全部参数 设备信息 型号 device profile model information"
+    PageId.SETTINGS_ENTRY_LABELS -> "设置 入口 文案 名称 settings entry labels names"
+    PageId.SETTINGS_ENTRY_ICONS -> "设置 入口 图标 settings entry icons"
+    PageId.SETTINGS_APPEARANCE_HOME, PageId.SETTINGS_APPEARANCE_DEVICE -> "设置 背景 壁纸 模糊 settings background wallpaper blur"
+    PageId.SUPER_XIAOAI -> "超级小爱 输入法 悬浮窗口 super xiaoai assistant ime keyboard"
+    PageId.PORTAL, PageId.PORTAL_MATERIAL -> "传送门 背景 卡片 识屏 portal background card ocr"
+    PageId.CAMERA, PageId.CAMERA_PALETTE -> "相机 相册 编辑 调色板 camera gallery editor palette"
+    PageId.SYSTEM_UPDATE -> "系统更新 自动更新 ota system updater"
+    PageId.REAR_SCREEN, PageId.REAR_CUSTOM_CENTER -> "背屏 副屏 自定义 中心 rear subscreen display custom center"
+    PageId.REAR_MUSIC_APPS -> "背屏 音乐 白名单 rear music whitelist"
+    PageId.REAR_MINI_PLAYER -> "背屏 迷你 播放器 rear mini player"
+    PageId.SIDEBAR -> "侧边栏 游戏 视频 工具箱 sidebar game video toolbox"
+    PageId.PERSONAL_ASSISTANT, PageId.ASSISTANT_WIDGET_GLASS -> "负一屏 小部件 壁纸 模糊 app vault assistant widget wallpaper blur"
+    PageId.CONTACTS_DIALER -> "拨号 通话 联系人 背景 contacts dialer call background"
+    PageId.APP_NAVIGATION -> "应用 底部导航 底栏 标签栏 liquid glass bottom navigation tab bar"
+    PageId.ENVIRONMENT_DETECTION -> "环境检测 root lsposed xposed bootloader environment detection"
+    PageId.CLOUD_CONTROL -> "云控 cloud control"
+    PageId.PRIVACY_GUARD -> "预装 隐私 拦截 privacy guard"
+    PageId.OTHER -> "其他 屏幕录制 健康 互传 screen recorder health airdrop"
+    else -> ""
+}
 
 private data class CustomRearScreenApp(
     val productId: String,
@@ -1626,6 +1721,10 @@ private fun Shell(
     )
     val seamlessEntry = seamless.entries[pageStack.lastIndex]
     val backdrop = rememberLayerBackdrop()
+    var homeSearchActive by remember { mutableStateOf(false) }
+    var homeSearchExpanded by remember { mutableStateOf(false) }
+    var homeSearchProgress by remember { mutableFloatStateOf(0f) }
+    var homeSearchAnchor by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     val maxBackProgress = settings.predictiveBackProgress.coerceIn(10, 100) / 100f
     val gestureBlur = if (seamlessEntry != null) 12f * seamlessEntry.progress.value
         else 12f - 8f * (backState.gestureProgress / maxBackProgress).coerceIn(0f, 1f)
@@ -1712,6 +1811,13 @@ private fun Shell(
                     Tab.CATEGORY -> CategoryHome(
                         connected = service != null,
                         open = openRootPage,
+                        searchMounted = homeSearchActive,
+                        searchExpanded = homeSearchExpanded,
+                        searchAnchor = homeSearchAnchor,
+                        onSearchExpandedChange = { homeSearchExpanded = it },
+                        onSearchClosed = { homeSearchActive = false; homeSearchProgress = 0f },
+                        onSearchProgress = { homeSearchProgress = it },
+                        searchPrimaryButton = navigationSettings.style == "hyper_os",
                     )
                     Tab.SETTINGS -> SettingsHome(
                         settings,
@@ -1739,6 +1845,15 @@ private fun Shell(
             navigationSettings,
             backdrop,
             Modifier.align(Alignment.BottomCenter).blur(baseCoveredBlur.dp),
+            onSearch = {
+                if (homeSearchAnchor.width > 0f) {
+                    homeSearchActive = true
+                    homeSearchExpanded = true
+                }
+            },
+            onSearchPositioned = { if (!homeSearchActive) homeSearchAnchor = it },
+            searchMounted = homeSearchActive,
+            searchProgress = homeSearchProgress,
         )
         AnimatedVisibility(
             visible = page != null,
@@ -1887,46 +2002,81 @@ private fun BottomBar(
     settings: HookSettings,
     navigationSettings: ModuleNavigationSettings,
     backdrop: Backdrop,
-    modifier: Modifier
+    modifier: Modifier,
+    onSearch: () -> Unit,
+    onSearchPositioned: (androidx.compose.ui.geometry.Rect) -> Unit,
+    searchMounted: Boolean,
+    searchProgress: Float,
 ) {
     val view = LocalView.current
-    val monetAccentColor by animateColorAsState(
-        targetValue = MiuixTheme.colorScheme.primary,
-        animationSpec = tween(420, easing = FastOutSlowInEasing),
-        label = "bottomBarMonetAccent",
-    )
+    val monetAccentColor by animateColorAsState(MiuixTheme.colorScheme.primary,
+        tween(420, easing = FastOutSlowInEasing), label = "bottomBarMonetAccent")
     val index = remember { mutableIntStateOf(tab.ordinal) }
     LaunchedEffect(tab) { index.intValue = tab.ordinal }
     val tabs = Tab.entries.mapIndexed { i, item ->
-        val title = if (item == Tab.CATEGORY) {
-            tr("tab_home", tr("首页", "首页"))
-        } else {
-            tr("tab_settings", tr("设置", "设置"))
+        HostTab(if (item == Tab.CATEGORY) tr("tab_home", tr("首页", "首页"))
+            else tr("tab_settings", tr("设置", "设置")), "os4.$i") {
+            if (!searchMounted) { index.intValue = i; select(item) }
         }
-        HostTab(title, "os4.$i") { index.intValue = i; select(item) }
     }
-    Box(
-        modifier.fillMaxWidth().height(if (navigationSettings.style == "hyper_os") 76.dp else 100.dp),
-        contentAlignment = Alignment.BottomCenter
-    ) {
-        CustomNavigation(
-            sourceView = view,
-            tabs = tabs,
-            selectedIndex = index,
-            blurRadius = if (navigationSettings.style == "liquid_glass") 3 else 18,
-            labelMode = navigationSettings.labelMode,
-            navigationStyle = navigationSettings.style,
-            advancedMaterial = true,
-            colorMode = settings.themeMode,
-            accentColorOverride = monetAccentColor,
-            material = rememberModuleNavigationMaterial(navigationSettings.style),
-            hyperDockedLiquidGlassEnabled = rememberHyperDockedGlassEnabled(),
-            hyperDockedAccentEnabled = true,
-            liquidBottomSpacingDp = 0,
-            onHostPreDraw = {},
-            backdropOverride = backdrop,
-            tabImageVector = { i -> if (i == Tab.CATEGORY.ordinal) MiuixIcons.Regular.Home else MiuixIcons.Regular.Settings }
+    val docked = navigationSettings.style == "hyper_os"
+    val liquid = navigationSettings.style == "liquid_glass"
+    val reveal by animateFloatAsState(if (tab == Tab.CATEGORY) 1f else 0f,
+        tween(480, easing = FastOutSlowInEasing), label = "navigationSearchReveal")
+    val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val barHeight = (72f * .82f * .95f).dp
+    val navExit = searchPhase(searchProgress, 0f, .65f)
+    BoxWithConstraints(modifier.fillMaxWidth().height(if (docked) 140.dp + navInset else 100.dp + navInset)) {
+        val barWidth = maxWidth * (.53f * .82f * 1.12f)
+        val gap = 8.dp
+        val buttonSize = if (docked) 60.dp else barHeight
+        val shift = if (docked) 0.dp else -(buttonSize + gap) / 2 * reveal
+        val right = maxWidth / 2 + barWidth / 2 + shift
+        val centerY = maxHeight - navInset - (8f * .82f).dp - barHeight / 2
+        val buttonLeft = if (docked) maxWidth - 24.dp - buttonSize else right + gap - (buttonSize + gap) * (1f - reveal)
+        val buttonTop = if (docked) maxHeight - navInset - 76.dp - buttonSize else centerY - buttonSize / 2
+        // Existing size overrides measure the real surfaces; host app defaults stay intact.
+        val widthFactor = if (liquid) barWidth.value / ((maxWidth.value - 28f) * .53f * .82f * 1.10f) else 1.12f
+        val heightFactor = if (liquid) barHeight.value / 64f else .95f
+        val dimensions = btm.m.liquidglass.NavigationScaleSettings.Settings(
+            widthEnabled = true, widthHundredths = ((widthFactor - 1f) * 10000f).roundToInt(),
+            heightEnabled = true, heightHundredths = ((heightFactor - 1f) * 10000f).roundToInt(),
         )
+        Box(Modifier.fillMaxSize().graphicsLayer {
+            translationX = shift.toPx()
+            translationY = navExit * (barHeight + navInset + 24.dp).toPx() + if (liquid) .44.dp.toPx() else 0f
+            alpha = 1f - navExit
+        }.blur((navExit * 10f).dp)) {
+            CustomNavigation(
+                sourceView = view, tabs = tabs, selectedIndex = index,
+                blurRadius = if (liquid) 3 else 18,
+                labelMode = navigationSettings.labelMode, navigationStyle = navigationSettings.style,
+                advancedMaterial = true, colorMode = settings.themeMode,
+                accentColorOverride = monetAccentColor,
+                material = rememberModuleNavigationMaterial(navigationSettings.style),
+                dimensionScale = dimensions,
+                hyperDockedLiquidGlassEnabled = rememberHyperDockedGlassEnabled(),
+                hyperDockedAccentEnabled = true, liquidBottomSpacingDp = 7,
+                onHostPreDraw = {}, backdropOverride = backdrop,
+                tabImageVector = { i -> if (i == Tab.CATEGORY.ordinal) MiuixIcons.Regular.Home else MiuixIcons.Regular.Settings },
+                tabIconContent = { i, color ->
+                    Image(if (i == Tab.CATEGORY.ordinal) MiuixIcons.Regular.Home else MiuixIcons.Regular.Settings,
+                        null, Modifier.size(28.dp), colorFilter = ColorFilter.tint(color))
+                },
+            )
+        }
+        if (!searchMounted && reveal > .001f) {
+            SearchRoundButton(
+                backdrop = backdrop, size = buttonSize,
+                primary = docked, closeProgress = 0f,
+                modifier = Modifier.offset(buttonLeft, buttonTop)
+                    .graphicsLayer { alpha = reveal; translationY = (1f - reveal) * 16.dp.toPx() }
+                    .blur(((1f - reveal) * 6f).dp)
+                    .onGloballyPositioned { onSearchPositioned(it.boundsInWindow()) },
+                enabled = tab == Tab.CATEGORY && reveal > .98f,
+                onClick = onSearch,
+            )
+        }
     }
 }
 
@@ -1934,35 +2084,38 @@ private fun BottomBar(
 private fun CategoryHome(
     connected: Boolean,
     open: (PageId) -> Unit,
+    searchMounted: Boolean,
+    searchExpanded: Boolean,
+    searchAnchor: androidx.compose.ui.geometry.Rect,
+    onSearchExpandedChange: (Boolean) -> Unit,
+    onSearchClosed: () -> Unit,
+    onSearchProgress: (Float) -> Unit,
+    searchPrimaryButton: Boolean,
 ) {
+    var searchProgress by remember { mutableFloatStateOf(0f) }
     var query by rememberSaveable { mutableStateOf("") }
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    val searchItems = categorySearchItems()
-    val normalizedQuery = query.trim().lowercase(Locale.getDefault())
-    val filteredItems = if (normalizedQuery.isBlank()) {
-        emptyList()
-    } else {
-        searchItems.filter { item ->
-            buildString {
-                append(item.title)
-                append('\n')
-                append(item.description)
-                item.scopes.forEach { scope ->
-                    append('\n')
-                    append(tr(scope.title, scope.title))
-                    append('\n')
-                    append(scope.packageName)
-                }
-            }.lowercase(Locale.getDefault()).contains(normalizedQuery)
-        }
+    var pendingPage by remember { mutableStateOf<PageId?>(null) }
+    val searchItems = categorySearchItems() + categoryDeepSearchItems()
+    val documents = searchItems.map { item ->
+        SettingsSearchDocument(
+            item, item.title, item.description,
+            item.scopes.map { tr(it.title, it.title) + " " + it.packageName },
+            categorySearchKeywords(item.page),
+        )
     }
-    val groupedItems = filteredItems
-        .flatMap { item -> item.scopes.map { scope -> scope to item } }
-        .groupBy({ it.first }, { it.second })
-        .mapValues { (_, items) -> items.distinctBy { it.title to it.page } }
-
+    val matches = rememberSettingsSearch(documents, query)
+    val results = (if (query.isBlank()) emptyList() else matches.orEmpty()).map { item ->
+        HomeSearchResult(
+            key = item.page.name + ":" + item.title,
+            title = item.title,
+            description = item.description,
+            scopes = item.scopes.joinToString(" · ") { tr(it.title, it.title) },
+            onClick = { pendingPage = item.page; onSearchExpandedChange(false) },
+        )
+    }
     AppPage(
         "HyperChanger",
+        coveredBlur = (3f * searchProgress).dp,
         actions = {
             GlassToolbarIconButton(
                 icon = MiuixIcons.Regular.Refresh,
@@ -1970,162 +2123,74 @@ private fun CategoryHome(
                 onClick = { open(PageId.RESTART_SCOPES) },
             )
         },
+        overlay = {
+            if (searchMounted && searchAnchor.width > 0f) {
+                HomeSearchOverlay(
+                    expanded = searchExpanded,
+                    onProgress = { searchProgress = it; onSearchProgress(it) },
+                    primaryButton = searchPrimaryButton,
+                    anchorInWindow = searchAnchor,
+                    query = query,
+                    onQueryChange = { query = it },
+                    results = results,
+                    searching = matches == null,
+                    enabled = connected,
+                    onDismiss = { pendingPage = null; onSearchExpandedChange(false) },
+                    onClosed = {
+                        onSearchClosed()
+                        searchProgress = 0f
+                        query = ""
+                        val destination = pendingPage
+                        pendingPage = null
+                        destination?.let(open)
+                    },
+                )
+            }
+        },
     ) { padding, scroll ->
         AppList(padding, scroll) {
             item {
-                CategorySearchBar(
-                    query = query,
-                    expanded = expanded,
-                    onQueryChange = { query = it },
-                    onExpandedChange = { expanded = it },
-                    onCancel = { query = ""; expanded = false },
-                    collapsedFraction = scroll.state.collapsedFraction.coerceIn(0f, 1f),
+                CategoryGroup(
+                    title = tr("系统界面", "系统界面"),
+                    entries = listOf(
+                        CategoryPageEntry(tr("系统界面与材质调整", "系统界面与材质调整"), PageId.SHADE),
+                        CategoryPageEntry(tr("桌面", "桌面"), PageId.DESKTOP),
+                        CategoryPageEntry(tr("通知与超级岛", "通知与超级岛"), PageId.ISLAND),
+                        CategoryPageEntry(tr("状态栏与控制中心", "状态栏与控制中心"), PageId.STATUS),
+                        CategoryPageEntry(tr("锁屏", "锁屏"), PageId.LOCK),
+                    ),
+                    enabled = connected,
+                    open = open,
                 )
             }
-            if (normalizedQuery.isBlank()) {
-                item {
-                    CategoryGroup(
-                        title = tr("系统界面", "系统界面"),
-                        entries = listOf(
-                            CategoryPageEntry(tr("系统界面与材质调整", "系统界面与材质调整"), PageId.SHADE),
-                            CategoryPageEntry(tr("桌面", "桌面"), PageId.DESKTOP),
-                            CategoryPageEntry(tr("通知与超级岛", "通知与超级岛"), PageId.ISLAND),
-                            CategoryPageEntry(tr("状态栏与控制中心", "状态栏与控制中心"), PageId.STATUS),
-                            CategoryPageEntry(tr("锁屏", "锁屏"), PageId.LOCK),
-                        ),
-                        enabled = connected,
-                        open = open,
-                    )
-                }
-                item {
-                    CategoryGroup(
-                        title = tr("系统功能", "系统功能"),
-                        entries = listOf(
-                            CategoryPageEntry(tr("系统框架", "系统框架"), PageId.SYSTEM_FRAMEWORK),
-                            CategoryPageEntry(tr("超级小爱与输入法", "超级小爱与输入法"), PageId.SUPER_XIAOAI),
-                            CategoryPageEntry(tr("相机与相册编辑", "相机与相册编辑"), PageId.CAMERA),
-                            CategoryPageEntry(tr("系统更新", "系统更新"), PageId.SYSTEM_UPDATE),
-                            CategoryPageEntry(tr("系统设置", "系统设置"), PageId.SYSTEM_SETTINGS),
-                            CategoryPageEntry(tr("背屏", "背屏"), PageId.REAR_SCREEN),
-                        ),
-                        enabled = connected,
-                        open = open,
-                    )
-                }
-                item {
-                    CategoryGroup(
-                        title = tr("其他", "其他"),
-                        entries = listOf(
-                            CategoryPageEntry(tr("应用底部导航", "应用底部导航"), PageId.APP_NAVIGATION),
-                            CategoryPageEntry(tr("其他", "其他"), PageId.OTHER),
-                        ),
-                        enabled = connected,
-                        open = open,
-                    )
-                }
-            } else if (groupedItems.isEmpty()) {
-                item {
-                    Card(
-                        Modifier.fillMaxWidth(),
-                        cornerRadius = 22.5.dp,
-                        insideMargin = PaddingValues(18.dp),
-                    ) {
-                        Text(
-                            tr("category_search_no_results", "没有找到匹配的设置项"),
-                            style = MiuixTheme.textStyles.body2,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            modifier = Modifier.fillMaxWidth(),
-                            textAlign = TextAlign.Center,
-                        )
-                    }
-                }
-            } else {
-                groupedItems.forEach { (scope, items) ->
-                    item {
-                        SmallTitle(
-                            tr(scope.title, scope.title),
-                            insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp),
-                        )
-                        Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-                            items.forEach { result ->
-                                SharedViewArrowPreference(
-                                    title = result.title,
-                                    summary = result.description,
-                                    enabled = connected,
-                                    onClick = { open(result.page) },
-                                )
-                            }
-                        }
-                    }
-                }
+            item {
+                CategoryGroup(
+                    title = tr("系统功能", "系统功能"),
+                    entries = listOf(
+                        CategoryPageEntry(tr("系统框架", "系统框架"), PageId.SYSTEM_FRAMEWORK),
+                        CategoryPageEntry(tr("超级小爱与输入法", "超级小爱与输入法"), PageId.SUPER_XIAOAI),
+                        CategoryPageEntry(tr("相机与相册编辑", "相机与相册编辑"), PageId.CAMERA),
+                        CategoryPageEntry(tr("系统更新", "系统更新"), PageId.SYSTEM_UPDATE),
+                        CategoryPageEntry(tr("系统设置", "系统设置"), PageId.SYSTEM_SETTINGS),
+                        CategoryPageEntry(tr("背屏", "背屏"), PageId.REAR_SCREEN),
+                    ),
+                    enabled = connected,
+                    open = open,
+                )
+            }
+            item {
+                CategoryGroup(
+                    title = tr("其他", "其他"),
+                    entries = listOf(
+                        CategoryPageEntry(tr("应用底部导航", "应用底部导航"), PageId.APP_NAVIGATION),
+                        CategoryPageEntry(tr("其他", "其他"), PageId.OTHER),
+                    ),
+                    enabled = connected,
+                    open = open,
+                )
             }
         }
     }
-}
-
-@Composable
-private fun CategorySearchBar(
-    query: String,
-    expanded: Boolean,
-    onQueryChange: (String) -> Unit,
-    onExpandedChange: (Boolean) -> Unit,
-    onCancel: () -> Unit,
-    collapsedFraction: Float,
-) {
-    val showCancel = expanded || query.isNotBlank()
-    val cancelAlpha by animateFloatAsState(
-        targetValue = if (showCancel) 1f else 0f,
-        animationSpec = tween(220, easing = FastOutSlowInEasing),
-        label = "categorySearchCancelAlpha",
-    )
-    val cancelBlur by animateFloatAsState(
-        targetValue = if (showCancel) 0f else 8f,
-        animationSpec = tween(220, easing = FastOutSlowInEasing),
-        label = "categorySearchCancelBlur",
-    )
-    SearchBar(
-        modifier = Modifier.fillMaxWidth()
-            .graphicsLayer {
-                val scale = 1f - .1f * collapsedFraction
-                scaleX = scale
-                scaleY = scale
-            }
-            .blur((4f * collapsedFraction).dp),
-        insideMargin = DpSize(0.dp, 0.dp),
-        inputField = {
-            InputField(
-                query = query,
-                onQueryChange = onQueryChange,
-                onSearch = { onExpandedChange(false) },
-                expanded = expanded,
-                onExpandedChange = onExpandedChange,
-                label = tr("category_search_placeholder", "搜索设置项名称、描述或作用域"),
-            )
-        },
-        expanded = expanded,
-        onExpandedChange = onExpandedChange,
-        outsideEndAction = {
-            AnimatedVisibility(
-                visible = showCancel,
-                enter = fadeIn(tween(220, easing = FastOutSlowInEasing)),
-                exit = fadeOut(tween(220, easing = FastOutSlowInEasing)),
-            ) {
-                Text(
-                    modifier = Modifier
-                        .padding(start = 12.dp)
-                        .graphicsLayer { alpha = cancelAlpha }
-                        .blur(cancelBlur.dp)
-                        .clickable(
-                            interactionSource = null,
-                            indication = null,
-                            onClick = onCancel,
-                        ),
-                    text = tr("取消", "取消"),
-                    color = MiuixTheme.colorScheme.primary,
-                )
-            }
-        },
-    ) {}
 }
 
 @Composable
@@ -3022,16 +3087,15 @@ private fun RearMusicApps(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    val normalizedQuery = query.trim().lowercase(Locale.getDefault())
-    val visibleApps = remember(apps, orderingPackages, normalizedQuery, showSystemApps) {
-        apps.filter { app ->
-            (showSystemApps || !app.isSystem) &&
-                (normalizedQuery.isEmpty() ||
-                    app.label.lowercase(Locale.getDefault()).contains(normalizedQuery) ||
-                    app.packageName.lowercase(Locale.getDefault()).contains(normalizedQuery))
-        }.sortedWith(compareByDescending<RearApp> { it.packageName in orderingPackages }
-            .thenBy(String.CASE_INSENSITIVE_ORDER) { it.label }
-            .thenBy { it.packageName })
+    val documents = remember(apps) {
+        apps.map { app -> SettingsSearchDocument(app, app.label, "", listOf(app.packageName)) }
+    }
+    val matches = rememberSettingsSearch(documents, query)
+    val visibleApps = remember(matches, orderingPackages, showSystemApps) {
+        matches.orEmpty().filter { showSystemApps || !it.isSystem }
+            .sortedWith(compareByDescending<RearApp> { it.packageName in orderingPackages }
+                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.label }
+                .thenBy { it.packageName })
     }
     AppPage(
         title = tr("\u80cc\u5c4f\u97f3\u4e50\u63a7\u4ef6\u767d\u540d\u5355", "\u80cc\u5c4f\u97f3\u4e50\u63a7\u4ef6\u767d\u540d\u5355"),
@@ -3062,7 +3126,8 @@ private fun RearMusicApps(
                         item {
                             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(18.dp)) {
                                 Text(
-                                    tr("\u6ca1\u6709\u5339\u914d\u7684\u5e94\u7528", "\u6ca1\u6709\u5339\u914d\u7684\u5e94\u7528"),
+                                    if (matches == null) tr("category_search_loading", "正在搜索…")
+                                    else tr("\u6ca1\u6709\u5339\u914d\u7684\u5e94\u7528", "\u6ca1\u6709\u5339\u914d\u7684\u5e94\u7528"),
                                     style = MiuixTheme.textStyles.body2,
                                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                     modifier = Modifier.fillMaxWidth(),
@@ -13989,6 +14054,8 @@ internal fun AppPage(
     onLargeTitleClick: (() -> Unit)? = null,
     pageBackground: (@Composable BoxScope.() -> Unit)? = null,
     header: @Composable () -> Unit = {},
+    overlay: @Composable BoxScope.() -> Unit = {},
+    coveredBlur: Dp = 0.dp,
     content: @Composable (PaddingValues, ScrollBehavior) -> Unit,
 ) {
     val context = LocalContext.current
@@ -14016,6 +14083,7 @@ internal fun AppPage(
         Box(Modifier.fillMaxSize().layerBackdrop(backdrop)) { it() }
     }
     Scaffold(
+        modifier = Modifier.blur(coveredBlur),
         containerColor = ComposeColor.Transparent,
         floatingToolbar = floatingToolbar,
         floatingToolbarPosition = floatingToolbarPosition,
@@ -14115,6 +14183,7 @@ internal fun AppPage(
             scrollableList = restartScrollableList,
         )
     }
+    overlay()
     }
     }
 }
