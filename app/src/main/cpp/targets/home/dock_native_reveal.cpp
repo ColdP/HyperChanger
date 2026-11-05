@@ -180,6 +180,9 @@ void render(void *engine, int64_t view, void *tree_owner, float density) {
 }
 void keyguard(void *watcher, bool locked) {
     const bool was_locked = keyguard_locked.exchange(locked, std::memory_order_acq_rel);
+    if (locked != was_locked) {
+        __android_log_print(ANDROID_LOG_INFO, kTag, "keyguard showing=%d; Dock pre-entry gate", locked);
+    }
     if (locked) {
         epoch.fetch_add(1, std::memory_order_acq_rel);
         end_ns.store(0, std::memory_order_release);
@@ -284,6 +287,17 @@ bool install(const Images &image) {
         if (!nhk::safe_read(image.engine + 0xd8c9d8, std::as_writable_bytes(std::span(live)))
             || live != schedule_shape) return false;
         schedule_frame = reinterpret_cast<ScheduleFrame>(image.engine + 0xd8c9d8);
+    }
+    if (engine->build == "c014a14bb9ddab4431a887c98c6d56ce305b0573") {
+        // Verified Engine::ScheduleFrame(bool), including Animator receiver +0x680.
+        constexpr std::array<uint32_t, 13> expected{
+            0xf81e0ffe,0xa9014ff4,0xaa0003f4,0xb0ff9660,0x912a4400,
+            0x2a0103f3,0x940c97a9,0xf9434280,0x2a1303e1,0x97fff507,
+            0xa9414ff4,0xf84207fe,0x140c97ab};
+        std::array<uint32_t, 13> live{};
+        if (!nhk::safe_read(image.engine + 0xe1fc14, std::as_writable_bytes(std::span(live)))
+            || live != expected) return false;
+        schedule_frame = reinterpret_cast<ScheduleFrame>(image.engine + 0xe1fc14);
     }
     const auto &profile = *image.profile;
     std::array<uint32_t, 24> keyguard_shape{

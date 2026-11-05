@@ -27,6 +27,11 @@ struct EngineProfile {
 // Keep the contribution engine ABI alongside the independently checked system
 // engine. Vtable addresses include the two-word Itanium ABI prefix.
 inline constexpr std::array kEngineProfiles{
+    // OS4.0.4.0.XPBCNXM: RVAs recovered from the engine's GNU mini symbols.
+    // Runtime entry guards and unlock following verified on Xiaomi 17 Pro Max.
+    EngineProfile{"c014a14bb9ddab4431a887c98c6d56ce305b0573",
+        0xb1f5fc, 0xb18440, 0xe1fc5c, 0xb240f4, 0xb22ee0, 0xb241f4, 0xb2344c,
+        0x1180208, 0x117f418, 0x117f168},
     EngineProfile{"fcc3c35629e617bafce14f6e96dbff79d3da1ab4",
         0xb2a270, 0xb230b4, 0xe2c964, 0xb2ed68, 0xb2db54, 0xb2ee68, 0xb2e0c0,
         0x118e118, 0x118d3c8, 0x118d118},

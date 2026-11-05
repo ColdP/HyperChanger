@@ -27,11 +27,13 @@ public:
             complete_ = true;
             return {{}, true};
         }
-        // Reused trees can skip the icon setter for an entire unlock. Absence
-        // of an observation is not an invisible icon. Keep the normal pose and
-        // remain armed for real motion, without a delayed visibility timeout.
-        return {fresh ? source : FollowPose{}, false};
+        // A preloaded home frame can report the settled pose before the real
+        // unlock animation starts (face authentication followed by a swipe).
+        // Do not expose that stale/identity pose as a one-frame normal Dock.
+        // Once motion starts, only this epoch's fresh icon samples are used.
+        if (!motion_seen_) return {{0, 0}, false};
+        return {fresh ? source : FollowPose{0, 0}, false};
     }
-    bool needs_frame() const { return motion_seen_ && !complete_; }
+    bool needs_frame() const { return !complete_; }
 };
 } // namespace dock_reveal
