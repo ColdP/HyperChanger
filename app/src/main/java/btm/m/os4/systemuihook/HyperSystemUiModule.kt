@@ -1453,7 +1453,7 @@ class HyperSystemUiModule : XposedModule() {
                     if (preferences.getBoolean("unlock_xiaomi_18_rear_screen_ai", false) || preferences.getBoolean("remove_custom_rear_screen_restrictions", false)) {
                         othersHooks.installSubScreenCenterAppWidgetState(param.defaultClassLoader)
                     }
-                    othersHooks.installMusicControlWhitelistHook(param.defaultClassLoader, preferences)
+                    othersHooks.installMusicControlWhitelistHook(param, preferences)
                     othersHooks.installRearScreenLeftSwipeHook(param.defaultClassLoader, preferences)
                 }
                 PERSONAL_ASSISTANT -> {

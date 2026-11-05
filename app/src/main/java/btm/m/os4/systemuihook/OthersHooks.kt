@@ -52,6 +52,7 @@ internal class OthersHooks(
     private var rearScreenLeftSwipeInstalled = false
     private var islandSimulationRearScreenInstalled = false
     private val rearMiniPlayerHooks = RearMiniPlayerHooks(module)
+    private val rearMusicWhitelistHooks = RearMusicWhitelistHooks(module, hookDeoptimized, logTag)
     private val screenshotHooks = ScreenshotHooks(module, hookDeoptimized, logTag)
     private val contactsDialerHooks = ContactsDialerHooks(module, hookDeoptimized, logTag)
     private val portalHooks = PortalHooks(module, hookDeoptimized, logTag)
@@ -886,127 +887,8 @@ internal class OthersHooks(
         }
     }
 
-    fun installMusicControlWhitelistHook(
-        classLoader: ClassLoader,
-        preferences: SharedPreferences,
-    ) {
-        if (!preferences.getBoolean(HOOK_MUSIC_CONTROLS_WHITELIST, true)) return
-        runCatching {
-            val configClass = sequenceOf(
-                "A2.a",
-                "p2.a",
-                "P2.a",
-                "com.xiaomi.subscreencenter.p2.a",
-            )
-                .mapNotNull { name -> runCatching { classLoader.loadClass(name) }.getOrNull() }
-                .firstOrNull()
-                ?: error("Music configuration class was not found")
-            val whitelist = preferences.getStringSet(MUSIC_CONTROLS_WHITELIST_APPS, emptySet()).orEmpty()
-            val mapFields = configClass.declaredFields.filter { field ->
-                java.lang.reflect.Modifier.isStatic(field.modifiers) && Map::class.java.isAssignableFrom(field.type)
-            }
-            val mapField = mapFields.firstOrNull { field ->
-                runCatching {
-                    field.isAccessible = true
-                    val map = field.get(null) as? Map<*, *> ?: return@runCatching false
-                    map.keys.any { it in setOf("com.xiaomi.music", "com.android.incallui", "com.xiaomi.smarthome") } ||
-                        map.values.any { it == "unified.music" || it == "music" }
-                }.getOrDefault(false)
-            } ?: mapFields.firstOrNull()
-            runCatching {
-                if (mapField != null) {
-                    mapField.isAccessible = true
-                    val original = mapField.get(null) as? Map<*, *> ?: emptyMap<Any?, Any?>()
-                    val replacement = LinkedHashMap<Any?, Any?>().apply {
-                        putAll(original)
-                        whitelist.forEach { put(it, "music") }
-                    }
-                    mapField.set(null, replacement)
-                }
-            }.onFailure { error ->
-                btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not replace rear music configuration map", error)
-            }
-
-            fun currentWhitelist(): Set<String> = preferences
-                .getStringSet(MUSIC_CONTROLS_WHITELIST_APPS, emptySet())
-                .orEmpty()
-
-            configClass.declaredMethods.firstOrNull { method ->
-                method.name == "a" &&
-                    method.parameterTypes.contentEquals(arrayOf(String::class.java)) &&
-                    method.returnType == String::class.java
-            }?.let { method ->
-                hookDeoptimized(method)
-                    .setExceptionMode(ExceptionMode.PROTECTIVE)
-                    .setId("rear-music-whitelist:business")
-                    .intercept { chain ->
-                        val packageName = chain.getArg(0) as? String
-                        if (packageName != null && packageName in currentWhitelist()) "music"
-                        else chain.proceed()
-                    }
-            }
-
-            configClass.declaredMethods.firstOrNull { method ->
-                method.name == "b" &&
-                    method.parameterTypes.isEmpty() &&
-                    Set::class.java.isAssignableFrom(method.returnType)
-            }?.let { method ->
-                hookDeoptimized(method)
-                    .setExceptionMode(ExceptionMode.PROTECTIVE)
-                    .setId("rear-music-whitelist:supported-apps")
-                    .intercept { chain ->
-                        val result = chain.proceed()
-                        val supported = LinkedHashSet<Any?>()
-                        (result as? Set<*>)?.let(supported::addAll)
-                        supported.addAll(currentWhitelist())
-                        supported
-                    }
-            }
-
-            configClass.declaredMethods.firstOrNull { method ->
-                method.name == "c" &&
-                    method.parameterTypes.contentEquals(arrayOf(String::class.java)) &&
-                    method.returnType == Boolean::class.javaPrimitiveType
-            }?.let { method ->
-                hookDeoptimized(method)
-                    .setExceptionMode(ExceptionMode.PROTECTIVE)
-                    .setId("rear-music-whitelist:is-music")
-                    .intercept { chain ->
-                        val packageName = chain.getArg(0) as? String
-                        if (packageName != null && packageName in currentWhitelist()) true
-                        else chain.proceed()
-                    }
-            }
-
-            val utilityClass = sequenceOf("A2.g", "p2.g", "P2.g")
-                .mapNotNull { name -> runCatching { classLoader.loadClass(name) }.getOrNull() }
-                .firstOrNull()
-            utilityClass?.declaredMethods?.firstOrNull { method ->
-                method.name == "k" &&
-                    method.parameterTypes.size == 3 &&
-                    method.parameterTypes[0] == String::class.java &&
-                    Set::class.java.isAssignableFrom(method.parameterTypes[1]) &&
-                    Map::class.java.isAssignableFrom(method.parameterTypes[2]) &&
-                    method.returnType == Boolean::class.javaPrimitiveType
-            }?.let { method ->
-                hookDeoptimized(method)
-                    .setExceptionMode(ExceptionMode.PROTECTIVE)
-                    .setId("rear-music-whitelist:is-enabled")
-                    .intercept { chain ->
-                        val packageName = chain.getArg(0) as? String
-                        if (packageName != null && packageName in currentWhitelist()) {
-                            val switches = chain.getArg(2) as? Map<*, *>
-                            (switches?.get("com.music.service") as? Boolean) ?: true
-                        } else {
-                            chain.proceed()
-                        }
-                    }
-            }
-            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed rear music whitelist hooks (${whitelist.size} app(s), ${configClass.name})")
-        }.onFailure { error ->
-            btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not update rear music control whitelist", error)
-        }
-    }
+    fun installMusicControlWhitelistHook(param: PackageLoadedParam, preferences: SharedPreferences) =
+        rearMusicWhitelistHooks.install(param, preferences)
 
     /** Virtually enables the same two gates as the root script, scoped to the three target apps. */
     fun installRearScreenAppWidgetUnlockHooks(classLoader: ClassLoader) {
