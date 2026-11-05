@@ -3,6 +3,7 @@ package btm.m.os4.systemuihook
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.res.Configuration
 import android.view.View
 import android.view.ViewGroup
 import android.widget.RelativeLayout
@@ -28,6 +29,9 @@ internal class SidebarAppearanceHooks(
     private val measureWidth = ThreadLocal<Int>()
     private val nativeBoxRead = ThreadLocal<Boolean>()
     private val lookups = Collections.synchronizedMap(WeakHashMap<Any, WeakReference<Any>>())
+    private val spanTables = Collections.synchronizedMap(WeakHashMap<Any, SidebarSpanTable>())
+    private class PanelMeasureState(val availableWidth: Int, val configuration: Configuration)
+    private val panelMeasureStates = Collections.synchronizedMap(WeakHashMap<View, PanelMeasureState>())
 
     fun install(loader: ClassLoader, preferences: SharedPreferences) {
         if (installed) return
@@ -213,7 +217,17 @@ internal class SidebarAppearanceHooks(
             try {
                 runCatching {
                     (getApps.invoke(owner) as? View)?.let { apps ->
-                        updatePanel.invoke(apps)
+                        val measuredWidth = View.MeasureSpec.getSize(widthSpec).takeIf { it > 0 }
+                            ?: owner.width.takeIf { it > 0 } ?: apps.width
+                        val oppositePadding = if (isLeft.invoke(owner) == true) owner.paddingRight else owner.paddingLeft
+                        val availableWidth = measuredWidth - (getDockWidth.invoke(owner) as Int) - oppositePadding
+                        val previous = panelMeasureStates[apps]
+                        val configuration = owner.resources.configuration
+                        if (previous == null || previous.availableWidth != availableWidth ||
+                            previous.configuration != configuration) {
+                            updatePanel.invoke(apps)
+                            panelMeasureStates[apps] = PanelMeasureState(availableWidth, Configuration(configuration))
+                        }
                         val dock = getDock.invoke(owner) as? View
                         val params = apps.layoutParams as? RelativeLayout.LayoutParams
                         if (dock != null && dock.id > 0 && dock.parent === owner && apps.parent === owner && params != null &&
@@ -305,17 +319,36 @@ internal class SidebarAppearanceHooks(
         val getLookup = grid.getDeclaredMethod("M")
         val getType = loader.loadClass("x7.e").getMethod("getItemViewType", Int::class.javaPrimitiveType)
         val getCount = loader.loadClass("x7.e").getMethod("getItemCount")
-        fun span(adapter: Any, position: Int): Int =
-            if (position in 0 until (getCount.invoke(adapter) as Int) && getType.invoke(adapter, position) == 2) 2 else 1
+        fun table(adapter: Any): SidebarSpanTable = synchronized(spanTables) {
+            spanTables.getOrPut(adapter) { SidebarSpanTable() }
+        }.also { cache ->
+            cache.prepare { IntArray(getCount.invoke(adapter) as Int) { position ->
+                if (getType.invoke(adapter, position) == 2) 2 else 1
+            } }
+        }
+        // Include single-item, range, payload and DiffUtil notifications. Invalidate before
+        // dispatch: RecyclerView observers may synchronously query the new span geometry.
+        loader.loadClass("androidx.recyclerview.widget.RecyclerView\$h").declaredMethods
+            .filter { it.name.startsWith("notify") }.forEach { method ->
+                hook(method, "invalidate-spans:${method.name}:${method.parameterCount}") { chain ->
+                    spanTables[chain.thisObject]?.invalidate()
+                    chain.proceed()
+                }
+            }
         hook(defaultLookup.getDeclaredMethod("f", Int::class.javaPrimitiveType), "divider-span") { chain ->
-            val original = chain.proceed()
             val adapter = lookups[chain.thisObject]?.get()
-            if (adapter == null) original else span(adapter, chain.getArg(0) as Int)
+            if (adapter == null) chain.proceed() else table(adapter).size(chain.getArg(0) as Int)
         }
         hook(defaultLookup.getDeclaredMethod("e", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType), "span-index") { chain ->
-            val original = chain.proceed()
             val adapter = lookups[chain.thisObject]?.get()
-            if (adapter == null) original else sidebarSpanIndex(chain.getArg(0) as Int, chain.getArg(1) as Int) { span(adapter, it) }
+            if (adapter == null || chain.getArg(1) != 2) chain.proceed()
+            else table(adapter).index(chain.getArg(0) as Int)
+        }
+        hook(defaultLookup.superclass.getDeclaredMethod("d", Int::class.javaPrimitiveType,
+            Int::class.javaPrimitiveType), "span-group") { chain ->
+            val adapter = lookups[chain.thisObject]?.get()
+            if (adapter == null || chain.getArg(1) != 2) chain.proceed()
+            else table(adapter).group(chain.getArg(0) as Int)
         }
         val recyclerField = dock.getDeclaredField("i").apply { isAccessible = true }
         val setManager = recycler.getMethod("setLayoutManager", layoutManager)

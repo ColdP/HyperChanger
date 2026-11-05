@@ -48,6 +48,44 @@ internal fun sidebarAllAppsItemScale(contentWidth: Int, density: Float): Float =
 
 internal data class SidebarAllAppsSpec(val columns: Int, val width: Int)
 
+/** Cached dual-column geometry for the dock adapter. The stock span lookup walks every prior
+ * item for each query, which becomes visible while Folme animates the rail. */
+internal class SidebarSpanTable {
+    private var sizes = IntArray(0)
+    private var indices = IntArray(0)
+    private var groups = IntArray(0)
+    private var valid = false
+
+    @Synchronized
+    fun prepare(provider: () -> IntArray) {
+        if (valid) return
+        sizes = provider().map { if (it == 2) 2 else 1 }.toIntArray()
+        indices = IntArray(sizes.size)
+        groups = IntArray(sizes.size)
+        var span = 0
+        var group = 0
+        sizes.forEachIndexed { position, size ->
+            if (span + size > 2) {
+                span = 0
+                group++
+            }
+            indices[position] = span
+            groups[position] = group
+            span += size
+            if (span == 2) {
+                span = 0
+                group++
+            }
+        }
+        valid = true
+    }
+
+    @Synchronized fun invalidate() { valid = false }
+    @Synchronized fun size(position: Int): Int = sizes.getOrElse(position) { 1 }
+    @Synchronized fun index(position: Int): Int = indices.getOrElse(position) { 0 }
+    @Synchronized fun group(position: Int): Int = groups.getOrElse(position) { position }
+}
+
 internal data class SidebarToolboxFit(val scale: Float, val width: Int, val height: Int)
 
 /** A single transform preserves the native content's aspect ratio, including its outline. */
