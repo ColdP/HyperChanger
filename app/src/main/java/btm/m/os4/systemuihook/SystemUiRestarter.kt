@@ -139,4 +139,6 @@ enum class ScopeApplication(val title: String, val packageName: String) {
     AIRDROP("小米互传", "com.miui.mishare.connectivity"),
     HTML_VIEWER("HTML 查看器", "com.android.htmlviewer"),
     JOYOSE("Joyose", "com.xiaomi.joyose"),
+    SYSTEM_HELPER("系统助手", "com.mobiletools.systemhelper"),
+    GUARD_PROVIDER("系统安全组件", "com.miui.guardprovider"),
 }

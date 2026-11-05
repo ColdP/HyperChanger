@@ -1162,6 +1162,12 @@ class HyperSystemUiModule : XposedModule() {
             }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install Joyose hooks", error) }
             return
         }
+        if (param.packageName == "com.mobiletools.systemhelper" || param.packageName == "com.miui.guardprovider") {
+            runCatching {
+                othersHooks.installPreinstalledPrivacyHooks(param, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+            }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install preinstalled privacy hooks", error) }
+            return
+        }
         if (param.packageName == SETTINGS_PACKAGE) {
             othersHooks.installHotspotTemperatureHooks(param, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
             runCatching {

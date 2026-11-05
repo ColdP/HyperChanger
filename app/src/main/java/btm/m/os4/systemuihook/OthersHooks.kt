@@ -26,6 +26,7 @@ import btm.m.liquidglass.hook.AppBottomNavHooks
 import btm.m.liquidglass.hook.LuckinAntiDetectionHooks
 import btm.m.os4.systemuihook.htmlviewer.HtmlViewerHooks
 import btm.m.os4.systemuihook.joyose.JoyoseHooks
+import btm.m.os4.systemuihook.privacy.PreinstalledPrivacyHooks
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 import io.github.libxposed.api.XposedInterface.HookBuilder
 import io.github.libxposed.api.XposedModule
@@ -65,6 +66,7 @@ internal class OthersHooks(
     private val hotspotTemperatureHooks = HotspotTemperatureHooks(module)
     private val htmlViewerHooks = HtmlViewerHooks(module)
     private val joyoseHooks = JoyoseHooks(module)
+    private val preinstalledPrivacyHooks = PreinstalledPrivacyHooks(module)
 
     fun installPortalHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
         portalHooks.install(classLoader, preferences)
@@ -101,6 +103,9 @@ internal class OthersHooks(
 
     fun installJoyoseHooks(param: PackageLoadedParam, preferences: SharedPreferences) =
         joyoseHooks.install(param, preferences)
+
+    fun installPreinstalledPrivacyHooks(param: PackageLoadedParam, preferences: SharedPreferences) =
+        preinstalledPrivacyHooks.install(param, preferences)
 
     fun installRearMiniPlayerMusicHooks(preferences: SharedPreferences) = rearMiniPlayerHooks.installMusic(preferences)
 
