@@ -11,8 +11,8 @@ body:
     id: device-model
     attributes:
       label: 设备型号
-      description: 请填写完整的设备型号，例如 Xiaomi 14。
-      placeholder: 例如：Xiaomi 14
+      description: 请填写完整的设备型号，例如 Xiaomi 17。
+      placeholder: 例如：Xiaomi 17
     validations:
       required: true
 
@@ -20,8 +20,8 @@ body:
     id: hyperos-version
     attributes:
       label: HyperOS 具体版本
-      description: 请填写完整的 HyperOS 构建版本，例如 OS2.0.2.0.VNCCNXM。
-      placeholder: 例如：OS2.0.2.0.VNCCNXM
+      description: 请填写完整的 HyperOS 构建版本，例如 OS4.0.6.0.XPCCNXM。
+      placeholder: 例如：OS4.0.6.0.XPCCNXM
     validations:
       required: true
 
@@ -31,7 +31,7 @@ body:
       label: LSPosed 框架版本与日志
       description: 请填写 LSPosed 框架版本，并在此处粘贴相关日志片段。完整日志文件请在下方上传。
       placeholder: |
-        LSPosed 版本：1.10.0
+        LSPosed 版本：2.21(7912)
         日志：
         2026-01-01 12:00:00 E/AndroidRuntime: ...
       render: text
