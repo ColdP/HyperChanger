@@ -1,0 +1,89 @@
+name: Bug 报告
+description: 提交包含设备信息、版本信息和日志的可复现问题
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈问题。请先确认你使用的是受支持的 HyperOS 版本，并移除日志中的个人隐私信息。
+
+  - type: input
+    id: device-model
+    attributes:
+      label: 设备型号
+      description: 请填写完整的设备型号，例如 Xiaomi 14。
+      placeholder: 例如：Xiaomi 14
+    validations:
+      required: true
+
+  - type: input
+    id: hyperos-version
+    attributes:
+      label: HyperOS 具体版本
+      description: 请填写完整的 HyperOS 构建版本，例如 OS2.0.2.0.VNCCNXM。
+      placeholder: 例如：OS2.0.2.0.VNCCNXM
+    validations:
+      required: true
+
+  - type: textarea
+    id: lsposed-version-and-logs
+    attributes:
+      label: LSPosed 框架版本与日志
+      description: 请填写 LSPosed 框架版本，并在此处粘贴相关日志片段。完整日志文件请在下方上传。
+      placeholder: |
+        LSPosed 版本：1.10.0
+        日志：
+        2026-01-01 12:00:00 E/AndroidRuntime: ...
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem-description
+    attributes:
+      label: 问题描述
+      description: 请具体描述发生了什么，以及问题出现的频率和影响。
+      placeholder: 请至少填写 30 个字符。
+    validations:
+      required: true
+      min_length: 30
+
+  - type: textarea
+    id: reproduction-steps
+    attributes:
+      label: 复现步骤
+      description: 请按顺序列出触发问题的操作。
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+      min_length: 20
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: 预期行为
+      description: 说明你原本期望发生什么。
+    validations:
+      required: true
+      min_length: 10
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: 实际行为
+      description: 说明实际发生了什么，并注明是否可以稳定复现。
+    validations:
+      required: true
+      min_length: 10
+
+  - type: upload
+    id: log-files
+    attributes:
+      label: 上传日志或相关文件
+      description: 必须上传至少一个相关文件。支持 .log、.txt、.zip，单个文件大小遵循 GitHub 限制。
+    validations:
+      required: true
+      accept: ".log,.txt,.zip"
