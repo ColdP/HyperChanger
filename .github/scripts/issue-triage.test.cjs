@@ -54,6 +54,11 @@ test('short body, missing keyword and missing attachment fail independently', ()
   assert.equal(validateReport(null).length, 3);
 });
 
+test('body threshold rejects 59 characters and accepts exactly 60', () => {
+  assert.equal(validateReport(`日志${'字'.repeat(57)}\n${attachment}`).length, 1);
+  assert.deepEqual(validateReport(`日志${'字'.repeat(58)}\n${attachment}`), []);
+});
+
 test('form headings, comments, links and placeholders do not satisfy body requirements', () => {
   const body = `### LSPosed 框架版本与日志\n_No response_\n<!-- 日志 ${details} -->\n[日志 ${details}](https://example.com/log.txt)\n${attachment}`;
   assert.equal(validateReport(body).length, 2);
@@ -69,12 +74,21 @@ test('accept current and legacy GitHub file attachments with supported extension
   }
 });
 
-test('reject screenshots, external URLs, hidden attachments and pasted code links', () => {
+test('accept GitHub screenshot attachments', () => {
+  for (const screenshot of [
+    'https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef',
+    'https://github.com/ColdP/HyperChanger/files/12345/screenshot.PNG',
+    ...['png', 'jpg', 'jpeg', 'gif', 'webp'].map((ext) => `https://github.com/user-attachments/files/12345/screenshot.${ext}`),
+  ]) {
+    assert.deepEqual(validateReport(`${details}\n日志\n![截图](${screenshot})`), []);
+  }
+});
+
+test('reject external URLs, hidden attachments and pasted code links', () => {
   for (const fake of [
-    'https://github.com/user-attachments/assets/12345',
     'https://example.com/log.txt',
     'https://github.com.evil.example/user-attachments/files/12345/log.txt',
-    'https://github.com/user-attachments/files/12345/photo.png',
+    'https://github.com/user-attachments/files/12345/document.pdf',
     `<!-- ${attachment} -->`,
     `\`\`\`text\n${attachment}\n\`\`\``,
   ]) {
@@ -85,7 +99,7 @@ test('reject screenshots, external URLs, hidden attachments and pasted code link
 test('notification contains real newlines, all reasons and literal extension formatting', () => {
   const comment = buildComment(['第一项', '第二项']);
   assert.ok(comment.includes('\n- 第一项\n- 第二项\n'));
-  assert.ok(comment.includes('`.log`、`.txt` 或 `.zip`'));
+  assert.ok(comment.includes('`.log`、`.txt`、`.zip` 或截图'));
   assert.ok(comment.startsWith(COMMENT_MARKER));
 });
 

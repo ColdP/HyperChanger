@@ -1,10 +1,10 @@
-const MIN_BODY_LENGTH = 80;
+const MIN_BODY_LENGTH = 60;
 const COMMENT_MARKER = '<!-- hyperchanger-invalid-report -->';
 
 function validateReport(body = '') {
   const content = (body || '').replace(/<!--.*?-->/gs, '');
-  // Only GitHub-hosted file attachments count; screenshots and external links do not.
-  const attachmentPattern = /https:\/\/github\.com\/(?:user-attachments\/files|[^/\s]+\/[^/\s]+\/files)\/\d+\/[^\s<>"`)]*\.(?:log|txt|zip)(?=$|[\s<>"`)\]?#])/giu;
+  // GitHub-hosted log files and image attachments count; external links do not.
+  const attachmentPattern = /https:\/\/github\.com\/(?:user-attachments\/assets\/[0-9a-f-]+|(?:user-attachments\/files|[^/\s]+\/[^/\s]+\/files)\/\d+\/[^\s<>"`)]*\.(?:log|txt|zip|png|jpe?g|gif|webp))(?=$|[\s<>"`)\]?#])/giu;
   const hasAttachment = attachmentPattern.test(content.replace(/```[^\n]*\n[\s\S]*?```/g, ''));
   const userText = content
     .replace(/^#{1,6}\s+.*$/gm, '')
@@ -24,7 +24,7 @@ function validateReport(body = '') {
     reasons.push('正文没有日志关键词（如 LSPosed、logcat、日志、ログ、Exception），请填写框架版本及相关日志说明。');
   }
   if (!hasAttachment) {
-    reasons.push('缺少 GitHub 上传的 .log、.txt 或 .zip 日志附件；截图、外部链接和代码块中的链接不计入。');
+    reasons.push('缺少 GitHub 上传的 .log、.txt、.zip 或截图附件；外部链接和代码块中的链接不计入。');
   }
   return reasons;
 }
@@ -37,12 +37,12 @@ function buildComment(reasons) {
     '',
     ...reasons.map((reason) => `- ${reason}`),
     '',
-    '请使用 Bug 报告表单重新提交，填写设备型号、完整 HyperOS 版本、LSPosed 框架版本与日志，并上传相关的 `.log`、`.txt` 或 `.zip` 文件。',
-    '正文有效内容需至少 80 个字符。上传前请移除日志中的个人隐私信息。',
+    '请使用 Bug 报告表单重新提交，填写设备型号、完整 HyperOS 版本、LSPosed 框架版本与日志，并上传相关的 `.log`、`.txt`、`.zip` 或截图文件。',
+    '正文有效内容需至少 60 个字符。上传前请移除日志中的个人隐私信息。',
     '',
-    'This report is incomplete and will be labeled `invalid` and closed automatically. Please submit a complete report with your device model, full HyperOS version, LSPosed version and logs, at least 80 characters of actual text, and an uploaded `.log`, `.txt` or `.zip` log file.',
+    'This report is incomplete and will be labeled `invalid` and closed automatically. Please submit a complete report with your device model, full HyperOS version, LSPosed version and logs, at least 60 characters of actual text, and an uploaded `.log`, `.txt`, `.zip` or screenshot file.',
     '',
-    'この報告は情報が不足しているため、`invalid` ラベルを付けて自動的に終了します。端末名、HyperOS の完全なバージョン、LSPosed のバージョンとログ、80 文字以上の本文、アップロードした `.log`・`.txt`・`.zip` のログファイルを添えて再投稿してください。',
+    'この報告は情報が不足しているため、`invalid` ラベルを付けて自動的に終了します。端末名、HyperOS の完全なバージョン、LSPosed のバージョンとログ、60 文字以上の本文、アップロードした `.log`・`.txt`・`.zip` またはスクリーンショットを添えて再投稿してください。',
   ].join('\n');
 }
 

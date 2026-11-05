@@ -83,7 +83,7 @@ body:
     id: log-files
     attributes:
       label: 上传日志或相关文件
-      description: 必须上传至少一个相关文件。支持 .log、.txt、.zip，单个文件大小遵循 GitHub 限制。
+      description: 必须上传至少一个相关文件。支持 .log、.txt、.zip、.png、.jpg、.jpeg、.gif、.webp，单个文件大小遵循 GitHub 限制。
     validations:
       required: true
-      accept: ".log,.txt,.zip"
+      accept: ".log,.txt,.zip,.png,.jpg,.jpeg,.gif,.webp"
