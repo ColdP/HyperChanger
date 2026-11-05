@@ -151,6 +151,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.core.view.WindowCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.core.graphics.createBitmap
 import kotlinx.coroutines.Dispatchers
@@ -3003,50 +3006,79 @@ private fun RearMusicApps(
     val apps = rememberRearApps()
     var query by rememberSaveable { mutableStateOf("") }
     var showSystemApps by rememberSaveable { mutableStateOf(false) }
+    // Checkbox changes persist immediately; only entry/refresh changes the priority group.
+    var orderingPackages by remember { mutableStateOf(selectedPackages.toSet()) }
+    val currentSelectedPackages by rememberUpdatedState(selectedPackages)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) orderingPackages = currentSelectedPackages.toSet()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val normalizedQuery = query.trim().lowercase(Locale.getDefault())
-    val visibleApps = remember(apps, selectedPackages, normalizedQuery, showSystemApps) {
+    val visibleApps = remember(apps, orderingPackages, normalizedQuery, showSystemApps) {
         apps.filter { app ->
             (showSystemApps || !app.isSystem) &&
                 (normalizedQuery.isEmpty() ||
                     app.label.lowercase(Locale.getDefault()).contains(normalizedQuery) ||
                     app.packageName.lowercase(Locale.getDefault()).contains(normalizedQuery))
-        }.sortedWith(compareByDescending<RearApp> { it.packageName in selectedPackages }
+        }.sortedWith(compareByDescending<RearApp> { it.packageName in orderingPackages }
             .thenBy(String.CASE_INSENSITIVE_ORDER) { it.label }
             .thenBy { it.packageName })
     }
     AppPage(
         title = tr("\u80cc\u5c4f\u97f3\u4e50\u63a7\u4ef6\u767d\u540d\u5355", "\u80cc\u5c4f\u97f3\u4e50\u63a7\u4ef6\u767d\u540d\u5355"),
         onBack = back,
+        floatingToolbar = {
+            NavigationAppSearchField(query, onQueryChange = { query = it })
+        },
         content = { padding, scroll ->
-            AppList(padding, scroll, 28) {
-                item {
-                    RearAppSearchBar(query = query, onQueryChange = { query = it })
-                }
-                if (visibleApps.isEmpty()) {
-                    item {
-                        Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(18.dp)) {
-                            Text(
-                                tr("\u6ca1\u6709\u5339\u914d\u7684\u5e94\u7528", "\u6ca1\u6709\u5339\u914d\u7684\u5e94\u7528"),
-                                style = MiuixTheme.textStyles.body2,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                modifier = Modifier.fillMaxWidth(),
-                                textAlign = TextAlign.Center,
+            val listPadding = PaddingValues(
+                top = padding.calculateTopPadding(),
+                bottom = maxOf(
+                    padding.calculateBottomPadding(),
+                    WindowInsets.ime.asPaddingValues().calculateBottomPadding(),
+                ),
+            )
+            PullToRefresh(
+                isRefreshing = false,
+                onRefresh = { orderingPackages = currentSelectedPackages.toSet() },
+                modifier = Modifier.fillMaxSize(),
+                pullToRefreshState = rememberPullToRefreshState(refreshThreshold = NAVIGATION_REFRESH_THRESHOLD),
+                contentPadding = padding,
+                topAppBarScrollBehavior = scroll,
+                color = MiuixTheme.colorScheme.primary,
+                refreshTexts = navigationRefreshTexts(),
+            ) {
+                AppList(listPadding, scroll, 112) {
+                    if (visibleApps.isEmpty()) {
+                        item {
+                            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(18.dp)) {
+                                Text(
+                                    tr("\u6ca1\u6709\u5339\u914d\u7684\u5e94\u7528", "\u6ca1\u6709\u5339\u914d\u7684\u5e94\u7528"),
+                                    style = MiuixTheme.textStyles.body2,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    textAlign = TextAlign.Center,
+                                )
+                            }
+                        }
+                    } else {
+                        items(visibleApps, key = { it.packageName }) { app ->
+                            val checked = app.packageName in selectedPackages
+                            RearAppCard(
+                                app = app,
+                                checked = checked,
+                                onCheckedChange = {
+                                    onSelectedPackagesChange(
+                                        if (checked) selectedPackages - app.packageName
+                                        else selectedPackages + app.packageName,
+                                    )
+                                },
                             )
                         }
-                    }
-                } else {
-                    items(visibleApps, key = { it.packageName }) { app ->
-                        val checked = app.packageName in selectedPackages
-                        RearAppCard(
-                            app = app,
-                            checked = checked,
-                            onCheckedChange = {
-                                onSelectedPackagesChange(
-                                    if (checked) selectedPackages - app.packageName
-                                    else selectedPackages + app.packageName,
-                                )
-                            },
-                        )
                     }
                 }
             }

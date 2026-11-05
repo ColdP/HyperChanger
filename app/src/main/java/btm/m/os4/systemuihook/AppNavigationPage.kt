@@ -67,7 +67,7 @@ private data class AppNavItem(val name: String, val packageName: String)
 private enum class NavigationAppListPage { DISABLED, UNINSTALLED }
 
 // MIUIX defaults to .25; use 60% of the previous refresh distance.
-private const val NAVIGATION_REFRESH_THRESHOLD = .25f * .6f
+internal const val NAVIGATION_REFRESH_THRESHOLD = .25f * .6f
 
 private val appNavItems = listOf(
     AppNavItem("QQ", "com.tencent.mobileqq"),
@@ -310,7 +310,7 @@ internal fun AppNavigationPage(back: () -> Unit) {
     }
 }
 
-private fun navigationRefreshTexts() = listOf(
+internal fun navigationRefreshTexts() = listOf(
     tr("appNavigationPullToRefresh", "下拉刷新"),
     tr("appNavigationReleaseToRefresh", "松开刷新"),
     tr("appNavigationRefreshing", "正在刷新…"),
