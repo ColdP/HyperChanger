@@ -32,6 +32,14 @@ class HookApplication : Application(), XposedServiceHelper.OnServiceListener {
             .onFailure { ModuleLog.w("WidgetGlass", "Could not sync widget settings", it) }
         runCatching { SidebarSettingsStore(this).syncRemote(service) }
             .onFailure { ModuleLog.w("Sidebar", "Could not sync sidebar settings", it) }
+        runCatching { SidebarAppearanceSettingsStore(this).syncRemote(service) }
+            .onFailure { ModuleLog.w("SidebarAppearance", "Could not sync sidebar appearance settings", it) }
+        runCatching { SidebarShapeSettingsStore(this).syncRemote(service) }
+            .onFailure { ModuleLog.w("SidebarShape", "Could not sync sidebar shape settings", it) }
+        runCatching { SidebarColumnSpacingSettingsStore(this).syncRemote(service) }
+            .onFailure { ModuleLog.w("SidebarSpacing", "Could not sync sidebar column spacing", it) }
+        runCatching { SidebarIconCountSettingsStore(this).syncRemote(service) }
+            .onFailure { ModuleLog.w("SidebarIconCount", "Could not sync sidebar icon count settings", it) }
         runCatching { PortalSettings.syncRemote(this, service) }
             .onFailure { ModuleLog.w("Portal", "Could not sync Portal settings", it) }
         runCatching { ContactsDialerSettings.syncRemote(this, service) }

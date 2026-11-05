@@ -35,6 +35,10 @@ internal fun restartRecommendationSnapshot(group: String, preferences: SharedPre
         btm.m.liquidglass.HyperFloatingAccentSettings.isEnabled(p, it.packageName)
     }
     readSidebarSettings(p)
+    readSidebarAppearanceSettings(p)
+    readSidebarColumnSpacingSettings(p)
+    readSidebarShapeSettings(p)
+    readSidebarIconCountSettings(p)
     readSidebarFeatureSettings(p)
     readPersonalAssistantSettings(p)
     readPowerBatterySettings(p)

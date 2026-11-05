@@ -1053,6 +1053,8 @@ class HyperSystemUiModule : XposedModule() {
             }
             if (runCatching { android.app.Application.getProcessName() == "com.miui.securitycenter:ui" }.getOrDefault(false)) {
                 othersHooks.installSidebarHooks(param.defaultClassLoader, preferences)
+                othersHooks.installSidebarAppearanceHooks(param.defaultClassLoader, preferences)
+                othersHooks.installSidebarIconCountHooks(param.defaultClassLoader, preferences)
                 othersHooks.installVideoToolboxHooks(param, preferences)
             }
             if (preferences.isEnvironmentDetectionEnabled() && preferences.getBoolean(KEY_SECURITYCENTER_ROOTED_DIAGNOSTICS, false)) {

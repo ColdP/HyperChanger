@@ -111,6 +111,10 @@ internal fun restartScopesForPreference(group: String, key: String): Set<ScopeAp
         key == KEY_REMOVE_HOTSPOT_TEMP_LIMIT -> setOf(ScopeApplication.SETTINGS)
         key.startsWith(ASSISTANT_WIDGET_GLASS_PREFIX) -> setOf(ScopeApplication.PERSONAL_ASSISTANT)
         key.startsWith(SIDEBAR_PREFIX) -> setOf(ScopeApplication.SECURITY_CENTER)
+        key.startsWith(SIDEBAR_COLUMN_SPACING_PREFIX) -> setOf(ScopeApplication.SECURITY_CENTER)
+        key.startsWith(SIDEBAR_SHAPE_PREFIX) -> setOf(ScopeApplication.SECURITY_CENTER)
+        key.startsWith(SIDEBAR_APPEARANCE_PREFIX) -> setOf(ScopeApplication.SECURITY_CENTER)
+        key.startsWith(SIDEBAR_ICON_COUNT_PREFIX) -> setOf(ScopeApplication.SECURITY_CENTER)
         key.startsWith("portal_") -> setOf(ScopeApplication.PORTAL)
         key.startsWith("home_") || key.startsWith("dock_") -> setOf(ScopeApplication.DESKTOP)
         key.startsWith("settings_") || key in setOf(

@@ -1016,6 +1016,10 @@ private fun Root(
             restartTracker.withoutTracking {
                 hooks.syncRemote(it)
                 SidebarSettingsStore(context).syncRemote(it)
+                SidebarAppearanceSettingsStore(context).syncRemote(it)
+                SidebarColumnSpacingSettingsStore(context).syncRemote(it)
+                SidebarShapeSettingsStore(context).syncRemote(it)
+                SidebarIconCountSettingsStore(context).syncRemote(it)
                 SidebarFeatureSettingsStore(context).syncRemote(it)
                 PersonalAssistantSettingsStore(context).syncRemote(it)
                 WidgetGlassSettingsStore(context).syncRemote(it)
@@ -1870,6 +1874,7 @@ private fun Shell(
             onDismiss = onDismissModulePresetResetDialog,
             onConfirm = onConfirmModulePresetReset,
         )
+        RestartFailureDialog()
     }
     }
     }

@@ -6,56 +6,82 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlin.concurrent.thread
 
 object SystemUiRestarter {
+    internal data class Failure(val title: String, val message: String)
+    private val failureState = MutableStateFlow<Failure?>(null)
+    internal val failure = failureState.asStateFlow()
+
+    internal fun dismissFailure(displayed: Failure) {
+        failureState.compareAndSet(displayed, null)
+    }
+
+    private fun showFailure(message: String, partial: Boolean = false) {
+        failureState.value = Failure(
+            if (partial) tr("部分应用重启失败", "部分应用重启失败") else tr("重启失败", "重启失败"),
+            message,
+        )
+    }
+
     fun restart(context: Context, targets: Set<ScopeApplication>) {
         thread(name = "scope-app-restart", isDaemon = true) {
             if (targets.isEmpty()) {
-                showToast(context, "\u8bf7\u81f3\u5c11\u9009\u62e9\u4e00\u4e2a\u4f5c\u7528\u57df\u5e94\u7528")
+                showFailure(tr("请至少选择一个作用域应用", "请至少选择一个作用域应用"))
                 return@thread
             }
 
             val rootCheck = runSu("id")
             if (rootCheck.exitCode != 0 || !rootCheck.output.contains("uid=0")) {
-                showToast(
-                    context,
-                    "\u91cd\u542f\u5931\u8d25\uff1a\u672a\u83b7\u5f97 Root \u6743\u9650\uff08su \u88ab\u62d2\u7edd\u3001\u672a\u6388\u6743\u6216\u4e0d\u53ef\u7528\uff09",
-                )
+                showFailure(tr("未获得 Root 权限（su 被拒绝、未授权或不可用）", "未获得 Root 权限（su 被拒绝、未授权或不可用）"))
                 return@thread
             }
 
             val failures = buildList {
                 targets.forEach { target ->
+                    val title = tr(target.title, target.title)
                     val packagePath = runSu("cmd package path ${target.packageName}")
                     if (packagePath.exitCode != 0 || !packagePath.output.contains("package:")) {
-                        add("${target.title}\uff1a\u5e94\u7528\u672a\u5b89\u88c5\u6216\u5305\u540d\u4e0d\u5b58\u5728")
+                        add("$title：${tr("应用未安装或包名不存在", "应用未安装或包名不存在")}")
+                        return@forEach
+                    }
+
+                    if (target == ScopeApplication.SECURITY_CENTER) {
+                        // The sidebar runs in :ui, and other services use independent process
+                        // names. Force-stop the package even when its main PID is absent.
+                        val stopResult = runSu("am force-stop --user current com.miui.securitycenter")
+                        if (stopResult.exitCode != 0) {
+                            val details = stopResult.errorMessage ?: stopResult.output.trim().take(200).ifBlank {
+                                tr("命令退出码：%d", "命令退出码：%d").format(stopResult.exitCode)
+                            }
+                            add(tr("安全服务强制停止失败：%s", "安全服务强制停止失败：%s").format(details))
+                        }
                         return@forEach
                     }
 
                     val pidResult = runSu("pidof ${target.packageName}")
                     val processIds = pidResult.output.trim()
                     if (pidResult.exitCode != 0 || processIds.isBlank()) {
-                        add("${target.title}\uff1a\u5e94\u7528\u672a\u5728\u8fd0\u884c")
+                        add("$title：${tr("应用未在运行", "应用未在运行")}")
                         return@forEach
                     }
 
                     val killResult = runSu("kill -15 $processIds")
                     if (killResult.exitCode != 0) {
-                        add("${target.title}\uff1a${restartFailureReason(killResult)}")
+                        add("$title：${restartFailureReason(killResult)}")
                     }
                 }
             }
             if (failures.isEmpty()) {
-                showToast(context, "\u5df2\u91cd\u542f\u9009\u4e2d\u7684\u4f5c\u7528\u57df\u5e94\u7528")
+                showToast(context, tr("已重启选中的作用域应用", "已重启选中的作用域应用"))
             } else {
                 val restartedCount = targets.size - failures.size
                 val prefix = if (restartedCount > 0) {
-                    "\u5df2\u91cd\u542f $restartedCount \u4e2a\uff0c\u4ee5\u4e0b\u5931\u8d25\uff1a"
-                } else {
-                    "\u91cd\u542f\u5931\u8d25\uff1a"
-                }
-                showToast(context, "$prefix\n${failures.joinToString("\n")}")
+                    tr("已重启 %d 个应用，以下应用重启失败：", "已重启 %d 个应用，以下应用重启失败：").format(restartedCount) + "\n\n"
+                } else ""
+                showFailure(prefix + failures.joinToString("\n"), partial = restartedCount > 0)
             }
         }
     }
@@ -64,10 +90,10 @@ object SystemUiRestarter {
         val output = result.output.lowercase()
         return when {
             "permission denied" in output || "operation not permitted" in output ->
-                "\u6ca1\u6709\u7ed3\u675f\u8fdb\u7a0b\u7684\u6743\u9650"
-            "not found" in output -> "\u7ed3\u675f\u8fdb\u7a0b\u547d\u4ee4\u4e0d\u53ef\u7528"
-            result.errorMessage != null -> "\u6267\u884c\u547d\u4ee4\u5931\u8d25\uff1a${result.errorMessage}"
-            else -> "\u7ed3\u675f\u8fdb\u7a0b\u5931\u8d25\uff08\u9000\u51fa\u7801 ${result.exitCode}\uff09"
+                tr("没有结束进程的权限", "没有结束进程的权限")
+            "not found" in output -> tr("结束进程命令不可用", "结束进程命令不可用")
+            result.errorMessage != null -> tr("执行命令失败：%s", "执行命令失败：%s").format(result.errorMessage)
+            else -> tr("结束进程失败（退出码 %d）", "结束进程失败（退出码 %d）").format(result.exitCode)
         }
     }
 

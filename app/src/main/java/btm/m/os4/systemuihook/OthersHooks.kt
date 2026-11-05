@@ -58,6 +58,8 @@ internal class OthersHooks(
     private val contactsDialerHooks = ContactsDialerHooks(module, hookDeoptimized, logTag)
     private val portalHooks = PortalHooks(module, hookDeoptimized, logTag)
     private val sidebarHooks = SidebarHooks(module, hookDeoptimized, logTag)
+    private val sidebarAppearanceHooks = SidebarAppearanceHooks(module, hookDeoptimized, logTag)
+    private val sidebarIconCountHooks = SidebarIconCountHooks(module, hookDeoptimized, logTag)
     private val widgetGlassHooks = WidgetGlassHooks(module, hookDeoptimized, logTag)
     private val personalAssistantWallpaperHooks = PersonalAssistantWallpaperHooks(module, hookDeoptimized)
     private val videoToolboxHooks = VideoToolboxHooks(module)
@@ -73,6 +75,12 @@ internal class OthersHooks(
 
     fun installSidebarHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
         sidebarHooks.install(classLoader, preferences)
+
+    fun installSidebarAppearanceHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
+        sidebarAppearanceHooks.install(classLoader, preferences)
+
+    fun installSidebarIconCountHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
+        sidebarIconCountHooks.install(classLoader, preferences)
 
     fun installWidgetGlassHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
         widgetGlassHooks.install(classLoader, preferences)
