@@ -2174,9 +2174,11 @@ private fun BottomBar(
             SearchRoundButton(
                 backdrop = backdrop, size = buttonSize,
                 primary = docked, closeProgress = 0f, navigationStyle = navigationSettings.style,
+                motionAlpha = reveal, motionBlur = ((1f - reveal) * 6f).dp,
                 modifier = Modifier.offset(buttonLeft, buttonTop)
-                    .graphicsLayer { alpha = reveal; translationY = (1f - reveal) * 16.dp.toPx() }
-                    .blur(((1f - reveal) * 6f).dp)
+                    .graphicsLayer {
+                        translationY = (1f - reveal) * 16.dp.toPx()
+                    }
                     .onGloballyPositioned { onSearchPositioned(it.boundsInWindow()) },
                 enabled = tab == Tab.CATEGORY && reveal > .98f,
                 onClick = onSearch,

@@ -22,6 +22,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur as contentBlur
+import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.drawWithContent
@@ -243,10 +244,12 @@ internal fun HomeSearchOverlay(
         SearchRoundButton(
             backdrop = foregroundBackdrop, size = buttonSize, primary = primaryButton, navigationStyle = navigationStyle,
             closeProgress = searchPhase(progress, .15f, .85f),
+            motionAlpha = 1f - .25f * transitionBlur,
+            motionBlur = (transitionBlur * 4f).dp,
             modifier = Modifier.offset(
                 sourceLeft + (targetLeft - sourceLeft) * buttonMotion,
                 sourceTop + (targetTop - sourceTop) * buttonMotion,
-            ).graphicsLayer { alpha = 1f - .25f * transitionBlur }.contentBlur((transitionBlur * 4f).dp),
+            ),
             enabled = interactionEnabled && expanded, onClick = onDismiss,
         )
     }
@@ -266,6 +269,8 @@ internal fun SearchRoundButton(
     navigationStyle: String,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    motionAlpha: Float = 1f,
+    motionBlur: Dp = 0.dp,
     onClick: () -> Unit,
 ) {
     val material = rememberModuleNavigationMaterial(navigationStyle)
@@ -318,14 +323,27 @@ internal fun SearchRoundButton(
     ) else Modifier
     val iconColor = if (primary) MiuixTheme.colorScheme.onPrimary else MiuixTheme.colorScheme.onSurface
     val iconBlur = sin(PI.toFloat() * closeProgress).coerceAtLeast(0f) * 5f
-    Box(modifier.requiredSize(size).then(outerShadow).then(surface)
-        .clip(CircleShape).then(highlight.gestureModifier).then(highlight.modifier)
-        .clickable(enabled = enabled, interactionSource = interactions, indication = null, onClick = onClick),
-        contentAlignment = Alignment.Center) {
-        Icon(MiuixIcons.Regular.Search, if (closeProgress < .5f) tr("category_search_open", "搜索设置") else null,
-            Modifier.size(24.dp).graphicsLayer { alpha = 1f - closeProgress }.contentBlur(iconBlur.dp), tint = iconColor)
-        Icon(MiuixIcons.Regular.Close, if (closeProgress >= .5f) tr("category_search_close", "关闭搜索") else null,
-            Modifier.size(24.dp).graphicsLayer { alpha = closeProgress }.contentBlur(iconBlur.dp), tint = iconColor)
+    // Unbounded blur still records its input within the layer's rectangular bounds.
+    // Reserve space BEFORE that recording for Shadow.Default (24dp blur, 4dp offset)
+    // and the animated blur. Keep the measured anchor and interactive circle unchanged.
+    val shadowSpace = 64.dp
+    Box(modifier.requiredSize(size)) {
+        Box(
+            Modifier.matchParentSize().wrapContentSize(Alignment.Center, unbounded = true)
+                .requiredSize(size + shadowSpace * 2)
+                .graphicsLayer { alpha = motionAlpha }
+                .contentBlur(motionBlur, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                .padding(shadowSpace)
+                .then(outerShadow).then(surface)
+                .clip(CircleShape).then(highlight.gestureModifier).then(highlight.modifier)
+                .clickable(enabled = enabled, interactionSource = interactions, indication = null, onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(MiuixIcons.Regular.Search, if (closeProgress < .5f) tr("category_search_open", "搜索设置") else null,
+                Modifier.size(24.dp).graphicsLayer { alpha = 1f - closeProgress }.contentBlur(iconBlur.dp), tint = iconColor)
+            Icon(MiuixIcons.Regular.Close, if (closeProgress >= .5f) tr("category_search_close", "关闭搜索") else null,
+                Modifier.size(24.dp).graphicsLayer { alpha = closeProgress }.contentBlur(iconBlur.dp), tint = iconColor)
+        }
     }
 }
 
