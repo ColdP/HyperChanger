@@ -7455,14 +7455,9 @@ class HyperSystemUiModule : XposedModule() {
                     .invoke(container, blurRadius.coerceIn(0, MAX_SHORTCUT_BACKDROP_BLUR_RADIUS))
                 // NotificationUtil initializes background blur but zeroes the two
                 // glass samples. Supply the same native container radii as upstream.
-                val resources = view.resources
-                fun dimension(name: String): Int {
-                    val id = resources.getIdentifier(name, "dimen", SYSTEM_UI)
-                    check(id != 0) { "Missing SystemUI dimension: $name" }
-                    return resources.getDimensionPixelSize(id)
-                }
+                val (smallRadius, bigRadius) = lockscreenGlassSampleRadii(view)
                 viewClass.getMethod("setMiGlassBlurRadius", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
-                    .invoke(container, dimension("notification_glass_small_blur_max_radius"), dimension("notification_glass_big_blur_max_radius"))
+                    .invoke(container, smallRadius, bigRadius)
                 viewClass.getMethod("setMiBackgroundBlurScaleRatio", Float::class.javaPrimitiveType).invoke(container, 0f)
                 runCatching {
                     Class.forName("miuix.core.util.MiuiBlurUtils", false, loader)
@@ -7487,6 +7482,16 @@ class HyperSystemUiModule : XposedModule() {
                 if (showHighlight) viewClass.getMethod("setMiBloomStroke", FloatArray::class.java)
                     .invoke(view, SHORTCUT_BLOOM_STROKE_PARAMETERS)
                 return
+            }
+            // A failed provider must not be treated as initialized by the soft-glass
+            // stage. In particular, plugin Resources may lack SystemUI dimensions.
+            if (container != null) {
+                lockscreenBackdropContainers.remove(container)
+                runCatching {
+                    viewClass.getMethod("setPassWindowBlurEnabled", Boolean::class.javaPrimitiveType).invoke(container, false)
+                    viewClass.getMethod("setMiBackgroundBlurMode", Int::class.javaPrimitiveType).invoke(container, 0)
+                    viewClass.getMethod("setMiGlassBlurRadius", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType).invoke(container, 0, 0)
+                }
             }
         }
         viewClass.getMethod("clearMiBackgroundBlendColor").invoke(view)
@@ -7518,9 +7523,25 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
+    private fun lockscreenGlassSampleRadii(view: View): Pair<Int, Int> {
+        // Keyguard shortcuts can have plugin Resources even inside SystemUI. Resolve
+        // the dimensions from their owning package, just like notification recipes.
+        fun dimension(name: String): Int {
+            val local = view.resources
+            val localId = local.getIdentifier(name, "dimen", SYSTEM_UI)
+            val resources = if (localId != 0) local else
+                view.context.createPackageContext(SYSTEM_UI, 0).resources
+            val id = if (localId != 0) localId else resources.getIdentifier(name, "dimen", SYSTEM_UI)
+            check(id != 0) { "Missing SystemUI dimension: $name" }
+            return resources.getDimensionPixelSize(id)
+        }
+        return dimension("notification_glass_small_blur_max_radius") to
+            dimension("notification_glass_big_blur_max_radius")
+    }
+
     private fun setOwnedBackdropScale(view: View, scale: Float) {
         val target = if (view.tag == SHORTCUT_GLASS_TAG || view.tag == LOCKSCREEN_CAPSULE_MATERIAL_TAG) {
-            view.parent as? View ?: view
+            (view.parent as? View)?.takeIf { lockscreenBackdropContainers.contains(it) } ?: view
         } else view
         // This API is an extra background zoom amount, not a texture resolution
         // ratio. Native notification/capsule glass leaves it at zero (not 1.0).
@@ -7540,14 +7561,9 @@ class HyperSystemUiModule : XposedModule() {
         )
         val backdrop = view.parent as? View
         if (backdrop != null && lockscreenBackdropContainers.contains(backdrop)) {
-            val resources = view.resources
-            fun radius(name: String): Int {
-                val id = resources.getIdentifier(name, "dimen", SYSTEM_UI)
-                check(id != 0) { "Missing SystemUI dimension: $name" }
-                return softGlassBlur(resources.getDimensionPixelSize(id), glass.refractionBlur)
-            }
+            val (smallRadius, bigRadius) = lockscreenGlassSampleRadii(view)
             View::class.java.getMethod("setMiGlassBlurRadius", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
-                .invoke(backdrop, radius("notification_glass_small_blur_max_radius"), radius("notification_glass_big_blur_max_radius"))
+                .invoke(backdrop, softGlassBlur(smallRadius, glass.refractionBlur), softGlassBlur(bigRadius, glass.refractionBlur))
         }
         // Scale the native zoom amount, rather than using a full-unit texture scale.
         setOwnedBackdropScale(view, softGlassScale(0.075f, glass.backgroundScale))

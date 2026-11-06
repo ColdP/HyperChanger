@@ -44,7 +44,7 @@ public final class IosShadeWallpaperReveal {
         else if (progress > previousProgress) exiting = false;
         previousProgress = progress;
         boolean full = showWallpaper && progress >= 1f && switchFraction >= 1f && !switching;
-        boolean start = state.update(enabled, progress, full);
+        boolean start = state.update(enabled, progress, full, showWallpaper && switching);
         if (!enabled || !start || animatorTarget != state.targetAlpha) cancel();
         if (!enabled) {
             wallpaper.setAlpha(1f);

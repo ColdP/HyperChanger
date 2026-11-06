@@ -298,9 +298,11 @@ public final class ShadeLayer {
                     landscape, sRoot, sFrame.getTranslationY(), cornerRadius());
         }
         float density = sFrame.getResources().getDisplayMetrics().density;
+        // Horizontal switching changes page ownership, not vertical expansion.
+        // Keep the wallpaper at its expanded focus while the pages slide across.
         int blur = landscape
-                ? Math.round((22f + 14f * (1f - visual)) * density)
-                : Math.round(28f * density * (1f - visual));
+                ? Math.round((22f + 14f * (1f - IOS.progress)) * density)
+                : Math.round(28f * density * (1f - IOS.progress));
         blur = (blur + 1) / 2 * 2;
         if (!staged && sWp != null && sLastWpBlur != blur) {
             sWp.setRenderEffect(btm.m.os4.systemuihook.newnotificationcenter.IosShadeBlurEffects.blur(blur));
