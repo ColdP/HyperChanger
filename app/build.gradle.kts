@@ -26,7 +26,7 @@ android {
         minSdk = 35
         targetSdk = 37
         versionCode = 1020202
-        versionName = "1.2.2 RC2"
+        versionName = "1.2.2"
         buildConfigField("String", "BUILD_DATE", "\"$buildDate\"")
         ndk { abiFilters += "arm64-v8a" }
 
