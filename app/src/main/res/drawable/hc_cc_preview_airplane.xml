@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Extracted from .reverse-tmp/cc-systemui-res/resources/res/drawable/_ic_signal_airplane_disable__0_res_0x7f08081c.xml; native geometry preserved. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:name="vector" android:height="32dp" android:width="32dp" android:viewportWidth="64" android:viewportHeight="64">
+    <path android:name="path" android:fillColor="#FFFFFFFF" android:pathData="M 53.3 38.7 L 36 31.3 L 36 48.9 L 41.5 53.6 C 41.9 53.9 42.1 54.5 41.8 55 C 41.5 55.6 40.8 56.1 40 56.1 L 24 56.1 C 23.2 56.1 22.5 55.7 22.2 55 C 22 54.5 22.1 54 22.5 53.6 L 28 48.9 L 28 31.3 L 10.7 38.7 C 9.7 39.1 8.4 38.7 8.1 37.6 C 8 37.4 8 36 8 36 C 8 35.2 8.8 34.9 10 34 L 28 22 L 28 10.2 C 28 8.1 29.5 6.2 31.6 6 C 34 5.8 36 7.7 36 10 L 36 22 L 54 34 C 55.2 34.9 56 35.2 56 36 C 56 36 56 37.4 55.9 37.6 C 55.5 38.7 54.3 39.1 53.3 38.7 Z" android:strokeWidth="1" />
+</vector>

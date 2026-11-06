@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Extracted from .reverse-tmp/cc-systemui-res/resources/res/drawable/_ic_qs_vibrate_off__0_res_0x7f080804.xml; native geometry preserved. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:name="vector" android:height="32dp" android:width="32dp" android:viewportWidth="64" android:viewportHeight="64">
+    <path android:name="path_5" android:fillColor="#FFFFFFFF" android:pathData="M 57 42 C 55.9 42 55 41.1 55 40 L 55 24 C 55 22.9 55.9 22 57 22 C 58.1 22 59 22.9 59 24 L 59 40 C 59 41.1 58.1 42 57 42 Z" android:strokeWidth="1" />
+    <path android:name="path_2" android:fillColor="#FFFFFFFF" android:pathData="M 7 42 C 5.9 42 5 41.1 5 40 L 5 24 C 5 22.9 5.9 22 7 22 C 8.1 22 9 22.9 9 24 L 9 40 C 9 41.1 8.1 42 7 42 Z" android:strokeWidth="1" />
+    <group android:name="center_1">
+        <path android:name="center" android:fillColor="#FFFFFFFF" android:pathData="M 42 8 L 22 8 C 20.3 8 19 9.3 19 11 L 19 53 C 19 54.7 20.3 56 22 56 L 42 56 C 43.7 56 45 54.7 45 53 L 45 11 C 45 9.3 43.7 8 42 8 Z M 41 51 C 41 51.6 40.6 52 40 52 L 24 52 C 23.4 52 23 51.6 23 51 L 23 13 C 23 12.4 23.4 12 24 12 L 40 12 C 40.6 12 41 12.4 41 13 L 41 51 Z" android:strokeWidth="1" />
+    </group>
+    <group android:name="left_1">
+        <path android:name="left" android:fillColor="#FFFFFFFF" android:pathData="M 14 47 C 12.9 47 12 46.1 12 45 L 12 19 C 12 17.9 12.9 17 14 17 C 15.1 17 16 17.9 16 19 L 16 45 C 16 46.1 15.1 47 14 47 Z" android:strokeWidth="1" />
+    </group>
+    <group android:name="right_1">
+        <path android:name="right" android:fillColor="#FFFFFFFF" android:pathData="M 50 47 C 48.9 47 48 46.1 48 45 L 48 19 C 48 17.9 48.9 17 50 17 C 51.1 17 52 17.9 52 19 L 52 45 C 52 46.1 51.1 47 50 47 Z" android:strokeWidth="1" />
+    </group>
+</vector>

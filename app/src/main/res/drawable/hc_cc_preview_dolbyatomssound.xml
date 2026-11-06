@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Extracted from .reverse-tmp/MiuiSystemUIPlugin-18.3.2.22.0/resources/res/drawable/ic_qs_dolby_atoms_disable.xml; native geometry preserved. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:height="32dp" android:width="32dp" android:viewportWidth="35" android:viewportHeight="35">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M6.919,8.909H4.211V27.374H6.919C11.975,27.374 16.096,23.228 16.096,18.142C16.096,13.056 11.975,8.909 6.919,8.909Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M27.611,8.909H30.319V27.374H27.611C22.555,27.374 18.434,23.228 18.434,18.142C18.434,13.056 22.555,8.909 27.611,8.909Z" />
+</vector>

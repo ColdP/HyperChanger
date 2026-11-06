@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Extracted from .reverse-tmp/cc-systemui-res/resources/res/drawable/_ic_qs_dnd_off__0_res_0x7f0807d7.xml; native geometry preserved. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:name="vector" android:height="32dp" android:width="32dp" android:viewportWidth="64" android:viewportHeight="64">
+    <group android:name="group" android:pivotX="35" android:pivotY="32">
+        <path android:name="path" android:fillColor="#FFFFFFFF" android:pathData="M 34 22.9 C 34.9 31.7 41.4 38.9 50.1 40.6 C 52.9 41.1 55.7 41.1 58.4 40.4 C 59.1 40.2 59.7 40.7 59.9 41.3 C 60 41.5 59.9 41.8 59.8 42 C 59.5 42.8 58.7 44.4 58.7 44.4 C 56.8 48.1 54 51.3 50.6 53.8 C 50.5 53.8 50.5 53.9 50.4 53.9 C 50 54.2 49.6 54.5 49.2 54.7 C 49 54.8 48.7 55 48.5 55.1 C 48.1 55.3 47.7 55.6 47.3 55.8 C 46.7 56.1 46.2 56.4 45.6 56.6 C 45.3 56.7 45 56.8 44.7 57 C 44.2 57.2 43.8 57.4 43.3 57.5 C 43.1 57.6 42.8 57.7 42.5 57.7 C 41.8 57.9 41.1 58.1 40.3 58.3 C 40.1 58.3 40 58.4 39.8 58.4 C 39.4 58.5 39 58.6 38.6 58.6 C 38.1 58.6 37.7 58.7 37.2 58.8 C 36.6 58.9 35.8 59 35 59 C 20 59 8 46.9 8 32 C 8 17.1 20 5 35 5 C 36.2 5 37.4 5.1 38.6 5.3 C 39.3 5.4 39.8 6 39.7 6.7 C 39.7 7 39.6 7.2 39.4 7.4 C 35.4 11.6 33.5 17.2 34 22.9 Z M 12.1 33.9 C 13.1 46.5 24.2 55.9 36.8 54.9 C 43.4 54.4 49.4 51 53.4 45.7 C 53.6 45.5 53.5 45.2 53.3 45 L 53 45 C 39.8 44.5 29.5 33.3 30 20 C 30.1 16.5 31.1 13 32.7 9.9 C 32.8 9.7 32.7 9.4 32.5 9.3 C 32.4 9.3 32.3 9.2 32.2 9.2 C 19.9 10.7 11 21.6 12.1 33.9 Z" android:strokeWidth="1" />
+    </group>
+</vector>

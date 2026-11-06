@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Extracted from .reverse-tmp/cc-systemui-res/resources/res/drawable/ic_qs_night_mode_off.xml; native geometry preserved. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:height="32dp" android:width="32dp" android:viewportWidth="64" android:viewportHeight="64">
+    <group android:translateX="29" android:translateY="1">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M2 0H2A2 2 0 0 1 4 2V7A2 2 0 0 1 2 9H2A2 2 0 0 1 0 7V2A2 2 0 0 1 2 0Z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M2 53H2A2 2 0 0 1 4 55V60A2 2 0 0 1 2 62H2A2 2 0 0 1 0 60V55A2 2 0 0 1 2 53Z" />
+    </group>
+    <group android:rotation="-90" android:translateY="34">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M2 0H2A2 2 0 0 1 4 2V7A2 2 0 0 1 2 9H2A2 2 0 0 1 0 7V2A2 2 0 0 1 2 0Z" />
+    </group>
+    <group android:rotation="-45" android:translateX="7.6655" android:translateY="11.4939">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M2 0H2A2 2 0 0 1 4 2V7A2 2 0 0 1 2 9H2A2 2 0 0 1 0 7V2A2 2 0 0 1 2 0Z" />
+    </group>
+    <group android:rotation="45" android:translateX="51.5061" android:translateY="8.6655">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M2 53H2A2 2 0 0 1 4 55V60A2 2 0 0 1 2 62H2A2 2 0 0 1 0 60V55A2 2 0 0 1 2 53Z" />
+    </group>
+    <path android:pathData="M52.4510247 15.6714139C49.7357238 17.8714447 48 21.2330223 48 25C48 31.627417 53.372583 37 60 37C60.4415939 37 60.8776168 36.9761471 61.3068503 36.9296595C58.804094 41.7258192 53.78441 45 48 45C39.7157288 45 33 38.2842712 33 30C33 21.7157288 39.7157288 15 48 15C49.5498045 15 51.044713 15.2350382 52.4510247 15.6714139Z" android:strokeColor="#FFFFFFFF" android:strokeWidth="4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <group android:scaleX="-1" android:scaleY="-1" android:rotation="0" android:translateX="50.1467" android:translateY="64">
+        <path android:pathData="M19.1466903 49C28.5355311 49 36.1466903 41.3888407 36.1466903 32C36.1466903 22.6111593 28.5355311 15 19.1466903 15C17.3526533 15 15.6235235 15.2779007 14 15.793003" android:strokeColor="#FFFFFFFF" android:strokeWidth="4" android:strokeLineCap="round" />
+    </group>
+</vector>

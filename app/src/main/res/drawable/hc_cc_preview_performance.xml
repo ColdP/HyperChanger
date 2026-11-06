@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Extracted from .reverse-tmp/SecurityCenter-13.6.3-260924.0.1/resources/res/drawable/ic_performance_mode_tile.xml; native geometry preserved. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:height="32dp" android:width="32dp" android:viewportWidth="84" android:viewportHeight="84">
+    <path android:fillColor="#ffffff" android:pathData="M43.5326,9.5851C42.588,9.0237 41.412,9.0237 40.4674,9.5851L18.9783,22.355C18.3718,22.7154 18,23.3688 18,24.0743V35.4197C18,36.9705 19.6885,37.9313 21.0217,37.1391L40.9783,25.2798C41.608,24.9056 42.392,24.9056 43.0217,25.2798L62.9783,37.1391C64.3115,37.9313 66,36.9705 66,35.4197V24.0743C66,23.3688 65.6283,22.7154 65.0217,22.355L43.5326,9.5851Z" android:fillType="evenOdd" />
+    <path android:fillColor="#ffffff" android:pathData="M43.5326,39.5841C42.588,39.0228 41.412,39.0228 40.4674,39.5841L18.9783,52.354C18.3718,52.7145 18,53.3678 18,54.0734V65.4197C18,66.9705 19.6885,67.9313 21.0217,67.1391L40.9783,55.2798C41.608,54.9056 42.392,54.9056 43.0217,55.2798L62.9783,67.1391C64.3115,67.9313 66,66.9705 66,65.4197V54.0734C66,53.3678 65.6283,52.7145 65.0217,52.354L43.5326,39.5841Z" android:fillType="evenOdd" />
+</vector>

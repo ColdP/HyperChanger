@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Extracted from .reverse-tmp/MiuiSystemUIPlugin-18.3.2.22.0/resources/res/drawable/miplay_view_play.xml; native geometry preserved. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:height="32dp" android:width="32dp" android:viewportWidth="76" android:viewportHeight="76">
+    <path android:fillColor="#ffffff" android:pathData="M60.2553,33.376C63.7834,35.4488 63.7834,40.5503 60.2553,42.6231L24.1677,63.8251C20.5929,65.9254 16.0889,63.3477 16.0889,59.2016L16.0889,16.7975C16.0889,12.6514 20.5929,10.0737 24.1677,12.174L60.2553,33.376Z" android:fillType="evenOdd" />
+</vector>

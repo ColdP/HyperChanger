@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Extracted from .reverse-tmp/cc-systemui-res/resources/res/drawable/_ic_qs_data_off__0_res_0x7f0807c7.xml; native geometry preserved. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:name="vector" android:height="32dp" android:width="32dp" android:viewportWidth="64" android:viewportHeight="64">
+    <group android:name="group_right">
+        <path android:name="right_bar" android:fillColor="#FFFFFFFF" android:pathData="M 41.3 55 C 42.3 54.8 43 53.9 43 52.9 L 43 11 C 43 9.8 41.9 8.8 40.7 9 C 39.7 9.2 39 10.1 39 11.1 L 39 53 C 39 54.2 40.1 55.2 41.3 55 Z" android:strokeWidth="1" />
+        <group android:name="group_right_arrow1" android:pivotX="41" android:pivotY="8.8">
+            <path android:name="right_arrow1" android:fillColor="#FFFFFFFF" android:pathData="M 43 19.8 C 43 19.6 43.2 19.5 43.4 19.6 L 48.6 21.8 C 48.9 21.9 49.3 22 49.6 21.9 C 50.2 21.7 50.6 21.3 50.8 20.8 C 51 20.4 50.9 19.9 50.6 19.6 L 42.5 9.7 C 42.1 9.3 41.6 9 41 9 C 39.9 9 39 9.9 39 11 L 39 19.8" android:strokeWidth="1" />
+        </group>
+    </group>
+    <group android:name="group_left">
+        <group android:name="group_left_arrow1" android:pivotX="23" android:pivotY="55.2" android:scaleX="0.9899" android:scaleY="0.9899">
+            <path android:name="left_arrow1" android:fillColor="#FFFFFFFF" android:pathData="M 21 44.2 C 21 44.4 20.8 44.5 20.6 44.4 L 15.4 42.2 C 15.1 42.1 14.7 42 14.4 42.1 C 13.8 42.3 13.4 42.7 13.2 43.2 C 13 43.6 13.1 44.1 13.4 44.4 L 21.5 54.3 C 21.9 54.7 22.4 55 23 55 C 24.1 55 25 54.1 25 53 L 25 44.2" android:strokeWidth="1" />
+        </group>
+        <path android:name="left_bar" android:fillColor="#FFFFFFFF" android:pathData="M 22.7 9.026 C 21.7 9.226 21 10.126 21 11.126 L 21 53.026 C 21 54.226 22.1 55.226 23.3 55.026 C 24.3 54.826 25 53.926 25 52.926 L 25 11.026 C 25 9.826 23.9 8.826 22.7 9.026 Z" android:strokeWidth="1" />
+    </group>
+</vector>

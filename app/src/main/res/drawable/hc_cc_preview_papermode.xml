@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Extracted from .reverse-tmp/cc-systemui-res/resources/res/drawable/_ic_qs_paper_mode_off__0_res_0x7f0807f7.xml; native geometry preserved. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:name="vector" android:height="32dp" android:width="32dp" android:viewportWidth="64" android:viewportHeight="64">
+    <path android:name="center" android:fillColor="#FFFFFFFF" android:pathData="M 32 20 C 25.4 20 20 25.4 20 32 C 20 38.6 25.4 44 32 44 C 38.6 44 44 38.6 44 32 C 44 25.4 38.6 20 32 20 Z M 32 40 C 27.6 40 24 36.4 24 32 C 24 27.6 27.6 24 32 24 C 36.4 24 40 27.6 40 32 C 40 36.4 36.4 40 32 40 Z" android:strokeWidth="1" />
+    <group android:name="group_edge" android:pivotX="32" android:pivotY="32">
+        <path android:name="edge" android:pathData="M 32 11.3 C 18.4 11.3 7 20.4 3.8 32.1 C 7 43.6 18.4 52.7 32 52.7 C 45.6 52.7 57 43.6 60.2 32 C 57 20.4 45.6 11.3 32 11.3 Z" android:strokeColor="#FFFFFFFF" android:strokeWidth="4" android:strokeLineCap="round" android:strokeLineJoin="round" android:strokeMiterLimit="10" />
+    </group>
+</vector>

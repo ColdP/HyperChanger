@@ -29,7 +29,7 @@ import kotlin.math.roundToInt
 /**
  * HyperiOS-style real 2D layoutChunk for the upper controls and optional small-tile backfill.
  * All RecyclerView objects belong to the plugin loader; only Android View crosses loaders.
- * No record reordering, replacement views, frame translations or secondary router hooks.
+ * Uses native card factories/owners; no replacement views or secondary router hooks.
  */
 internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
     private val scheduled = Collections.newSetFromMap(WeakHashMap<Class<*>, Boolean>())
@@ -54,6 +54,9 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
     private val handler by lazy { Handler(Looper.getMainLooper()) }
     private var preferenceListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
     @Volatile private var settings = CcTileLayoutSettings()
+    private var selectionPreferences: SharedPreferences? = null
+    private var selectedSpecs: Map<String, String> = emptyMap()
+    private val cardSelections = WeakHashMap<Any, List<String>>()
 
     fun install(loader: ClassLoader, p: SharedPreferences) {
         if (!p.getBoolean(KEY_CC_TILE_LAYOUT_ENABLED, false)) return
@@ -74,6 +77,8 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
     private fun installAdapter(clazz: Class<*>, p: SharedPreferences) {
         if (!installed.add(clazz)) return
         settings = readCcTileLayoutSettings(p)
+        selectionPreferences = p
+        installTileSelection(clazz.classLoader!!, p)
         installSmallTileTypes(clazz)
         // This runs on the main handler, outside the ClassLoader discovery stack.
         listOf(MEDIA_HOLDER, MEDIA_ANIMATOR).forEach { name ->
@@ -83,13 +88,15 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         }
         if (preferenceListener == null) {
             preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-                if (key == null || key == KEY_CC_TILE_LAYOUT || key == KEY_CC_TILE_LAYOUT_ENABLED || key == KEY_CC_MEDIA_SOURCE_ICON_HIDDEN || key == KEY_CC_SMALL_TILE_AUTO_FILL) {
+                if (key == null || key in setOf(KEY_CC_TILE_LAYOUT, KEY_CC_TILE_LAYOUT_ENABLED, KEY_CC_MEDIA_SOURCE_ICON_HIDDEN,
+                        KEY_CC_SMALL_TILE_AUTO_FILL, KEY_CONTROL_CENTER_5G_TILE_MODE, KEY_CONTROL_CENTER_GMS_TILE_ENABLED)) {
                     handler.post {
                         settings = readCcTileLayoutSettings(p)
                         if (!settings.enabled) adapted.entries.toList().filter { it.value.id == "media" }
                             .forEach { clearMedia(it.key) }
                         panels.entries.toList().forEach { (adapter, reference) ->
                             reference.get()?.let { rv ->
+                                refreshTileSelection(adapter)
                                 // Drop stale saved anchors after dimensions/order change; OEM lays out from top.
                                 if (key == null || key == KEY_CC_TILE_LAYOUT || key == KEY_CC_TILE_LAYOUT_ENABLED || key == KEY_CC_SMALL_TILE_AUTO_FILL) {
                                     call(adapter, "notifyDataSetChanged")
@@ -142,6 +149,59 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         panels[adapter] = WeakReference(rv)
         installManager(manager.javaClass)
         installOrientationHelper(manager)
+        rv.post { if (panels[adapter]?.get() === rv) refreshTileSelection(adapter) }
+    }
+
+    /** OEM creates and owns records, callbacks and tile lifecycles for the selected specs. */
+    private fun installTileSelection(loader: ClassLoader, p: SharedPreferences) {
+        val controller = loader.loadClass("miui.systemui.controlcenter.qs.QSController")
+        controller.getDeclaredMethod("getCardStyleTileSpecs").let { m ->
+            module.hook(m).setExceptionMode(ExceptionMode.PROTECTIVE).setId("cc-tiles:selected-specs").intercept { chain ->
+                val original = chain.proceed()
+                val context = call(chain.thisObject, "getContext") as? Context
+                if (!settings.enabled || context == null) original else {
+                    selectedSpecs = CcTileCatalog.specs(context, p, settings.tiles)
+                    selectedSpecs.values.toList()
+                }
+            }
+        }
+        loader.loadClass("miui.systemui.controlcenter.panel.main.media.MediaPlayerController")
+            .getDeclaredMethod("getListItems").let { m ->
+                module.hook(m).setExceptionMode(ExceptionMode.PROTECTIVE).setId("cc-tiles:optional-media").intercept { chain ->
+                    val original = chain.proceed()
+                    val owner = chain.thisObject
+                    val normal = call(call(field(owner, "mainPanelModeController"), "get"), "getMode")?.toString() == "NORMAL"
+                    val vertical = call(call(field(owner, "mainPanelStyleController"), "get"), "getStyle")?.toString() == "VERTICAL"
+                    if (settings.enabled && normal && vertical && settings.tiles.none { it.id == "media" }) emptyList<Any>() else original
+                }
+            }
+    }
+
+    private fun refreshTileSelection(adapter: Any) {
+        val p = selectionPreferences ?: return
+        val contents = field(adapter, "contentMap") as? Map<*, *> ?: return
+        val cards = contents.keys.firstOrNull { it?.javaClass?.simpleName == "QSCardsController" } ?: return
+        val qs = call(field(cards, "qsController"), "get") ?: return
+        val context = call(qs, "getContext") as? Context ?: return
+        runCatching {
+            selectedSpecs = CcTileCatalog.specs(context, p, settings.tiles)
+            val wanted = if (settings.enabled) selectedSpecs.values.toList()
+                else (call(qs, "getCardStyleTileSpecs") as? List<*>)?.filterIsInstance<String>().orEmpty()
+            // Include media membership: its native content output must also be redistributed.
+            val signature = wanted + if (settings.tiles.any { it.id == "media" } || !settings.enabled) listOf("@media") else emptyList()
+            if (cardSelections[cards] == signature) return
+            call(qs, "updateExcludeTileSpecs")
+            // OEM clearCardTiles removes callbacks but does not release listening tokens.
+            // Release outgoing records as onStop does; native holders start the new records.
+            (field(cards, "cardRecords") as? Iterable<*>)?.toList()?.forEach { record ->
+                call(record, "setListening", false)
+                call(record, "stopMarquee")
+            }
+            call(cards, "createCardTiles")
+            call(call(field(cards, "qsListController"), "get"), "onTilesChanged")
+            call(cards, "distributeTiles")
+            cardSelections[cards] = signature
+        }.onFailure { HookModuleLogger.log(module, ModuleLog.WARN, "HyperChanger", "Could not refresh selected control center tiles", it) }
     }
 
     /** Use the plugin's ordinary tile factory/holder, just as HyperiOS does for small cards. */
@@ -165,7 +225,7 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
                 val manager = field(adapter, "layoutManager")
                 val id = if (adapter != null && manager != null) block(adapter, manager)?.ids?.get(chain.getArg(0) as Int) else null
                 val tile = settings.tiles.firstOrNull { it.id == id }
-                if ((id == "wlan" || id == "data") && tile?.w == 1 && tile.h == 1) 8453 else original
+                if (id != null && id != "media" && tile != null && !tile.slider && tile.w == 1 && tile.h == 1) 8453 else original
             }
         }
     }
@@ -388,7 +448,7 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         content.forEach { (owner, raw) ->
             (raw as? List<*>)?.forEach { item ->
                 val id = when (owner?.javaClass?.simpleName) {
-                    "QSCardsController" -> when (call(item, "getSpec")) { "wifi" -> "wlan"; "cell" -> "data"; else -> null }
+                    "QSCardsController" -> selectedSpecs.entries.firstOrNull { it.value == call(item, "getSpec") }?.key
                     "MediaPlayerController" -> "media"
                     "BrightnessSliderController" -> "brightness"
                     "VolumeSliderController" -> "volume"
@@ -399,9 +459,10 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         }
         val ids = linkedMapOf<Int, String>()
         all.forEach { (position, id, _) -> if (id != null) ids[position] = id }
-        if (ids.size != 5 || ids.values.toSet() != CcTileLayouts.initial.map { it.id }.toSet()) return null
+        if (ids.values.toSet().size != ids.size || "brightness" !in ids.values || "volume" !in ids.values) return null
+        if (ids.values.any { id -> settings.tiles.none { it.id == id } }) return null
         val start = ids.keys.min(); val end = ids.keys.max()
-        if (end - start != 4) return null
+        if (end - start + 1 != ids.size) return null
         val tiles = linkedMapOf<Int, CcTile>()
         ids.forEach { (position, id) -> tiles[position] = settings.tiles.first { it.id == id } }
         val following = if (settings.smallTileAutoFill) all.filter { it.first > end }.map { (position, _, item) ->

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Extracted from .reverse-tmp/MiuiSystemUIPlugin-18.3.2.22.0/resources/res/drawable/ic_qs_aisubtitles.xml; native geometry preserved. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:height="32dp" android:width="32dp" android:viewportWidth="30" android:viewportHeight="30">
+    <path android:fillColor="#00000000" android:pathData="M6,6L24,6A2,2 0,0 1,26 8L26,22A2,2 0,0 1,24 24L6,24A2,2 0,0 1,4 22L4,8A2,2 0,0 1,6 6z" android:strokeColor="#ffffff" android:strokeWidth="2.2" />
+    <path android:fillColor="#00000000" android:pathData="M10,12.5H20" android:strokeColor="#ffffff" android:strokeWidth="2.2" android:strokeLineCap="round" />
+    <path android:fillColor="#00000000" android:pathData="M10,17.5H15" android:strokeColor="#ffffff" android:strokeWidth="2.2" android:strokeLineCap="round" />
+</vector>
