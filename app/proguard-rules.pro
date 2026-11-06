@@ -12,3 +12,6 @@
 # SystemUI gesture bridge. Keep the implementation members intact in release
 # builds so R8 cannot remove or rename callback helpers used by the runtime.
 -keep class btm.m.os4.systemuihook.hypermusiccover.Main { *; }
+
+# Root app_process starts this read-only preview helper by its binary name.
+-keep class btm.m.os4.systemuihook.CcPreviewMediaRoot { *; }

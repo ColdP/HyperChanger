@@ -21,6 +21,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.preference.ArrowPreference
@@ -42,6 +47,27 @@ internal fun ControlCenterTileLayoutPage(back: () -> Unit) = AppPage(
     val local = remember(context) { context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE) }
     var available by remember { mutableStateOf(CcTileCatalog.available(local).map { it.id }) }
     val serviceIcons = remember(context) { CcTileCatalog.previewIcons(context) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var previewMedia by remember { mutableStateOf<CcPreviewMedia?>(null) }
+    LaunchedEffect(context, lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            try {
+                while (true) {
+                    try {
+                        previewMedia = CcPreviewMediaReader.read(context)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        previewMedia = null
+                        break
+                    }
+                    delay(5000)
+                }
+            } finally {
+                previewMedia = null
+            }
+        }
+    }
     DisposableEffect(local) {
         val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key == null || key == KEY_CONTROL_CENTER_5G_TILE_MODE || key == KEY_CONTROL_CENTER_GMS_TILE_ENABLED)
@@ -93,6 +119,7 @@ internal fun ControlCenterTileLayoutPage(back: () -> Unit) = AppPage(
                 modifier = Modifier.fillMaxWidth().wrapContentHeight(),
                 update = { editor ->
                     editor.setColors(editorColors)
+                    editor.setMedia(previewMedia)
                     editor.onAutoScroll = { listState.dispatchRawDelta(it) }
                     editor.onCommit = { tiles, sizes ->
                         settings = settings.copy(tiles = tiles, rememberedSizes = sizes)
@@ -130,13 +157,14 @@ internal data class CcEditorColors(
     val guide: Int, val drop: Int, val handle: Int, val badge: Int, val badgeText: Int, val card: Int,
 )
 
-/** Offline native version of edit-control-center.html; no WebView, network or system editing. */
+/** Native layout editor; media preview reads a snapshot without editing the system. */
 internal class CcLayoutEditorView(context: Context) : View(context) {
     var onCommit: (List<CcTile>, Map<String, Pair<Int, Int>>) -> Unit = { _, _ -> }
     var onAutoScroll: (Float) -> Float = { 0f }
     private var available = emptyList<String>()
     private var sizes = emptyMap<String, Pair<Int, Int>>()
     private var icons = emptyMap<String, Drawable?>()
+    private var media: CcPreviewMedia? = null
     private var baseSizes = sizes
     private var baseAvailable = available
     private var sourceLower = false
@@ -234,8 +262,11 @@ internal class CcLayoutEditorView(context: Context) : View(context) {
         }
         setMeasuredDimension(newWidth, resolveSize((upperHeight + gap + lowerHeight).roundToInt(), heightMeasureSpec))
     }
-    private fun radius(r: RectF, slider: Boolean = false) = (if (slider) 10.5f * density else tileRadius)
+    private fun radius(r: RectF) = tileRadius
         .coerceAtMost(minOf(r.width(), r.height()) / 2)
+    fun setMedia(value: CcPreviewMedia?) {
+        if (media != value) { media = value; invalidate() }
+    }
     fun setColors(value: CcEditorColors) {
         if (colors != value) { colors = value; invalidate() }
     }
@@ -325,7 +356,7 @@ internal class CcLayoutEditorView(context: Context) : View(context) {
     }
     private fun drawTile(c: Canvas, t: CcTile, r: RectF) {
         val palette = colors ?: return
-        val radius = radius(r, t.slider)
+        val radius = radius(r)
         round(c, r, radius, if (active?.id == t.id && (dragging || resizing)) palette.activeTile else palette.tile)
         c.save(); c.clipPath(Path().apply { addRoundRect(r, radius, radius, Path.Direction.CW) })
         val scale = minOf(1f, cell / (88f * density))
@@ -338,7 +369,30 @@ internal class CcLayoutEditorView(context: Context) : View(context) {
             fun cover(x: Float, y: Float, size: Float) {
                 // Cover uses a fixed 10dp radius; a 6.5dp inset aligns its corner center
                 // with the enclosing 16.5dp tile. No module radius preference is read.
-                block(x, y, size, size, minOf(10f * density, size / 2))
+                if (size <= 0f) return
+                val art = media?.artwork
+                val corner = minOf(10f * density, size / 2)
+                if (art == null) block(x, y, size, size, corner)
+                else {
+                    val target = RectF(x, y, x + size, y + size)
+                    val side = minOf(art.width, art.height)
+                    val left = (art.width - side) / 2; val top = (art.height - side) / 2
+                    c.save()
+                    c.clipPath(Path().apply { addRoundRect(target, corner, corner, Path.Direction.CW) })
+                    paint.style = Paint.Style.FILL; paint.color = Color.WHITE; paint.isFilterBitmap = true
+                    c.drawBitmap(art, Rect(left, top, left + side, top + side), target, paint)
+                    c.restore()
+                }
+            }
+            fun label(value: String?, x: Float, y: Float, width: Float, height: Float,
+                      placeholderWidth: Float, bold: Boolean) {
+                if (value == null) { block(x, y, placeholderWidth, height, height / 2); return }
+                paint.style = Paint.Style.FILL; paint.color = if (bold) palette.foreground else palette.media
+                paint.typeface = Typeface.create("sans-serif", if (bold) Typeface.BOLD else Typeface.NORMAL)
+                paint.textAlign = Paint.Align.LEFT; paint.textSize = height
+                val text = android.text.TextUtils.ellipsize(value.replace('\n', ' ').replace('\r', ' '),
+                    android.text.TextPaint(paint), width.coerceAtLeast(0f), android.text.TextUtils.TruncateAt.END)
+                c.drawText(text.toString(), x, y + height / 2 - (paint.ascent() + paint.descent()) / 2, paint)
             }
             when {
                 t.w == 1 && t.h == 1 -> { val inset = 6.5f * density; val s = minOf(r.width(), r.height()) - 2 * inset; cover(r.left + inset, r.top + inset, s) }
@@ -348,16 +402,17 @@ internal class CcLayoutEditorView(context: Context) : View(context) {
                     val x = r.left + inset; val y = r.top + inset
                     cover(x, y, s)
                     val lineX = x + s + 16 * u; val lineW = r.right - lineX - 18 * u
-                    block(lineX, r.centerY() - 18 * u, lineW, 16 * u, 8 * u)
-                    block(lineX, r.centerY() + 8 * u, lineW * .6f, 14 * u, 7 * u)
+                    label(media?.title, lineX, r.centerY() - 18 * u, lineW, 16 * u, lineW, true)
+                    label(media?.artist, lineX, r.centerY() + 8 * u, lineW, 14 * u, lineW * .6f, false)
                 }
                 else -> {
                     val inset = 6.5f * density
                     val x = r.left + inset; val y = r.top + inset
                     val s = minOf(68 * u, r.width() - 2 * inset)
                     cover(x, y, s)
-                    block(x, y + s + 16 * u, (r.width() - 40 * u) * .74f, 18 * u, 9 * u)
-                    block(x, y + s + 44 * u, (r.width() - 40 * u) * .42f, 16 * u, 8 * u)
+                    val textWidth = r.right - x - 12 * u
+                    label(media?.title, x, y + s + 16 * u, textWidth, 18 * u, (r.width() - 40 * u) * .74f, true)
+                    label(media?.artist, x, y + s + 44 * u, textWidth, 16 * u, (r.width() - 40 * u) * .42f, false)
                 }
             }
         } else {
