@@ -846,11 +846,13 @@ public final class Main {
     static void installSystemUi(ClassLoader cl) {
         Xp.log(TAG + "loaded into SystemUI");
 
+        // Keep the shared PassBlur texture dimensions aligned with the compositor's
+        // current draw scale, including lockscreen scale changes.
+        PassBlurScaleFix.install();
+
         // Before the clock container lookup below, which returns early when it fails: none of
         // these have anything to do with the clock, and a build that renamed the container must
         // not cost them too.
-        // HyperChanger retains the existing owner / excludes this standalone feature.
-        // The home screen magnified behind the shade, after the lock screen (PassBlurScaleFix).
         // HyperChanger retains the existing owner / excludes this standalone feature.
         // The mini player hangs off the shortcut row, not the clock container.
         MiniPlayerRuntime.install(cl);

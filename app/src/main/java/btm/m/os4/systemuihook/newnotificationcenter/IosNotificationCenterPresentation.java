@@ -26,6 +26,7 @@ import android.view.View.OnClickListener;
 import android.util.Base64;
 
 import java.lang.reflect.Method;
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.WeakHashMap;
@@ -109,10 +110,6 @@ public final class IosNotificationCenterPresentation {
     private static int shortcutNotificationBottomOffsetDp;
     private static boolean notificationShortcutsEnabled;
     private static View clearButton;
-    private static int clearButtonVisibility = View.VISIBLE;
-    private static float clearButtonAlpha = 1f;
-    private static boolean clearButtonCaptured;
-    private static View capturedClearButton;
     private static final WeakHashMap<View, int[]> clearButtonStates = new WeakHashMap<>();
     private static Boolean keyguardLockedOverride;
     private static int lastBlur = -1;
@@ -144,6 +141,7 @@ public final class IosNotificationCenterPresentation {
     private static int notificationHeaderGapDp;
     private static OnClickListener nativeClearAction;
     private static View nativeDismissView;
+    private static WeakReference<Object> nativeDismissController = new WeakReference<>(null);
     private static int notificationClearStyle;
     private static int notificationClearMaterial;
     private static float notificationClearRadius = 22f;
@@ -460,6 +458,7 @@ public final class IosNotificationCenterPresentation {
             Object candidate = Xp.getObjectField(controller, "dismissView");
             if (!(candidate instanceof View)) return;
             View view = (View) candidate;
+            nativeDismissController = new WeakReference<>(controller);
             captureNativeClearAction(view);
             clearButtonScanNeeded = true;
             syncClearButton();
@@ -895,8 +894,10 @@ public final class IosNotificationCenterPresentation {
 
     private static void syncClearButton() {
         if (window == null) return;
-        boolean keyguardLocked = isKeyguardLocked();
-        if (!notificationHeaderEnabled && !hideClearButton && !keyguardLocked) {
+        // The native controller owns its own eligibility (clearable rows,
+        // keyguard, heads-up, panel state).  Only the explicit user setting may
+        // hide it; custom-header presence must not make the system button vanish.
+        if (!hideClearButton) {
             if (!clearButtonStates.isEmpty()) restoreNativeClearButtons();
             clearButtonScanNeeded = false;
             return;
@@ -938,13 +939,27 @@ public final class IosNotificationCenterPresentation {
             View view = entry.getKey();
             int[] state = entry.getValue();
             if (view == null || state == null) continue;
-            view.setVisibility(state[0]);
-            view.setAlpha(Float.intBitsToFloat(state[1]));
+            restoreNativeClearButton(view, state);
         }
         clearButtonStates.clear();
-        clearButtonCaptured = false;
-        capturedClearButton = null;
         clearButton = null;
+    }
+
+    private static void restoreNativeClearButton(View view, int[] state) {
+        Object controller = nativeDismissController.get();
+        try {
+            if (controller != null && Xp.getObjectField(controller, "dismissView") == view) {
+                // Eligibility may have changed while hidden (including a switch to
+                // Control Center). Replay the native state, including alpha, scale
+                // and clickability, rather than an old opening-animation snapshot.
+                Xp.callMethod(controller, "updateShow");
+                Xp.callMethod(controller, "updateAppearanceWithoutAnimation");
+                Xp.callMethod(controller, "performAnimComplete");
+                return;
+            }
+        } catch (Throwable ignored) {}
+        view.setVisibility(state[0]);
+        view.setAlpha(Float.intBitsToFloat(state[1]));
     }
 
     private static void collectClearButtons(View view, ArrayList<View> output) {
@@ -1728,21 +1743,9 @@ public final class IosNotificationCenterPresentation {
         if (status != null && status.getParent() instanceof ViewGroup) {
             ((ViewGroup) status.getParent()).removeView(status);
         }
-        boolean keyguardLocked = isKeyguardLocked();
-        if (clearButton != null) {
-            if (keyguardLocked) {
-                clearButton.setVisibility(View.GONE);
-                clearButton.setAlpha(clearButtonAlpha);
-            } else {
-                clearButton.setVisibility(clearButtonVisibility);
-                clearButton.setAlpha(clearButtonAlpha);
-            }
-        }
-        if (!keyguardLocked) {
-            clearButton = null;
-            clearButtonCaptured = false;
-            capturedClearButton = null;
-        }
+        // The clear control belongs to the native controller across panel switches.
+        // Leaving this presentation must never reveal it or overwrite its animation.
+        clearButton = null;
         removeNotificationHeader();
         host = null;
         panel = null;

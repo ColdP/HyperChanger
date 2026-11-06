@@ -232,7 +232,11 @@ final class IosNotificationStackHooks {
             }
             if (lastSpecial >= 0) extent += padding;
         }
-        if (ordinaryCount > 0) extent += Math.max(0f, tail);
+        // The OEM marks the last ordinary notification as isLastNotif.  A lone
+        // ordinary card therefore has no collapsed cards below it and must not
+        // reserve the two stack-peek heights.  Keep the existing peek envelope
+        // when another ordinary card can actually occupy it.
+        if (ordinaryCount > 1) extent += Math.max(0f, tail);
         return extent;
     }
 

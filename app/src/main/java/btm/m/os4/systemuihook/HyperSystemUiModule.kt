@@ -6858,6 +6858,16 @@ class HyperSystemUiModule : XposedModule() {
     private val capsuleMaterialStates = WeakHashMap<ImageView, Pair<MiniPlayerAppearance, ClassLoader>>()
 
     private fun applyMiniPlayerMaterial(view: ImageView, appearance: MiniPlayerAppearance, classLoader: ClassLoader) {
+        // The runtime's MaterialElement replaces the old mini-player view. Keep
+        // the same ownership marker and drawable mask as the original adapter.
+        view.tag = LOCKSCREEN_CAPSULE_MATERIAL_TAG
+        view.setImageDrawable(GradientDrawable().apply {
+            setColor(when (appearance.backgroundMode) {
+                MINI_PLAYER_BACKGROUND_PURE -> appearance.pureColor
+                MINI_PLAYER_BACKGROUND_ADVANCED, MINI_PLAYER_BACKGROUND_SOFT_GLASS -> Color.argb(1, 255, 255, 255)
+                else -> Color.argb(158, 31, 35, 36)
+            })
+        })
         if (capsuleMaterialStates.put(view, appearance to classLoader) == null) {
             view.addOnLayoutChangeListener { target, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
                 if (right > left && bottom > top &&
@@ -6883,6 +6893,8 @@ class HyperSystemUiModule : XposedModule() {
                 // The same layer survives material changes; retire the old glass shader.
                 View::class.java.getMethod("setMiViewMaterialType", Int::class.javaPrimitiveType).invoke(view, 0)
                 View::class.java.getMethod("clearMiBackgroundBlendColor").invoke(view)
+                runCatching { View::class.java.getMethod("chooseBackgroundBlurContainer", View::class.java).invoke(view, null) }
+                runCatching { View::class.java.getMethod("setPassWindowBlurEnabled", Boolean::class.javaPrimitiveType).invoke(view, false) }
                 View::class.java.getMethod("setMiBackgroundBlurMode", Int::class.javaPrimitiveType).invoke(view, 0)
                 View::class.java.getMethod("setMiViewBlurMode", Int::class.javaPrimitiveType).invoke(view, 0)
             }
@@ -7428,6 +7440,16 @@ class HyperSystemUiModule : XposedModule() {
         showHighlight: Boolean,
     ) {
         val viewClass = View::class.java
+        if (view.tag == SHORTCUT_GLASS_TAG || view.tag == LOCKSCREEN_CAPSULE_MATERIAL_TAG) {
+            // These layers own their wallpaper sample. Do not inherit a previous
+            // notification/morph container or gradient sampling type on rebinding.
+            runCatching {
+                viewClass.getMethod("chooseBackgroundBlurContainer", View::class.java).invoke(view, null)
+            }
+            runCatching {
+                viewClass.getMethod("setMiBackgroundBlurType", Int::class.javaPrimitiveType).invoke(view, 0)
+            }
+        }
         viewClass.getMethod("clearMiBackgroundBlendColor").invoke(view)
         viewClass.getMethod("setPassWindowBlurEnabled", Boolean::class.javaPrimitiveType)
             .invoke(view, true)
