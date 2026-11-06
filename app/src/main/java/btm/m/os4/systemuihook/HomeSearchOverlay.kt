@@ -7,6 +7,9 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -20,10 +23,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur as contentBlur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
@@ -68,6 +73,7 @@ internal data class HomeSearchResult(
     val title: String,
     val description: String,
     val scopes: String,
+    val requiresService: Boolean = true,
     val onClick: () -> Unit,
 )
 
@@ -78,6 +84,8 @@ private data class SearchResultsState(val query: String, val searching: Boolean,
 internal fun HomeSearchOverlay(
     expanded: Boolean,
     primaryButton: Boolean = false,
+    navigationStyle: String,
+    interactionEnabled: Boolean = true,
     anchorInWindow: Rect,
     query: String,
     onQueryChange: (String) -> Unit,
@@ -97,7 +105,7 @@ internal fun HomeSearchOverlay(
         motion.animateTo(if (expanded) 1f else 0f, tween(480, easing = FastOutSlowInEasing))
         if (!expanded) latestOnClosed()
     }
-    BackHandler { onDismiss() }
+    BackHandler(enabled = interactionEnabled) { onDismiss() }
     val base = LocalToolbarBackdrop.current ?: rememberLayerBackdrop()
     val resultsBackdrop = rememberLayerBackdrop()
     val foregroundBackdrop = rememberCombinedBackdrop(base, resultsBackdrop)
@@ -180,7 +188,7 @@ internal fun HomeSearchOverlay(
                             SearchGlassCard(base) {
                                 Text(
                                     when {
-                                        snapshot.query.isBlank() -> tr("category_search_start", "输入功能名称、关键词、拼音或应用包名")
+                                        snapshot.query.isBlank() -> tr("category_search_start", "输入功能名称、关键词或应用包名")
                                         else -> tr("category_search_no_results", "没有找到匹配的设置项")
                                     }, modifier = Modifier.padding(20.dp),
                                     style = MiuixTheme.textStyles.body2,
@@ -191,7 +199,7 @@ internal fun HomeSearchOverlay(
                     } else if (!snapshot.searching) items(snapshot.results, key = { it.key }) { result ->
                         SearchGlassCard(base) {
                             ArrowPreference(result.title, summary = result.description,
-                                enabled = enabled && expanded && contentAlpha > .98f && snapshot.query == query, onClick = result.onClick)
+                                enabled = interactionEnabled && (enabled || !result.requiresService) && expanded && contentAlpha > .98f && snapshot.query == query, onClick = result.onClick)
                             Text(result.scopes,
                                 modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 16.dp),
                                 style = MiuixTheme.textStyles.footnote1,
@@ -226,20 +234,20 @@ internal fun HomeSearchOverlay(
                 .searchGlass(foregroundBackdrop, RoundedCornerShape(50), tint),
             hint = tr("category_search_placeholder", "搜索设置项名称、描述或作用域"),
             floating = false, drawSurface = false,
-            requestFocus = expanded && progress > .96f, enabled = expanded && progress > .96f,
+            requestFocus = interactionEnabled && expanded && progress > .96f, enabled = interactionEnabled && expanded && progress > .96f,
         )
         // One fixed circle moves between the two anchors; it never stretches or fuses.
         // Render it last so both its background and icon stay above every card.
         val buttonMotion = searchPhase(progress, 0f, 1f)
         val transitionBlur = sin(PI.toFloat() * progress).coerceAtLeast(0f)
         SearchRoundButton(
-            backdrop = foregroundBackdrop, size = buttonSize, primary = primaryButton,
+            backdrop = foregroundBackdrop, size = buttonSize, primary = primaryButton, navigationStyle = navigationStyle,
             closeProgress = searchPhase(progress, .15f, .85f),
             modifier = Modifier.offset(
                 sourceLeft + (targetLeft - sourceLeft) * buttonMotion,
                 sourceTop + (targetTop - sourceTop) * buttonMotion,
             ).graphicsLayer { alpha = 1f - .25f * transitionBlur }.contentBlur((transitionBlur * 4f).dp),
-            enabled = expanded, onClick = onDismiss,
+            enabled = interactionEnabled && expanded, onClick = onDismiss,
         )
     }
 }
@@ -255,21 +263,64 @@ internal fun SearchRoundButton(
     size: Dp,
     primary: Boolean,
     closeProgress: Float,
+    navigationStyle: String,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
+    val material = rememberModuleNavigationMaterial(navigationStyle)
+    val dark = MiuixTheme.colorScheme.surface.luminance() < .5f
+    val interactions = remember { MutableInteractionSource() }
+    val pressed by interactions.collectIsPressedAsState()
+    val press by animateFloatAsState(if (pressed) 1f else 0f, tween(120), label = "searchActionHighlight")
+    val highlightAlpha = material.light(when (navigationStyle) {
+        "liquid_glass" -> Highlight.Default.alpha
+        "harmony_os_floating" -> (if (dark) .78f else .96f) * (.72f + .28f * press)
+        "hyper_os_floating" -> if (dark) .78f else .96f
+        else -> .70f
+    })
     val scope = rememberCoroutineScope()
     val highlight = remember(scope) { InteractiveHighlight(scope) { size, offset ->
         Offset(offset.x.coerceIn(0f, size.width), offset.y.coerceIn(0f, size.height))
     } }
-    val tint = (if (primary) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.surfaceContainer)
-        .copy(alpha = if (primary) .42f else .30f)
+    val liquid = navigationStyle == "liquid_glass"
+    val harmony = navigationStyle == "harmony_os_floating"
+    val floating = harmony || navigationStyle == "hyper_os_floating"
+    val useEffects = isRuntimeShaderSupported()
+    // Match CustomNavigation's container, including the material preference multipliers.
+    // Search fields/cards deliberately keep their own searchGlass recipe.
+    val baseTint = when {
+        primary -> MiuixTheme.colorScheme.primary.copy(alpha = .42f)
+        liquid -> (if (dark) Color(0xFF121212) else Color(0xFFFAFAFA)).copy(alpha = .4f)
+        !useEffects -> (if (dark) Color(0xFF242424) else Color(0xFFF5F5F5))
+            .copy(alpha = if (dark) .88f else .82f)
+        else -> (if (dark) Color.Black else Color(0xFFF5F5F5))
+            .copy(alpha = if (harmony) { if (dark) .36f else .48f } else { if (dark) .30f else .42f })
+    }
+    val tint = baseTint.copy(alpha = material.alpha(baseTint.alpha))
+    val surface = if (useEffects) Modifier.drawBackdrop(
+        backdrop = backdrop, shape = { CircleShape },
+        effects = {
+            vibrancy()
+            blur((if (liquid) 3f * 8f / 18f else 18f * if (harmony) .29f else .24f).dp.toPx() * material.blur / 100f)
+            val boost = if (harmony) 1f + .3f * press * material.pressBoost / 100f else 1f
+            lens((if (liquid) 24.dp else 16.dp).toPx() * boost * material.thickness / 100f,
+                (if (liquid) 24.dp else 32.dp).toPx() * boost * material.refraction / 100f,
+                depthEffect = !liquid, chromaticAberration = material.dispersion ?: false)
+        },
+        highlight = { Highlight.Default.copy(alpha = highlightAlpha) },
+        shadow = { Shadow.Default }, innerShadow = null,
+        onDrawSurface = { drawRect(tint) },
+    ) else Modifier.background(tint, CircleShape)
+    val outerShadow = if (floating) Modifier.shadow(
+        elevation = 6.dp, shape = CircleShape, clip = false,
+        ambientColor = Color.Black.copy(alpha = .35f), spotColor = Color.Black.copy(alpha = .35f),
+    ) else Modifier
     val iconColor = if (primary) MiuixTheme.colorScheme.onPrimary else MiuixTheme.colorScheme.onSurface
     val iconBlur = sin(PI.toFloat() * closeProgress).coerceAtLeast(0f) * 5f
-    Box(modifier.requiredSize(size).searchGlass(backdrop, CircleShape, tint)
+    Box(modifier.requiredSize(size).then(outerShadow).then(surface)
         .clip(CircleShape).then(highlight.gestureModifier).then(highlight.modifier)
-        .clickable(enabled = enabled, interactionSource = null, indication = null, onClick = onClick),
+        .clickable(enabled = enabled, interactionSource = interactions, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center) {
         Icon(MiuixIcons.Regular.Search, if (closeProgress < .5f) tr("category_search_open", "搜索设置") else null,
             Modifier.size(24.dp).graphicsLayer { alpha = 1f - closeProgress }.contentBlur(iconBlur.dp), tint = iconColor)
@@ -278,12 +329,12 @@ internal fun SearchRoundButton(
     }
 }
 
-private fun Modifier.searchGlass(backdrop: Backdrop, shape: Shape, tint: Color): Modifier =
+private fun Modifier.searchGlass(backdrop: Backdrop, shape: Shape, tint: Color, highlightAlpha: Float = .25f): Modifier =
     if (isRuntimeShaderSupported()) drawBackdrop(
         backdrop = backdrop, shape = { shape },
         effects = { vibrancy(); blur(SEARCH_GLASS_BLUR.toPx()); lens(18.dp.toPx(), SEARCH_GLASS_REFRACTION.toPx(),
             depthEffect = true, chromaticAberration = false) },
-        highlight = { Highlight.Default.copy(alpha = .25f) },
+        highlight = { Highlight.Default.copy(alpha = highlightAlpha) },
         shadow = { Shadow.Default.copy(radius = 8.dp, alpha = .12f) }, innerShadow = null,
         onDrawSurface = { drawRect(tint) },
     ) else background(tint, shape)

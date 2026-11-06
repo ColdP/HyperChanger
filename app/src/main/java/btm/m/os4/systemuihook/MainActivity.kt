@@ -59,6 +59,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.animateColorAsState
@@ -89,6 +90,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -122,6 +124,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
@@ -333,8 +336,13 @@ private data class CategorySearchItem(
     val title: String,
     val description: String,
     val scopes: Set<ScopeApplication>,
-    val page: PageId,
+    val page: PageId? = null,
+    val moduleSetting: Boolean = false,
+    val settingsSection: ModuleSettingsSection? = null,
+    val keywords: String = "",
 )
+
+private enum class ModuleSettingsSection(val listIndex: Int) { MODULE(1), APPEARANCE(2), INFORMATION(3) }
 
 private data class CategoryPageEntry(
     val title: String,
@@ -547,10 +555,28 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
 // These destinations use the same PageId dispatcher as normal navigation, including nested pages.
 private fun categoryDeepSearchItems(): List<CategorySearchItem> {
     fun entry(key: String, fallback: String, page: PageId, vararg scopes: ScopeApplication) =
-        CategorySearchItem(tr(key, fallback), tr("category_search_open_page", "打开此功能的设置页面"), scopes.toSet(), page)
+        CategorySearchItem(tr(key, fallback), tr(key, fallback), scopes.toSet(), page)
     val ui = ScopeApplication.SYSTEM_UI
     val settings = ScopeApplication.SETTINGS
     return listOf(
+        entry("伪装版本", "伪装版本", PageId.SYSTEM_UPDATE, ScopeApplication.SYSTEM_UPDATE),
+        entry("伪装 SOTA 版本", "伪装 SOTA 版本", PageId.SYSTEM_UPDATE, ScopeApplication.SYSTEM_UPDATE),
+        entry("控制中心", "控制中心", PageId.CONTROL, ui),
+        entry("双排信号参数微调", "双排信号参数微调", PageId.STATUS_SIGNAL_TUNING, ui),
+        entry("移动网络类型参数微调", "移动网络类型参数微调", PageId.STATUS_MOBILE_NETWORK_TYPE_TUNING, ui),
+        entry("锁屏小组件背景设置", "锁屏小组件背景设置", PageId.LOCKSCREEN_WIDGET_BACKGROUND, ui, ScopeApplication.AOD),
+        entry("歌词库", "歌词库", PageId.LYRIC_LIBRARY, ui),
+        entry("softGlassParameters", "柔光玻璃参数", PageId.SOFT_GLASS_PARAMETERS, ui),
+        entry("softGlassPresets", "柔光玻璃预设", PageId.SOFT_GLASS_PRESETS, ui),
+        entry("导航与通知预设", "导航与通知预设", PageId.SHADE_PRESETS, ui),
+        entry("联系人与拨号背景", "联系人与拨号背景", PageId.CONTACTS_DIALER_BACKGROUND, ScopeApplication.CONTACTS_DIALER),
+        entry("侧边栏玻璃参数", "侧边栏玻璃参数", PageId.SIDEBAR_GLASS, ScopeApplication.SECURITY_CENTER),
+        entry("rearScreenshotShellTitle", "背屏截图壳", PageId.REAR_SCREEN_SHELL, ScopeApplication.SUBSCREEN_CENTER),
+        entry("rearSwipeAppTitle", "背屏左滑应用", PageId.REAR_SWIPE_APP, ScopeApplication.SUBSCREEN_CENTER),
+        entry("设备信息预设", "设备信息预设", PageId.DEVICE_PROFILE_PRESETS, settings),
+        entry("设备信息云预设", "设备信息云预设", PageId.DEVICE_PROFILE_CLOUD_PRESETS, settings),
+        entry("settingsEntryAppearance", "设置入口外观", PageId.SETTINGS_ENTRY_APPEARANCE, settings),
+        entry("tutorialDeviceCard", "自定义我的设备卡片", PageId.TUTORIAL_DEVICE_CARD, settings),
         entry("桌面材质调整", "桌面材质调整", PageId.DESKTOP_MATERIAL, ScopeApplication.DESKTOP),
         entry("手势提示线样式自定义", "手势提示线样式自定义", PageId.GESTURE_HANDLE_STYLE, ui),
         entry("iosNotificationClockGlass", "通知中心大时钟柔光玻璃", PageId.IOS_NOTIFICATION_CLOCK_GLASS, ui),
@@ -584,8 +610,56 @@ private fun categoryDeepSearchItems(): List<CategorySearchItem> {
     )
 }
 
+// Internal application settings share the search index, but never require a hook service.
+private fun moduleSettingsSearchItems(): List<CategorySearchItem> {
+    fun entry(key: String, fallback: String, section: ModuleSettingsSection,
+        page: PageId? = null, keywords: String = "") = CategorySearchItem(
+        tr(key, fallback), tr(key, fallback), emptySet(),
+        page = page, moduleSetting = true, settingsSection = section, keywords = keywords,
+    )
+    val module = ModuleSettingsSection.MODULE
+    val appearance = ModuleSettingsSection.APPEARANCE
+    val information = ModuleSettingsSection.INFORMATION
+    return listOf(
+        entry("模块设置", "模块设置", module, keywords = "模块 应用 内部 设置 module app settings preferences"),
+        entry("searchIncludeModuleSettings", "搜索结果展示 HyperChanger 设置项", module,
+            keywords = "搜索 结果 展示 模块 设置 search results HyperChanger settings"),
+        entry("moduleSafety", "模块安全", module, PageId.MODULE_SAFETY, "安全 救砖 safety recovery safe mode"),
+        entry("safetyViewLogs", "查看日志", module, PageId.MODULE_LOGS, "日志 调试 log debug"),
+        entry("restart_scope_apps", "重启作用域应用", module, PageId.RESTART_SCOPES, "重启 作用域 restart scope apps"),
+        entry("language", "语言", module, PageId.LANGUAGE, "语言 中文 英文 日文 翻译 language translation locale"),
+        entry("隐藏桌面图标", "隐藏桌面图标", module, keywords = "隐藏 图标 hide launcher icon"),
+        entry("系统设置内模块入口", "系统设置内模块入口", module, keywords = "设置 模块 入口 settings module entry"),
+        entry("settingsAppEntryTitle", "模块入口文案", module, keywords = "入口 文案 entry label title"),
+        entry("settingsModuleEntryIcon", "模块入口图标", module, keywords = "入口 图标 entry icon"),
+        entry("preference-导入模块预设", "导入模块预设", module, keywords = "导入 预设 import preset configuration"),
+        entry("preference-导出模块预设", "导出模块预设", module, keywords = "导出 备份 预设 export backup preset"),
+        entry("preference-恢复默认配置", "恢复默认配置", module, keywords = "恢复 默认 重置 reset restore defaults"),
+        entry("主题与颜色", "主题与颜色", appearance, PageId.THEME_AND_COLOR, "主题 颜色 theme color appearance"),
+        entry("主题模式", "主题模式", appearance, PageId.THEME_AND_COLOR, "深色 浅色 夜间 theme mode dark light"),
+        entry("Monet 取色", "Monet 取色", appearance, PageId.THEME_AND_COLOR, "壁纸 动态 颜色 monet wallpaper dynamic color"),
+        entry("monet_palette", "调色盘", appearance, PageId.THEME_AND_COLOR, "调色盘 palette tonal"),
+        entry("monet_color_spec", "色彩规范", appearance, PageId.THEME_AND_COLOR, "色彩 规范 color specification 2021 2025"),
+        entry("选择颜色", "选择颜色", appearance, PageId.THEME_AND_COLOR, "自定义 颜色 custom color seed"),
+        entry("navigation_style", "底部导航栏样式", appearance, keywords = "底部 导航栏 样式 悬浮 液态 玻璃 HyperOS HarmonyOS liquid glass floating bottom navigation style"),
+        entry("底部导航栏标签显示方式", "底部导航栏标签显示方式", appearance, keywords = "导航 标签 图标 文本 navigation label icon text"),
+        entry("hyperDockedGlass", "HyperOS 底部导航栏液态玻璃", appearance, keywords = "贴边 液态 玻璃 docked navigation glass"),
+        entry("预测性返回动画", "预测性返回动画", appearance, keywords = "预测 返回 手势 predictive back gesture animation"),
+        entry("预测性返回动画最大进度", "预测性返回动画最大进度", appearance, keywords = "预测 返回 进度 predictive back maximum progress"),
+        entry("sharedViewAnimation", "一镜到底的无缝动画", appearance, keywords = "一镜到底 无缝 共享 元素 动画 seamless shared view animation"),
+        entry("关于", "关于", information, PageId.ABOUT, "关于 版本 about version"),
+        entry("软件更新", "软件更新", information, PageId.SOFTWARE_UPDATE, "软件 应用 更新 update software upgrade"),
+        entry("更新日志", "更新日志", information, PageId.UPDATE_LOG, "更新 日志 changelog release notes"),
+        entry("contributors", "贡献者", information, PageId.CONTRIBUTORS, "贡献者 contributors"),
+        entry("捐赠", "捐赠", information, PageId.DONATE, "捐赠 支持 donate support"),
+        entry("开源代码声明", "开源代码声明", information, PageId.OPEN, "开源 致谢 open source acknowledgements"),
+        entry("隐私政策", "隐私政策", information, PageId.LEGAL_PRIVACY, "隐私 政策 privacy policy"),
+        entry("用户协议", "用户协议", information, PageId.LEGAL_USER_AGREEMENT, "用户 协议 user agreement terms"),
+    )
+}
+
 // Search-only synonyms are deliberately independent of the display language.
-private fun categorySearchKeywords(page: PageId): String = when (page) {
+private fun categorySearchKeywords(page: PageId?): String = when (page) {
     PageId.DESKTOP -> "桌面 启动器 文件夹 最近任务 launcher home folder recents"
     PageId.DESKTOP_MATERIAL -> "桌面 材质 玻璃 模糊 launcher blur glass material"
     PageId.SHADE -> "系统界面 通知中心 液态玻璃 手势提示线 notification shade liquid glass"
@@ -621,7 +695,7 @@ private fun categorySearchKeywords(page: PageId): String = when (page) {
     PageId.SUPER_XIAOAI -> "超级小爱 输入法 悬浮窗口 super xiaoai assistant ime keyboard"
     PageId.PORTAL, PageId.PORTAL_MATERIAL -> "传送门 背景 卡片 识屏 portal background card ocr"
     PageId.CAMERA, PageId.CAMERA_PALETTE -> "相机 相册 编辑 调色板 camera gallery editor palette"
-    PageId.SYSTEM_UPDATE -> "系统更新 自动更新 ota system updater"
+    PageId.SYSTEM_UPDATE -> "系统更新 自动更新 伪装版本 版本伪装 伪装SOTA版本 禁用更新 移除OTA限制 ota system updater version spoof fake version"
     PageId.REAR_SCREEN, PageId.REAR_CUSTOM_CENTER -> "背屏 副屏 自定义 中心 rear subscreen display custom center"
     PageId.REAR_MUSIC_APPS -> "背屏 音乐 白名单 rear music whitelist"
     PageId.REAR_MINI_PLAYER -> "背屏 迷你 播放器 rear mini player"
@@ -751,6 +825,12 @@ private fun Root(
     DisposableEffect(sharedViewAnimations) {
         val dispose = sharedViewAnimations.observe()
         onDispose { dispose() }
+    }
+    LaunchedEffect(service) {
+        service?.let {
+            ModuleSearchSettings.sync(context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE),
+                it.getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+        }
     }
     LaunchedEffect(service) { service?.let(sharedViewAnimations::syncRemote) }
     var pendingRestartTargets by remember { mutableStateOf(emptySet<ScopeApplication>()) }
@@ -1724,6 +1804,10 @@ private fun Shell(
     var homeSearchActive by remember { mutableStateOf(false) }
     var homeSearchExpanded by remember { mutableStateOf(false) }
     var homeSearchProgress by remember { mutableFloatStateOf(0f) }
+    var moduleSearchSection by remember { mutableStateOf<ModuleSettingsSection?>(null) }
+    var moduleSearchTabSwitch by remember { mutableStateOf(false) }
+    val moduleSearchReveal = remember { Animatable(0f) }
+    val searchNavigationScope = rememberCoroutineScope()
     var homeSearchAnchor by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     val maxBackProgress = settings.predictiveBackProgress.coerceIn(10, 100) / 100f
     val gestureBlur = if (seamlessEntry != null) 12f * seamlessEntry.progress.value
@@ -1795,18 +1879,22 @@ private fun Shell(
             AnimatedContent(
                 targetState = tab,
                 transitionSpec = {
-                    val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
-                    (slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { direction * it / 7 } + fadeIn(tween(210)) + scaleIn(tween(280), initialScale = .985f)) togetherWith
-                        (slideOutHorizontally(tween(230, easing = FastOutSlowInEasing)) { -direction * it / 3 } + fadeOut(tween(180)) + scaleOut(tween(230), targetScale = .975f))
+                    if (moduleSearchTabSwitch) {
+                        EnterTransition.None togetherWith ExitTransition.None
+                    } else {
+                        val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
+                        (slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { direction * it / 7 } + fadeIn(tween(210)) + scaleIn(tween(280), initialScale = .985f)) togetherWith
+                            (slideOutHorizontally(tween(230, easing = FastOutSlowInEasing)) { -direction * it / 3 } + fadeOut(tween(180)) + scaleOut(tween(230), targetScale = .975f))
+                    }
                 },
                 label = "mainTabNavigation",
                 modifier = Modifier.fillMaxSize().background(MiuixTheme.colorScheme.surface),
             ) { currentTab ->
             val tabBlurRadius by transition.animateFloat(
-                transitionSpec = { tween(280, easing = FastOutSlowInEasing) },
+                transitionSpec = { if (moduleSearchTabSwitch) snap() else tween(280, easing = FastOutSlowInEasing) },
                 label = "mainTabBlur",
             ) { state -> if (state == EnterExitState.Visible) 0f else 12f }
-            Box(Modifier.fillMaxSize().blur(tabBlurRadius.dp)) {
+            Box(Modifier.fillMaxSize().blur((tabBlurRadius + if (currentTab == Tab.SETTINGS) moduleSearchReveal.value else 0f).dp)) {
                 when (currentTab) {
                     Tab.CATEGORY -> CategoryHome(
                         connected = service != null,
@@ -1817,7 +1905,22 @@ private fun Shell(
                         onSearchExpandedChange = { homeSearchExpanded = it },
                         onSearchClosed = { homeSearchActive = false; homeSearchProgress = 0f },
                         onSearchProgress = { homeSearchProgress = it },
-                        searchPrimaryButton = navigationSettings.style == "hyper_os",
+                        searchNavigationStyle = navigationSettings.style,
+                        onOpenModuleSettings = { section, destination ->
+                            searchNavigationScope.launch {
+                                moduleSearchReveal.snapTo(3f)
+                                moduleSearchTabSwitch = true
+                                moduleSearchSection = section
+                                tab = Tab.SETTINGS
+                                homeSearchActive = false
+                                homeSearchExpanded = false
+                                homeSearchProgress = 0f
+                                withFrameNanos { }
+                                destination?.let(openRootPage)
+                                moduleSearchReveal.animateTo(0f, tween(140, easing = FastOutSlowInEasing))
+                                moduleSearchTabSwitch = false
+                            }
+                        },
                     )
                     Tab.SETTINGS -> SettingsHome(
                         settings,
@@ -1833,6 +1936,8 @@ private fun Shell(
                         onImportModulePreset,
                         onExportModulePreset,
                         onResetModulePreset,
+                        searchSection = moduleSearchSection,
+                        onSearchSectionConsumed = { moduleSearchSection = null },
                     )
                 }
             }
@@ -2027,16 +2132,16 @@ private fun BottomBar(
     val barHeight = (72f * .82f * .95f).dp
     val navExit = searchPhase(searchProgress, 0f, .65f)
     BoxWithConstraints(modifier.fillMaxWidth().height(if (docked) 140.dp + navInset else 100.dp + navInset)) {
-        val barWidth = maxWidth * (.53f * .82f * 1.12f)
+        val barWidth = maxWidth * (.53f * .82f * 1.12f * .95f)
         val gap = 8.dp
         val buttonSize = if (docked) 60.dp else barHeight
         val shift = if (docked) 0.dp else -(buttonSize + gap) / 2 * reveal
         val right = maxWidth / 2 + barWidth / 2 + shift
         val centerY = maxHeight - navInset - (8f * .82f).dp - barHeight / 2
-        val buttonLeft = if (docked) maxWidth - 24.dp - buttonSize else right + gap - (buttonSize + gap) * (1f - reveal)
+        val buttonLeft = if (docked) maxWidth - 24.dp - buttonSize else right + gap + 24.dp * (1f - reveal)
         val buttonTop = if (docked) maxHeight - navInset - 76.dp - buttonSize else centerY - buttonSize / 2
         // Existing size overrides measure the real surfaces; host app defaults stay intact.
-        val widthFactor = if (liquid) barWidth.value / ((maxWidth.value - 28f) * .53f * .82f * 1.10f) else 1.12f
+        val widthFactor = if (liquid) barWidth.value / ((maxWidth.value - 28f) * .53f * .82f * 1.10f) else 1.12f * .95f
         val heightFactor = if (liquid) barHeight.value / 64f else .95f
         val dimensions = btm.m.liquidglass.NavigationScaleSettings.Settings(
             widthEnabled = true, widthHundredths = ((widthFactor - 1f) * 10000f).roundToInt(),
@@ -2068,7 +2173,7 @@ private fun BottomBar(
         if (!searchMounted && reveal > .001f) {
             SearchRoundButton(
                 backdrop = backdrop, size = buttonSize,
-                primary = docked, closeProgress = 0f,
+                primary = docked, closeProgress = 0f, navigationStyle = navigationSettings.style,
                 modifier = Modifier.offset(buttonLeft, buttonTop)
                     .graphicsLayer { alpha = reveal; translationY = (1f - reveal) * 16.dp.toPx() }
                     .blur(((1f - reveal) * 6f).dp)
@@ -2090,27 +2195,60 @@ private fun CategoryHome(
     onSearchExpandedChange: (Boolean) -> Unit,
     onSearchClosed: () -> Unit,
     onSearchProgress: (Float) -> Unit,
-    searchPrimaryButton: Boolean,
+    searchNavigationStyle: String,
+    onOpenModuleSettings: (ModuleSettingsSection?, PageId?) -> Unit,
 ) {
+    val resultNavigationScope = rememberCoroutineScope()
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    var navigatingFromSearch by remember { mutableStateOf(false) }
     var searchProgress by remember { mutableFloatStateOf(0f) }
     var query by rememberSaveable { mutableStateOf("") }
-    var pendingPage by remember { mutableStateOf<PageId?>(null) }
-    val searchItems = categorySearchItems() + categoryDeepSearchItems()
+    val includeModuleSettings = rememberSearchIncludesModuleSettings()
+    val searchItems = categorySearchItems() + categoryDeepSearchItems() +
+        if (includeModuleSettings) moduleSettingsSearchItems() else emptyList()
+    val catalog = rememberSettingsSearchCatalog(activeLanguageStrings)
     val documents = searchItems.map { item ->
         SettingsSearchDocument(
             item, item.title, item.description,
-            item.scopes.map { tr(it.title, it.title) + " " + it.packageName },
-            categorySearchKeywords(item.page),
+            if (item.moduleSetting) listOf(tr("category_search_module_scope", "HyperChanger 设置"), BuildConfig.APPLICATION_ID)
+                else item.scopes.map { tr(it.title, it.title) + " " + it.packageName },
+            item.keywords + " " + categorySearchKeywords(item.page),
+            features = catalog?.get(item.page?.name)?.texts.orEmpty(),
+            destination = item.page?.name ?: "settings:${item.settingsSection?.name}",
         )
     }
     val matches = rememberSettingsSearch(documents, query)
     val results = (if (query.isBlank()) emptyList() else matches.orEmpty()).map { item ->
         HomeSearchResult(
-            key = item.page.name + ":" + item.title,
+            key = (item.page?.name ?: item.settingsSection?.name.orEmpty()) + ":" + item.title,
             title = item.title,
-            description = item.description,
-            scopes = item.scopes.joinToString(" · ") { tr(it.title, it.title) },
-            onClick = { pendingPage = item.page; onSearchExpandedChange(false) },
+            description = SettingsSearchIndex.preferenceTitle(query,
+                catalog?.get(item.page?.name)?.titles.orEmpty(), item.title),
+            scopes = if (item.moduleSetting) tr("category_search_module_scope", "HyperChanger 设置")
+                else item.scopes.joinToString(" · ") { tr(it.title, it.title) },
+            requiresService = !item.moduleSetting,
+            onClick = {
+                if (!navigatingFromSearch) {
+                    navigatingFromSearch = true
+                    focus.clearFocus()
+                    keyboard?.hide()
+                    if (item.moduleSetting) {
+                        onOpenModuleSettings(item.settingsSection, item.page)
+                        query = ""
+                    } else item.page?.let { destination ->
+                        // Keep the search surface in place until the incoming page covers it.
+                        open(destination)
+                        resultNavigationScope.launch {
+                            delay(300)
+                            onSearchClosed()
+                            searchProgress = 0f
+                            query = ""
+                            navigatingFromSearch = false
+                        }
+                    }
+                }
+            },
         )
     }
     AppPage(
@@ -2128,21 +2266,21 @@ private fun CategoryHome(
                 HomeSearchOverlay(
                     expanded = searchExpanded,
                     onProgress = { searchProgress = it; onSearchProgress(it) },
-                    primaryButton = searchPrimaryButton,
+                    primaryButton = searchNavigationStyle == "hyper_os",
+                    navigationStyle = searchNavigationStyle,
+                    interactionEnabled = !navigatingFromSearch,
                     anchorInWindow = searchAnchor,
                     query = query,
                     onQueryChange = { query = it },
                     results = results,
-                    searching = matches == null,
+                    searching = matches == null || catalog == null,
                     enabled = connected,
-                    onDismiss = { pendingPage = null; onSearchExpandedChange(false) },
+                    onDismiss = { if (!navigatingFromSearch) onSearchExpandedChange(false) },
                     onClosed = {
                         onSearchClosed()
                         searchProgress = 0f
                         query = ""
-                        val destination = pendingPage
-                        pendingPage = null
-                        destination?.let(open)
+                        navigatingFromSearch = false
                     },
                 )
             }
@@ -3278,11 +3416,20 @@ private fun SettingsHome(
     onImportModulePreset: () -> Unit,
     onExportModulePreset: () -> Unit,
     onResetModulePreset: () -> Unit,
+    searchSection: ModuleSettingsSection? = null,
+    onSearchSectionConsumed: () -> Unit = {},
 ) = AppPage(tr("settings", tr("设置", "设置"))) { padding, scroll ->
     val context = LocalContext.current
     var editingEntryTitle by remember { mutableStateOf(false) }
     var predictiveProgress by remember(settings.predictiveBackProgress) { mutableFloatStateOf(settings.predictiveBackProgress.toFloat()) }
-    AppList(padding, scroll) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(searchSection) {
+        searchSection?.let {
+            listState.scrollToItem(it.listIndex)
+            onSearchSectionConsumed()
+        }
+    }
+    AppList(padding, scroll, state = listState) {
         item { ServiceCard(service, appThemeStore.settings.monetEnabled) }
         item {
             Group(tr("模块设置", "模块设置")) {
@@ -3291,6 +3438,7 @@ private fun SettingsHome(
                     title = tr("restart_scope_apps", tr("\u91cd\u542f\u4f5c\u7528\u57df\u5e94\u7528", "\u91cd\u542f\u4f5c\u7528\u57df\u5e94\u7528")),
                     onClick = { open(PageId.RESTART_SCOPES) },
                 )
+                ModuleSearchSettingsPreference(service)
                 val languagePrefs = remember { context.getSharedPreferences("languages", android.content.Context.MODE_PRIVATE) }
                 val selectedLanguage = languagePrefs.getString("selected", "system") ?: "system"
                 val selectedLanguageSummary = when (selectedLanguage) {
@@ -14979,9 +15127,11 @@ private fun GlassActionButton(
 }
 
 @Composable
-internal fun AppList(padding: PaddingValues, scroll: ScrollBehavior, bottom: Int = 112, items: LazyListScope.() -> Unit) {
+internal fun AppList(padding: PaddingValues, scroll: ScrollBehavior, bottom: Int = 112,
+    state: LazyListState = rememberLazyListState(), items: LazyListScope.() -> Unit) {
     LazyColumn(
         Modifier.fillMaxSize().background(MiuixTheme.colorScheme.surface).nestedScroll(scroll.nestedScrollConnection),
+        state = state,
         contentPadding = PaddingValues(16.dp, padding.calculateTopPadding() + 4.dp, 16.dp, padding.calculateBottomPadding() + bottom.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         content = items

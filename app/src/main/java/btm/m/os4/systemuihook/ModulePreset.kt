@@ -86,6 +86,7 @@ object ModulePresetCodec {
                 completeAppNavigationPreset(values, context.getSharedPreferences(groupName, Context.MODE_PRIVATE))
                 completeModuleNavigationPreset(values)
                 completeSharedViewAnimationPreset(values)
+                completeModuleSearchPreset(values)
                 completeStackedMobileCornerPreset(values)
                 completeCcTileLayoutPreset(values)
                 completeCapsuleNotificationPreset(values)
@@ -149,6 +150,7 @@ object ModulePresetCodec {
             if (groupName == REMOTE_PREFERENCE_GROUP) {
                 completeModuleNavigationPreset(values)
                 completeSharedViewAnimationPreset(values)
+                completeModuleSearchPreset(values)
                 completeStackedMobileCornerPreset(values)
                 completeCcTileLayoutPreset(values)
                 completeCapsuleNotificationPreset(values)
@@ -218,6 +220,7 @@ object ModulePresetCodec {
             if (groupName == REMOTE_PREFERENCE_GROUP) {
                 completeModuleNavigationPreset(values)
                 completeSharedViewAnimationPreset(values)
+                completeModuleSearchPreset(values)
                 completeStackedMobileCornerPreset(values)
                 completeCcTileLayoutPreset(values)
                 completeCapsuleNotificationPreset(values)

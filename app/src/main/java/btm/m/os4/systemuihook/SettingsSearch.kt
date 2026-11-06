@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 package btm.m.os4.systemuihook
 
-import android.icu.text.Transliterator
+import androidx.compose.ui.platform.LocalContext
+import org.json.JSONObject
 import androidx.compose.runtime.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -26,13 +27,7 @@ internal fun <T> rememberSettingsSearch(
 ): List<T>? {
     val snapshot by produceState<SearchIndexSnapshot<T>?>(null, documents) {
         value = withContext(Dispatchers.Default) {
-            // Each build owns its ICU instance; Transliterator is mutable and not thread-safe.
-            val transliterator = runCatching {
-                Transliterator.getInstance("Traditional-Simplified; Han-Latin; Latin-ASCII")
-            }.getOrNull()
-            SearchIndexSnapshot(documents, SettingsSearchIndex(documents) {
-                transliterator?.transliterate(it) ?: it
-            })
+            SearchIndexSnapshot(documents, SettingsSearchIndex(documents))
         }
     }
     val response by produceState<SearchResponse<T>?>(null, snapshot, query) {
@@ -46,4 +41,37 @@ internal fun <T> rememberSettingsSearch(
     return response?.takeIf {
         it.snapshot === snapshot && it.snapshot.documents == documents && it.query == query
     }?.matches
+}
+
+internal data class SettingsSearchCatalogPage(val texts: List<String>, val titles: List<SettingsSearchPreferenceTitle>)
+private data class SearchCatalogSnapshot(val language: Map<String, String>, val pages: Map<String, SettingsSearchCatalogPage>)
+
+/** Catalogs contain UI strings and destinations only; no runtime reflection or setting values. */
+@Composable
+internal fun rememberSettingsSearchCatalog(language: Map<String, String>): Map<String, SettingsSearchCatalogPage>? {
+    val context = LocalContext.current.applicationContext
+    val catalog by produceState<SearchCatalogSnapshot?>(null, context, language) {
+        value = withContext(Dispatchers.IO) {
+            val json = JSONObject(context.assets.open("settings-search.json").bufferedReader().use { it.readText() })
+            val pages = buildMap {
+                json.keys().forEach { page ->
+                    val entries = json.getJSONArray(page)
+                    val texts = mutableListOf<String>()
+                    val titles = mutableListOf<SettingsSearchPreferenceTitle>()
+                    for (i in 0 until entries.length()) {
+                        val entry = entries.getJSONArray(i)
+                        val key = entry.getString(0)
+                        val fallback = entry.getString(1)
+                        val translated = language[key] ?: language[fallback] ?: fallback
+                        texts += translated
+                        texts += fallback
+                        if (entry.optBoolean(2)) titles += SettingsSearchPreferenceTitle(translated, listOf(fallback))
+                    }
+                    put(page, SettingsSearchCatalogPage(texts.distinct(), titles.distinct()))
+                }
+            }
+            SearchCatalogSnapshot(language, pages)
+        }
+    }
+    return catalog?.takeIf { it.language == language }?.pages
 }
