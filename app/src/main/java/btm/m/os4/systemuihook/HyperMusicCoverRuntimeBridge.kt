@@ -82,7 +82,7 @@ object HyperMusicCoverRuntimeBridge {
     private val sentSettings = HashMap<String, String>()
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == null || key == HMC_NEXT_SETTINGS_KEY || key.startsWith("lockscreen_") ||
-            key.startsWith("mini_player_") || key.startsWith("soft_glass_")) {
+            key.startsWith("mini_player_") || key.startsWith("shortcut_") || key.startsWith("soft_glass_")) {
             handler.removeCallbacks(refresh)
             handler.post(refresh)
         }

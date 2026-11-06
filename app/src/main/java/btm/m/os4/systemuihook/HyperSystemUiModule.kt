@@ -4079,6 +4079,7 @@ class HyperSystemUiModule : XposedModule() {
         view.tag == "$CONTROL_CENTER_PLUS_TAG.background" || view.tag == "$CONTROL_CENTER_POWER_TAG.background"
 
     private fun isSoftGlassSurface(view: View): Boolean {
+        if (lockscreenBackdropContainers.contains(view)) return false
         if (isControlCenterTopButtonBackground(view) || expandedIslandMaterialApplying.get() == true || expandedIslandGlassSurfaces.contains(view)) return false
         if (view.tag == SHORTCUT_GLASS_TAG || view.tag == LOCKSCREEN_CAPSULE_MATERIAL_TAG) return false
         if (isVolumePanelSurface(view) || stackContainsClass("com.android.systemui.miui.volume.")) {
@@ -4091,12 +4092,13 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun isSoftGlassPanelLayer(view: View): Boolean =
-        !isControlCenterTopButtonBackground(view) && expandedIslandMaterialApplying.get() != true && !expandedIslandGlassSurfaces.contains(view) && view.tag != SHORTCUT_GLASS_TAG && view.tag != LOCKSCREEN_CAPSULE_MATERIAL_TAG && (
+        !lockscreenBackdropContainers.contains(view) && !isControlCenterTopButtonBackground(view) && expandedIslandMaterialApplying.get() != true && !expandedIslandGlassSurfaces.contains(view) && view.tag != SHORTCUT_GLASS_TAG && view.tag != LOCKSCREEN_CAPSULE_MATERIAL_TAG && (
             (volumeGlobalGlassSelected() && (isVolumePanelSurface(view) || stackContainsClass("com.android.systemui.miui.volume."))) ||
             isShadeBackgroundView(view) || stackContainsClass("ShadeBlendBlurController") ||
             stackContainsClass("ShadeWindowBlurController") || stackContainsClass("ShadeSolidBackgroundController"))
 
     private fun isSoftGlassBlendSurface(view: View): Boolean {
+        if (lockscreenBackdropContainers.contains(view)) return false
         if (isControlCenterTopButtonBackground(view) || expandedIslandMaterialApplying.get() == true || expandedIslandGlassSurfaces.contains(view)) return false
         if (view.tag == SHORTCUT_GLASS_TAG || view.tag == LOCKSCREEN_CAPSULE_MATERIAL_TAG) return false
         if (isVolumePanelSurface(view)) return volumeGlobalGlassSelected()
@@ -6856,6 +6858,7 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private val capsuleMaterialStates = WeakHashMap<ImageView, Pair<MiniPlayerAppearance, ClassLoader>>()
+    private val lockscreenBackdropContainers = Collections.newSetFromMap(WeakHashMap<View, Boolean>())
 
     private fun applyMiniPlayerMaterial(view: ImageView, appearance: MiniPlayerAppearance, classLoader: ClassLoader) {
         // The runtime's MaterialElement replaces the old mini-player view. Keep
@@ -6893,9 +6896,15 @@ class HyperSystemUiModule : XposedModule() {
                 // The same layer survives material changes; retire the old glass shader.
                 View::class.java.getMethod("setMiViewMaterialType", Int::class.javaPrimitiveType).invoke(view, 0)
                 View::class.java.getMethod("clearMiBackgroundBlendColor").invoke(view)
-                runCatching { View::class.java.getMethod("chooseBackgroundBlurContainer", View::class.java).invoke(view, null) }
                 runCatching { View::class.java.getMethod("setPassWindowBlurEnabled", Boolean::class.javaPrimitiveType).invoke(view, false) }
                 View::class.java.getMethod("setMiBackgroundBlurMode", Int::class.javaPrimitiveType).invoke(view, 0)
+                val backdrop = view.parent as? View ?: view
+                runCatching { View::class.java.getMethod("chooseBackgroundBlurContainer", View::class.java).invoke(backdrop, null) }
+                runCatching { View::class.java.getMethod("setPassWindowBlurEnabled", Boolean::class.javaPrimitiveType).invoke(backdrop, false) }
+                View::class.java.getMethod("setMiBackgroundBlurMode", Int::class.javaPrimitiveType).invoke(backdrop, 0)
+                runCatching { View::class.java.getMethod("setMiGlassBlurRadius", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType).invoke(backdrop, 0, 0) }
+                View::class.java.getMethod("setMiBackgroundBlurScaleRatio", Float::class.javaPrimitiveType).invoke(backdrop, 0f)
+                lockscreenBackdropContainers.remove(backdrop)
                 View::class.java.getMethod("setMiViewBlurMode", Int::class.javaPrimitiveType).invoke(view, 0)
             }
             when (appearance.backgroundMode) {
@@ -6905,25 +6914,10 @@ class HyperSystemUiModule : XposedModule() {
                     blurRadius = appearance.advancedBlurRadius,
                     color = appearance.advancedColor,
                     showHighlight = appearance.advancedHighlight,
+                    classLoader = classLoader,
                 )
                 MINI_PLAYER_BACKGROUND_SOFT_GLASS -> {
-                    val glass = appearance.glass.copy(enabled = true)
-                    applyLegacyBackdropMaterial(
-                        view = view,
-                        opacity = softGlassBlur(10, glass.backgroundOpacity),
-                        blurRadius = softGlassBlur(40, glass.backgroundBlur),
-                        color = Color.WHITE,
-                        showHighlight = false,
-                    )
-                    View::class.java.getMethod("setMiBackgroundBlurScaleRatio", Float::class.javaPrimitiveType)
-                        .invoke(view, softGlassScale(1f, glass.backgroundScale))
-                    applySystemGlassMaterial(
-                        view = view,
-                        classLoader = classLoader,
-                        blurRadius = softGlassBlur(36, glass.refractionBlur),
-                        luminance = DEFAULT_SOFT_GLASS_LUMINANCE,
-                        parameters = tuneSoftGlass(SHORTCUT_GLASS_PARAMETERS, glass, standaloneBackground = true),
-                    )
+                    applyLockscreenSoftGlassMaterial(view, classLoader, appearance.glass)
                 }
             }
         }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not refresh capsule material", it) }
@@ -6998,7 +6992,18 @@ class HyperSystemUiModule : XposedModule() {
             shortcutContainer.clipToPadding = false
             for (index in shortcutContainer.childCount - 1 downTo 0) {
                 val child = shortcutContainer.getChildAt(index)
-                if (child.tag == SHORTCUT_GLASS_TAG) shortcutContainer.removeViewAt(index)
+                if (child.tag == SHORTCUT_GLASS_TAG) {
+                    // The old background's PassBlur provider lives on this parent.
+                    // Release it even when the replacement mode is pure/disabled.
+                    runCatching {
+                        View::class.java.getMethod("setPassWindowBlurEnabled", Boolean::class.javaPrimitiveType).invoke(shortcutContainer, false)
+                        View::class.java.getMethod("setMiBackgroundBlurMode", Int::class.javaPrimitiveType).invoke(shortcutContainer, 0)
+                        View::class.java.getMethod("setMiGlassBlurRadius", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType).invoke(shortcutContainer, 0, 0)
+                        View::class.java.getMethod("setMiBackgroundBlurScaleRatio", Float::class.javaPrimitiveType).invoke(shortcutContainer, 0f)
+                    }
+                    shortcutContainer.removeViewAt(index)
+                    lockscreenBackdropContainers.remove(shortcutContainer)
+                }
             }
             val glassBackground = ImageView(shortcutContainer.context).apply {
                 tag = SHORTCUT_GLASS_TAG
@@ -7056,27 +7061,12 @@ class HyperSystemUiModule : XposedModule() {
                             blurRadius = shortcutSettings.advancedBlur,
                             color = shortcutSettings.advancedColor,
                             showHighlight = shortcutSettings.advancedHighlight,
+                            classLoader = classLoader,
                         )
                         SHORTCUT_BACKGROUND_SOFT_GLASS -> {
-                            val activeGlass = (if (shortcutSettings.useGlobalGlass) readSoftGlassSettings(preferences)
-                                else shortcutSettings.glass).copy(enabled = true)
-                            applyLegacyBackdropMaterial(
-                                view = glassBackground,
-                                // 100% means the existing translucent 10% blend, not solid white.
-                                opacity = softGlassBlur(10, activeGlass.backgroundOpacity),
-                                blurRadius = softGlassBlur(40, activeGlass.backgroundBlur),
-                                color = Color.WHITE,
-                                showHighlight = false,
-                            )
-                            View::class.java.getMethod("setMiBackgroundBlurScaleRatio", Float::class.javaPrimitiveType)
-                                .invoke(glassBackground, softGlassScale(1f, activeGlass.backgroundScale))
-                            applySystemGlassMaterial(
-                                view = glassBackground,
-                                classLoader = classLoader,
-                                blurRadius = softGlassBlur(36, activeGlass.refractionBlur),
-                                luminance = DEFAULT_SOFT_GLASS_LUMINANCE,
-                                parameters = tuneSoftGlass(SHORTCUT_GLASS_PARAMETERS, activeGlass, standaloneBackground = true),
-                            )
+                            val activeGlass = if (shortcutSettings.useGlobalGlass) readSoftGlassSettings(preferences)
+                                else shortcutSettings.glass
+                            applyLockscreenSoftGlassMaterial(glassBackground, classLoader, activeGlass)
                         }
                     }
                 }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not initialize shortcut material", it) }
@@ -7438,16 +7428,65 @@ class HyperSystemUiModule : XposedModule() {
         blurRadius: Int,
         color: Int,
         showHighlight: Boolean,
+        classLoader: ClassLoader? = null,
     ) {
         val viewClass = View::class.java
-        if (view.tag == SHORTCUT_GLASS_TAG || view.tag == LOCKSCREEN_CAPSULE_MATERIAL_TAG) {
-            // These layers own their wallpaper sample. Do not inherit a previous
-            // notification/morph container or gradient sampling type on rebinding.
-            runCatching {
+        if (classLoader != null && (view.tag == SHORTCUT_GLASS_TAG || view.tag == LOCKSCREEN_CAPSULE_MATERIAL_TAG)) {
+            // Match HyperMusicCover: the parent provides the wallpaper backdrop;
+            // this child carries only the glass shape and blend colors.
+            val container = view.parent as? View
+            val initialized = container != null && runCatching {
+                lockscreenBackdropContainers.add(container)
+                val loader = classLoader
+                val util = Class.forName(
+                    "com.android.systemui.statusbar.notification.utils.NotificationUtil",
+                    false,
+                    loader,
+                )
+                util.getMethod(
+                    "applyContainerViewBlur",
+                    Context::class.java,
+                    View::class.java,
+                    Int::class.javaPrimitiveType,
+                    Int::class.javaPrimitiveType,
+                    Boolean::class.javaPrimitiveType,
+                ).invoke(null, view.context, container, 0, 0, false)
+                viewClass.getMethod("setMiBackgroundBlurRadius", Int::class.javaPrimitiveType)
+                    .invoke(container, blurRadius.coerceIn(0, MAX_SHORTCUT_BACKDROP_BLUR_RADIUS))
+                // NotificationUtil initializes background blur but zeroes the two
+                // glass samples. Supply the same native container radii as upstream.
+                val resources = view.resources
+                fun dimension(name: String): Int {
+                    val id = resources.getIdentifier(name, "dimen", SYSTEM_UI)
+                    check(id != 0) { "Missing SystemUI dimension: $name" }
+                    return resources.getDimensionPixelSize(id)
+                }
+                viewClass.getMethod("setMiGlassBlurRadius", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+                    .invoke(container, dimension("notification_glass_small_blur_max_radius"), dimension("notification_glass_big_blur_max_radius"))
+                viewClass.getMethod("setMiBackgroundBlurScaleRatio", Float::class.javaPrimitiveType).invoke(container, 0f)
+                runCatching {
+                    Class.forName("miuix.core.util.MiuiBlurUtils", false, loader)
+                        .getMethod("setMiBlurWinType", View::class.java)
+                        .invoke(null, container)
+                }
+                true
+            }.getOrDefault(false)
+            if (initialized) {
+                // Retire any local sampler from an earlier material binding.
+                viewClass.getMethod("setPassWindowBlurEnabled", Boolean::class.javaPrimitiveType).invoke(view, false)
+                viewClass.getMethod("setMiBackgroundBlurMode", Int::class.javaPrimitiveType).invoke(view, 0)
+                viewClass.getMethod("setMiBackgroundBlurScaleRatio", Float::class.javaPrimitiveType).invoke(view, 0f)
                 viewClass.getMethod("chooseBackgroundBlurContainer", View::class.java).invoke(view, null)
-            }
-            runCatching {
-                viewClass.getMethod("setMiBackgroundBlurType", Int::class.javaPrimitiveType).invoke(view, 0)
+                viewClass.getMethod("setMiViewBlurMode", Int::class.javaPrimitiveType).invoke(view, 1)
+                viewClass.getMethod("clearMiBackgroundBlendColor").invoke(view)
+                viewClass.getMethod("addMiBackgroundBlendColor", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+                    .invoke(view, Color.argb(
+                        opacity.coerceIn(0, MAX_SHORTCUT_OPACITY) * 255 / MAX_SHORTCUT_OPACITY,
+                        Color.red(color), Color.green(color), Color.blue(color),
+                    ), SHORTCUT_GLASS_BLEND_MODE)
+                if (showHighlight) viewClass.getMethod("setMiBloomStroke", FloatArray::class.java)
+                    .invoke(view, SHORTCUT_BLOOM_STROKE_PARAMETERS)
+                return
             }
         }
         viewClass.getMethod("clearMiBackgroundBlendColor").invoke(view)
@@ -7477,6 +7516,48 @@ class HyperSystemUiModule : XposedModule() {
             viewClass.getMethod("setMiBloomStroke", FloatArray::class.java)
                 .invoke(view, SHORTCUT_BLOOM_STROKE_PARAMETERS)
         }
+    }
+
+    private fun setOwnedBackdropScale(view: View, scale: Float) {
+        val target = if (view.tag == SHORTCUT_GLASS_TAG || view.tag == LOCKSCREEN_CAPSULE_MATERIAL_TAG) {
+            view.parent as? View ?: view
+        } else view
+        // This API is an extra background zoom amount, not a texture resolution
+        // ratio. Native notification/capsule glass leaves it at zero (not 1.0).
+        View::class.java.getMethod("setMiBackgroundBlurScaleRatio", Float::class.javaPrimitiveType)
+            .invoke(target, scale)
+    }
+
+    private fun applyLockscreenSoftGlassMaterial(view: ImageView, classLoader: ClassLoader, settings: SoftGlassSettings) {
+        val glass = settings.copy(enabled = true).normalized()
+        applyLegacyBackdropMaterial(
+            view = view,
+            opacity = softGlassBlur(10, glass.backgroundOpacity),
+            blurRadius = softGlassBlur(40, glass.backgroundBlur),
+            color = Color.WHITE,
+            showHighlight = false,
+            classLoader = classLoader,
+        )
+        val backdrop = view.parent as? View
+        if (backdrop != null && lockscreenBackdropContainers.contains(backdrop)) {
+            val resources = view.resources
+            fun radius(name: String): Int {
+                val id = resources.getIdentifier(name, "dimen", SYSTEM_UI)
+                check(id != 0) { "Missing SystemUI dimension: $name" }
+                return softGlassBlur(resources.getDimensionPixelSize(id), glass.refractionBlur)
+            }
+            View::class.java.getMethod("setMiGlassBlurRadius", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+                .invoke(backdrop, radius("notification_glass_small_blur_max_radius"), radius("notification_glass_big_blur_max_radius"))
+        }
+        // Scale the native zoom amount, rather than using a full-unit texture scale.
+        setOwnedBackdropScale(view, softGlassScale(0.075f, glass.backgroundScale))
+        applySystemGlassMaterial(
+            view = view,
+            classLoader = classLoader,
+            blurRadius = softGlassBlur(36, glass.refractionBlur),
+            luminance = DEFAULT_SOFT_GLASS_LUMINANCE,
+            parameters = tuneSoftGlass(SHORTCUT_GLASS_PARAMETERS, glass, standaloneBackground = true),
+        )
     }
 
     private fun applySystemGlassMaterial(
