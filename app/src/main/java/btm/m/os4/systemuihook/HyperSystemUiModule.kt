@@ -173,6 +173,7 @@ private const val CONTROL_CENTER_POWER_PATH =
 private val gestureMaterialOverlays = Collections.synchronizedMap(WeakHashMap<View, View>())
 
 class HyperSystemUiModule : XposedModule() {
+    private val controlCenterTopButtonsPlacement = ControlCenterTopButtonsPlacement()
     private val controlCenterHooks by lazy {
         ControlCenterHooks(
             module = this,
@@ -1896,6 +1897,8 @@ class HyperSystemUiModule : XposedModule() {
             if (!controlCenterPreferenceListenerInstalled) {
                 val listener = SharedPreferences.OnSharedPreferenceChangeListener { changed, key ->
                     if (key?.startsWith(CONTROL_CENTER_TOP_BUTTONS_SETTINGS_PREFIX) == true ||
+                        key?.startsWith(CC_TOP_BUTTONS_PLACEMENT_PREFIX) == true ||
+                        key?.startsWith(CC_TOP_BUTTONS_GEOMETRY_PREFIX) == true ||
                         key?.startsWith(CONTROL_CENTER_TOP_BUTTONS_GLASS_PREFIX) == true ||
                         key?.startsWith("soft_glass_parameters_v3_") == true ||
                         key == ADD_CONTROL_CENTER_TOP_BUTTONS_KEY ||
@@ -1967,6 +1970,17 @@ class HyperSystemUiModule : XposedModule() {
                             }?.invoke(panel) as? ViewGroup
                         }.getOrNull()
                         if (root != null) {
+                            // The footer may be offscreen and not bound yet. Resolve its
+                            // existing controller so placement and live settings do not
+                            // depend on scrolling to the last row first.
+                            val editController = readInstanceField(panel, "distributor")?.let { distributor ->
+                                (readInstanceField(distributor, "childControllers") as? Iterable<*>)
+                                    ?.firstOrNull { it?.javaClass?.name == CONTROL_CENTER_EDIT_BUTTON_CONTROLLER_CLASS }
+                            }
+                            if (editController != null) synchronized(controlCenterButtonsLock) {
+                                controlCenterEditController = editController
+                                controlCenterControllerClassLoader = editController.javaClass.classLoader
+                            }
                             installControlCenterTopButtonsIntoRoot(root, preferences)
                             Handler(Looper.getMainLooper()).postDelayed({
                                 installControlCenterTopButtonsIntoRoot(root, preferences)
@@ -2351,11 +2365,16 @@ class HyperSystemUiModule : XposedModule() {
             listOf(controlCenterPlusButton, controlCenterPowerButton)
         }
         return buttons.filterNotNull().firstOrNull { button ->
-            if (button.visibility != View.VISIBLE || button.width <= 0 || button.height <= 0) return@firstOrNull false
+            if (!button.isShown || button.width <= 0 || button.height <= 0) return@firstOrNull false
+            val visibleBounds = Rect()
+            if (!button.getGlobalVisibleRect(visibleBounds) || !visibleBounds.contains(event.rawX.toInt(), event.rawY.toInt()))
+                return@firstOrNull false
             val location = IntArray(2)
             button.getLocationOnScreen(location)
             val x = event.rawX
             val y = event.rawY
+            if (button.clipBounds?.contains((x - location[0]).toInt(), (y - location[1]).toInt()) == false)
+                return@firstOrNull false
             x >= location[0] && x <= location[0] + button.width &&
                 y >= location[1] && y <= location[1] + button.height
         }
@@ -2520,8 +2539,11 @@ class HyperSystemUiModule : XposedModule() {
                 "childCount=${root.childCount}",
         )
         val existingPlus = root.findViewWithTag<View>(CONTROL_CENTER_PLUS_TAG)
+            ?: controlCenterTopButtonsPlacement.retainedButton(root, CONTROL_CENTER_PLUS_TAG)
         val existingPower = root.findViewWithTag<View>(CONTROL_CENTER_POWER_TAG)
+            ?: controlCenterTopButtonsPlacement.retainedButton(root, CONTROL_CENTER_POWER_TAG)
         if (!enabled) {
+            controlCenterTopButtonsPlacement.clear(preferences.getBoolean(KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON, false))
             existingPlus?.let { (it.parent as? ViewGroup)?.removeView(it) }
             existingPower?.let { (it.parent as? ViewGroup)?.removeView(it) }
             synchronized(controlCenterButtonsLock) {
@@ -2621,8 +2643,8 @@ class HyperSystemUiModule : XposedModule() {
         addButton(existingPlus, CONTROL_CENTER_PLUS_TAG, CONTROL_CENTER_PLUS_PATH, Gravity.TOP or Gravity.START)
         addButton(existingPower, CONTROL_CENTER_POWER_TAG, CONTROL_CENTER_POWER_PATH, Gravity.TOP or Gravity.END)
         synchronized(controlCenterButtonsLock) {
-            controlCenterPlusButton = root.findViewWithTag(CONTROL_CENTER_PLUS_TAG)
-            controlCenterPowerButton = root.findViewWithTag(CONTROL_CENTER_POWER_TAG)
+            controlCenterPlusButton = existingPlus ?: root.findViewWithTag(CONTROL_CENTER_PLUS_TAG)
+            controlCenterPowerButton = existingPower ?: root.findViewWithTag(CONTROL_CENTER_POWER_TAG)
         }
         synchronized(controlCenterButtonsLock) {
             listOf(controlCenterPlusButton, controlCenterPowerButton).forEach { button ->
@@ -2657,6 +2679,13 @@ class HyperSystemUiModule : XposedModule() {
         } else if (expandController != null) {
             updateControlCenterTopButtonsProgress(controlCenterExpansionProgress(expandController))
         }
+        synchronized(controlCenterButtonsLock) {
+            controlCenterTopButtonsPlacement.update(root, controlCenterEditController,
+                listOfNotNull(controlCenterPlusButton, controlCenterPowerButton),
+                readControlCenterTopButtonsPlacement(preferences),
+                preferences.getBoolean(KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON, false),
+                readControlCenterTopButtonsGeometry(preferences).spacingDp)
+        }
         btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Control-center top buttons injected into ${root.javaClass.name}")
     }
 
@@ -2667,10 +2696,11 @@ class HyperSystemUiModule : XposedModule() {
     ) {
         val topSettings = readControlCenterTopButtonsGlassSettings(preferences)
         val mode = topSettings.backgroundMode
+        val geometry = readControlCenterTopButtonsGeometry(preferences)
         val radiusDp = when (mode) {
-            CONTROL_CENTER_TOP_BUTTONS_MODE_PURE -> topSettings.pureRadius
-            CONTROL_CENTER_TOP_BUTTONS_MODE_ADVANCED -> topSettings.advancedRadius
-            CONTROL_CENTER_TOP_BUTTONS_MODE_SOFT_GLASS -> topSettings.softRadius
+            CONTROL_CENTER_TOP_BUTTONS_MODE_PURE -> geometry.pureRadius
+            CONTROL_CENTER_TOP_BUTTONS_MODE_ADVANCED -> geometry.advancedRadius
+            CONTROL_CENTER_TOP_BUTTONS_MODE_SOFT_GLASS -> geometry.softRadius
             else -> 0f
         }.coerceIn(0f, CONTROL_CENTER_TOP_BUTTONS_BACKGROUND_RADIUS_MAX_DP)
         val showBackground = mode != CONTROL_CENTER_TOP_BUTTONS_MODE_NONE && radiusDp > 0f
@@ -2733,7 +2763,7 @@ class HyperSystemUiModule : XposedModule() {
         val icon = (button as? ViewGroup)
             ?.findViewWithTag<View>("${button.tag}.icon")
             ?: return
-        val scale = readControlCenterTopButtonsGlassSettings(preferences).iconScale
+        val scale = readControlCenterTopButtonsGeometry(preferences).iconScale
         icon.scaleX = scale
         icon.scaleY = scale
     }
@@ -3248,7 +3278,7 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun isControlCenterEditButtonView(view: View?): Boolean {
-        if (view == null || view.id == View.NO_ID) return false
+        if (view == null || view.id == View.NO_ID || ControlCenterTopButtonsPlacement.isBottomButtonsRow(view)) return false
         return runCatching {
             view.resources.getResourceEntryName(view.id) == "qs_customize_button"
         }.getOrDefault(false)

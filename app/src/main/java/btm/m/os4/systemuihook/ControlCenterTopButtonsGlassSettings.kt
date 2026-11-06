@@ -78,7 +78,7 @@ internal class ControlCenterTopButtonsGlassSettingsStore(private val local: Shar
     internal fun syncPreferences(remote: SharedPreferences) {
         local.edit().apply {
             remote.all.forEach { (key, value) ->
-                if (!local.contains(key) && (key.startsWith(CONTROL_CENTER_TOP_BUTTONS_GLASS_PREFIX) ||
+                if (!local.contains(key) && !key.startsWith(CC_TOP_BUTTONS_GEOMETRY_PREFIX) && (key.startsWith(CONTROL_CENTER_TOP_BUTTONS_GLASS_PREFIX) ||
                     key.startsWith(CONTROL_CENTER_TOP_BUTTONS_SETTINGS_PREFIX) ||
                     key.startsWith("control_center_top_buttons_") ||
                     key == "add_control_center_top_buttons" || key == "show_control_center_top_buttons_in_landscape")

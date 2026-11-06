@@ -1206,6 +1206,8 @@ private fun Root(
                 NotificationTextColorSettingsStore(context).syncRemote(it)
                 ControlCenterRadiusSettingsStore(context).syncRemote(it)
                 ControlCenterTopButtonsGlassSettingsStore(context).syncRemote(it)
+                ControlCenterTopButtonsPlacementSettingsStore(context).syncRemote(it)
+                ControlCenterTopButtonsGeometrySettingsStore(context).syncRemote(it)
                 SuperXiaoAiInputGlassSettingsStore(context).syncRemote(it)
                 RearScreenGestureSettingsStore(context).syncRemote(it)
                 RearMiniPlayerSettingsStore(context).syncRemote(it)
@@ -9439,13 +9441,25 @@ private fun ControlCenterTopButtonsPage(back: () -> Unit) {
     val service by HookApplication.service.collectAsStateWithLifecycle()
     val store = remember(context) { ControlCenterTopButtonsGlassSettingsStore(context) }
     var state by remember { mutableStateOf(store.settings) }
+    val placementStore = remember(context) { ControlCenterTopButtonsPlacementSettingsStore(context) }
+    var placement by remember { mutableStateOf(placementStore.settings) }
+    val geometryStore = remember(context) { ControlCenterTopButtonsGeometrySettingsStore(context) }
+    var geometry by remember { mutableStateOf(geometryStore.read(placement.atBottom)) }
     LaunchedEffect(service) {
         service?.let(store::syncRemote)
+        service?.let(placementStore::syncRemote)
+        service?.let(geometryStore::syncRemote)
+        placement = placementStore.settings
+        geometry = geometryStore.read(placement.atBottom)
         state = store.settings
     }
     fun update(transform: (ControlCenterTopButtonsGlassSettings) -> ControlCenterTopButtonsGlassSettings) {
         store.update(service, transform)
         state = store.settings
+    }
+    fun updateGeometry(parameter: CcButtonGeometryParameter, value: Float) {
+        geometryStore.update(service, placement.atBottom, parameter, value)
+        geometry = geometryStore.read(placement.atBottom)
     }
     AppPage(tr("控制中心顶部按钮", "控制中心顶部按钮"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI)) { p, scroll ->
         AppList(p, scroll) {
@@ -9461,11 +9475,35 @@ private fun ControlCenterTopButtonsPage(back: () -> Unit) {
                         enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
                         exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
                     ) {
-                        SwitchPreference(
-                            title = tr("横屏显示控制中心顶部控制按钮", "横屏显示控制中心顶部控制按钮"),
-                            checked = state.showInLandscape,
-                            onCheckedChange = { value -> update { it.copy(showInLandscape = value) } },
-                        )
+                        Column {
+                            SwitchPreference(
+                                title = tr("横屏显示控制中心顶部控制按钮", "横屏显示控制中心顶部控制按钮"),
+                                checked = state.showInLandscape,
+                                onCheckedChange = { value -> update { it.copy(showInLandscape = value) } },
+                            )
+                            SwitchPreference(
+                                title = tr("cc_top_buttons_at_bottom", "下移至控制中心磁贴尾部"),
+                                checked = placement.atBottom,
+                                onCheckedChange = { value ->
+                                    placementStore.update(service, placement.copy(atBottom = value))
+                                    placement = placementStore.settings
+                                    geometry = geometryStore.read(placement.atBottom)
+                                },
+                            )
+                            AnimatedVisibility(visible = placement.atBottom,
+                                enter = fadeIn(tween(180)) + expandVertically(tween(220)),
+                                exit = fadeOut(tween(140)) + shrinkVertically(tween(180))) {
+                                ParameterIntSlide(tr("cc_top_buttons_bottom_gap", "与控制中心磁贴底部的间距"),
+                                    placement.gapDp, -48..64, " dp", defaultValue = 0) { value ->
+                                    placementStore.update(service, placement.copy(gapDp = value))
+                                    placement = placementStore.settings
+                                }
+                            }
+                        }
+                    }
+                    ParameterIntSlide(tr("cc_top_buttons_spacing", "控制按钮之间的间距"),
+                        geometry.spacingDp, -64..96, " dp", defaultValue = 0) { value ->
+                        updateGeometry(CcButtonGeometryParameter.SPACING, value.toFloat())
                     }
                 }
             }
@@ -9478,10 +9516,10 @@ private fun ControlCenterTopButtonsPage(back: () -> Unit) {
                     Group(tr("材质设置", "材质设置")) {
                         ParameterFloatSlide(
                             title = tr("顶部按钮图标缩放", "顶部按钮图标缩放"),
-                            value = state.iconScale,
+                            value = geometry.iconScale,
                             range = .5f..2f,
                             defaultValue = 1f,
-                        ) { value -> update { it.copy(iconScale = value) } }
+                        ) { value -> updateGeometry(CcButtonGeometryParameter.ICON_SCALE, value) }
                         OverlayDropdownPreference(
                             title = tr("顶部按钮背景材质", "顶部按钮背景材质"),
                             items = listOf(tr("不显示", "不显示"), tr("纯色", "纯色"), tr("高级材质", "高级材质"), tr("柔光玻璃", "柔光玻璃")),
@@ -9500,7 +9538,7 @@ private fun ControlCenterTopButtonsPage(back: () -> Unit) {
                                             color = state.pureColor,
                                             onColorChange = { value -> update { it.copy(pureColor = value) } },
                                         )
-                                        ParameterDpSlide(tr("顶部按钮背景圆形半径", "顶部按钮背景圆形半径"), state.pureRadius, 0f..22f, 22f) { value -> update { it.copy(pureRadius = value) } }
+                                        ParameterDpSlide(tr("顶部按钮背景圆形半径", "顶部按钮背景圆形半径"), geometry.pureRadius, 0f..22f, 22f) { value -> updateGeometry(CcButtonGeometryParameter.PURE_RADIUS, value) }
                                     }
                                     CONTROL_CENTER_TOP_BUTTONS_MODE_ADVANCED -> {
                                         ShortcutBackgroundColorPreference(
@@ -9508,7 +9546,7 @@ private fun ControlCenterTopButtonsPage(back: () -> Unit) {
                                             color = state.advancedColor,
                                             onColorChange = { value -> update { it.copy(advancedColor = value) } },
                                         )
-                                        ParameterDpSlide(tr("顶部按钮背景圆形半径", "顶部按钮背景圆形半径"), state.advancedRadius, 0f..22f, 22f) { value -> update { it.copy(advancedRadius = value) } }
+                                        ParameterDpSlide(tr("顶部按钮背景圆形半径", "顶部按钮背景圆形半径"), geometry.advancedRadius, 0f..22f, 22f) { value -> updateGeometry(CcButtonGeometryParameter.ADVANCED_RADIUS, value) }
                                         ParameterIntSlide(tr("不透明度", "不透明度"), state.advancedOpacity, 0..100, "%", 14) { value -> update { it.copy(advancedOpacity = value) } }
                                         ParameterIntSlide(tr("背景模糊度", "背景模糊度"), state.advancedBlur, 0..40, " px", 40) { value -> update { it.copy(advancedBlur = value) } }
                                         SwitchPreference(
@@ -9518,7 +9556,7 @@ private fun ControlCenterTopButtonsPage(back: () -> Unit) {
                                         )
                                     }
                                     CONTROL_CENTER_TOP_BUTTONS_MODE_SOFT_GLASS -> {
-                                        ParameterDpSlide(tr("顶部按钮背景圆形半径", "顶部按钮背景圆形半径"), state.softRadius, 0f..22f, 22f) { value -> update { it.copy(softRadius = value) } }
+                                        ParameterDpSlide(tr("顶部按钮背景圆形半径", "顶部按钮背景圆形半径"), geometry.softRadius, 0f..22f, 22f) { value -> updateGeometry(CcButtonGeometryParameter.SOFT_RADIUS, value) }
                                         SwitchPreference(
                                             title = tr("使用全局柔光玻璃参数", "使用全局柔光玻璃参数"),
                                             checked = state.useGlobal,

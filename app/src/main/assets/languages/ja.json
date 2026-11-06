@@ -3,6 +3,9 @@
   "creator": "btm_m",
   "locale": "ja",
   "strings": {
+    "cc_top_buttons_spacing": "操作ボタン間の間隔",
+    "cc_top_buttons_at_bottom": "最後のタイル行の下に移動",
+    "cc_top_buttons_bottom_gap": "コントロールセンターのタイル下端との間隔",
     "cc_tile_wlan": "WLAN",
     "cc_tile_data": "モバイルデータ",
     "cc_tile_media": "メディア",

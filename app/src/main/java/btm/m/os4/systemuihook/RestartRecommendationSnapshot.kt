@@ -26,6 +26,8 @@ internal fun restartRecommendationSnapshot(group: String, preferences: SharedPre
     readControlCenterClockSettings(p)
     readControlCenterHeaderHeightOffset(p)
     readCcTileLayoutSettings(p)
+    readControlCenterTopButtonsPlacement(p)
+    readControlCenterTopButtonsGeometry(p)
     ContactsDialerSettings.read(p)
     PortalSettings.read(p)
     readWidgetGlassSettings(p)

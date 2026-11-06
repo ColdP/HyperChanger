@@ -3,6 +3,9 @@
   "creator": "btm_m",
   "locale": "en",
   "strings": {
+    "cc_top_buttons_spacing": "Spacing between control buttons",
+    "cc_top_buttons_at_bottom": "Move below the last tile row",
+    "cc_top_buttons_bottom_gap": "Gap below Control Center tiles",
     "cc_tile_wlan": "WLAN",
     "cc_tile_data": "Mobile data",
     "cc_tile_media": "Media",
