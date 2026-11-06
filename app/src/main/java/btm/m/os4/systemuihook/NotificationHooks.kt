@@ -279,6 +279,16 @@ internal class NotificationHooks(
     private val stackBlurBaselines = Collections.synchronizedMap(WeakHashMap<View, ViewRenderBaseline>())
     private val stackBlurProgress = Collections.synchronizedMap(WeakHashMap<View, Float>())
     private val stackBlurEffects = java.util.concurrent.ConcurrentHashMap<Int, RenderEffect>()
+    private data class StackRadiusAccessor(val method: java.lang.reflect.Method?)
+    private val stackRadiusAccessors = object : ClassValue<StackRadiusAccessor>() {
+        override fun computeValue(type: Class<*>): StackRadiusAccessor = StackRadiusAccessor(
+            runCatching {
+                (type.methods.firstOrNull { it.name == "getBgRadius" && it.parameterCount == 0 }
+                    ?: type.declaredMethods.firstOrNull { it.name == "getBgRadius" && it.parameterCount == 0 })
+                    ?.apply { isAccessible = true }
+            }.getOrNull(),
+        )
+    }
     private val stackBlurOutline = object : ViewOutlineProvider() {
         override fun getOutline(view: View, outline: Outline) {
             val width = view.width
@@ -288,9 +298,7 @@ internal class NotificationHooks(
                 return
             }
             val radius = runCatching {
-                val method = view.javaClass.methods.firstOrNull { it.name == "getBgRadius" && it.parameterCount == 0 }
-                    ?: view.javaClass.declaredMethods.firstOrNull { it.name == "getBgRadius" && it.parameterCount == 0 }
-                (method?.apply { isAccessible = true }?.invoke(view) as? Number)?.toFloat()
+                (stackRadiusAccessors.get(view.javaClass).method?.invoke(view) as? Number)?.toFloat()
             }.getOrNull()?.takeIf { it > 0f }
                 ?: runCatching { view.resources.getDimension(view.resources.getIdentifier("notification_item_bg_radius", "dimen", "com.android.systemui")) }.getOrDefault(0f)
             outline.setRoundRect(0, 0, width, height, radius.coerceAtLeast(0f))

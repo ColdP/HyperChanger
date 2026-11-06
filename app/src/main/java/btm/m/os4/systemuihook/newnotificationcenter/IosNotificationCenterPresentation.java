@@ -27,6 +27,7 @@ import android.util.Base64;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.WeakHashMap;
 
 import btm.m.os4.systemuihook.hypermusiccover.Xp;
@@ -35,6 +36,8 @@ import btm.m.os4.systemuihook.hypermusiccover.Xp;
 public final class IosNotificationCenterPresentation {
     private static final String TAG = "[IOSShade] ";
     private static ViewGroup window;
+    private static final WeakHashMap<android.content.res.Resources, HashMap<String, Integer>> RESOURCE_IDS =
+            new WeakHashMap<>();
     private static FrameLayout panel;
     private static FrameLayout host;
     private static View clock;
@@ -247,6 +250,7 @@ public final class IosNotificationCenterPresentation {
         clearObserver = null;
         releasePresentation();
         restoreNativeClearButtons();
+        RESOURCE_IDS.clear();
         window = null;
     }
 
@@ -1782,7 +1786,19 @@ public final class IosNotificationCenterPresentation {
 
     private static View byId(View root, String name) {
         if (root == null) return null;
-        int id = root.getResources().getIdentifier(name, "id", "com.android.systemui");
+        android.content.res.Resources resources = root.getResources();
+        HashMap<String, Integer> ids = RESOURCE_IDS.get(resources);
+        Integer cached = ids == null ? null : ids.get(name);
+        int id = cached == null ? resources.getIdentifier(name, "id", "com.android.systemui") : cached;
+        // Cache identifiers, never views: OEM/plugin reinflation can replace a view
+        // at the same ID. Missing resources must remain discoverable on later frames.
+        if (cached == null && id != 0) {
+            if (ids == null) {
+                ids = new HashMap<>();
+                RESOURCE_IDS.put(resources, ids);
+            }
+            ids.put(name, id);
+        }
         return id == 0 ? null : root.findViewById(id);
     }
 

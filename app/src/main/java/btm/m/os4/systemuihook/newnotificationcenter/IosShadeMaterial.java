@@ -5,9 +5,11 @@ import btm.m.os4.systemuihook.hypermusiccover.Xp;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
+import android.content.res.Resources;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.WeakHashMap;
 
@@ -32,6 +34,23 @@ public final class IosShadeMaterial {
     private static final WeakHashMap<View, Boolean> CONTAIN_REQUESTS = new WeakHashMap<>();
     private static final WeakHashMap<View, Boolean> MEDIA = new WeakHashMap<>();
     private static final WeakHashMap<View, Boolean> GROUP_CONTROLS = new WeakHashMap<>();
+    // Only class names are immutable. Parentage and explicit group/media registration
+    // must still be checked live when notification views are rebound or reparented.
+    private static final class GroupType {
+        final boolean control, owner;
+        GroupType(Class<?> type) {
+            String name = type.getName().toLowerCase(java.util.Locale.ROOT);
+            String simple = name.substring(name.lastIndexOf('.') + 1);
+            control = simple.contains("expandbutton") || simple.contains("collapsebutton");
+            owner = name.contains("expandablenotificationrow")
+                    || name.contains("notificationchildrencontainer");
+        }
+    }
+    private static final ClassValue<GroupType> GROUP_TYPES = new ClassValue<GroupType>() {
+        @Override protected GroupType computeValue(Class<?> type) { return new GroupType(type); }
+    };
+    private static final WeakHashMap<Resources, HashMap<Integer, Boolean>> GROUP_RESOURCE_IDS =
+            new WeakHashMap<>();
     private static final WeakHashMap<View, int[]> GLASS_REQUESTS = new WeakHashMap<>();
     private static final WeakHashMap<View, int[]> SAVED_GLASS = new WeakHashMap<>();
     private static Method glassRadius;
@@ -208,28 +227,28 @@ public final class IosShadeMaterial {
      */
     private static boolean isGroupCollapseView(View view) {
         if (GROUP_CONTROLS.containsKey(view)) return true;
-        String className = view.getClass().getName().toLowerCase(java.util.Locale.ROOT);
-        int separator = className.lastIndexOf('.');
-        String simple = separator >= 0 ? className.substring(separator + 1) : className;
-        if (simple.contains("expandbutton") || simple.contains("collapsebutton")) return true;
+        if (GROUP_TYPES.get(view.getClass()).control) return true;
         for (Object parent = view.getParent(); parent instanceof View;
                 parent = ((View) parent).getParent()) {
-            String parentName = parent.getClass().getName().toLowerCase(java.util.Locale.ROOT);
-            int parentSeparator = parentName.lastIndexOf('.');
-            String parentSimple = parentSeparator >= 0
-                    ? parentName.substring(parentSeparator + 1) : parentName;
-            if (parentSimple.contains("expandbutton") || parentSimple.contains("collapsebutton")) {
-                return true;
-            }
+            if (GROUP_TYPES.get(parent.getClass()).control) return true;
         }
         try {
             int id = view.getId();
             if (id > 0) {
-                String entry = view.getResources().getResourceEntryName(id)
-                        .toLowerCase(java.util.Locale.ROOT);
-                if (entry.contains("collapse_button") || entry.contains("group_collapse")
+                Resources resources = view.getResources();
+                HashMap<Integer, Boolean> ids = GROUP_RESOURCE_IDS.get(resources);
+                Boolean cached = ids == null ? null : ids.get(id);
+                if (cached != null) return cached;
+                String entry = resources.getResourceEntryName(id).toLowerCase(java.util.Locale.ROOT);
+                boolean control = entry.contains("collapse_button") || entry.contains("group_collapse")
                         || ((entry.contains("expand") || entry.contains("collapse"))
-                        && (entry.contains("notification") || entry.contains("group")))) return true;
+                        && (entry.contains("notification") || entry.contains("group")));
+                if (ids == null) {
+                    ids = new HashMap<>();
+                    GROUP_RESOURCE_IDS.put(resources, ids);
+                }
+                ids.put(id, control);
+                return control;
             }
         } catch (Throwable ignored) {
         }
@@ -293,9 +312,7 @@ public final class IosShadeMaterial {
     }
 
     private static void captureGroupControls(View owner) {
-        String name = owner.getClass().getName().toLowerCase(java.util.Locale.ROOT);
-        if (!name.contains("expandablenotificationrow")
-                && !name.contains("notificationchildrencontainer")) return;
+        if (!GROUP_TYPES.get(owner.getClass()).owner) return;
         // The MIUI group header keeps the actual collapse ImageView inside its injector.
         // Walk only the named notification-group fields, with a bounded depth, so ordinary
         // child notification rows are never reclassified as wallpaper surfaces.
@@ -418,6 +435,7 @@ public final class IosShadeMaterial {
         } finally {
             SAVED.clear();
             SAVED_GLASS.clear();
+            GROUP_RESOURCE_IDS.clear();
             WRITING.remove();
         }
     }
