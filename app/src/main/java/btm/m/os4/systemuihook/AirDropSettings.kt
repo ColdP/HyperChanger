@@ -7,7 +7,9 @@ import android.content.SharedPreferences
 import io.github.libxposed.service.XposedService
 
 /** Module setting for the MiShare AirDrop availability gate. */
-data class AirDropSettings(val forceEnable: Boolean = false)
+data class AirDropSettings(
+    val forceEnable: Boolean = false,
+)
 
 class AirDropSettingsStore(context: Context) {
     private val local = context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE)
@@ -37,7 +39,9 @@ class AirDropSettingsStore(context: Context) {
     )
 
     private fun SharedPreferences.write(value: AirDropSettings) {
-        edit().putBoolean(KEY_AIRDROP_FORCE_ENABLE, value.forceEnable).apply()
+        edit()
+            .putBoolean(KEY_AIRDROP_FORCE_ENABLE, value.forceEnable)
+            .apply()
     }
 }
 

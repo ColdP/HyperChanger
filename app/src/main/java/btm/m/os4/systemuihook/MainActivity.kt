@@ -3736,6 +3736,7 @@ private fun RestartScopesPage(
     )
     val systemFeatureTargets = listOf(
         ScopeApplication.SETTINGS,
+        ScopeApplication.GOOGLE_PLAY_SERVICES,
         ScopeApplication.PERSONAL_ASSISTANT,
         ScopeApplication.SUBSCREEN_CENTER,
         ScopeApplication.SYSTEM_UPDATE,
@@ -4540,9 +4541,25 @@ private fun SystemSettings(
     onPickLogo: () -> Unit,
     onClearLogo: () -> Unit,
     back: () -> Unit,
-) = AppPage(tr("系统设置", "系统设置"), back, restartScopes = setOf(ScopeApplication.SETTINGS, ScopeApplication.SOUND_EFFECT, ScopeApplication.MI_SETTINGS, ScopeApplication.SECURITY_CENTER)) { padding, scroll ->
+) = AppPage(tr("系统设置", "系统设置"), back, restartScopes = setOf(ScopeApplication.SETTINGS, ScopeApplication.GOOGLE_PLAY_SERVICES, ScopeApplication.SOUND_EFFECT, ScopeApplication.MI_SETTINGS, ScopeApplication.SECURITY_CENTER)) { padding, scroll ->
     val cpuIconContext = LocalContext.current
     val soundEffectService by HookApplication.service.collectAsStateWithLifecycle()
+    val gmsUnlockStore = remember(cpuIconContext) { GmsUnlockSettingsStore(cpuIconContext) }
+    var gmsUnlockSettings by remember { mutableStateOf(gmsUnlockStore.settings) }
+    LaunchedEffect(soundEffectService) {
+        soundEffectService?.let {
+            gmsUnlockStore.syncRemote(it)
+            gmsUnlockSettings = gmsUnlockStore.settings
+        }
+    }
+    val gmsQuickShareIslandStore = remember(cpuIconContext) { GmsQuickShareIslandSettingsStore(cpuIconContext) }
+    var gmsQuickShareIslandSettings by remember { mutableStateOf(gmsQuickShareIslandStore.settings) }
+    LaunchedEffect(soundEffectService) {
+        soundEffectService?.let {
+            gmsQuickShareIslandStore.syncRemote(it)
+            gmsQuickShareIslandSettings = gmsQuickShareIslandStore.settings
+        }
+    }
     val appScopeService by HookApplication.service.collectAsStateWithLifecycle()
     val miSettingsService by HookApplication.service.collectAsStateWithLifecycle()
     val miSettingsStore = remember(cpuIconContext) { MiSettingsPreferencesStore(cpuIconContext) }
@@ -4736,11 +4753,6 @@ private fun SystemSettings(
                     onCheckedChange = { enabled -> updateSettingsApp { it.copy(unlockNeverScreenTimeout = enabled) } },
                 )
                 SwitchPreference(
-                    title = tr("显示 Google 服务入口", "显示 Google 服务入口"),
-                    checked = settingsApp.showGoogleServiceEntry,
-                    onCheckedChange = { enabled -> updateSettingsApp { it.copy(showGoogleServiceEntry = enabled) } },
-                )
-                SwitchPreference(
                     title = tr("显示已保存 WiFi 的密码", "显示已保存 WiFi 的密码"),
                     checked = settingsApp.showSavedWifiPasswords,
                     onCheckedChange = { enabled -> updateSettingsApp { it.copy(showSavedWifiPasswords = enabled) } },
@@ -4814,6 +4826,33 @@ OverlayDropdownPreference(
                         defaultValue = 100f,
                     )
                 }
+            }
+        }
+        item {
+            Group(tr("Google 服务", "Google 服务")) {
+                SwitchPreference(
+                    title = tr("解除国行 GMS 限制", "解除国行 GMS 限制"),
+                    summary = tr("解除 Google Play 服务中的国行功能限制，Quick Share 可用性取决于设备支持。", "解除 Google Play 服务中的国行功能限制，Quick Share 可用性取决于设备支持。"),
+                    checked = gmsUnlockSettings.enabled,
+                    onCheckedChange = { enabled ->
+                        gmsUnlockStore.update(soundEffectService) { it.copy(enabled = enabled) }
+                        gmsUnlockSettings = gmsUnlockStore.settings
+                    },
+                )
+                SwitchPreference(
+                    title = tr("Quick Share 接入小米超级岛", "Quick Share 接入小米超级岛"),
+                    summary = tr("将 Quick Share 的传输通知显示为小米超级岛；可能需要先去除小米超级岛白名单限制。", "将 Quick Share 的传输通知显示为小米超级岛；可能需要先去除小米超级岛白名单限制。"),
+                    checked = gmsQuickShareIslandSettings.enabled,
+                    onCheckedChange = { enabled ->
+                        gmsQuickShareIslandStore.update(soundEffectService) { it.copy(enabled = enabled) }
+                        gmsQuickShareIslandSettings = gmsQuickShareIslandStore.settings
+                    },
+                )
+                SwitchPreference(
+                    title = tr("显示 Google 服务入口", "显示 Google 服务入口"),
+                    checked = settingsApp.showGoogleServiceEntry,
+                    onCheckedChange = { enabled -> updateSettingsApp { it.copy(showGoogleServiceEntry = enabled) } },
+                )
             }
         }
         item {

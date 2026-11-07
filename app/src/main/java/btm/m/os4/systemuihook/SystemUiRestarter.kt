@@ -163,6 +163,7 @@ enum class ScopeApplication(val title: String, val packageName: String) {
     SOUND_EFFECT("音质音效", "com.miui.misound"),
     MI_SETTINGS("小米设置", "com.xiaomi.misettings"),
     AIRDROP("小米互传", "com.miui.mishare.connectivity"),
+    GOOGLE_PLAY_SERVICES("Google Play 服务", "com.google.android.gms"),
     HTML_VIEWER("HTML 查看器", "com.android.htmlviewer"),
     JOYOSE("Joyose", "com.xiaomi.joyose"),
     SYSTEM_HELPER("系统助手", "com.mobiletools.systemhelper"),

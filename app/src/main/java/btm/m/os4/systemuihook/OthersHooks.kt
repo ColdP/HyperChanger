@@ -52,6 +52,7 @@ internal class OthersHooks(
     private var customRearScreenWidgetRegistrationInstalled = false
     private var rearScreenLeftSwipeInstalled = false
     private var islandSimulationRearScreenInstalled = false
+    private var googleQuickShareIslandInstalled = false
     private val rearMiniPlayerHooks = RearMiniPlayerHooks(module)
     private val rearMusicWhitelistHooks = RearMusicWhitelistHooks(module, hookDeoptimized, logTag)
     private val screenshotHooks = ScreenshotHooks(module, hookDeoptimized, logTag)
@@ -411,6 +412,125 @@ internal class OthersHooks(
             .setId("hyperchanger:airdrop-force-enable:cta")
             .intercept { true }
         btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, logTag, "Installed MiShare AirDrop availability hooks in ${param.packageName}")
+    }
+
+    /**
+     * Reproduce unlock_cn_gms_ksu's two feature removals inside Play services.
+     * The original module edits permission XML before boot; this process-local equivalent only
+     * changes the PackageManager answers observed by GMS and leaves the system feature registry
+     * untouched. Quick Share still requires the installed provider and wireless backend.
+     */
+    fun installGoogleFeatureUnlockHooks(param: PackageLoadedParam) {
+        val preferences = module.getRemotePreferences(REMOTE_PREFERENCE_GROUP)
+        if (!preferences.getBoolean(KEY_GMS_UNLOCK_FEATURES, false)) return
+        val packageManager = Class.forName("android.app.ApplicationPackageManager", false, null)
+        packageManager.declaredMethods
+            .filter { method ->
+                method.name == "hasSystemFeature" &&
+                    method.parameterTypes.firstOrNull() == String::class.java &&
+                    method.returnType == Boolean::class.javaPrimitiveType
+            }
+            .forEach { method ->
+                method.isAccessible = true
+                hookDeoptimized(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("hyperchanger:gms-feature-unlock:${method.toGenericString()}")
+                    .intercept { chain ->
+                        when (chain.getArg(0) as? String) {
+                            // unlock_cn_gms_ksu removes these feature declarations from the
+                            // PackageManager-visible XML. Returning false is the equivalent
+                            // process-local answer; returning true would preserve the CN gate.
+                            "cn.google.services", "com.google.android.feature.services_updater" -> false
+                            else -> chain.proceed()
+                        }
+                    }
+            }
+        packageManager.declaredMethods
+            .filter { method -> method.name == "getSystemAvailableFeatures" && method.parameterCount == 0 }
+            .forEach { method ->
+                method.isAccessible = true
+                hookDeoptimized(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("hyperchanger:gms-feature-unlock:list:${method.toGenericString()}")
+                    .intercept { chain ->
+                        val result = chain.proceed()
+                        val features = result as? Array<*> ?: return@intercept result
+                        val filtered = features.filter { feature ->
+                            val name = (feature as? android.content.pm.FeatureInfo)?.name
+                            name != "cn.google.services" &&
+                                name != "com.google.android.feature.services_updater"
+                        }
+                        // Preserve the framework method's FeatureInfo[] runtime type. A Kotlin
+                        // toTypedArray() here would create Object[], which can fail at the GMS
+                        // caller's checkcast even though the elements are valid FeatureInfo.
+                        val componentType = result.javaClass.componentType ?: return@intercept result
+                        val typed = java.lang.reflect.Array.newInstance(componentType, filtered.size)
+                        filtered.forEachIndexed { index, feature ->
+                            java.lang.reflect.Array.set(typed, index, feature)
+                        }
+                        typed
+                    }
+            }
+        HookModuleLogger.log(module, Log.INFO, logTag, "Installed process-local GMS feature unlock hooks in ${param.packageName}")
+    }
+
+    /**
+     * Quick Share owns the transfer notification and already updates it in place for progress.
+     * Add the same Focus notification extras consumed by HyperOS Dynamic Island before GMS posts
+     * it, so the original notification ID, actions, progress and cancellation remain GMS-owned.
+     */
+    @Synchronized
+    fun installGoogleQuickShareIslandHook(param: PackageLoadedParam) {
+        if (googleQuickShareIslandInstalled) return
+        val preferences = module.getRemotePreferences(REMOTE_PREFERENCE_GROUP)
+        if (!preferences.getBoolean(KEY_GMS_QUICK_SHARE_ISLAND, false)) return
+        val methods = android.app.NotificationManager::class.java.declaredMethods.filter { method ->
+            when (method.name) {
+                "notify" -> method.parameterTypes.contentEquals(arrayOf(
+                    String::class.java, Int::class.javaPrimitiveType, android.app.Notification::class.java,
+                ))
+                "notifyAsUser" -> method.parameterTypes.contentEquals(arrayOf(
+                    String::class.java, Int::class.javaPrimitiveType, android.app.Notification::class.java,
+                    android.os.UserHandle::class.java,
+                ))
+                "notifyAsPackage" -> method.parameterTypes.contentEquals(arrayOf(
+                    String::class.java, String::class.java, Int::class.javaPrimitiveType, android.app.Notification::class.java,
+                ))
+                else -> false
+            }
+        }
+        // Each process owns one installation. Successful registrations remain guarded even when
+        // a later overload cannot be hooked, preventing duplicate callbacks on subsequent loads.
+        methods.forEach { method ->
+            runCatching {
+                method.isAccessible = true
+                val notificationIndex = method.parameterTypes.indexOf(android.app.Notification::class.java)
+                val tagIndex = if (method.name == "notifyAsPackage") 1 else 0
+                hookDeoptimized(method)
+                    .setExceptionMode(ExceptionMode.PROTECTIVE)
+                    .setId("hyperchanger:gms-quick-share-island:${method.toGenericString()}")
+                    .intercept { chain ->
+                        // Keep the original call outside the adaptation catch: never retry a
+                        // framework notification call that has already thrown or had side effects.
+                        val adapted = runCatching {
+                            if (!preferences.getBoolean(KEY_GMS_QUICK_SHARE_ISLAND, false)) return@runCatching null
+                            val original = chain.getArg(notificationIndex) as? android.app.Notification ?: return@runCatching null
+                            if (method.name == "notifyAsPackage" && chain.getArg(0) != "com.google.android.gms") return@runCatching null
+                            QuickShareIslandBridge.transform(chain.getArg(tagIndex) as? String, original)
+                        }.getOrNull()
+                        if (adapted != null) {
+                            val args = chain.args.toTypedArray().also { it[notificationIndex] = adapted }
+                            chain.proceedWith(chain.thisObject, args)
+                        } else chain.proceed()
+                    }
+                googleQuickShareIslandInstalled = true
+            }.onFailure { error ->
+                HookModuleLogger.log(module, Log.WARN, logTag, "Could not install GMS island hook for ${method.name}", error)
+            }
+        }
+        if (googleQuickShareIslandInstalled) {
+            HookModuleLogger.log(module, Log.INFO, logTag, "Installed GMS Quick Share Dynamic Island bridge in ${param.packageName}")
+        }
     }
 
     /** Keep the Xiaomi 18 Pro Max / madrid identity local to the Mi Share process. */

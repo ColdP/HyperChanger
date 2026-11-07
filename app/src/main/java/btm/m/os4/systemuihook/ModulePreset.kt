@@ -105,6 +105,8 @@ object ModulePresetCodec {
                 completePersonalAssistantPreset(values)
                 completeWidgetGlassPreset(values)
                 completePowerBatteryPreset(values)
+                completeGmsUnlockPreset(values)
+                completeGmsQuickShareIslandPreset(values)
             }
             groups.put(groupName, values)
         }
@@ -171,6 +173,8 @@ object ModulePresetCodec {
                 completePersonalAssistantPreset(values)
                 completeWidgetGlassPreset(values)
                 completePowerBatteryPreset(values)
+                completeGmsUnlockPreset(values)
+                completeGmsQuickShareIslandPreset(values)
             }
             PreviewGroup(
                 groupName,
@@ -243,6 +247,8 @@ object ModulePresetCodec {
                 completePersonalAssistantPreset(values)
                 completeWidgetGlassPreset(values)
                 completePowerBatteryPreset(values)
+                completeGmsUnlockPreset(values)
+                completeGmsQuickShareIslandPreset(values)
             }
             val preserveMissingNavigation = groupName == REMOTE_PREFERENCE_GROUP
             applyValues(context.getSharedPreferences(groupName, Context.MODE_PRIVATE), values, replace = true,

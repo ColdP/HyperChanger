@@ -126,6 +126,8 @@ internal fun restartScopesForPreference(group: String, key: String): Set<ScopeAp
         key.startsWith("mi_settings_") -> setOf(ScopeApplication.MI_SETTINGS)
         key.startsWith("audio_") -> setOf(ScopeApplication.SOUND_EFFECT)
         key.startsWith("airdrop_") -> setOf(ScopeApplication.AIRDROP)
+        key == KEY_GMS_UNLOCK_FEATURES -> setOf(ScopeApplication.GOOGLE_PLAY_SERVICES)
+        key == KEY_GMS_QUICK_SHARE_ISLAND -> setOf(ScopeApplication.GOOGLE_PLAY_SERVICES)
         key.startsWith("system_update_") -> setOf(ScopeApplication.SYSTEM_UPDATE)
         key.startsWith("screenrecorder_") -> setOf(ScopeApplication.SCREEN_RECORDER, ScopeApplication.XIAOMI_HEALTH)
         key.contains("music_controls_") -> setOf(ScopeApplication.SUBSCREEN_CENTER)

@@ -1195,6 +1195,13 @@ class HyperSystemUiModule : XposedModule() {
                 .onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install MiShare AirDrop hooks", error) }
             return
         }
+        if (param.packageName == GMS_PACKAGE) {
+            runCatching { othersHooks.installGoogleFeatureUnlockHooks(param) }
+                .onFailure { error -> HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install GMS feature unlock hooks", error) }
+            runCatching { othersHooks.installGoogleQuickShareIslandHook(param) }
+                .onFailure { error -> HookModuleLogger.log(this, Log.ERROR, TAG, "Could not install GMS Quick Share island hook", error) }
+            return
+        }
         if (param.packageName == LOCKSCREEN_WALLPAPER) {
             // The new HyperMusicCover runtime above owns this process's wallpaper hooks.
             runCatching {
@@ -11908,6 +11915,7 @@ class HyperSystemUiModule : XposedModule() {
         @Volatile private var superWallpaperDepthActive = false
         private const val SETTINGS_PACKAGE = "com.android.settings"
         private const val AIRDROP_PACKAGE = "com.miui.mishare.connectivity"
+        private const val GMS_PACKAGE = "com.google.android.gms"
         private const val KEY_HIDE_APP_ICON = "hide_app_icon"
         private const val TAG = "HyperSystemUIHook"
         private const val SYSTEM_UI = "com.android.systemui"
