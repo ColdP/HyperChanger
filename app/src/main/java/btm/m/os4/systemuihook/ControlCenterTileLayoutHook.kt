@@ -42,9 +42,6 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
     private val blockExtents = WeakHashMap<View, BlockExtent>()
     private val sliderSizes = WeakHashMap<View, Pair<Int, Int>>()
     private val mediaProgress = WeakHashMap<View, WeakReference<MediaProgressView>>()
-    private val mediaFavorite = WeakHashMap<View, WeakReference<CcMediaFavoriteView>>()
-    private val mediaVolume = WeakHashMap<View, WeakReference<View>>()
-    private val mediaDevice = WeakHashMap<View, WeakReference<View>>()
     private val mediaPlaceholders = WeakHashMap<View, WeakReference<View>>()
     private val mediaHolders = WeakHashMap<View, WeakReference<Any>>()
     private val hiddenMediaChildren = WeakHashMap<View, MutableMap<String, Int>>()
@@ -275,7 +272,6 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
     }
 
     private fun clearMedia(root: View) {
-        clearExpandedControls(root)
         restoreMediaChildren(root)
         mediaLayoutSizes.remove(root)
         mediaProgress.remove(root)?.get()?.let { (root as? ViewGroup)?.overlay?.remove(it) }
@@ -672,11 +668,6 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
                     if (t != null && adapter != null && panels[adapter]?.get() === parent &&
                         field(adapter, "mode")?.toString() == "NORMAL" && field(adapter, "style")?.toString() == "VERTICAL") {
                         if (t.id == "media") layoutMedia(root, t) else if (!t.slider) layoutCard(root, t)
-                    } else if ((t == null || t.id == "media") &&
-                        find(root, "cover") != null && insideExpandedMediaPanel(root)) {
-                        layoutExpandedMedia(root)
-                    } else if ((t == null || t.id == "media") && hasExpandedControls(root)) {
-                        clearExpandedControls(root)
                     }
                 }
                 result
@@ -713,7 +704,6 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
             restoreMediaChildren(root)
             mediaLayoutSizes[root] = size
         }
-        clearExpandedControls(root)
         val d = root.resources.displayMetrics.density
         val inset = minOf((14*d).roundToInt(), root.width/8)
         val cover = find(root, "cover") ?: return
@@ -868,216 +858,6 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
             progress.invalidate()
         } else mediaProgress.remove(root)?.get()?.let { (root as? ViewGroup)?.overlay?.remove(it) }
         syncEmptyMedia(root)
-    }
-
-    /** True while the media card is hosted by the secondary panel that opens after tapping it. */
-    private fun insideExpandedMediaPanel(root: View): Boolean {
-        val content = root.resources.getIdentifier("media_content", "id", "miui.systemui.plugin")
-        if (content == 0) return false
-        var parent = root.parent
-        while (parent is View) {
-            if (parent.id == content) return true
-            parent = parent.parent
-        }
-        return false
-    }
-
-    private fun hasExpandedControls(root: View): Boolean =
-        mediaFavorite.containsKey(root) || mediaVolume.containsKey(root) || mediaDevice.containsKey(root)
-
-    /**
-     * Expanded card, top to bottom: centred cover, title, artist/lyric line, progress bar, then
-     * one row holding favourite + previous + play/pause + next, followed by the volume bar and
-     * the playback device row.
-     */
-    private fun layoutExpandedMedia(root: View) {
-        if (root.width <= 0 || root.height <= 0) return
-        val context = root.context
-        val density = root.resources.displayMetrics.density
-        fun dp(value: Float) = (value * density).roundToInt()
-        val inset = dp(16f)
-        val gap = dp(8f)
-        val rowWidth = (root.width - inset * 2).coerceAtLeast(1)
-        val cover = find(root, "cover") ?: return
-        mediaChildVisible(root, "title", true)
-        mediaChildVisible(root, "artist", true)
-        mediaChildVisible(root, "empty_state", true)
-        mediaChildVisible(root, "audio_container", true)
-        mediaChildVisible(root, "device_icon", false)
-        val coverSize = dp(96f).coerceAtMost(rowWidth).coerceAtLeast(1)
-        box(cover, (root.width - coverSize) / 2, inset, coverSize, coverSize)
-        syncCoverOutline(root)
-        var y = inset + coverSize + dp(10f)
-        val titleHeight = dp(26f)
-        val artistHeight = dp(20f)
-        find(root, "title")?.let { box(it, inset, y, rowWidth, titleHeight) }
-        find(root, "artist")?.let { box(it, inset, y + titleHeight, rowWidth, artistHeight) }
-        find(root, "empty_state")?.let { box(it, inset, y, rowWidth, titleHeight + artistHeight) }
-        y += titleHeight + artistHeight + gap
-        val progressHeight = dp(20f)
-        val progress = ensureMediaProgress(root)
-        box(progress, inset, y, rowWidth, progressHeight)
-        progress.invalidate()
-        y += progressHeight + gap
-        // favourite, previous, play/pause, next in four equal slots
-        val actionHeight = dp(44f)
-        val slot = rowWidth / 4
-        val actionSize = minOf(dp(44f), slot, actionHeight).coerceAtLeast(1)
-        ensureFavorite(root)?.let { box(it, inset, y, slot, actionHeight) }
-        find(root, "audio_container")?.let { owner ->
-            box(owner, inset + slot, y, slot * 3, actionHeight)
-            listOf("prev", "play", "next").forEachIndexed { index, name ->
-                find(owner, name)?.let { child ->
-                    box(
-                        child,
-                        slot * index + (slot - actionSize) / 2,
-                        (actionHeight - actionSize) / 2,
-                        actionSize,
-                        actionSize,
-                    )
-                }
-            }
-        }
-        y += actionHeight + gap
-        ensureVolumeRow(root)?.let { row ->
-            val height = dp(32f)
-            box(row, inset, y, rowWidth, height)
-            y += height + gap
-        }
-        ensureDeviceRow(root)?.let { row ->
-            box(row, inset, y, rowWidth, dp(52f))
-            syncDeviceTitle(root)
-        }
-        syncEmptyMedia(root)
-    }
-
-    private fun ensureMediaProgress(root: View): MediaProgressView {
-        mediaProgress[root]?.get()?.let { return it }
-        val view = MediaProgressView(root.context, root)
-        mediaProgress[root] = WeakReference(view)
-        (root as? ViewGroup)?.let { group -> runCatching { group.overlay.add(view) } }
-        return view
-    }
-
-    private fun ensureFavorite(root: View): CcMediaFavoriteView? {
-        if (root !is ViewGroup) return null
-        mediaFavorite[root]?.get()?.let { return it }
-        val context = root.context
-        val view = CcMediaFavoriteView(
-            context,
-            isFavorite = { CcMediaActions.controller(context)?.let(CcMediaActions::isFavorite) ?: false },
-            onToggle = { CcMediaActions.controller(context)?.let(CcMediaActions::toggleFavorite) },
-        )
-        runCatching { root.addView(view) }
-        mediaFavorite[root] = WeakReference(view)
-        return view
-    }
-
-    /** Stock volume item layout: real MiPlayVolumeBar, bound to STREAM_MUSIC. */
-    private fun ensureVolumeRow(root: View): View? {
-        if (root !is ViewGroup) return null
-        mediaVolume[root]?.get()?.let { return it }
-        val context = root.context
-        val row = CcMediaNative.layout(context, "qs_control_detail_miplay_device_volume_item") ?: return null
-        row.findViewById<android.widget.SeekBar>(CcMediaNative.id(context, "device_volume_bar"))?.let { seek ->
-            seek.visibility = View.VISIBLE
-            seek.max = CcMediaVolume.max(context).coerceAtLeast(1)
-            seek.progress = CcMediaVolume.level(context)
-            seek.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(bar: android.widget.SeekBar, value: Int, fromUser: Boolean) {
-                    if (fromUser) CcMediaVolume.set(context, value)
-                }
-
-                override fun onStartTrackingTouch(bar: android.widget.SeekBar) = Unit
-
-                override fun onStopTrackingTouch(bar: android.widget.SeekBar) = Unit
-            })
-        }
-        runCatching { root.addView(row) }
-        mediaVolume[root] = WeakReference(row)
-        return row
-    }
-
-    /** Stock device item layout, so the row matches the native device list entries. */
-    private fun ensureDeviceRow(root: View): View? {
-        if (root !is ViewGroup) return null
-        mediaDevice[root]?.get()?.let { return it }
-        val context = root.context
-        val view = CcMediaNative.layout(context, "qs_control_detail_miplay_device_item") ?: return null
-        view.findViewById<View>(CcMediaNative.id(context, "device_volume_bar"))?.visibility = View.GONE
-        view.isClickable = true
-        view.setOnClickListener { openMediaDevicePicker(root, it) }
-        runCatching { root.addView(view) }
-        mediaDevice[root] = WeakReference(view)
-        return view
-    }
-
-    private fun syncDeviceTitle(root: View) {
-        val context = root.context
-        val id = CcMediaNative.id(context, "device_title")
-        if (id == 0) return
-        val text = CcMediaRoute.currentName(context) ?: tr("cc_media_output", "播放设备")
-        mediaDevice[root]?.get()?.findViewById<android.widget.TextView>(id)?.let { view ->
-            if (view.text?.toString() != text) view.text = text
-        }
-    }
-
-    private fun clearExpandedControls(root: View) {
-        mediaFavorite.remove(root)?.get()?.let { (it.parent as? ViewGroup)?.removeView(it) }
-        mediaVolume.remove(root)?.get()?.let { (it.parent as? ViewGroup)?.removeView(it) }
-        mediaDevice.remove(root)?.get()?.let { (it.parent as? ViewGroup)?.removeView(it) }
-    }
-
-    /** Forward to the stock output picker first; fall back to our own device list. */
-    private fun openMediaDevicePicker(root: View, anchor: View) {
-        val native = find(root, "device_icon")
-        if (native != null && (native.isClickable || native.hasOnClickListeners())) {
-            if (runCatching { native.performClick() }.getOrDefault(false)) return
-        }
-        showMediaOutputPopup(root, anchor)
-    }
-
-    private fun showMediaOutputPopup(root: View, anchor: View) {
-        val context = root.context
-        val devices = CcMediaRoute.outputs(context)
-        if (devices.isEmpty()) return
-        val density = context.resources.displayMetrics.density
-        fun dp(value: Int) = (value * density).roundToInt()
-        val list = android.widget.LinearLayout(context).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(dp(4), dp(4), dp(4), dp(4))
-        }
-        var popup: android.widget.PopupWindow? = null
-        devices.forEach { device ->
-            list.addView(android.widget.TextView(context).apply {
-                text = device.productName?.toString()?.takeIf { it.isNotBlank() }
-                    ?: tr("cc_media_output", "播放设备")
-                setTextColor(0xffffffff.toInt())
-                textSize = 14f
-                setPadding(dp(14), dp(12), dp(14), dp(12))
-                isClickable = true
-                setOnClickListener {
-                    CcMediaRoute.select(context, device)
-                    popup?.dismiss()
-                }
-            })
-        }
-        val widthPx = dp(220)
-        list.measure(
-            View.MeasureSpec.makeMeasureSpec(widthPx, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
-        )
-        val created = android.widget.PopupWindow(list, widthPx, list.measuredHeight, true).apply {
-            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0xf0181a1c.toInt()))
-            isOutsideTouchable = true
-            elevation = dp(8).toFloat()
-        }
-        popup = created
-        val location = IntArray(2)
-        anchor.getLocationOnScreen(location)
-        val x = (location[0] + anchor.width - widthPx).coerceAtLeast(dp(8))
-        val yValue = (location[1] - list.measuredHeight - dp(8)).coerceAtLeast(dp(8))
-        runCatching { created.showAtLocation(anchor, Gravity.NO_GRAVITY, x, yValue) }
     }
 
     private fun syncEmptyMedia(root: View) {
