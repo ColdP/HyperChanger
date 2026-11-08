@@ -1172,6 +1172,9 @@ class HyperSystemUiModule : XposedModule() {
             return
         }
         if (param.packageName == SETTINGS_PACKAGE) {
+            runCatching {
+                othersHooks.installSettingsTitleBarBlurHooks(param, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+            }.onFailure { error -> HookModuleLogger.log(this, Log.WARN, TAG, "Could not install Settings title bar gradient blur", error) }
             othersHooks.installHotspotTemperatureHooks(param, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
             runCatching {
                 othersHooks.installSettingsAdvancedColorStyleHook(param.defaultClassLoader, getRemotePreferences(REMOTE_PREFERENCE_GROUP))

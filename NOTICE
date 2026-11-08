@@ -95,3 +95,14 @@ https://coldp.github.io/hyperchanger-updateinfo/models/jpn.traineddata .
 It is mirrored without changes from tesseract-ocr/tessdata_fast revision
 87416418657359cb625c412a48b6e1d6d41c29bd, licensed under Apache-2.0.
 The model is not bundled in the application APK.
+
+HyperBackground 1.4.5-beta2 (https://github.com/Solomonstery/HyperBackground)
+Copyright (c) 2026 HyperBackground contributors
+Licensed under the MIT License. The Settings title bar gradient background blur
+is adapted from dynamic/topbar/DynamicActionBarHook.kt at upstream tag
+v1.4.5-beta2 (d6ebe38db8da070d32ae6580bcf64623368d66fd).
+Modifications by btm_m for HyperChanger, 2026-11-08: com.android.settings-only
+installation; independent opt-in preference, remote synchronization and module
+presets; host hook API/DexKit integration; 114% blur height and failure recovery.
+Button materials, bottom gradients and other application scopes are excluded.
+Full copyright and permission notice: app/src/main/assets/licenses/HyperBackground-MIT.txt.

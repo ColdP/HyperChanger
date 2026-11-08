@@ -102,11 +102,19 @@ class SettingsAppearanceProvider : ContentProvider() {
         uri.pathSegments.firstOrNull().orEmpty(),
     )
 
-    private fun assetMime(prefs: android.content.SharedPreferences, slot: String): String = when (slot) {
+    private fun assetMime(prefs: android.content.SharedPreferences, slot: String): String {
+        if (slot in COLOR_MODE_ASSET_SLOTS && prefs.readDeviceStyleCustomization().assetsForStyle(appearanceAssetStyle(slot))) {
+            return prefs.getString("${colorModeAssetKey(slot, isNight())}_mime", "").orEmpty()
+        }
+        return when (slot) {
+        APPEARANCE_SLOT_AUDIO_LOGO -> "image/*"
+        APPEARANCE_SLOT_STYLE4_BACKGROUND -> prefs.readDeviceStyleCustomization().styleFour.backgroundMime
+        APPEARANCE_SLOT_STYLE4_LOGO -> prefs.readDeviceStyleCustomization().styleFour.logoMime
         APPEARANCE_SLOT_CPU_ICON -> prefs.readDeviceStyleCustomization().cpuIconMime
         APPEARANCE_SLOT_STYLE3_CPU_ICON -> prefs.readDeviceStyleCustomization().separateProcessorIconMime
         APPEARANCE_SLOT_STYLE3_CAMERA_BRAND -> prefs.readDeviceStyleCustomization().cameraBrandMime
         else -> prefs.getString(mimeKey(slot), "").orEmpty()
+        }
     }
 
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
@@ -179,7 +187,7 @@ class SettingsAppearanceProvider : ContentProvider() {
     }
 
     private fun appearanceFile(slot: String): File {
-        require(slot == APPEARANCE_SLOT_HOME || slot == APPEARANCE_SLOT_DEVICE || slot == APPEARANCE_SLOT_LOGO || slot == APPEARANCE_SLOT_CPU_ICON || slot == APPEARANCE_SLOT_STYLE3_CPU_ICON || slot == APPEARANCE_SLOT_STYLE3_CAMERA_BRAND || slot == APPEARANCE_SLOT_DEVICE_IMAGE || slot == APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO || slot == APPEARANCE_SLOT_STYLE1_UPDATE_BACKGROUND || slot == APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE || slot == APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO || slot == APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND || slot == APPEARANCE_SLOT_STYLE3_BACKGROUND || slot == APPEARANCE_SLOT_STYLE3_LOGO || slot == LOCKSCREEN_WIDGET_SIGNATURE_SLOT || slot == LOCKSCREEN_EDITOR_BACKGROUND_SLOT)
+        require(slot == APPEARANCE_SLOT_HOME || slot == APPEARANCE_SLOT_DEVICE || slot == APPEARANCE_SLOT_LOGO || slot == APPEARANCE_SLOT_AUDIO_LOGO || slot == APPEARANCE_SLOT_CPU_ICON || slot == APPEARANCE_SLOT_STYLE3_CPU_ICON || slot == APPEARANCE_SLOT_STYLE3_CAMERA_BRAND || slot == APPEARANCE_SLOT_DEVICE_IMAGE || slot == APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO || slot == APPEARANCE_SLOT_STYLE1_UPDATE_BACKGROUND || slot == APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE || slot == APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO || slot == APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND || slot == APPEARANCE_SLOT_STYLE3_BACKGROUND || slot == APPEARANCE_SLOT_STYLE3_LOGO || slot == APPEARANCE_SLOT_STYLE4_BACKGROUND || slot == APPEARANCE_SLOT_STYLE4_LOGO || slot == LOCKSCREEN_WIDGET_SIGNATURE_SLOT || slot == LOCKSCREEN_EDITOR_BACKGROUND_SLOT)
         if (slot == LOCKSCREEN_EDITOR_BACKGROUND_SLOT) {
             return File(requireContext().filesDir, "lockscreen_editor_background.bin")
         }
@@ -201,7 +209,8 @@ class SettingsAppearanceProvider : ContentProvider() {
         APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE, APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO -> prefs.getInt("device_interface_style", DEVICE_INTERFACE_STYLE_SYSTEM) == DEVICE_INTERFACE_STYLE_TWO
         APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND -> prefs.getInt("device_interface_style", DEVICE_INTERFACE_STYLE_SYSTEM) == DEVICE_INTERFACE_STYLE_TWO
         APPEARANCE_SLOT_STYLE3_BACKGROUND, APPEARANCE_SLOT_STYLE3_LOGO -> prefs.getInt("device_interface_style", DEVICE_INTERFACE_STYLE_SYSTEM) == DEVICE_INTERFACE_STYLE_THREE
-        APPEARANCE_SLOT_CPU_ICON, APPEARANCE_SLOT_STYLE3_CPU_ICON, APPEARANCE_SLOT_STYLE3_CAMERA_BRAND -> appearanceFile(slot).isFile
+        APPEARANCE_SLOT_STYLE4_BACKGROUND, APPEARANCE_SLOT_STYLE4_LOGO -> prefs.getInt("device_interface_style", DEVICE_INTERFACE_STYLE_SYSTEM) == DEVICE_INTERFACE_STYLE_FOUR
+        APPEARANCE_SLOT_AUDIO_LOGO, APPEARANCE_SLOT_CPU_ICON, APPEARANCE_SLOT_STYLE3_CPU_ICON, APPEARANCE_SLOT_STYLE3_CAMERA_BRAND -> appearanceFile(slot).isFile
         else -> false
     }
 

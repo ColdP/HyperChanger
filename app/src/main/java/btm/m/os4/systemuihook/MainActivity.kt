@@ -1255,6 +1255,7 @@ private fun Root(
                 SettingsEntryAppearanceSettingsStore(context).syncRemote(it)
                 appThemeStore.syncRemote(it)
                 SettingsAdvancedColorStyleSettingsStore(context).syncRemote(it)
+                SettingsTitleBarBlurSettingsStore(context).syncRemote(it)
                 superXiaoAiStore.syncRemote(it)
                 systemUpdateStore.syncRemote(it)
                 settings = hooks.settings
@@ -4592,6 +4593,14 @@ private fun SystemSettings(
             advancedColorStyle = advancedColorStyleStore.settings
         }
     }
+    val titleBarBlurStore = remember(cpuIconContext) { SettingsTitleBarBlurSettingsStore(cpuIconContext) }
+    var titleBarBlur by remember { mutableStateOf(titleBarBlurStore.settings) }
+    LaunchedEffect(appScopeService) {
+        appScopeService?.let {
+            titleBarBlurStore.syncRemote(it)
+            titleBarBlur = titleBarBlurStore.settings
+        }
+    }
     val soundEffectStore = remember(cpuIconContext) { SoundEffectPreferencesStore(cpuIconContext) }
     var soundEffect by remember { mutableStateOf(soundEffectStore.settings) }
     val nativeBoseSupported by (cpuIconContext.applicationContext as HookApplication)
@@ -4673,6 +4682,7 @@ private fun SystemSettings(
                                 summary = if (audioLogoImported) tr("已导入", "已导入") else tr("未导入", "未导入"),
                                 onClick = { pickAudioLogo.launch(arrayOf("image/*", "application/xml", "text/xml")) },
                             )
+                            LogoRecognitionPreference(appearance, APPEARANCE_SLOT_AUDIO_LOGO, updateAppearance)
                             SharedViewArrowPreference(
                                 title = tr("清除徽标", "清除徽标"),
                                 summary = if (audioLogoImported) tr("已导入", "已导入") else tr("无图标", "无图标"),
@@ -4688,48 +4698,6 @@ private fun SystemSettings(
         }
         item {
             Group(tr("设置应用", "设置应用")) {
-                SwitchPreference(
-                    title = tr("启用设备信息覆盖", "启用设备信息覆盖"),
-                    checked = profile.enabled,
-                    onCheckedChange = { enabled -> update { it.copy(enabled = enabled) } },
-                )
-                OverlayDropdownPreference(
-                    title = tr("处理器图标", "处理器图标"),
-                    items = listOf(
-                        tr("系统默认", "系统默认"),
-                        tr("骁龙", "骁龙"),
-                        tr("玄戒", "玄戒"),
-                        tr("天玑", "天玑"),
-                        tr("Apple Silicon", "Apple Silicon"),
-                        tr("英特尔", "英特尔"),
-                        tr("英伟达", "英伟达"),
-                        tr("AMD", "AMD"),
-                        tr("自定义", "自定义"),
-                    ),
-                    selectedIndex = profile.processorIcon.coerceIn(0, PROCESSOR_ICON_MAX),
-                    onSelectedIndexChange = { index ->
-                        update {
-                            it.copy(
-                                processorIcon = index.coerceIn(0, PROCESSOR_ICON_MAX),
-                                snapdragonIcon = index == PROCESSOR_ICON_SNAPDRAGON,
-                            )
-                        }
-                    },
-                )
-                // Mirrors the LOGO import pattern in the appearance page, but animated so the rows
-                // slide in instead of popping the group's height.
-                AnimatedVisibility(
-                    visible = profile.processorIcon == PROCESSOR_ICON_CUSTOM,
-                    enter = expandVertically(animationSpec = tween(220)) + fadeIn(animationSpec = tween(180)),
-                    exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(animationSpec = tween(120)),
-                ) {
-                    DeviceAppearanceAssetPreference(
-                        appearance = appearance,
-                        slot = APPEARANCE_SLOT_CPU_ICON,
-                        title = tr("device3_processor_custom_file", "自定义处理器图标"),
-                        update = updateAppearance,
-                    )
-                }
                 SwitchPreference(
                     title = tr("解锁更多自动锁屏选项", "解锁更多自动锁屏选项"),
                     checked = settingsApp.unlockNeverScreenTimeout,
@@ -4776,6 +4744,15 @@ private fun SystemSettings(
         item {
             SmallTitle(tr("界面自定义", "界面自定义"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 4.dp))
             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                SwitchPreference(
+                    title = tr("启用标题栏背景渐变模糊", "启用标题栏背景渐变模糊"),
+                    summary = tr("settingsTitleBarBlurSummary", "仅作用于系统设置，跟随滚动渐显。重新启动设置应用后生效。"),
+                    checked = titleBarBlur.enabled,
+                    onCheckedChange = { value ->
+                        titleBarBlurStore.update(appScopeService) { it.copy(enabled = value) }
+                        titleBarBlur = titleBarBlurStore.settings
+                    },
+                )
                 SharedViewArrowPreference(title = tr("自定义设置主界面背景图", "自定义设置主界面背景图"), onClick = { open(PageId.SETTINGS_APPEARANCE_HOME) })
                 SharedViewArrowPreference(title = tr("自定义我的设备界面背景图", "自定义我的设备界面背景图"), onClick = { open(PageId.SETTINGS_APPEARANCE_DEVICE) })
                 SharedViewArrowPreference(title = tr("自定义我的设备界面", "自定义我的设备界面"), onClick = { open(PageId.TUTORIAL_DEVICE_CARD) })
@@ -4793,6 +4770,7 @@ OverlayDropdownPreference(
                         summary = appearance.logoMime.ifBlank { tr("未导入", "未导入") },
                         onClick = onPickLogo,
                     )
+                    LogoRecognitionPreference(appearance, APPEARANCE_SLOT_LOGO, updateAppearance)
                     SharedViewArrowPreference(
                         title = tr("清除LOGO", "清除LOGO"),
                         summary = if (appearance.logoMime.isBlank()) tr("无LOGO", "无LOGO") else tr("已导入", "已导入"),
@@ -4852,6 +4830,48 @@ OverlayDropdownPreference(
         }
         item {
             Group(tr("设备信息", "设备信息")) {
+                SwitchPreference(
+                    title = tr("启用设备信息覆盖", "启用设备信息覆盖"),
+                    checked = profile.enabled,
+                    onCheckedChange = { enabled -> update { it.copy(enabled = enabled) } },
+                )
+                OverlayDropdownPreference(
+                    title = tr("处理器图标", "处理器图标"),
+                    items = listOf(
+                        tr("系统默认", "系统默认"),
+                        tr("骁龙", "骁龙"),
+                        tr("玄戒", "玄戒"),
+                        tr("天玑", "天玑"),
+                        tr("Apple Silicon", "Apple Silicon"),
+                        tr("英特尔", "英特尔"),
+                        tr("英伟达", "英伟达"),
+                        tr("AMD", "AMD"),
+                        tr("自定义", "自定义"),
+                    ),
+                    selectedIndex = profile.processorIcon.coerceIn(0, PROCESSOR_ICON_MAX),
+                    onSelectedIndexChange = { index ->
+                        update {
+                            it.copy(
+                                processorIcon = index.coerceIn(0, PROCESSOR_ICON_MAX),
+                                snapdragonIcon = index == PROCESSOR_ICON_SNAPDRAGON,
+                            )
+                        }
+                    },
+                )
+                // Mirrors the LOGO import pattern in the appearance page, but animated so the rows
+                // slide in instead of popping the group's height.
+                AnimatedVisibility(
+                    visible = profile.processorIcon == PROCESSOR_ICON_CUSTOM,
+                    enter = expandVertically(animationSpec = tween(220)) + fadeIn(animationSpec = tween(180)),
+                    exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(animationSpec = tween(120)),
+                ) {
+                    DeviceAppearanceAssetPreference(
+                        appearance = appearance,
+                        slot = APPEARANCE_SLOT_CPU_ICON,
+                        title = tr("device3_processor_custom_file", "自定义处理器图标"),
+                        update = updateAppearance,
+                    )
+                }
                 SharedViewArrowPreference(title = tr("我的设备与全部参数", "我的设备与全部参数"), onClick = { open(PageId.DEVICE_PROFILE) })
             }
         }
@@ -5114,7 +5134,7 @@ private fun TutorialDeviceCardSettings(
     onColorModeAssetAction: (String, Boolean, Boolean) -> Unit,
     back: () -> Unit,
 ) = AppPage(tr("自定义我的设备界面", "自定义我的设备界面"), back, restartScopes = setOf(ScopeApplication.SETTINGS)) { padding, scroll ->
-    val style = appearance.deviceInterfaceStyle.coerceIn(DEVICE_INTERFACE_STYLE_SYSTEM, DEVICE_INTERFACE_STYLE_THREE)
+    val style = appearance.deviceInterfaceStyle.coerceIn(DEVICE_INTERFACE_STYLE_SYSTEM, DEVICE_INTERFACE_STYLE_FOUR)
     val selectStyle: (Int) -> Unit = { selected ->
             update {
             it.copy(
@@ -5129,7 +5149,7 @@ private fun TutorialDeviceCardSettings(
             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
 OverlayDropdownPreference(
                     title = tr("我的设备界面样式", "我的设备界面样式"),
-                    items = listOf(tr("系统默认", "系统默认"), tr("样式1", "样式1"), tr("样式2", "样式2"), tr("样式3", "样式3")),
+                    items = listOf(tr("系统默认", "系统默认"), tr("样式1", "样式1"), tr("样式2", "样式2"), tr("样式3", "样式3"), tr("样式4", "样式4")),
                     selectedIndex = style,
                     onSelectedIndexChange = selectStyle,
                 )
@@ -5140,6 +5160,11 @@ OverlayDropdownPreference(
                     onCheckedChange = { enabled -> update { it.copy(deviceStyleCustomization = it.deviceStyleCustomization.withAssetsForStyle(style, enabled)) } },
                 )
             }
+        }
+        if (style == DEVICE_INTERFACE_STYLE_FOUR) {
+            item { StyleFourBannerControls(appearance, update) }
+            item { StyleFourLogoControls(appearance, update) }
+            item { StyleFourDetailControls(appearance, update) }
         }
         if (style == DEVICE_INTERFACE_STYLE_THREE) {
             item { StyleThreeBackgroundControls(appearance, update) }
@@ -14329,6 +14354,13 @@ private fun openProjects() = listOf(
         "https://github.com/1812z/HyperIsland",
         tr("MIT License", "MIT License"),
     ),
+    OpenProject(
+        tr("HyperBackground", "HyperBackground"),
+        tr("hyperBackgroundVersion", "1.4.5-beta2"),
+        tr("hyperBackgroundAttribution", "系统设置标题栏背景渐变模糊"),
+        "https://github.com/Solomonstery/HyperBackground",
+        tr("MIT", "MIT"),
+    ),
 )
 
 @Composable
@@ -14530,7 +14562,8 @@ private fun License(back: () -> Unit) {
     val context = LocalContext.current
     val licenseText = remember(context) {
         context.assets.open("licenses/AGPL-3.0-or-later.txt").bufferedReader().use { it.readText() } + "\n\n" +
-            context.assets.open("licenses/HyperMusicCover-GPL-3.0.txt").bufferedReader().use { it.readText() }
+            context.assets.open("licenses/HyperMusicCover-GPL-3.0.txt").bufferedReader().use { it.readText() } + "\n\n" +
+            context.assets.open("licenses/HyperBackground-MIT.txt").bufferedReader().use { it.readText() }
     }
     val upstreamNotices = remember(context) {
         context.assets.open("NOTICE").bufferedReader().use { it.readText() } + "\n\n" +

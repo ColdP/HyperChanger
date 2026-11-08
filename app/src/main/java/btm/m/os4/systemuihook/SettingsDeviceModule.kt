@@ -1484,7 +1484,7 @@ class SettingsDeviceModule : XposedModule() {
                 val night = view.resources.configuration.uiMode and
                     android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES
                 return custom.mutate().apply {
-                    setTint(if (night) 0x99FFFFFF.toInt() else 0x99000000.toInt())
+                    if (!source.deviceStyleCustomization.logoKeepsColors(source.slot)) setTint(if (night) 0x99FFFFFF.toInt() else 0x99000000.toInt())
                 }
             }
             else -> return null

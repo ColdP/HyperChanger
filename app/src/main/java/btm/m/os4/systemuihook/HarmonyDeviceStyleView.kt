@@ -118,7 +118,7 @@ class HarmonyUpdateCardView(
         )
         // Imported logos are user artwork and may be recolored as a whole. The
         // built-in HyperOS logo is split so its blue "OS" remains untouched.
-        logo.colorFilter = if (customLogo != null) {
+        logo.colorFilter = if (customLogo != null && !logoSource.deviceStyleCustomization.logoKeepsColors(logoSource.slot)) {
             PorterDuffColorFilter(
                 textColor(style.style2LogoColorMode, if (night) 0xFFF7F8FC.toInt() else 0xFF17181C.toInt()),
                 PorterDuff.Mode.SRC_IN,

@@ -8,6 +8,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
+import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -17,7 +18,7 @@ import kotlin.math.roundToInt
 /**
  * A Style 3-only presentation of the Settings device cards. The native RecyclerView is kept
  * alive and continues receiving asynchronous CPU/camera updates; this view only mirrors its
- * DeviceCardInfo objects and forwards their click listeners.
+ * DeviceCardInfo objects and forwards native clicks except for the model/CPU/RAM cards.
  */
 internal class SeparateDeviceDetailsSession(
     private val host: ViewGroup,
@@ -115,26 +116,43 @@ internal class SeparateDeviceDetailsView(
     }
 
     // Preserve native extra information (for example a security-chip card) when supplied.
-    private fun orderedCards(adapter: Any) = readCards(adapter).sortedBy { card ->
+    private fun orderedCards(adapter: Any) = NativeDeviceCards.read(adapter).sortedBy { card ->
         ORDER.indexOf(card.index).takeIf { it >= 0 } ?: ORDER.size
     }
 
-    private fun createCard(card: CardSnapshot): View {
+    private fun createCard(card: NativeDeviceCardSnapshot): View {
         val dark = resources.configuration.uiMode and 0x30 == 0x20
         val surface = FrameLayout(context).apply {
             background = GradientDrawable().apply {
                 cornerRadius = dp(24).toFloat()
                 setColor(if (dark) 0x24FFFFFF else Color.WHITE)
             }
-            isClickable = card.listener != null
-            card.listener?.let { listener ->
-                setOnClickListener {
-                    // Native listeners inspect BaseDeviceCardItem.getKey(); pass that native type.
-                    runCatching {
-                        val native = card.item.javaClass.classLoader!!.loadClass("com.android.settings.device.BaseDeviceCardItem")
-                            .getConstructor(Context::class.java).newInstance(context) as View
-                        native.javaClass.getMethod("setKey", String::class.java).invoke(native, card.key)
-                        listener.onClick(native)
+            when (card.index) {
+                MODEL_INDEX, CPU_INDEX -> {
+                    // Consume taps so they cannot reach the native update target underneath.
+                    isClickable = true
+                    isFocusable = false
+                    accessibilityDelegate = object : View.AccessibilityDelegate() {
+                        override fun onInitializeAccessibilityNodeInfo(host: View, info: AccessibilityNodeInfo) {
+                            super.onInitializeAccessibilityNodeInfo(host, info)
+                            info.isClickable = false
+                            info.removeAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_CLICK)
+                        }
+                    }
+                }
+                RAM_INDEX -> setOnClickListener { openDeviceMemoryExtension(context) }
+                else -> {
+                    isClickable = card.listener != null
+                    card.listener?.let { listener ->
+                        setOnClickListener {
+                            // Native listeners inspect BaseDeviceCardItem.getKey(); pass that native type.
+                            runCatching {
+                                val native = card.item.javaClass.classLoader!!.loadClass("com.android.settings.device.BaseDeviceCardItem")
+                                    .getConstructor(Context::class.java).newInstance(context) as View
+                                native.javaClass.getMethod("setKey", String::class.java).invoke(native, card.key)
+                                listener.onClick(native)
+                            }
+                        }
                     }
                 }
             }
@@ -147,7 +165,7 @@ internal class SeparateDeviceDetailsView(
             setPadding(0, 0, dp(35), 0)
         }
         val brandHeader = if (card.index == 2) cameraBrandHeader(dark) else null
-        if (brandHeader != null) text.addView(brandHeader, LayoutParams(-2, -2).apply { bottomMargin = dp(8) })
+        if (brandHeader != null) text.addView(brandHeader, LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
         val primary = TextView(context).apply {
             this.text = if (card.first.isNotBlank() && card.second.isNotBlank()) "${card.first}\n${card.second}" else card.value
             textSize = (if (brandHeader != null) 15f else 20f) * CARD_TEXT_SCALE
@@ -195,18 +213,33 @@ internal class SeparateDeviceDetailsView(
                 if (source.exists) LogoDrawableLoader.load(context, source) else null
             } else moduleContext()?.getDrawable(BRAND_LOGOS[controls.cameraBrand] ?: return null)
         }.getOrNull() ?: return null
+        if (controls.cameraBrand == 10 && !controls.logoKeepsColors(APPEARANCE_SLOT_STYLE3_CAMERA_BRAND)) drawable.mutate().setTint(if (dark) Color.WHITE else 0xFF202124.toInt())
         if (dark && controls.cameraBrand in listOf(3, 4, 5, 6, 8)) drawable.mutate().setTint(Color.WHITE)
         val ratio = drawable.intrinsicWidth.coerceAtLeast(1).toFloat() / drawable.intrinsicHeight.coerceAtLeast(1)
-        val widthDp = minOf(150f, 28f * ratio)
-        val heightDp = minOf(28f, widthDp / ratio)
-        return ImageView(context).apply {
+        val scale = deviceStyleScale(controls.cameraBrandLogoScale)
+        val widthDp = minOf(150f, 28f * ratio) * scale
+        val heightDp = minOf(28f * scale, widthDp / ratio)
+        val image = ImageView(context).apply {
             setImageDrawable(drawable)
             scaleType = ImageView.ScaleType.FIT_START
-            minimumWidth = dp(widthDp.toInt().coerceAtLeast(1))
-            minimumHeight = dp(heightDp.toInt().coerceAtLeast(1))
-            adjustViewBounds = true
-            maxWidth = minimumWidth
-            maxHeight = minimumHeight
+        }
+        return LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(image, LayoutParams(dp(widthDp), dp(heightDp)))
+            controls.cameraBrandSuffix.takeIf { it.isNotBlank() }?.let { value ->
+                val label = TextView(context).apply {
+                    text = value
+                    textSize = 20f * CARD_TEXT_SCALE * deviceStyleScale(controls.cameraBrandSuffixScale)
+                    includeFontPadding = false
+                    setSingleLine()
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    setTextColor(if (dark) Color.WHITE else 0xFF202124.toInt())
+                }
+                addView(label, LayoutParams(0, -2, 1f).apply {
+                    marginStart = if (widthDp > 0f) dp(controls.cameraBrandLogoTextSpacing) else 0
+                })
+            }
         }
     }
 
@@ -218,11 +251,12 @@ internal class SeparateDeviceDetailsView(
         setPadding(0, dp(7), 0, 0)
     }
 
-    private fun iconDrawable(card: CardSnapshot): android.graphics.drawable.Drawable? = runCatching {
+    private fun iconDrawable(card: NativeDeviceCardSnapshot): android.graphics.drawable.Drawable? = runCatching {
         val replacement = card.index == 0 && processorIconStyle >= 2
         val drawable = if (replacement) processorDrawable(processorIconStyle) else null
         val result = drawable ?: defaultIcon(card) ?: return@runCatching null
         val dark = resources.configuration.uiMode and 0x30 == 0x20
+        if (card.index == 0 && processorIconStyle == 9 && controls.logoKeepsColors(customIconSlot)) return@runCatching result
         result.mutate().apply {
             if (drawable != null || iconStyle == 0) {
                 setTint(if (dark) 0x8AFFFFFF.toInt() else if (iconStyle == 1) 0x8A000000.toInt() else 0x99000000.toInt())
@@ -233,7 +267,7 @@ internal class SeparateDeviceDetailsView(
         }
     }.getOrNull()
 
-    private fun defaultIcon(card: CardSnapshot): android.graphics.drawable.Drawable? = if (iconStyle == 1) {
+    private fun defaultIcon(card: NativeDeviceCardSnapshot): android.graphics.drawable.Drawable? = if (iconStyle == 1) {
         COLOROS_ICONS[card.index]?.let { moduleContext()?.getDrawable(it) }
             ?: card.iconRes.takeIf { it != 0 }?.let(context::getDrawable)
     } else {
@@ -266,57 +300,6 @@ internal class SeparateDeviceDetailsView(
         moduleContext()?.getDrawable(id)
     }.getOrNull()
 
-    private fun readCards(adapter: Any): List<CardSnapshot> {
-        val raw = field(adapter, "cardInfos") ?: field(adapter, "mCardInfos") ?: return emptyList()
-        val iterable = when (raw) {
-            is Iterable<*> -> raw.asSequence()
-            is Array<*> -> raw.asSequence()
-            else -> return emptyList()
-        }
-        return iterable.mapNotNull { item ->
-            item ?: return@mapNotNull null
-            runCatching {
-                CardSnapshot(
-                    item = item,
-                    index = call(item, "getIndex") as? Int ?: -1,
-                    title = (call(item, "getTitle2") as? String).orEmpty().ifBlank { (call(item, "getTitle") as? String).orEmpty() },
-                    value = call(item, "getValue") as? String ?: "",
-                    first = call(item, "getFirstValue") as? String ?: "",
-                    second = call(item, "getSecondValue") as? String ?: "",
-                    key = call(item, "getKey") as? String ?: "",
-                    iconRes = call(item, "getIconResId") as? Int ?: 0,
-                    listener = call(item, "getListener") as? View.OnClickListener,
-                )
-            }.getOrNull()
-        }.toList()
-    }
-
-    private fun field(target: Any, name: String): Any? = runCatching {
-        var type: Class<*>? = target.javaClass
-        while (type != null) {
-            val field = type.declaredFields.firstOrNull { it.name == name }
-            if (field != null) {
-                field.isAccessible = true
-                return@runCatching field.get(target)
-            }
-            type = type.superclass
-        }
-        null
-    }.getOrNull()
-
-    private fun call(target: Any, name: String): Any? = runCatching {
-        var type: Class<*>? = target.javaClass
-        while (type != null) {
-            val method = type.declaredMethods.firstOrNull { it.name == name && it.parameterCount == 0 }
-            if (method != null) {
-                method.isAccessible = true
-                return@runCatching method.invoke(target)
-            }
-            type = type.superclass
-        }
-        null
-    }.getOrNull()
-
     private fun systemProperty(name: String): String = runCatching {
         Class.forName("android.os.SystemProperties").getMethod("get", String::class.java, String::class.java)
             .invoke(null, name, "") as String
@@ -325,22 +308,12 @@ internal class SeparateDeviceDetailsView(
     private fun dp(value: Int): Int = dp(value.toFloat())
     private fun dp(value: Float): Int = (value * resources.displayMetrics.density).roundToInt()
 
-    private data class CardSnapshot(
-        val item: Any,
-        val index: Int,
-        val title: String,
-        val value: String,
-        val first: String,
-        val second: String,
-        val key: String,
-        val iconRes: Int,
-        val listener: View.OnClickListener?,
-    )
-
     private companion object {
         const val CARD_HEIGHT_SCALE = .92f
         const val CARD_TEXT_SCALE = .87f
         const val MODEL_INDEX = 6
+        const val CPU_INDEX = 0
+        const val RAM_INDEX = 5
         val ORDER = listOf(MODEL_INDEX, 0, 5, 2, 1, 3, 4)
         val NATIVE_ICONS = mapOf(
             6 to "device_description_model", 0 to "device_description_cpu", 5 to "device_description_ram",

@@ -38,6 +38,7 @@ object SettingsAppearanceApplier {
     private val colorOsCards = Collections.synchronizedMap(WeakHashMap<Any, ColorOsCardSession>())
     private val colorOsInfoCards = Collections.synchronizedMap(WeakHashMap<Any, ColorOsInfoCardsSession>())
     private val separateDeviceDetails = Collections.synchronizedMap(WeakHashMap<Any, SeparateDeviceDetailsSession>())
+    private val styleFourSessions = Collections.synchronizedMap(WeakHashMap<Any, DeviceStyleFourSession>())
     private val deviceCardSpacing = Collections.synchronizedMap(WeakHashMap<Any, DeviceCardSpacingSession>())
     private val cardLikeViews = Collections.synchronizedMap(WeakHashMap<View, Boolean>())
     private val cardColorResources = Collections.synchronizedMap(WeakHashMap<Resources, MutableMap<Int, Boolean>>())
@@ -146,6 +147,7 @@ object SettingsAppearanceApplier {
         colorOsInfoCards.remove(fragment)?.remove()
         separateDeviceDetails.remove(fragment)?.remove()
         deviceCardSpacing.remove(fragment)?.remove()
+        styleFourSessions.remove(fragment)?.remove()
     }
     fun stop(activity: Activity?) { activity?.let { layers[it]?.view?.onHostStop() } }
     fun destroy(activity: Activity?) {
@@ -176,6 +178,7 @@ object SettingsAppearanceApplier {
             // before adding our independent replacement card.
             val animationSource = target.findViewById<View>(animationLayoutId)
             val style = SettingsAppearanceSources.query(context, APPEARANCE_SLOT_DEVICE_IMAGE).deviceInterfaceStyle
+            if (style != DEVICE_INTERFACE_STYLE_FOUR) styleFourSessions.remove(fragment)?.remove()
             if (style != DEVICE_INTERFACE_STYLE_THREE) {
                 colorOsCards.remove(fragment)?.remove()
                 colorOsInfoCards.remove(fragment)?.remove()
@@ -244,6 +247,30 @@ object SettingsAppearanceApplier {
                         card.refresh(image)
                     }
                     applyHarmonyInfoCards(fragment, context, root, image, background)
+                }
+                DEVICE_INTERFACE_STYLE_FOUR -> {
+                    tutorialCards.remove(fragment)?.remove()
+                    deviceInfoCards.remove(fragment)?.remove()
+                    harmonyCards.remove(fragment)?.remove()
+                    harmonyInfoCards.remove(fragment)?.remove()
+                    val storage = root.findViewById<View>(context.resources.getIdentifier("device_memory_card_view", "id", context.packageName))
+                    val parent = nameCard?.parent as? LinearLayout
+                    val recycler = detailContainer?.findViewById<View>(context.resources.getIdentifier("description_grid", "id", context.packageName))
+                    if (nameCard != null && storage != null && parent != null && storage.parent === parent && detailContainer != null && recycler != null) {
+                        val background = SettingsAppearanceSources.query(context, APPEARANCE_SLOT_STYLE4_BACKGROUND)
+                        val logo = SettingsAppearanceSources.query(context, APPEARANCE_SLOT_STYLE4_LOGO)
+                        val key = background.cacheKey() + logo.cacheKey() + context.resources.configuration.uiMode
+                        val old = styleFourSessions[fragment]
+                        if (old != null && old.matches(target, parent, recycler, key)) old.enforce()
+                        else {
+                            old?.remove()
+                            styleFourSessions[fragment] = DeviceStyleFourSession(
+                                target, spacer, animationSource, parent, detailContainer, recycler, nameCard, storage,
+                                root.findViewById<View>(context.resources.getIdentifier("miui_version_text", "id", context.packageName)),
+                                background, logo, prepareSeparateCards, key,
+                            )
+                        }
+                    }
                 }
                 DEVICE_INTERFACE_STYLE_THREE -> {
                     tutorialCards.remove(fragment)?.remove()
@@ -461,7 +488,8 @@ object SettingsAppearanceApplier {
                 return
             }
             applyLogoDrawable(target, drawable)
-            session.applyMaterialPolicy(source.logoMode == LOGO_MODE_NO_ADVANCED_MATERIAL)
+            session.applyRecognitionPolicy(source.deviceStyleCustomization.logoKeepsColors(source.slot))
+            session.applyMaterialPolicy(source.logoMode == LOGO_MODE_NO_ADVANCED_MATERIAL || source.deviceStyleCustomization.logoKeepsColors(source.slot))
         }.onFailure { error -> Log.e(TAG, "logo apply failed", error) }
     }
 
@@ -484,7 +512,8 @@ object SettingsAppearanceApplier {
             val session = existing ?: LogoSession(target).also { logoSessions[activity] = it }
             val drawable = LogoDrawableLoader.load(activity, source) ?: return
             applyLogoDrawable(target, drawable)
-            session.applyMaterialPolicy(source.logoMode == LOGO_MODE_NO_ADVANCED_MATERIAL)
+            session.applyRecognitionPolicy(source.deviceStyleCustomization.logoKeepsColors(source.slot))
+            session.applyMaterialPolicy(source.logoMode == LOGO_MODE_NO_ADVANCED_MATERIAL || source.deviceStyleCustomization.logoKeepsColors(source.slot))
         }
     }
 
@@ -668,7 +697,12 @@ object SettingsAppearanceApplier {
             view.scaleX = 1f
             view.scaleY = 1f
             view.setImageDrawable(drawable)
-            view.scaleX = SettingsAppearanceSources.query(view.context, APPEARANCE_SLOT_LOGO).scale / 100f
+            val source = SettingsAppearanceSources.query(view.context, APPEARANCE_SLOT_LOGO)
+            if (source.deviceStyleCustomization.logoKeepsColors(source.slot)) {
+                view.imageTintList = null
+                view.clearColorFilter()
+            }
+            view.scaleX = source.scale / 100f
             view.scaleY = view.scaleX
         } finally {
             internalLogo.remove()
@@ -839,8 +873,15 @@ object SettingsAppearanceApplier {
         private val originalDrawable = view.drawable
         private val originalScaleX = view.scaleX
         private val originalScaleY = view.scaleY
+        private val originalTint = view.imageTintList
+        private val originalFilter = view.colorFilter
         private val materialViews = ArrayList<Pair<View, Drawable?>>()
         private var materialCleared = false
+
+        fun applyRecognitionPolicy(keepColors: Boolean) {
+            view.imageTintList = if (keepColors) null else originalTint
+            view.colorFilter = if (keepColors) null else originalFilter
+        }
 
         fun applyMaterialPolicy(removeMaterial: Boolean) {
             if (!removeMaterial) {
@@ -870,6 +911,8 @@ object SettingsAppearanceApplier {
             view.setImageDrawable(originalDrawable)
             view.scaleX = originalScaleX
             view.scaleY = originalScaleY
+            view.imageTintList = originalTint
+            view.colorFilter = originalFilter
             restoreMaterial()
         }
     }
@@ -882,6 +925,7 @@ object SettingsAppearanceApplier {
         val view: TutorialDeviceCardView,
         val key: String,
     ) {
+        private val scrollTransition = DeviceCardScrollTransition(view, host)
         private val originalHostBackground = host.background
         private val originalChildVisibility = List(host.childCount) { index ->
             host.getChildAt(index)
@@ -912,6 +956,7 @@ object SettingsAppearanceApplier {
         }
 
         fun remove() {
+            scrollTransition.clear()
             if (animationListenerAttached) {
                 runCatching { host.viewTreeObserver.removeOnPreDrawListener(animationSync) }
                 animationListenerAttached = false
@@ -929,12 +974,7 @@ object SettingsAppearanceApplier {
         }
 
         private fun syncCardAnimation() {
-            val source = animationSource ?: return
-            view.translationX = source.translationX
-            view.translationY = 0f
-            view.scaleX = source.scaleX
-            view.scaleY = source.scaleY
-            view.alpha = source.alpha
+            scrollTransition.apply(animationSource)
         }
     }
 
@@ -946,6 +986,7 @@ object SettingsAppearanceApplier {
         val view: HarmonyUpdateCardView,
         val key: String,
     ) {
+        private val scrollTransition = DeviceCardScrollTransition(view, host)
         private val originalHostBackground = host.background
         private val originalChildVisibility = List(host.childCount) { index -> host.getChildAt(index) }
             .filter { it !== view }
@@ -970,6 +1011,7 @@ object SettingsAppearanceApplier {
         }
 
         fun remove() {
+            scrollTransition.clear()
             view.dispose()
             if (attached) runCatching { host.viewTreeObserver.removeOnPreDrawListener(animationSync) }
             attached = false
@@ -980,12 +1022,7 @@ object SettingsAppearanceApplier {
         }
 
         private fun sync() {
-            val source = animationSource ?: return
-            view.translationX = source.translationX
-            view.translationY = 0f
-            view.scaleX = source.scaleX
-            view.scaleY = source.scaleY
-            view.alpha = source.alpha
+            scrollTransition.apply(animationSource)
         }
     }
 

@@ -70,6 +70,10 @@ internal class OthersHooks(
     private val htmlViewerHooks = HtmlViewerHooks(module)
     private val joyoseHooks = JoyoseHooks(module)
     private val preinstalledPrivacyHooks = PreinstalledPrivacyHooks(module)
+    private val settingsTitleBarBlurHooks = SettingsTitleBarBlurHooks(module, hookDeoptimized)
+
+    fun installSettingsTitleBarBlurHooks(param: PackageLoadedParam, preferences: SharedPreferences) =
+        settingsTitleBarBlurHooks.install(param, preferences)
 
     fun installPortalHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
         portalHooks.install(classLoader, preferences)
@@ -851,7 +855,9 @@ internal class OthersHooks(
         val drawable = audioLogoFor(settings.logoMode, appContext, moduleContext) ?: return null
         val night = res.configuration.uiMode and
             android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES
-        return drawable.mutate().apply { setTint(if (night) 0x33FFFFFF.toInt() else 0x33000000.toInt()) }
+        return drawable.mutate().apply {
+            if (settings.logoMode != AUDIO_LOGO_CUSTOM || !SettingsAppearanceSources.query(appContext, APPEARANCE_SLOT_AUDIO_LOGO).deviceStyleCustomization.logoKeepsColors(APPEARANCE_SLOT_AUDIO_LOGO)) setTint(if (night) 0x33FFFFFF.toInt() else 0x33000000.toInt())
+        }
     }
 
     private fun audioLogoFor(mode: Int, appContext: android.content.Context, moduleContext: android.content.Context): Drawable? =
@@ -886,7 +892,7 @@ internal class OthersHooks(
         val drawable = audioLogoFor(settings.logoMode, context, moduleContext) ?: return
         val night = root.resources.configuration.uiMode and
             android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES
-        drawable.mutate().setTint(if (night) 0x33FFFFFF.toInt() else 0x33000000.toInt())
+        if (settings.logoMode != AUDIO_LOGO_CUSTOM || !SettingsAppearanceSources.query(context, APPEARANCE_SLOT_AUDIO_LOGO).deviceStyleCustomization.logoKeepsColors(APPEARANCE_SLOT_AUDIO_LOGO)) drawable.mutate().setTint(if (night) 0x33FFFFFF.toInt() else 0x33000000.toInt())
         val density = root.resources.displayMetrics.density
         val image = ImageView(context)
         image.scaleType = ImageView.ScaleType.FIT_CENTER

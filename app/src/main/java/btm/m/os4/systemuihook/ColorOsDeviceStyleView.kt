@@ -139,7 +139,7 @@ internal class ColorOsUpdateCardView(
             val custom = logoSource.takeIf { it.exists }?.let { LogoDrawableLoader.load(context, it) }
             val ink = foreground(controls.logoColorMode)
             logo.setImageDrawable(custom ?: loadBuiltInLogo()?.let { SplitXiaomiOsLogoDrawable(it, ink) })
-            logo.colorFilter = if (custom != null && controls.logoColorMode != 0) PorterDuffColorFilter(ink, PorterDuff.Mode.SRC_IN) else null
+            logo.colorFilter = if (custom != null && controls.logoColorMode != 0 && !controls.logoKeepsColors(logoSource.slot)) PorterDuffColorFilter(ink, PorterDuff.Mode.SRC_IN) else null
             logo.visibility = if (logo.drawable == null) View.INVISIBLE else View.VISIBLE
             logoKey = newLogoKey
         }
@@ -330,6 +330,7 @@ internal class DeviceStyleDividerView(context: Context) : View(context) {
 }
 
 internal class ColorOsCardSession(private val host: FrameLayout, private val spacer: View?, private val originalParams: ViewGroup.LayoutParams?, private val animationSource: View?, val view: ColorOsUpdateCardView, val key: String) {
+    private val scrollTransition = DeviceCardScrollTransition(view, host)
     private val background = host.background
     private val originalHostHeight = host.layoutParams?.height
     private val originals = List(host.childCount) { host.getChildAt(it) }.filter { it !== view }.map { it to it.visibility }
@@ -363,17 +364,10 @@ internal class ColorOsCardSession(private val host: FrameLayout, private val spa
         }
     }
     private fun syncAnimation() {
-        animationSource?.let {
-            view.translationX = it.translationX
-            // Native translationY is only the -27/-30dp new-update logo lift.
-            // Scrolling moves the host and still supplies scale/alpha below.
-            view.translationY = 0f
-            view.scaleX = it.scaleX
-            view.scaleY = it.scaleY
-            view.alpha = it.alpha
-        }
+        scrollTransition.apply(animationSource)
     }
     fun remove() {
+        scrollTransition.clear()
         if (attached && host.viewTreeObserver.isAlive) host.viewTreeObserver.removeOnPreDrawListener(animationListener)
         attached = false
         (view.parent as? ViewGroup)?.removeView(view)

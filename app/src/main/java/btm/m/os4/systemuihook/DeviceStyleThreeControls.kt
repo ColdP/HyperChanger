@@ -116,6 +116,7 @@ internal fun StyleThreeUpdateControls(appearance: SettingsAppearanceSettings, up
 internal fun StyleThreeSeparateDetailsControls(appearance: SettingsAppearanceSettings, update: AppearanceUpdate) {
     val s = appearance.deviceStyleCustomization
     var editCameraBrand by remember { mutableStateOf(false) }
+    var editCameraBrandSuffix by remember { mutableStateOf(false) }
     fun save(transform: (DeviceStyleCustomization) -> DeviceStyleCustomization) =
         update { it.copy(deviceStyleCustomization = transform(it.deviceStyleCustomization)) }
     Group(tr("device3_separate_details", "分离式详细信息卡片")) {
@@ -158,7 +159,7 @@ internal fun StyleThreeSeparateDetailsControls(appearance: SettingsAppearanceSet
                     items = listOf(
                         tr("不显示", "不显示"), tr("device3_brand_leica", "徕卡"),
                         tr("device3_brand_zeiss", "蔡司"), tr("device3_brand_hasselblad", "哈苏"),
-                        tr("device3_brand_fujifilm", "富士"), tr("device3_brand_sony", "SONY"),
+                        tr("device3_brand_fujifilm", "富士"), tr("device3_brand_sony", "索尼"),
                         tr("device3_brand_nikon", "尼康"), tr("device3_brand_canon", "佳能"),
                         tr("device3_brand_panasonic", "松下"), tr("device3_brand_custom_text", "自定义文本"),
                         tr("device3_brand_custom_image", "自定义图片"),
@@ -177,6 +178,22 @@ internal fun StyleThreeSeparateDetailsControls(appearance: SettingsAppearanceSet
                     DeviceAppearanceAssetPreference(appearance, APPEARANCE_SLOT_STYLE3_CAMERA_BRAND,
                         tr("device3_brand_custom_image", "自定义图片"), update)
                 }
+                PortalAppearanceVisibility(s.cameraBrandHasLogo) {
+                    Column {
+                        DeviceRelativeScale(tr("device3_brand_logo_scale", "影像联名标志缩放"), s.cameraBrandLogoScale) { v -> save { it.copy(cameraBrandLogoScale = v) } }
+                        SharedViewArrowPreference(
+                            title = tr("device3_brand_suffix", "标志后文本"),
+                            summary = s.cameraBrandSuffix.ifBlank { tr("device3_brand_suffix_hint", "留空则不显示标志后文本") },
+                            onClick = { editCameraBrandSuffix = true },
+                        )
+                        PortalAppearanceVisibility(s.cameraBrandSuffix.isNotBlank()) {
+                            Column {
+                                DeviceRelativeScale(tr("文本缩放", "文本缩放"), s.cameraBrandSuffixScale) { v -> save { it.copy(cameraBrandSuffixScale = v) } }
+                                PortalSlider(tr("device3_brand_logo_text_spacing", "图标与文本间距"), s.cameraBrandLogoTextSpacing, 0..100, 8, " dp") { v -> save { it.copy(cameraBrandLogoTextSpacing = v) } }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -187,6 +204,15 @@ internal fun StyleThreeSeparateDetailsControls(appearance: SettingsAppearanceSet
             inputLabel = tr("device3_camera_brand", "影像联名"),
             onDismiss = { editCameraBrand = false },
             onSave = { text -> save { it.copy(cameraBrandText = text) }; editCameraBrand = false },
+        )
+    }
+    if (editCameraBrandSuffix && s.separateDetailsEnabled && s.cameraBrandHasLogo) {
+        DeviceProfileFieldDialog(
+            title = tr("device3_brand_suffix", "标志后文本"),
+            current = s.cameraBrandSuffix,
+            inputLabel = tr("device3_brand_suffix_hint", "留空则不显示标志后文本"),
+            onDismiss = { editCameraBrandSuffix = false },
+            onSave = { text -> save { it.copy(cameraBrandSuffix = text) }; editCameraBrandSuffix = false },
         )
     }
 }

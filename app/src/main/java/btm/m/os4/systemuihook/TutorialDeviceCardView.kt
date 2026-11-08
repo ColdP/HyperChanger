@@ -111,6 +111,8 @@ class TutorialDeviceCardView(
         phone.scaleX = scale
         phone.scaleY = scale
         topLogo.setImageDrawable(decode(context, logoSource))
+        if (logoSource.deviceStyleCustomization.logoKeepsColors(logoSource.slot)) topLogo.clearColorFilter()
+        else topLogo.setColorFilter(if (night) android.graphics.Color.WHITE else 0xFF17181C.toInt())
         topLogo.visibility = if (topLogo.drawable == null) GONE else VISIBLE
         val logoScaleFactor = logoScale.coerceIn(0, 200) / 100f
         topLogo.scaleX = logoScaleFactor

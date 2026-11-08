@@ -35,6 +35,7 @@ private fun assetNameFile(context: Context, slot: String) = File(context.filesDi
 internal fun SettingsAppearanceSettings.assetMime(slot: String): String {
     if (':' in slot) return colorModeAssetMimes[slot].orEmpty()
     return when (slot) {
+        APPEARANCE_SLOT_AUDIO_LOGO -> "image/*"
         APPEARANCE_SLOT_LOGO -> logoMime
         APPEARANCE_SLOT_DEVICE_IMAGE -> tutorialCardImageMime
         APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO -> tutorialCardLogoMime
@@ -44,6 +45,8 @@ internal fun SettingsAppearanceSettings.assetMime(slot: String): String {
         APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND -> style2BackgroundMime
         APPEARANCE_SLOT_STYLE3_BACKGROUND -> style3BackgroundMime
         APPEARANCE_SLOT_STYLE3_LOGO -> style3LogoMime
+        APPEARANCE_SLOT_STYLE4_BACKGROUND -> deviceStyleCustomization.styleFour.backgroundMime
+        APPEARANCE_SLOT_STYLE4_LOGO -> deviceStyleCustomization.styleFour.logoMime
         APPEARANCE_SLOT_CPU_ICON -> deviceStyleCustomization.cpuIconMime
         APPEARANCE_SLOT_STYLE3_CPU_ICON -> deviceStyleCustomization.separateProcessorIconMime
         APPEARANCE_SLOT_STYLE3_CAMERA_BRAND -> deviceStyleCustomization.cameraBrandMime
@@ -67,6 +70,8 @@ internal fun SettingsAppearanceSettings.withAsset(slot: String, mime: String, ve
         APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND -> copy(style2BackgroundMime = mime, style2BackgroundVersion = version)
         APPEARANCE_SLOT_STYLE3_BACKGROUND -> copy(style3BackgroundMime = mime, style3BackgroundVersion = version)
         APPEARANCE_SLOT_STYLE3_LOGO -> copy(style3LogoMime = mime, style3LogoVersion = version)
+        APPEARANCE_SLOT_STYLE4_BACKGROUND -> copy(deviceStyleCustomization = deviceStyleCustomization.copy(styleFour = deviceStyleCustomization.styleFour.copy(backgroundMime = mime, backgroundVersion = version)))
+        APPEARANCE_SLOT_STYLE4_LOGO -> copy(deviceStyleCustomization = deviceStyleCustomization.copy(styleFour = deviceStyleCustomization.styleFour.copy(logoMime = mime, logoVersion = version)))
         APPEARANCE_SLOT_CPU_ICON -> copy(deviceStyleCustomization = deviceStyleCustomization.copy(cpuIconMime = mime, cpuIconVersion = version))
         APPEARANCE_SLOT_STYLE3_CPU_ICON -> copy(deviceStyleCustomization = deviceStyleCustomization.copy(separateProcessorIconMime = mime, separateProcessorIconVersion = version))
         APPEARANCE_SLOT_STYLE3_CAMERA_BRAND -> copy(deviceStyleCustomization = deviceStyleCustomization.copy(cameraBrandMime = mime, cameraBrandVersion = version))
@@ -90,6 +95,7 @@ internal fun DeviceAppearanceAssetPreference(
             onSelectedIndexChange = { mode = it },
         )
         key(mode) { AppearanceAssetRow(appearance.assetMime(colorModeAssetKey(slot, mode == 1)), colorModeAssetKey(slot, mode == 1), title, update) }
+        LogoRecognitionPreference(appearance, slot, update)
         return
     }
     val slots = if (appearance.deviceStyleCustomization.assetsForStyle(appearanceAssetStyle(slot)) && slot in COLOR_MODE_ASSET_SLOTS) listOf(colorModeAssetKey(slot, false), colorModeAssetKey(slot, true)) else listOf(slot)
@@ -103,6 +109,7 @@ internal fun DeviceAppearanceAssetPreference(
             AppearanceAssetRow(appearance.assetMime(effective), effective, label, update)
         }
     }
+    if (slot.substringBefore(':') in RECOGNIZED_LOGO_SLOTS) LogoRecognitionPreference(appearance, slot, update)
 }
 
 @Composable
@@ -131,7 +138,7 @@ private fun AppearanceAssetRow(mime: String, slot: String, title: String, update
             else if (imported) previewBitmap(context, Uri.fromFile(file)) else null
         }
         val name = selected?.let { appearanceAssetDisplayName(context, it) } ?: if (imported && !cleared) savedName else ""
-        val isLogo = slot.substringBefore(':') in listOf(APPEARANCE_SLOT_LOGO, APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO, APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO, APPEARANCE_SLOT_STYLE3_LOGO, APPEARANCE_SLOT_CPU_ICON, APPEARANCE_SLOT_STYLE3_CPU_ICON, APPEARANCE_SLOT_STYLE3_CAMERA_BRAND)
+        val isLogo = slot.substringBefore(':') in listOf(APPEARANCE_SLOT_LOGO, APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO, APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO, APPEARANCE_SLOT_STYLE3_LOGO, APPEARANCE_SLOT_STYLE4_LOGO, APPEARANCE_SLOT_CPU_ICON, APPEARANCE_SLOT_STYLE3_CPU_ICON, APPEARANCE_SLOT_STYLE3_CAMERA_BRAND)
         WindowDialog(show = true, onDismissRequest = { open = false }) {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp), horizontalAlignment = Alignment.Start) {
                 Text(title, style = MiuixTheme.textStyles.title3)

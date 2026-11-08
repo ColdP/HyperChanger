@@ -40,6 +40,7 @@ val COLOR_MODE_ASSET_SLOTS = listOf(
     APPEARANCE_SLOT_DEVICE_IMAGE, APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO, APPEARANCE_SLOT_STYLE1_UPDATE_BACKGROUND,
     APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE, APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO, APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND,
     APPEARANCE_SLOT_STYLE3_BACKGROUND, APPEARANCE_SLOT_STYLE3_LOGO,
+    APPEARANCE_SLOT_STYLE4_BACKGROUND, APPEARANCE_SLOT_STYLE4_LOGO,
 )
 fun colorModeAssetKey(slot: String, dark: Boolean) = "$slot:${if (dark) COLOR_MODE_DARK else COLOR_MODE_LIGHT}"
 
@@ -380,7 +381,7 @@ private fun SettingsAppearanceSettings.normalized() = copy(
     tutorialCardBackgroundVerticalOffset = tutorialCardBackgroundVerticalOffset.coerceIn(-120, 120),
     tutorialCardBackgroundHorizontalOffset = tutorialCardBackgroundHorizontalOffset.coerceIn(-120, 120),
     tutorialCardBackgroundScale = tutorialCardBackgroundScale.coerceIn(0, 200),
-    deviceInterfaceStyle = deviceInterfaceStyle.coerceIn(DEVICE_INTERFACE_STYLE_SYSTEM, DEVICE_INTERFACE_STYLE_THREE),
+    deviceInterfaceStyle = deviceInterfaceStyle.coerceIn(DEVICE_INTERFACE_STYLE_SYSTEM, DEVICE_INTERFACE_STYLE_FOUR),
     style2ImageScale = style2ImageScale.coerceIn(0, 200),
     style2LogoVerticalOffset = style2LogoVerticalOffset.coerceIn(-120, 120),
     style2LogoVerticalOffsetLeft = style2LogoVerticalOffsetLeft.coerceIn(-120, 120),

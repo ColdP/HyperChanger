@@ -144,7 +144,7 @@ object SettingsAppearanceSources {
                     tutorialCardBackgroundVerticalOffset = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE1_BACKGROUND_VERTICAL_OFFSET).coerceIn(-120, 120),
                     tutorialCardBackgroundHorizontalOffset = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE1_BACKGROUND_HORIZONTAL_OFFSET).coerceIn(-120, 120),
                     tutorialCardBackgroundScale = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE1_BACKGROUND_SCALE).coerceIn(0, 200),
-                    deviceInterfaceStyle = cursor.int(SettingsAppearanceProvider.COLUMN_DEVICE_INTERFACE_STYLE).coerceIn(DEVICE_INTERFACE_STYLE_SYSTEM, DEVICE_INTERFACE_STYLE_THREE),
+                    deviceInterfaceStyle = cursor.int(SettingsAppearanceProvider.COLUMN_DEVICE_INTERFACE_STYLE).coerceIn(DEVICE_INTERFACE_STYLE_SYSTEM, DEVICE_INTERFACE_STYLE_FOUR),
                     style2ImageScale = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE2_IMAGE_SCALE).coerceIn(0, 200),
                     style2LogoVerticalOffset = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE2_LOGO_VERTICAL_OFFSET).coerceIn(-120, 120),
                     style2ImageLogoSpacing = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE2_IMAGE_LOGO_SPACING).coerceIn(-50, 50),

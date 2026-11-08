@@ -64,6 +64,7 @@ internal fun restartRecommendationSnapshot(group: String, preferences: SharedPre
     readSettingsEntryIconRevision(p)
     readSettingsModuleEntryIconSettings(p)
     readSettingsAdvancedColorStyleSettings(p)
+    readSettingsTitleBarBlurSettings(p)
     readSettingsAppScopePreferences(p)
     readMiSettingsPreferences(p)
     readSoundEffectPreferences(p)

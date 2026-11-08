@@ -11,7 +11,8 @@ internal const val APPEARANCE_SLOT_STYLE3_CAMERA_BRAND = "style3_camera_brand"
 
 /** Dedicated controls; persisted and synchronized by the existing appearance store. */
 data class DeviceStyleCustomization(
-    val independentAssets: List<Boolean> = List(4) { false },
+    val logoRecognition: Map<String, Int> = emptyMap(),
+    val independentAssets: List<Boolean> = List(5) { false },
     val backgroundBlur: Int = 0,
     val backgroundX: Int = 0,
     val backgroundY: Int = 0,
@@ -50,15 +51,23 @@ data class DeviceStyleCustomization(
     val separateProcessorIcon: Int = 0,
     val separateProcessorIconMime: String = "",
     val separateProcessorIconVersion: Long = 0L,
+    val styleFour: DeviceStyleFourSettings = DeviceStyleFourSettings(),
     val cameraBrand: Int = 0,
     val cameraBrandText: String = "",
+    val cameraBrandSuffix: String = "",
+    val cameraBrandSuffixScale: Int = 0,
+    val cameraBrandLogoScale: Int = 0,
+    val cameraBrandLogoTextSpacing: Int = 8,
     val cameraBrandMime: String = "",
     val cameraBrandVersion: Long = 0L,
 ) {
-    fun assetsForStyle(style: Int) = independentAssets.getOrElse(style.coerceIn(0, 3)) { false }
-    fun withAssetsForStyle(style: Int, enabled: Boolean) = copy(independentAssets = List(4) { if (it == style) enabled else assetsForStyle(it) })
+    val cameraBrandHasLogo: Boolean get() = cameraBrand in 1..8 || cameraBrand == 10
+
+    fun assetsForStyle(style: Int) = independentAssets.getOrElse(style.coerceIn(0, 4)) { false }
+    fun withAssetsForStyle(style: Int, enabled: Boolean) = copy(independentAssets = List(5) { if (it == style) enabled else assetsForStyle(it) })
 
     internal fun encode(): String = JSONObject().apply {
+        put("logoRecognition", JSONObject(logoRecognition))
         put("independentAssets", JSONArray(independentAssets))
         put("backgroundBlur", backgroundBlur)
         put("backgroundX", backgroundX)
@@ -97,8 +106,13 @@ data class DeviceStyleCustomization(
         put("separateProcessorIcon", separateProcessorIcon)
         put("separateProcessorIconMime", separateProcessorIconMime)
         put("separateProcessorIconVersion", separateProcessorIconVersion)
+        put("styleFour", styleFour.json())
         put("cameraBrand", cameraBrand)
         put("cameraBrandText", cameraBrandText)
+        put("cameraBrandSuffix", cameraBrandSuffix)
+        put("cameraBrandSuffixScale", cameraBrandSuffixScale)
+        put("cameraBrandLogoScale", cameraBrandLogoScale)
+        put("cameraBrandLogoTextSpacing", cameraBrandLogoTextSpacing)
         put("cameraBrandMime", cameraBrandMime)
         put("cameraBrandVersion", cameraBrandVersion)
     }.toString()
@@ -113,7 +127,8 @@ data class DeviceStyleCustomization(
             val json = JSONObject(payload ?: "{}")
             val modes = json.optJSONArray("independentAssets")
             DeviceStyleCustomization(
-                independentAssets = List(4) { modes?.optBoolean(it, legacyAssets) ?: legacyAssets },
+                logoRecognition = json.optJSONObject("logoRecognition")?.let { modes -> modes.keys().asSequence().filter { it in RECOGNIZED_LOGO_SLOTS }.associateWith { modes.optInt(it, 0).coerceIn(0..1) } }.orEmpty(),
+                independentAssets = List(5) { modes?.optBoolean(it, legacyAssets) ?: legacyAssets },
                 backgroundBlur = json.optInt("backgroundBlur", 0).coerceIn(0..100),
                 backgroundX = json.optInt("backgroundX", 0).coerceIn(-100..100),
                 backgroundY = json.optInt("backgroundY", 0).coerceIn(-100..100),
@@ -152,12 +167,17 @@ data class DeviceStyleCustomization(
                 separateProcessorIcon = json.optInt("separateProcessorIcon", 0).coerceIn(0..9),
                 separateProcessorIconMime = json.optString("separateProcessorIconMime", ""),
                 separateProcessorIconVersion = json.optLong("separateProcessorIconVersion", 0L),
+                styleFour = DeviceStyleFourSettings.decode(json.optJSONObject("styleFour")),
                 cameraBrand = json.optInt("cameraBrand", 0).coerceIn(0..10),
                 cameraBrandText = json.optString("cameraBrandText", "").take(256),
+                cameraBrandSuffix = json.optString("cameraBrandSuffix", "").take(256).trim(),
+                cameraBrandSuffixScale = json.optInt("cameraBrandSuffixScale", 0).coerceIn(-100..100),
+                cameraBrandLogoScale = json.optInt("cameraBrandLogoScale", 0).coerceIn(-100..100),
+                cameraBrandLogoTextSpacing = json.optInt("cameraBrandLogoTextSpacing", 8).coerceIn(0..100),
                 cameraBrandMime = json.optString("cameraBrandMime", ""),
                 cameraBrandVersion = json.optLong("cameraBrandVersion", 0L),
             )
-        }.getOrElse { DeviceStyleCustomization(independentAssets = List(4) { legacyAssets }) }
+        }.getOrElse { DeviceStyleCustomization(independentAssets = List(5) { legacyAssets }) }
     }
 }
 
@@ -171,6 +191,7 @@ internal fun appearanceAssetStyle(slot: String): Int = when (slot.substringBefor
     APPEARANCE_SLOT_LOGO -> 0
     APPEARANCE_SLOT_DEVICE_IMAGE, APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO, APPEARANCE_SLOT_STYLE1_UPDATE_BACKGROUND -> 1
     APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE, APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO, APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND -> 2
+    APPEARANCE_SLOT_STYLE4_BACKGROUND, APPEARANCE_SLOT_STYLE4_LOGO -> 4
     else -> 3
 }
 
