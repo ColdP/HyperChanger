@@ -108,6 +108,11 @@ object ModulePresetCodec {
                 completeGmsUnlockPreset(values)
                 completeGmsQuickShareIslandPreset(values)
             }
+            if (groupName == "settings") {
+                completeCameraFeaturePreset(values)
+                completeCameraWatermarkPreset(values)
+                completeCameraShutterPreset(values)
+            }
             groups.put(groupName, values)
         }
         return JSONObject()
@@ -176,6 +181,11 @@ object ModulePresetCodec {
                 completeGmsUnlockPreset(values)
                 completeGmsQuickShareIslandPreset(values)
             }
+            if (groupName == "settings") {
+                completeCameraFeaturePreset(values)
+                completeCameraWatermarkPreset(values)
+                completeCameraShutterPreset(values)
+            }
             PreviewGroup(
                 groupName,
                 values.keys().asSequence()
@@ -204,6 +214,7 @@ object ModulePresetCodec {
         import(context, service, preset.toString(Charsets.UTF_8))
         entries.filterKeys { it.startsWith(MODULE_PRESET_RESOURCE_ROOT) }
             .forEach { (path, value) -> restoreResource(context, path.removePrefix(MODULE_PRESET_RESOURCE_ROOT), value) }
+        service?.let { CameraWatermarkRemote.publish(context, it); CameraShutterRemote.publish(context, it) }
     }
 
     fun reset(context: Context, service: XposedService?) {
@@ -212,6 +223,7 @@ object ModulePresetCodec {
             service?.getRemotePreferences(group)?.edit()?.clear()?.apply()
         }
         resourceRoots(context).forEach { it.deleteRecursively() }
+        service?.let { CameraWatermarkRemote.publish(context, it); CameraShutterRemote.publish(context, it) }
     }
 
     fun import(
@@ -249,6 +261,11 @@ object ModulePresetCodec {
                 completePowerBatteryPreset(values)
                 completeGmsUnlockPreset(values)
                 completeGmsQuickShareIslandPreset(values)
+            }
+            if (groupName == "settings") {
+                completeCameraFeaturePreset(values)
+                completeCameraWatermarkPreset(values)
+                completeCameraShutterPreset(values)
             }
             val preserveMissingNavigation = groupName == REMOTE_PREFERENCE_GROUP
             applyValues(context.getSharedPreferences(groupName, Context.MODE_PRIVATE), values, replace = true,
@@ -329,6 +346,8 @@ object ModulePresetCodec {
             File(root, "rear_screenshot_shells"),
             File(root, "lyric_library"),
             File(root, ASSISTANT_BACKGROUND_DIRECTORY),
+            File(root, CAMERA_WATERMARK_DIRECTORY),
+            File(root, CAMERA_SHUTTER_DIRECTORY),
         )
         return candidates.flatMap { file ->
             if (!file.exists()) emptyList() else if (file.isDirectory) {
@@ -381,5 +400,7 @@ object ModulePresetCodec {
         File(context.filesDir, "rear_screenshot_shells"),
         File(context.filesDir, "lyric_library"),
         File(context.filesDir, ASSISTANT_BACKGROUND_DIRECTORY),
+        File(context.filesDir, CAMERA_WATERMARK_DIRECTORY),
+        File(context.filesDir, CAMERA_SHUTTER_DIRECTORY),
     )
 }

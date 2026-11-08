@@ -20,6 +20,13 @@ class HookApplication : Application(), XposedServiceHelper.OnServiceListener {
     }
 
     override fun onServiceBind(service: XposedService) {
+        CameraVersionCompatibility.enforce(this, service)
+        Thread({
+            runCatching { CameraWatermarkRemote.publish(this, service) }
+                .onFailure { ModuleLog.w("CameraWatermark", "Could not publish watermark library", it) }
+            runCatching { CameraShutterRemote.publish(this, service) }
+                .onFailure { ModuleLog.w("CameraShutter", "Could not publish shutter sound library", it) }
+        }, "hc-watermark-publish").start()
         runCatching { nativeBoseSupport.syncRemote(service) }
             .onFailure { ModuleLog.w("NativeBose", "Could not sync native BOSE device list", it) }
         runCatching { PersonalAssistantSettingsStore(this).syncRemote(service) }

@@ -1509,6 +1509,21 @@
       true
     ],
     [
+      "cc_top_buttons_at_bottom",
+      "下移至控制中心磁贴尾部",
+      true
+    ],
+    [
+      "cc_top_buttons_bottom_gap",
+      "与控制中心磁贴底部的间距",
+      false
+    ],
+    [
+      "cc_top_buttons_spacing",
+      "控制按钮之间的间距",
+      false
+    ],
+    [
       "材质设置",
       "材质设置",
       false
@@ -3482,29 +3497,428 @@
       true
     ],
     [
-      "一瞬功能",
-      "一瞬功能",
+      "camera_remove_model_limitation",
+      "去除机型限制",
       true
     ],
     [
-      "徕卡一瞬",
-      "徕卡一瞬",
+      "camera_all_xiaomi18_features",
+      "解锁 Xiaomi 18 系列相机所有功能",
+      true
+    ],
+    [
+      "camera_custom_watermark_model",
+      "自定义相机水印机型",
+      true
+    ],
+    [
+      "camera_use_system_model",
+      "使用系统机型",
       false
     ],
     [
-      "传奇一瞬",
-      "传奇一瞬",
+      "camera_watermark_library",
+      "水印库",
+      true
+    ],
+    [
+      "camera_shutter_sounds",
+      "自定义快门声",
+      true
+    ],
+    [
+      "camera_watermark_suffixes",
+      "水印特殊后缀",
+      true
+    ],
+    [
+      "camera_watermark_suffix_none",
+      "不启用特殊后缀",
       false
     ],
     [
-      "相册编辑全水印",
-      "相册编辑全水印",
+      "camera_focal_length_source",
+      "焦段来源",
+      true
+    ],
+    [
+      "camera_focal_source_auto",
+      "自动识别",
+      false
+    ],
+    [
+      "camera_focal_source_preset",
+      "从预设库选择",
+      false
+    ],
+    [
+      "camera_focal_source_custom",
+      "自定义",
+      false
+    ],
+    [
+      "camera_focal_preset_xiaomi15",
+      "Xiaomi 15",
+      false
+    ],
+    [
+      "camera_focal_preset_xiaomi15_pro",
+      "Xiaomi 15 Pro",
+      false
+    ],
+    [
+      "camera_focal_preset_xiaomi15_ultra",
+      "Xiaomi 15 Ultra",
+      false
+    ],
+    [
+      "camera_focal_preset_xiaomi14_ultra",
+      "Xiaomi 14 Ultra",
+      false
+    ],
+    [
+      "camera_focal_preset_xiaomi14t",
+      "Xiaomi 14T",
+      false
+    ],
+    [
+      "camera_focal_preset_xiaomi14t_pro",
+      "Xiaomi 14T Pro",
+      false
+    ],
+    [
+      "camera_focal_preset_xiaomi15s_pro",
+      "Xiaomi 15S Pro",
+      false
+    ],
+    [
+      "camera_focal_preset_xiaomi15t",
+      "Xiaomi 15T",
+      false
+    ],
+    [
+      "camera_focal_preset_xiaomi15t_pro",
+      "Xiaomi 15T Pro",
+      false
+    ],
+    [
+      "camera_focal_preset_xiaomi14",
+      "Xiaomi 14",
+      false
+    ],
+    [
+      "camera_focal_preset_xiaomi14_pro",
+      "Xiaomi 14 Pro",
+      false
+    ],
+    [
+      "camera_focal_preset_xiaomi17_pro",
+      "Xiaomi 17 Pro",
+      false
+    ],
+    [
+      "camera_focal_preset_xiaomi17_pro_max",
+      "Xiaomi 17 Pro Max",
+      false
+    ],
+    [
+      "camera_focal_preset_xiaomi17_max",
+      "Xiaomi 17 Max",
+      false
+    ],
+    [
+      "camera_focal_preset_xiaomi17t",
+      "Xiaomi 17T",
+      false
+    ],
+    [
+      "camera_focal_preset_xiaomi17t_pro",
+      "Xiaomi 17T Pro",
+      false
+    ],
+    [
+      "camera_focal_preset_xiaomi17_ultra",
+      "Xiaomi 17 Ultra",
+      false
+    ],
+    [
+      "camera_focal_preset",
+      "预设库",
+      true
+    ],
+    [
+      "camera_custom_focal_lengths",
+      "自定义焦段档位",
+      true
+    ],
+    [
+      "camera_focal_lengths_empty",
+      "尚未输入",
+      false
+    ],
+    [
+      "相册编辑全部水印",
+      "相册编辑全部水印",
       true
     ],
     [
       "解锁相册编辑 Xiaomi 18 系列新功能",
       "解锁相册编辑 Xiaomi 18 系列新功能",
       true
+    ],
+    [
+      "camera_watermark_brand",
+      "品牌",
+      false
+    ],
+    [
+      "camera_watermark_model",
+      "机型",
+      false
+    ],
+    [
+      "camera_watermark_identity_hint",
+      "留空使用系统品牌与机型。机型中重复的品牌会自动去除。",
+      false
+    ],
+    [
+      "取消",
+      "取消",
+      false
+    ],
+    [
+      "保存",
+      "保存",
+      false
+    ],
+    [
+      "camera_focal_lengths_hint",
+      "输入逗号分隔的倍率，例如 0.7,1,2,5,10。",
+      false
+    ],
+    [
+      "camera_focal_lengths_example",
+      "例如 0.7,1,2,5,10",
+      false
+    ]
+  ],
+  "CAMERA_WATERMARKS": [
+    [
+      "camera_watermark_operation_failed",
+      "操作失败，请检查水印 ZIP 或重试",
+      false
+    ],
+    [
+      "camera_watermark_exported",
+      "水印已导出",
+      false
+    ],
+    [
+      "camera_watermark_library",
+      "水印库",
+      false
+    ],
+    [
+      "camera_watermark_photo",
+      "照片",
+      false
+    ],
+    [
+      "camera_watermark_video",
+      "视频",
+      false
+    ],
+    [
+      "camera_watermark_unlock_all",
+      "解锁所有相机水印",
+      true
+    ],
+    [
+      "camera_watermark_unlock_front",
+      "去除前摄水印限制",
+      true
+    ],
+    [
+      "camera_watermark_import",
+      "导入水印",
+      true
+    ],
+    [
+      "camera_watermark_import_hint",
+      "导入当前分类的水印 ZIP，保存后重新打开相机生效",
+      false
+    ],
+    [
+      "camera_watermark_empty",
+      "还没有导入水印",
+      false
+    ],
+    [
+      "camera_watermark_import_confirm",
+      "确认导入水印",
+      false
+    ],
+    [
+      "camera_watermark_reselect",
+      "重新选择",
+      false
+    ],
+    [
+      "保存",
+      "保存",
+      false
+    ],
+    [
+      "取消",
+      "取消",
+      false
+    ],
+    [
+      "导出",
+      "导出",
+      false
+    ],
+    [
+      "分享",
+      "分享",
+      false
+    ],
+    [
+      "删除",
+      "删除",
+      false
+    ],
+    [
+      "camera_watermark_delete_confirm",
+      "确定删除这个水印吗？",
+      false
+    ]
+  ],
+  "CAMERA_SHUTTER_SOUNDS": [
+    [
+      "camera_shutter_error",
+      "操作失败，请检查音频文件或网络后重试",
+      false
+    ],
+    [
+      "camera_shutter_imported",
+      "导入的快门声",
+      false
+    ],
+    [
+      "camera_shutter_sounds",
+      "自定义快门声",
+      false
+    ],
+    [
+      "camera_shutter_local",
+      "已导入",
+      false
+    ],
+    [
+      "camera_shutter_online",
+      "在线预设",
+      false
+    ],
+    [
+      "camera_shutter_import",
+      "导入快门声",
+      true
+    ],
+    [
+      "camera_shutter_import_hint",
+      "支持 WAV、MP3、OGG、M4A、FLAC，最长 10 秒、最大 4 MB",
+      false
+    ],
+    [
+      "camera_shutter_refresh",
+      "刷新在线预设",
+      true
+    ],
+    [
+      "camera_shutter_download_all",
+      "一键下载所有快门声",
+      true
+    ],
+    [
+      "camera_shutter_loading",
+      "正在处理…",
+      false
+    ],
+    [
+      "camera_shutter_empty",
+      "还没有导入快门声",
+      false
+    ],
+    [
+      "camera_shutter_preview",
+      "试听",
+      false
+    ],
+    [
+      "camera_shutter_downloaded",
+      "已下载",
+      false
+    ],
+    [
+      "camera_shutter_download",
+      "下载",
+      false
+    ],
+    [
+      "camera_shutter_download_all_confirm",
+      "即将从仓库下载所有快门声",
+      false
+    ],
+    [
+      "取消",
+      "取消",
+      false
+    ],
+    [
+      "确定",
+      "确定",
+      false
+    ],
+    [
+      "camera_shutter_confirm",
+      "确认导入快门声",
+      true
+    ],
+    [
+      "camera_shutter_name",
+      "名称",
+      false
+    ],
+    [
+      "camera_watermark_reselect",
+      "重新选择",
+      false
+    ],
+    [
+      "camera_shutter_save_use",
+      "保存并使用",
+      false
+    ],
+    [
+      "导出",
+      "导出",
+      false
+    ],
+    [
+      "分享",
+      "分享",
+      false
+    ],
+    [
+      "删除",
+      "删除",
+      false
+    ],
+    [
+      "camera_shutter_delete_confirm",
+      "确定删除这个快门声吗？",
+      false
     ]
   ],
   "CAMERA_PALETTE": [
@@ -3965,11 +4379,6 @@
       true
     ],
     [
-      "显示 Google 服务入口",
-      "显示 Google 服务入口",
-      true
-    ],
-    [
       "显示已保存 WiFi 的密码",
       "显示已保存 WiFi 的密码",
       true
@@ -4057,6 +4466,36 @@
     [
       "LOGO缩放",
       "LOGO缩放",
+      true
+    ],
+    [
+      "Google 服务",
+      "Google 服务",
+      false
+    ],
+    [
+      "解除国行 GMS 限制",
+      "解除国行 GMS 限制",
+      true
+    ],
+    [
+      "解除 Google Play 服务中的国行功能限制，Quick Share 可用性取决于设备支持。",
+      "解除 Google Play 服务中的国行功能限制，Quick Share 可用性取决于设备支持。",
+      false
+    ],
+    [
+      "Quick Share 接入小米超级岛",
+      "Quick Share 接入小米超级岛",
+      true
+    ],
+    [
+      "将 Quick Share 的传输通知显示为小米超级岛；可能需要先去除小米超级岛白名单限制。",
+      "将 Quick Share 的传输通知显示为小米超级岛；可能需要先去除小米超级岛白名单限制。",
+      false
+    ],
+    [
+      "显示 Google 服务入口",
+      "显示 Google 服务入口",
       true
     ],
     [

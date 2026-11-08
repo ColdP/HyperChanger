@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <cache-path name="device_preset_exports" path="device_preset_exports/" />
+    <cache-path name="camera_watermark_exports" path="camera_watermark_exports/" />
+    <cache-path name="camera_shutter_exports" path="camera_shutter_exports/" />
 </paths>

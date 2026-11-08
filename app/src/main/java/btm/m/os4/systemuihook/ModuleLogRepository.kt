@@ -88,7 +88,7 @@ internal object ModuleLogParser {
         flush()
         return entries
     }
-    private fun isModule(text: String, tag: String) = "HyperChanger" in text || "HyperChanger" in tag || "btm.m.os4.systemuihook" in text || "btm.m.leicaunlocker" in text
+    private fun isModule(text: String, tag: String) = "HyperChanger" in text || "HyperChanger" in tag || "btm.m.os4.systemuihook" in text
     fun hash(text: String): String = MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
     fun matches(entry: ModuleLogEntry, minimum: Int, crashOnly: Boolean) =
         entry.priority >= minimum && (!crashOnly || entry.tag == "CRASH")

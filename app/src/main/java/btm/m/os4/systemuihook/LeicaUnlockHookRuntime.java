@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright 2026 btm_m
-package btm.m.leicaunlocker.hook;
+package btm.m.os4.systemuihook;
 
 import android.content.SharedPreferences;
 import android.hardware.camera2.CaptureRequest;
@@ -8,6 +8,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.Message;
 import btm.m.os4.systemuihook.ModuleLog;
 
 import androidx.annotation.NonNull;
@@ -27,10 +28,9 @@ import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 
-import btm.m.leicaunlocker.shared.ModuleConfig;
 import io.github.libxposed.api.XposedModule;
 
-public final class LeicaUnlockHook extends XposedModule {
+public class LeicaUnlockHookRuntime extends XposedModule {
     private static final String TAG = "LeicaUnlocker";
     private static final Object AI_PROFILE_LOCK = new Object();
     private static final String CAMERA_CONFIG_FACTORY = "Je.e";
@@ -44,6 +44,7 @@ public final class LeicaUnlockHook extends XposedModule {
     };
 
     private volatile SharedPreferences preferences;
+    private final Camera68Hooks camera68Hooks = new Camera68Hooks(this, () -> preferences);
     private volatile boolean targetProcess;
     /** True while this module instance is running inside Gallery/MediaEditor. */
     private volatile boolean galleryProcess;
@@ -124,14 +125,14 @@ public final class LeicaUnlockHook extends XposedModule {
     @Override
     public void onModuleLoaded(@NonNull ModuleLoadedParam param) {
         btm.m.os4.systemuihook.HookModuleLogger.attach(this, getRemotePreferences("hyper_system_ui_hook"));
-        targetProcess = ModuleConfig.isSupportedProcess(param.getProcessName());
+        targetProcess = CameraModuleConfig.isSupportedProcess(param.getProcessName());
         if (!targetProcess) {
             detach();
             return;
         }
 
         try {
-            preferences = getRemotePreferences(ModuleConfig.PREFERENCE_GROUP);
+            preferences = getRemotePreferences(CameraModuleConfig.PREFERENCE_GROUP);
             galleryProcess = isGalleryProcess(param.getProcessName());
             btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Loaded in " + param.getProcessName() + " with API " + getApiVersion());
         } catch (RuntimeException error) {
@@ -149,30 +150,40 @@ public final class LeicaUnlockHook extends XposedModule {
         if (!isTargetPackage(param.getPackageName(), param.isFirstPackage())) {
             return;
         }
-        if (ModuleConfig.isGalleryPackage(param.getPackageName())) {
+        if (CameraModuleConfig.isGalleryPackage(param.getPackageName())) {
             galleryProcess = true;
-            if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
-                    || pref(ModuleConfig.KEY_GALLERY_PALETTE_UNLOCKED, false)) {
-                if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+            if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                    || pref(CameraModuleConfig.KEY_GALLERY_PALETTE_UNLOCKED, false)) {
+                if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
                     applyGalleryWatermarkBuildProfile();
                 }
                 installSystemPropertyHooks();
             }
+            camera68Hooks.installWatermarkHooks(param.getDefaultClassLoader());
             installGalleryWatermarkHooksForChain(param.getDefaultClassLoader());
             return;
         }
-        if (ModuleConfig.TARGET_PACKAGE.equals(param.getPackageName())) {
+        if (CameraModuleConfig.TARGET_PACKAGE.equals(param.getPackageName())) {
+            if (!CameraVersionCompatibility.isSupportedApk(param.getApplicationInfo())) {
+                disableCameraModule();
+                return;
+            }
+            if (!isEnabled()) return;
+            if (isCamera2090Schema(param.getDefaultClassLoader())) {
+                camera68Hooks.install(param.getDefaultClassLoader());
+                return;
+            }
             installLeicaUiHooks(param.getDefaultClassLoader());
             installDeferredCameraClassHook(param.getDefaultClassLoader());
         }
         if (!isEnabled()) {
             return;
         }
-        if (!ModuleConfig.TARGET_PACKAGE.equals(param.getPackageName())) {
+        if (!CameraModuleConfig.TARGET_PACKAGE.equals(param.getPackageName())) {
             return;
         }
 
-        boolean preserveNativeFocalLengths = pref(ModuleConfig.KEY_PRESERVE_NATIVE_FOCAL_LENGTHS, true);
+        boolean preserveNativeFocalLengths = pref(CameraModuleConfig.KEY_PRESERVE_NATIVE_FOCAL_LENGTHS, true);
 
         if (preserveNativeFocalLengths) {
             captureNativeFocalLengthConfig(param.getDefaultClassLoader());
@@ -180,11 +191,16 @@ public final class LeicaUnlockHook extends XposedModule {
             installNativeFocalPreferenceHook(param.getDefaultClassLoader());
         }
         installSystemPropertyHooks();
-        if (pref(ModuleConfig.KEY_LEICA_UI, true)) {
+        // 2090 resolves its real provider through Eu.f2/Pe.b.e. Replacing
+        // Build identity here selects a generic provider and drops rear-screen,
+        // AI and picture-style capabilities, so retain the native identity.
+        if (pref(CameraModuleConfig.KEY_LEICA_UI, true)
+                && !isCamera2090Schema(param.getDefaultClassLoader())) {
             applyBuildProfile();
         }
         if (preserveNativeFocalLengths
                 && nativeCameraConfig != null
+                && !isCamera2090Schema(param.getDefaultClassLoader())
                 && activateNezhaCameraConfig()) {
             installNativeFocalLengthHooks();
             installNativeWatermarkLabelHook();
@@ -205,57 +221,81 @@ public final class LeicaUnlockHook extends XposedModule {
         }
 
         ClassLoader classLoader = param.getClassLoader();
-        if (ModuleConfig.isGalleryPackage(param.getPackageName())) {
+        if (CameraModuleConfig.isGalleryPackage(param.getPackageName())) {
             galleryProcess = true;
-            if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
-                    || pref(ModuleConfig.KEY_GALLERY_PALETTE_UNLOCKED, false)) {
-                if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+            if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                    || pref(CameraModuleConfig.KEY_GALLERY_PALETTE_UNLOCKED, false)) {
+                if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
                     applyGalleryWatermarkBuildProfile();
                 }
                 installSystemPropertyHooks();
             }
+            camera68Hooks.installWatermarkHooks(classLoader);
             installGalleryWatermarkHooksForChain(classLoader);
             return;
         }
-        if (!ModuleConfig.TARGET_PACKAGE.equals(param.getPackageName())) {
+        if (!CameraModuleConfig.TARGET_PACKAGE.equals(param.getPackageName())) {
+            return;
+        }
+        if (!CameraVersionCompatibility.isSupportedApk(param.getApplicationInfo())) {
+            disableCameraModule();
+            return;
+        }
+        if (!isEnabled()) return;
+        if (isCamera2090Schema(classLoader)) {
+            camera68Hooks.install(classLoader);
             return;
         }
         installLeicaUiHooks(classLoader);
         installDeferredCameraClassHook(classLoader);
         installNativeFocalDefaultValueHook(classLoader);
         installNativeFocalComponentHook(classLoader);
-        if (pref(ModuleConfig.KEY_PRESERVE_NATIVE_FOCAL_LENGTHS, true)) {
+        if (pref(CameraModuleConfig.KEY_PRESERVE_NATIVE_FOCAL_LENGTHS, true)) {
             installNativeFocalPreferenceHook(classLoader);
         }
         scheduleCameraFocalHookRetries(classLoader);
-        // Watermark catalog and model-limit hooks are independent of the camera
-        // master switch. The switch only gates the camera profile/security hooks.
+        // All camera installers follow the camera master switch. Gallery and
+        // MediaEditor retain their independent settings above.
         installSecurityCompatibilityHooks(classLoader);
+        installModelMismatchExitHook(classLoader);
         installExclusiveWatermarkFilterHook(classLoader);
         installCameraWatermarkCatalogHooks(classLoader);
         installLegendaryFallbackHook();
         installCameraFeatureHooks(classLoader);
     }
 
+    private boolean isCamera2090Schema(ClassLoader classLoader) {
+        return classLoader != null && Camera68Hooks.supports(classLoader);
+    }
+
+    private void disableCameraModule() {
+        SharedPreferences current = preferences;
+        if (current != null && current.getBoolean(CameraModuleConfig.KEY_MASTER_ENABLED, true)) {
+            current.edit().putBoolean(CameraModuleConfig.KEY_MASTER_ENABLED, false).apply();
+        }
+        btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG,
+                "Camera hooks disabled: unsupported camera version");
+    }
+
     private boolean isTargetPackage(String packageName, boolean firstPackage) {
         // PackageReady can be delivered after another package initialized the
         // process (notably MediaEditor :photo_editor/:editor_service). Requiring
         // firstPackage here silently skipped the watermark module.
-        return targetProcess && ModuleConfig.isSupportedPackage(packageName);
+        return targetProcess && CameraModuleConfig.isSupportedPackage(packageName);
     }
 
     private boolean isGalleryProcess(String processName) {
         return processName != null && (
-                processName.equals(ModuleConfig.GALLERY_PACKAGE)
-                        || processName.startsWith(ModuleConfig.GALLERY_PACKAGE + ":")
-                        || processName.equals(ModuleConfig.GALLERY_PLUGIN_PACKAGE)
-                        || processName.startsWith(ModuleConfig.GALLERY_PLUGIN_PACKAGE + ":")
-                        || processName.equals(ModuleConfig.MEDIA_EDITOR_PACKAGE)
-                        || processName.startsWith(ModuleConfig.MEDIA_EDITOR_PACKAGE + ":"));
+                processName.equals(CameraModuleConfig.GALLERY_PACKAGE)
+                        || processName.startsWith(CameraModuleConfig.GALLERY_PACKAGE + ":")
+                        || processName.equals(CameraModuleConfig.GALLERY_PLUGIN_PACKAGE)
+                        || processName.startsWith(CameraModuleConfig.GALLERY_PLUGIN_PACKAGE + ":")
+                        || processName.equals(CameraModuleConfig.MEDIA_EDITOR_PACKAGE)
+                        || processName.startsWith(CameraModuleConfig.MEDIA_EDITOR_PACKAGE + ":"));
     }
 
     private boolean isEnabled() {
-        return pref(ModuleConfig.KEY_MASTER_ENABLED, true);
+        return pref(CameraModuleConfig.KEY_MASTER_ENABLED, true);
     }
 
     private boolean pref(String key, boolean defaultValue) {
@@ -266,6 +306,15 @@ public final class LeicaUnlockHook extends XposedModule {
     private int prefInt(String key, int defaultValue) {
         SharedPreferences current = preferences;
         return current == null ? defaultValue : current.getInt(key, defaultValue);
+    }
+
+    private String prefString(String key, String defaultValue) {
+        SharedPreferences current = preferences;
+        return current == null ? defaultValue : current.getString(key, defaultValue);
+    }
+
+    private boolean removeModelLimitation() {
+        return pref(CameraModuleConfig.KEY_REMOVE_MODEL_LIMITATION, false);
     }
 
     private void installSystemPropertyHooks() {
@@ -290,7 +339,7 @@ public final class LeicaUnlockHook extends XposedModule {
             hook(method)
                     .setPriority(PRIORITY_HIGHEST)
                     .setId("camera_leica_ui_gate")
-                    .intercept(chain -> !isEnabled() || !pref(ModuleConfig.KEY_LEICA_UI, true)
+                    .intercept(chain -> !isEnabled() || !pref(CameraModuleConfig.KEY_LEICA_UI, true)
                             ? Boolean.FALSE : Boolean.TRUE);
             btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Camera Leica UI gate hook installed");
         } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
@@ -308,15 +357,38 @@ public final class LeicaUnlockHook extends XposedModule {
                         return chain.proceed();
                     }
                     String key = (String) chain.getArg(0);
-                    String replacement = ModuleConfig.propertyOverride(
+                    // Gallery/MediaEditor must keep the real handset model for
+                    // watermark rendering. The AI capability probe temporarily
+                    // uses the madrid identity, but that identity must never
+                    // leak into EXIF/watermark reads after the provider call.
+                    if (galleryProcess && ("ro.product.model".equals(key)
+                            || "ro.product.marketname".equals(key))) {
+                        if (galleryAiProfileActive) {
+                            String ai = CameraModuleConfig.aiPropertyOverride(key);
+                            if (ai != null) {
+                                return ai;
+                            }
+                        }
+                        String custom = prefString(CameraModuleConfig.KEY_CUSTOM_WATERMARK_MODEL, "").trim();
+                        if (!custom.isEmpty()) {
+                            return custom;
+                        }
+                        return chain.proceed();
+                    }
+                    String replacement = CameraModuleConfig.propertyOverride(
                             key,
-                            pref(ModuleConfig.KEY_LEICA_UI, true)
+                            pref(CameraModuleConfig.KEY_LEICA_UI, true)
                     );
+                    if (!galleryProcess && ("ro.product.model".equals(key)
+                            || "ro.product.marketname".equals(key))) {
+                        String custom = prefString(CameraModuleConfig.KEY_CUSTOM_WATERMARK_MODEL, "").trim();
+                        if (!custom.isEmpty()) replacement = custom;
+                    }
                     if (galleryProcess) {
                         String galleryReplacement = galleryAiProfileActive
-                                ? ModuleConfig.aiPropertyOverride(key)
-                                : (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
-                                ? ModuleConfig.galleryWatermarkPropertyOverride(key) : null);
+                                ? CameraModuleConfig.aiPropertyOverride(key)
+                                : (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                                ? CameraModuleConfig.galleryWatermarkPropertyOverride(key) : null);
                         if (galleryReplacement != null) {
                             replacement = galleryReplacement;
                         }
@@ -352,7 +424,12 @@ public final class LeicaUnlockHook extends XposedModule {
         galleryAiProfileActive = false;
         setStaticStringField(Build.class, "DEVICE", "lhasa");
         setStaticStringField(Build.class, "PRODUCT", "lhasa");
-        restoreGalleryOriginalBuildValue("MODEL");
+        String customWatermarkModel = prefString(CameraModuleConfig.KEY_CUSTOM_WATERMARK_MODEL, "").trim();
+        if (!customWatermarkModel.isEmpty()) {
+            setStaticStringField(Build.class, "MODEL", customWatermarkModel);
+        } else {
+            restoreGalleryOriginalBuildValue("MODEL");
+        }
         restoreGalleryOriginalBuildValue("BRAND");
         restoreGalleryOriginalBuildValue("MANUFACTURER");
         btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery watermark build profile applied: lhasa");
@@ -452,11 +529,107 @@ public final class LeicaUnlockHook extends XposedModule {
         }
     }
 
+    /** Camera 6.8.002090.2 moved several feature gates behind the device
+     * capability singleton. The old 6.7 bindings did not reach these entry
+     * points, so AI Help, Motion Capture, Legendary Moment and Master Live were
+     * filtered before their modules could be created. Keep the native methods'
+     * side effects, replacing only the final support result when the model
+     * limitation switch is enabled. */
+    private void installCamera2090FeatureSupportHooks(ClassLoader classLoader) {
+        String[] entries = {
+                "com.android.camera.features.mode.ai.AiModuleEntry",
+                "com.android.camera.features.mode.fast.FastMotionModuleEntry",
+                "com.android.camera.features.mode.legendary.LegendaryEnter",
+                "com.android.camera.features.mode.masterlive.MasterLiveModuleEntry"
+        };
+        for (String className : entries) {
+            try {
+                Class<?> entry = Class.forName(className, false, classLoader);
+                Method support = entry.getDeclaredMethod("support");
+                support.setAccessible(true);
+                hook(support)
+                        .setPriority(PRIORITY_HIGHEST)
+                        .setId("camera_2090_support_" + className.replace('.', '_'))
+                        .intercept(chain -> {
+                            Object original = chain.proceed();
+                            return isEnabled() && removeModelLimitation() ? Boolean.TRUE : original;
+                        });
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Camera 2090 mode support hook installed: " + className);
+            } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to hook Camera 2090 mode support: " + className, error);
+            }
+        }
+
+        try {
+            Class<?> pe = Class.forName("Pe.b", false, classLoader);
+            Method aiGate = pe.getDeclaredMethod("C0");
+            aiGate.setAccessible(true);
+            hook(aiGate)
+                    .setPriority(PRIORITY_HIGHEST)
+                    .setId("camera_2090_ai_capability")
+                    .intercept(chain -> {
+                        Object original = chain.proceed();
+                        return isEnabled() && removeModelLimitation() ? Boolean.TRUE : original;
+                    });
+            Field capabilityField = pe.getDeclaredField("e");
+            capabilityField.setAccessible(true);
+            Object singleton = Class.forName("Pe.b$b", false, classLoader).getDeclaredField("a").get(null);
+            Object capability = capabilityField.get(singleton);
+            if (capability != null) {
+                Class<?> capabilityClass = capability.getClass();
+                for (String methodName : new String[]{"H2", "c3", "l3"}) {
+                    try {
+                        Method gate = capabilityClass.getDeclaredMethod(methodName);
+                        gate.setAccessible(true);
+                        hook(gate)
+                                .setPriority(PRIORITY_HIGHEST)
+                                .setId("camera_2090_capability_" + methodName)
+                                .intercept(chain -> {
+                                    Object original = chain.proceed();
+                                    return isEnabled() && removeModelLimitation() ? Boolean.TRUE : original;
+                                });
+                    } catch (NoSuchMethodException ignored) {
+                        // A capability is optional on some regional 2090 splits.
+                    }
+                }
+            }
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to hook Camera 2090 capability gates", error);
+        }
+
+        try {
+            Class<?> styleGate = Class.forName("l9.h", false, classLoader);
+            Method enabled = styleGate.getDeclaredMethod("E2", Class.forName("l9.g", false, classLoader));
+            enabled.setAccessible(true);
+            hook(enabled)
+                    .setPriority(PRIORITY_HIGHEST)
+                    .setId("camera_2090_color_style_gate")
+                    .intercept(chain -> {
+                        Object original = chain.proceed();
+                        return isEnabled() && removeModelLimitation() ? Boolean.TRUE : original;
+                    });
+            Class<?> styleConfig = Class.forName("l9.g", false, classLoader);
+            Method itemGate = styleConfig.getDeclaredMethod("J0", int.class);
+            itemGate.setAccessible(true);
+            hook(itemGate)
+                    .setPriority(PRIORITY_HIGHEST)
+                    .setId("camera_2090_color_style_item_gate")
+                    .intercept(chain -> {
+                        Object original = chain.proceed();
+                        return isEnabled() && removeModelLimitation()
+                                && ((Number) chain.getArg(0)).intValue() == 3 ? Boolean.TRUE : original;
+                    });
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.WARN, TAG, "Unable to hook Camera 2090 color style gates", error);
+        }
+    }
+
     private void applyBuildProfile() {
+        String customWatermarkModel = prefString(CameraModuleConfig.KEY_CUSTOM_WATERMARK_MODEL, "").trim();
         Map<String, String> values = Map.of(
                 "DEVICE", "nezha",
                 "PRODUCT", "nezha",
-                "MODEL", "25128PNA1C",
+                "MODEL", customWatermarkModel.isEmpty() ? "25128PNA1C" : customWatermarkModel,
                 "BRAND", "Xiaomi",
                 "MANUFACTURER", "Xiaomi"
         );
@@ -464,7 +637,7 @@ public final class LeicaUnlockHook extends XposedModule {
         for (Map.Entry<String, String> entry : values.entrySet()) {
             setStaticStringField(Build.class, entry.getKey(), entry.getValue());
         }
-        btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Build profile applied: nezha / 25128PNA1C");
+        btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Build profile applied: nezha / " + (customWatermarkModel.isEmpty() ? "25128PNA1C" : customWatermarkModel));
     }
 
     private void captureNativeFocalLengthConfig(ClassLoader classLoader) {
@@ -529,7 +702,7 @@ public final class LeicaUnlockHook extends XposedModule {
     }
 
     private void scheduleCameraFocalHookRetries(ClassLoader initialLoader) {
-        if (nativeFocalRetryScheduled || !pref(ModuleConfig.KEY_PRESERVE_NATIVE_FOCAL_LENGTHS, true)) {
+        if (nativeFocalRetryScheduled || !pref(CameraModuleConfig.KEY_PRESERVE_NATIVE_FOCAL_LENGTHS, true)) {
             return;
         }
         nativeFocalRetryScheduled = true;
@@ -541,7 +714,7 @@ public final class LeicaUnlockHook extends XposedModule {
             @Override
             public void run() {
                 if (!targetProcess || !isEnabled()
-                        || !pref(ModuleConfig.KEY_PRESERVE_NATIVE_FOCAL_LENGTHS, true)) {
+                        || !pref(CameraModuleConfig.KEY_PRESERVE_NATIVE_FOCAL_LENGTHS, true)) {
                     return;
                 }
                 ClassLoader loader = Thread.currentThread().getContextClassLoader();
@@ -562,7 +735,7 @@ public final class LeicaUnlockHook extends XposedModule {
                 if (++attempts < 120) {
                     handler.postDelayed(task[0], 250L);
                 } else {
-                    btm.m.os4.systemuihook.HookModuleLogger.log(LeicaUnlockHook.this, ModuleLog.INFO, TAG, "Camera focal hook retry window expired");
+                    btm.m.os4.systemuihook.HookModuleLogger.log(LeicaUnlockHookRuntime.this, ModuleLog.INFO, TAG, "Camera focal hook retry window expired");
                 }
             }
         };
@@ -593,7 +766,7 @@ public final class LeicaUnlockHook extends XposedModule {
                         String captured = nativeDefaultFocal;
                         String current = result == null ? "" : String.valueOf(result);
                         if (isEnabled()
-                                && pref(ModuleConfig.KEY_PRESERVE_NATIVE_FOCAL_LENGTHS, true)
+                                && pref(CameraModuleConfig.KEY_PRESERVE_NATIVE_FOCAL_LENGTHS, true)
                                 && captured != null
                                 && (current.isEmpty() || "23".equals(current))) {
                             return captured;
@@ -621,7 +794,7 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setId("native_default_focal_value_67")
                     .intercept(chain -> {
                         Object result = chain.proceed();
-                        if (!isEnabled() || !pref(ModuleConfig.KEY_PRESERVE_NATIVE_FOCAL_LENGTHS, true)) {
+                        if (!isEnabled() || !pref(CameraModuleConfig.KEY_PRESERVE_NATIVE_FOCAL_LENGTHS, true)) {
                             return result;
                         }
                         int mode = ((Number) chain.getArg(0)).intValue();
@@ -797,7 +970,7 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setPriority(PRIORITY_HIGHEST)
                     .setId("native_focal_component_67")
                     .intercept(chain -> {
-                        if (!isEnabled() || !pref(ModuleConfig.KEY_PRESERVE_NATIVE_FOCAL_LENGTHS, true)) {
+                        if (!isEnabled() || !pref(CameraModuleConfig.KEY_PRESERVE_NATIVE_FOCAL_LENGTHS, true)) {
                             return chain.proceed();
                         }
                         int cameraId = ((Number) chain.getArg(0)).intValue();
@@ -1254,7 +1427,7 @@ public final class LeicaUnlockHook extends XposedModule {
                                     || localConfig == null
                                     || delegate == null
                                     || !isEnabled()
-                                    || !pref(ModuleConfig.KEY_PRESERVE_NATIVE_FOCAL_LENGTHS, true)) {
+                                    || !pref(CameraModuleConfig.KEY_PRESERVE_NATIVE_FOCAL_LENGTHS, true)) {
                                 return chain.proceed();
                             }
                             try {
@@ -1298,7 +1471,7 @@ public final class LeicaUnlockHook extends XposedModule {
                         if (chain.getThisObject() != nezhaCameraConfig
                                 || nativeConfig == null
                                 || !isEnabled()
-                                || !pref(ModuleConfig.KEY_PRESERVE_NATIVE_FOCAL_LENGTHS, true)) {
+                                || !pref(CameraModuleConfig.KEY_PRESERVE_NATIVE_FOCAL_LENGTHS, true)) {
                             return chain.proceed();
                         }
                         try {
@@ -1330,7 +1503,7 @@ public final class LeicaUnlockHook extends XposedModule {
                                 || !(chain.getArg(0) instanceof CaptureRequest.Key<?> key)) {
                             return chain.proceed();
                         }
-                        if (!isEnabled()) {
+                        if (!isEnabled() || !pref(CameraModuleConfig.KEY_ALL_XIAOMI18_FEATURES, true)) {
                             legendaryBuilders.remove(builder);
                             return chain.proceed();
                         }
@@ -1338,7 +1511,7 @@ public final class LeicaUnlockHook extends XposedModule {
                         // Camera 6.7 only emits the vendor tag after the mode is
                         // selected. Inject it proactively when Legendary mode
                         // is selected in the module settings.
-                        if (prefInt(ModuleConfig.KEY_INSTANT_MODE, 0) == 1
+                        if (pref(CameraModuleConfig.KEY_ALL_XIAOMI18_FEATURES, true)
                                 && !legendaryBuilders.containsKey(builder)
                                 && !LEGENDARY_VENDOR_TAG.equals(key.getName())) {
                             try {
@@ -1506,13 +1679,14 @@ public final class LeicaUnlockHook extends XposedModule {
     }
 
     private void installGalleryWatermarkHooks(ClassLoader classLoader) {
-        if (pref(ModuleConfig.KEY_GALLERY_PALETTE_UNLOCKED, false)) {
+        camera68Hooks.installWatermarkHooks(classLoader);
+        if (pref(CameraModuleConfig.KEY_GALLERY_PALETTE_UNLOCKED, false)) {
             installGalleryAiUnlockHooks(classLoader);
         }
         // Newer MediaEditor builds reject images without camera EXIF before
         // the watermark renderer is reached.  Install this independently of
         // the catalog/device hooks so every image can be watermarked.
-        if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+        if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
             installGalleryAiUnlockHooks(classLoader);
             installGalleryWatermarkExifBypass(classLoader);
             installGalleryWatermarkDeviceBypass(classLoader);
@@ -1530,7 +1704,7 @@ public final class LeicaUnlockHook extends XposedModule {
             installGalleryWatermarkSelectionRestrictionHook(classLoader);
             installGalleryWatermarkJsonLimitationHook();
         }
-        if (!pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+        if (!pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
             return;
         }
     }
@@ -1565,7 +1739,7 @@ public final class LeicaUnlockHook extends XposedModule {
                     hook(candidate)
                             .setPriority(PRIORITY_HIGHEST)
                             .setId("gallery_watermark_exif_" + name)
-                            .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                            .intercept(chain -> pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
                                     ? Boolean.TRUE : chain.proceed());
                     installed++;
                 } else if (("a".equals(name) || "m17674a".equals(name)) && count == 2
@@ -1574,7 +1748,7 @@ public final class LeicaUnlockHook extends XposedModule {
                     hook(candidate)
                             .setPriority(PRIORITY_HIGHEST)
                             .setId("gallery_watermark_param_validator")
-                            .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                            .intercept(chain -> pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
                                     ? Boolean.TRUE : chain.proceed());
                     installed++;
                 }
@@ -1618,7 +1792,7 @@ public final class LeicaUnlockHook extends XposedModule {
             hook(isLhasa)
                     .setPriority(PRIORITY_HIGHEST)
                     .setId("gallery_watermark_device_lhasa")
-                    .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                    .intercept(chain -> pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
                             ? Boolean.TRUE : chain.proceed());
             btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery watermark device capability bypass installed");
             return true;
@@ -1661,7 +1835,7 @@ public final class LeicaUnlockHook extends XposedModule {
                 hook(method)
                         .setPriority(PRIORITY_HIGHEST)
                         .setId("gallery_watermark_brand_capability_" + method.getName())
-                        .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                        .intercept(chain -> pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
                                 ? Boolean.TRUE : chain.proceed());
                 installed++;
             }
@@ -1726,7 +1900,7 @@ public final class LeicaUnlockHook extends XposedModule {
                             .setPriority(PRIORITY_HIGHEST)
                             .setId("gallery_watermark_item_predicate_"
                                     + type.getName().replace('.', '_') + "_" + method.getName())
-                            .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                            .intercept(chain -> pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
                                     ? Boolean.FALSE : chain.proceed());
                     count++;
                 }
@@ -1767,7 +1941,7 @@ public final class LeicaUnlockHook extends XposedModule {
                         .setPriority(PRIORITY_HIGHEST)
                         .setId("gallery_ai_provider_" + className.replace('.', '_'))
                         .intercept(chain -> {
-                            if (!pref(ModuleConfig.KEY_GALLERY_PALETTE_UNLOCKED, false)) {
+                            if (!pref(CameraModuleConfig.KEY_GALLERY_PALETTE_UNLOCKED, false)) {
                                 return chain.proceed();
                             }
                             if (!isAiProviderCall(className, chain.getArg(0))) {
@@ -1778,7 +1952,7 @@ public final class LeicaUnlockHook extends XposedModule {
                                 try {
                                     return chain.proceed();
                                 } finally {
-                                    if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                                    if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
                                         applyGalleryWatermarkBuildProfile();
                                     } else {
                                         restoreGalleryOriginalBuildProfile();
@@ -1797,7 +1971,7 @@ public final class LeicaUnlockHook extends XposedModule {
                                     .setId("gallery_ai_action_support_" + methodName)
                                     .intercept(chain -> {
                                         Object action = chain.getArg(0);
-                                        if (!pref(ModuleConfig.KEY_GALLERY_PALETTE_UNLOCKED, false)
+                                        if (!pref(CameraModuleConfig.KEY_GALLERY_PALETTE_UNLOCKED, false)
                                                 || !isAiAction(action)) {
                                             return chain.proceed();
                                         }
@@ -1806,7 +1980,7 @@ public final class LeicaUnlockHook extends XposedModule {
                                             try {
                                                 return Boolean.TRUE;
                                             } finally {
-                                                if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                                                if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
                                                     applyGalleryWatermarkBuildProfile();
                                                 } else {
                                                     restoreGalleryOriginalBuildProfile();
@@ -1905,7 +2079,7 @@ public final class LeicaUnlockHook extends XposedModule {
                     hook(method)
                             .setPriority(PRIORITY_HIGHEST)
                             .setId("gallery_ai_gate_" + className.replace('.', '_') + "_" + method.getName())
-                            .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_PALETTE_UNLOCKED, false)
+                            .intercept(chain -> pref(CameraModuleConfig.KEY_GALLERY_PALETTE_UNLOCKED, false)
                                     ? Boolean.TRUE : chain.proceed());
                     installed++;
                 }
@@ -1956,7 +2130,7 @@ public final class LeicaUnlockHook extends XposedModule {
                                     + type.getName().replace('.', '_') + "_" + methodName)
                             .intercept(chain -> {
                                 Object config = chain.getArg(0);
-                                if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                                if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
                                         && config != null) {
                                     return config;
                                 }
@@ -2025,7 +2199,7 @@ public final class LeicaUnlockHook extends XposedModule {
                         .setPriority(PRIORITY_HIGHEST)
                         .setId("gallery_watermark_selection_restriction_"
                                 + checker.getName().replace('.', '_'))
-                        .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                        .intercept(chain -> pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
                                 ? success : chain.proceed());
                 btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery watermark selection restriction bypass installed: "
                         + checker.getName());
@@ -2100,7 +2274,7 @@ public final class LeicaUnlockHook extends XposedModule {
                         .setPriority(PRIORITY_HIGHEST)
                         .setId("gallery_watermark_json_limitation_bypass")
                         .intercept(chain -> {
-                            if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                            if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
                                     && chain.getArg(0) instanceof String key
                                     && key.toLowerCase(java.util.Locale.ROOT).contains("limitation")) {
                                 return null;
@@ -2136,7 +2310,7 @@ public final class LeicaUnlockHook extends XposedModule {
                             && method.getParameterCount() == 0 && method.getReturnType() == boolean.class) {
                         hook(method).setPriority(PRIORITY_HIGHEST)
                                 .setId("gallery_watermark_bt_k")
-                                .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                                .intercept(chain -> pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
                                         ? Boolean.TRUE : chain.proceed());
                         installed++;
                     } else if (("ft.d0".equals(className) || "ft.j0".equals(className))
@@ -2144,7 +2318,7 @@ public final class LeicaUnlockHook extends XposedModule {
                             && method.getReturnType() == boolean.class) {
                         hook(method).setPriority(PRIORITY_HIGHEST)
                                 .setId("gallery_watermark_device_" + className.replace('.', '_'))
-                                .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                                .intercept(chain -> pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
                                         ? Boolean.TRUE : chain.proceed());
                         installed++;
                     } else if (("k30.f".equals(className) || "ah0.c".equals(className))
@@ -2153,7 +2327,7 @@ public final class LeicaUnlockHook extends XposedModule {
                         hook(method).setPriority(PRIORITY_HIGHEST)
                                 .setId("gallery_watermark_device_lambda_" + className.replace('.', '_'))
                                 .intercept(chain -> {
-                                    if (!pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                                    if (!pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
                                         return chain.proceed();
                                     }
                                     // These Kotlin lambdas use case 0 for
@@ -2213,7 +2387,7 @@ public final class LeicaUnlockHook extends XposedModule {
                         .setPriority(PRIORITY_HIGHEST)
                         .setId("gallery_palette_predicate_" + className.replace('.', '_'))
                         .intercept(chain -> {
-                            if (!pref(ModuleConfig.KEY_GALLERY_PALETTE_UNLOCKED, false)) {
+                            if (!pref(CameraModuleConfig.KEY_GALLERY_PALETTE_UNLOCKED, false)) {
                                 return chain.proceed();
                             }
                             // hr.a/hr.b are shared switch predicates; only
@@ -2274,7 +2448,7 @@ public final class LeicaUnlockHook extends XposedModule {
                         .setPriority(PRIORITY_HIGHEST)
                         .setId("gallery_watermark_limit_" + className.replace('.', '_'))
                         .intercept(chain -> {
-                            if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                            if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
                                 return Boolean.FALSE;
                             }
                             return chain.proceed();
@@ -2352,7 +2526,7 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setId("gallery_watermark_lookup_fallback")
                     .intercept(chain -> {
                         Object value = chain.proceed();
-                        if (value != null || !pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                        if (value != null || !pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
                             return value;
                         }
                         try {
@@ -2412,7 +2586,7 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setPriority(PRIORITY_HIGHEST)
                     .setId("gallery_cloud_watermark_init_bypass")
                     .intercept(chain -> {
-                        if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                        if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
                             try {
                                 Class<?> manager = resolveFirstClass(classLoader, "kl0.m0", "kl0.C9143m0");
                                 Object instance = findStaticSingleton(manager);
@@ -2468,7 +2642,7 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setId("gallery_cloud_watermark_item_version_bypass")
                     .intercept(chain -> {
                         Object result = chain.proceed();
-                        if (result != null || !pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                        if (result != null || !pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
                             return result;
                         }
                         try {
@@ -2548,7 +2722,7 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setPriority(PRIORITY_HIGHEST)
                     .setId("gallery_watermark_filter_bypass")
                     .intercept(chain -> {
-                        if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                        if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
                             Field bypass = findWatermarkBypassField(manager);
                             if (bypass != null) {
                                 try {
@@ -2599,7 +2773,7 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setPriority(PRIORITY_HIGHEST)
                     .setId("gallery_watermark_init_bypass")
                     .intercept(chain -> {
-                        if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                        if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
                             try {
                                 bypass.setBoolean(chain.getThisObject(), true);
                             } catch (IllegalAccessException | RuntimeException ignored) {
@@ -2693,7 +2867,7 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setPriority(PRIORITY_HIGHEST)
                     .setId("gallery_modern_cloud_watermark_filter")
                     .intercept(chain -> {
-                        if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                        if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
                                 && chain.getArg(0) != null) {
                             // f0.a removes entries by device, region, version,
                             // time window, and name length. Return the source
@@ -2717,7 +2891,7 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setPriority(PRIORITY_HIGHEST)
                     .setId("gallery_modern_watermark_capability")
                     .intercept(chain -> {
-                        if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                        if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
                             return supported;
                         }
                         return chain.proceed();
@@ -2736,7 +2910,7 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setPriority(PRIORITY_HIGHEST)
                     .setId("gallery_modern_watermark_render_capability")
                     .intercept(chain -> {
-                        if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                        if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
                             return verificationSuccess;
                         }
                         return chain.proceed();
@@ -2761,7 +2935,7 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setId("gallery_modern_watermark_availability")
                     .intercept(chain -> {
                         Object result = chain.proceed();
-                        if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                        if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
                             forceWatermarkItemsAvailable(chain.getArg(0));
                         }
                         return result;
@@ -2801,7 +2975,7 @@ public final class LeicaUnlockHook extends XposedModule {
             hook(capability)
                     .setPriority(PRIORITY_HIGHEST)
                     .setId("gallery_modern_watermark_capability_only")
-                    .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                    .intercept(chain -> pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
                             ? supported : chain.proceed());
             btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Modern watermark capability-only hook installed (xy.j0.a)");
             return true;
@@ -2892,7 +3066,7 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setPriority(PRIORITY_HIGHEST)
                     .setId("gallery_watermark_fragment_click")
                     .intercept(chain -> {
-                        if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                        if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
                             // The feature module may be loaded lazily after the
                             // fragment appears. Re-run resolution at click time.
                             installModernGalleryWatermarkHooks(fragment.getClassLoader());
@@ -2971,7 +3145,7 @@ public final class LeicaUnlockHook extends XposedModule {
                         .setPriority(PRIORITY_HIGHEST)
                         .setId("gallery_watermark_capability_" + methodName)
                         .intercept(chain -> {
-                            if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                            if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
                                 return Boolean.TRUE;
                             }
                             return chain.proceed();
@@ -3027,7 +3201,7 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setPriority(PRIORITY_HIGHEST)
                     .setId("gallery_watermark_usage_restrictions")
                     .intercept(chain -> {
-                        if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                        if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
                             return success;
                         }
                         return chain.proceed();
@@ -3081,7 +3255,7 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setPriority(PRIORITY_HIGHEST)
                     .setId("gallery_watermark_legacy_restrictions")
                     .intercept(chain -> {
-                        if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                        if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
                             return success;
                         }
                         return chain.proceed();
@@ -3111,7 +3285,7 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setPriority(PRIORITY_HIGHEST)
                     .setId("gallery_all_watermark_limitations")
                     .intercept(chain -> {
-                        if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                        if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
                             // Keep the original return type/value. Older builds
                             // use this method for both filtering and catalog
                             // loading, so returning null can empty the menu.
@@ -3196,6 +3370,12 @@ public final class LeicaUnlockHook extends XposedModule {
             if ("xy.j0".equals(className)) {
                 installModernWatermarkCapabilityOnly(loader);
             }
+        } else if ("sm0.l".equals(className) || "sm0.C14349l".equals(className)
+                || "eo0.b".equals(className) || "mm0.a".equals(className)) {
+            // The model renderer is loaded from the editor feature dex after
+            // PackageReady. Install the same final text boundary hook in that
+            // loader so the stock catalog/template remains intact.
+            camera68Hooks.installWatermarkHooks(loader);
         } else if ("tb0.o0".equals(className)) {
             installGalleryWatermarkManagerHook(loader);
         } else if ("zn.a".equals(className)) {
@@ -3315,7 +3495,7 @@ public final class LeicaUnlockHook extends XposedModule {
             hook(filterMethod).setPriority(PRIORITY_HIGHEST)
                     .setId("gallery_watermark_generic_filter_" + type.getName().replace('.', '_'))
                     .intercept(chain -> {
-                        if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                        if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
                             try {
                                 bypass.setBoolean(chain.getThisObject(), true);
                             } catch (IllegalAccessException | RuntimeException ignored) {
@@ -3330,7 +3510,7 @@ public final class LeicaUnlockHook extends XposedModule {
                 hook(init).setPriority(PRIORITY_HIGHEST)
                         .setId("gallery_watermark_generic_init_" + type.getName().replace('.', '_'))
                         .intercept(chain -> {
-                            if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                            if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
                                 try {
                                     bypass.setBoolean(chain.getThisObject(), true);
                                 } catch (IllegalAccessException | RuntimeException ignored) {
@@ -3362,7 +3542,7 @@ public final class LeicaUnlockHook extends XposedModule {
     /** Structural fallback for the EXIF validator when its package/class is renamed. */
     private void installGenericWatermarkExifHook(Class<?> type) {
         if (type == null || !galleryWatermarkExifClasses.add(type)
-                || !pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                || !pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
             return;
         }
         try {
@@ -3384,7 +3564,7 @@ public final class LeicaUnlockHook extends XposedModule {
                         .setPriority(PRIORITY_HIGHEST)
                         .setId("gallery_watermark_generic_exif_" + type.getName().replace('.', '_')
                                 + "_" + method.getName())
-                        .intercept(chain -> pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                        .intercept(chain -> pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
                                 ? Boolean.TRUE : chain.proceed());
                 installed++;
             }
@@ -3430,7 +3610,7 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setId("gallery_watermark_data_loader_success")
                     .intercept(chain -> {
                         Object result = chain.proceed();
-                        return pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
+                        return pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)
                                 ? Boolean.TRUE : result;
                     });
             btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Gallery watermark data-loader result hook installed");
@@ -3473,7 +3653,7 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setId("gallery_watermark_availability_success")
                     .intercept(chain -> {
                         Object result = chain.proceed();
-                        if (pref(ModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
+                        if (pref(CameraModuleConfig.KEY_GALLERY_ALL_WATERMARKS, true)) {
                             forceWatermarkItemsAvailable(chain.getArg(0));
                         }
                         return result;
@@ -3716,17 +3896,70 @@ public final class LeicaUnlockHook extends XposedModule {
 
     private void installSecurityCompatibilityHooks(ClassLoader classLoader) {
         try {
+            // Camera 6.8's actual gate is Pe.b.O(): Camera calls this before
+            // sending Handler message 11 (the version/model mismatch path).
+            // Returning false keeps the normal Qs() initialization branch.
+            Class<?> compatibility = Class.forName("Pe.b", false, classLoader);
+            hookBooleanResult(compatibility, "O", false, "camera_model_compatibility", true);
             Class<?> guard = Class.forName("com.camera.LSsdQFvLalapDwvA", false, classLoader);
-            hookBooleanResult(guard, "RitIeKoenwCSqcPf", true, "security_valid");
-            hookBooleanResult(guard, "QiVkoLmEuZWFFHiA", false, "security_reject_a");
-            hookBooleanResult(guard, "qkPDndbXdHyDtWXd", false, "security_reject_b");
+            hookBooleanResult(guard, "RitIeKoenwCSqcPf", true, "security_valid", false);
+            hookBooleanResult(guard, "QiVkoLmEuZWFFHiA", false, "security_reject_a", true);
+            hookBooleanResult(guard, "qkPDndbXdHyDtWXd", false, "security_reject_b", true);
             btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.INFO, TAG, "Nezha security compatibility hooks installed");
         } catch (ClassNotFoundException | RuntimeException error) {
             btm.m.os4.systemuihook.HookModuleLogger.log(this, ModuleLog.ERROR, TAG, "Camera security class was not found", error);
         }
     }
 
-    private void hookBooleanResult(Class<?> owner, String methodName, boolean result, String id) {
+    /**
+     * Camera 6.8 reports a model/version mismatch by sending message 11 to
+     * ActivityBase's Handler (com.android.camera.a$c).  The handler then adds
+     * CameraExitHint and the fragment starts the three-second finish timer.
+     * The obfuscated boolean helpers are not the exit gate, so bypassing them
+     * alone leaves the warning and countdown intact.
+     */
+    private void installModelMismatchExitHook(ClassLoader classLoader) {
+        try {
+            Class<?> handler = Class.forName("com.android.camera.a$c", false, classLoader);
+            Method method = handler.getDeclaredMethod("handleMessage", Message.class);
+            method.setAccessible(true);
+            hook(method)
+                    .setPriority(PRIORITY_HIGHEST)
+                    .setId("camera_model_mismatch_exit")
+                    .intercept(chain -> {
+                        Object argument = chain.getArgs().isEmpty() ? null : chain.getArgs().get(0);
+                        if (isEnabled()
+                                && removeModelLimitation()
+                                && argument instanceof Message
+                                && ((Message) argument).what == 11) {
+                            btm.m.os4.systemuihook.HookModuleLogger.log(
+                                    this,
+                                    ModuleLog.INFO,
+                                    TAG,
+                                    "Blocked Camera 6.8 model/version mismatch exit message"
+                            );
+                            return null;
+                        }
+                        return chain.proceed();
+                    });
+            btm.m.os4.systemuihook.HookModuleLogger.log(
+                    this,
+                    ModuleLog.INFO,
+                    TAG,
+                    "Camera 6.8 model mismatch exit hook installed"
+            );
+        } catch (NoSuchMethodException | ClassNotFoundException | RuntimeException error) {
+            btm.m.os4.systemuihook.HookModuleLogger.log(
+                    this,
+                    ModuleLog.ERROR,
+                    TAG,
+                    "Unable to install Camera 6.8 model mismatch exit hook",
+                    error
+            );
+        }
+    }
+
+    private void hookBooleanResult(Class<?> owner, String methodName, boolean result, String id, boolean modelGate) {
         try {
             Method method = owner.getDeclaredMethod(methodName);
             method.setAccessible(true);
@@ -3734,8 +3967,12 @@ public final class LeicaUnlockHook extends XposedModule {
                     .setPriority(PRIORITY_HIGHEST)
                     .setId(id)
                     .intercept(chain -> {
-                        if (!isEnabled()) {
-                            return chain.proceed();
+                        // Preserve lazy initialization and other side effects of
+                        // the original predicate, then replace only its Boolean
+                        // result when the setting is enabled.
+                        Object original = chain.proceed();
+                        if (!isEnabled() || (modelGate && !removeModelLimitation())) {
+                            return original;
                         }
                         return result;
                     });

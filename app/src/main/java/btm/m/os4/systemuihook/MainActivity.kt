@@ -320,6 +320,8 @@ private enum class PageId {
     SHADE_PRESETS,
     SOFT_GLASS_PARAMETERS,
     SOFT_GLASS_PRESETS,
+    CAMERA_WATERMARKS,
+    CAMERA_SHUTTER_SOUNDS,
     IOS_NOTIFICATION_CLOCK_GLASS, CONTROL_CENTER_TOP_BUTTONS, CONTROL_CENTER_TILE_LAYOUT,
     GESTURE_HANDLE_STYLE, DESKTOP, DESKTOP_MATERIAL,
     ISLAND, ISLAND_COLLAPSED, ISLAND_EXPANDED, ISLAND_EXPANDED_BACKGROUND, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_HEADER_SETTINGS, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_ADJUSTMENT, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_MUSIC, LOCKSCREEN_CAPSULE, LOCKSCREEN_SHORTCUT_BACKGROUND, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
@@ -5929,6 +5931,8 @@ private fun Detail(
         PageId.RASTER_WALLPAPER -> RasterWallpaper(settings, update, onPickRasterImages, onApplyRasterWallpaper, back)
         PageId.SUPER_XIAOAI -> SuperXiaoAi(settings, superXiaoAi, updateSuperXiaoAi, openPage, back)
         PageId.CAMERA -> Camera(cameras, updateCamera, openPage, back)
+        PageId.CAMERA_WATERMARKS -> CameraWatermarkPage(cameras.watermark, cameras.customWatermarkModel, { transform -> updateCamera { it.copy(watermark = transform(it.watermark)) } }, back)
+        PageId.CAMERA_SHUTTER_SOUNDS -> CameraShutterPage(cameras.shutter, { transform -> updateCamera { it.copy(shutter = transform(it.shutter)) } }, back)
         PageId.CAMERA_PALETTE -> CameraPalette(cameras, updateCamera, back)
         PageId.SYSTEM_UPDATE -> SystemUpdate(systemUpdate, updateSystemUpdate, back)
         PageId.SYSTEM_FRAMEWORK -> FrameworkPage(back)
@@ -7949,16 +7953,24 @@ private fun GestureHandleAdjustmentDialog(
     onDismiss: () -> Unit,
     onApply: (Int) -> Unit,
 ) {
-    var selected by remember(show, mask) { mutableIntStateOf(mask) }
     val items = listOf(
         GESTURE_HANDLE_HOOK_LENGTH to tr("手势提示线长度", "手势提示线长度"),
         GESTURE_HANDLE_HOOK_HEIGHT to tr("手势提示线高度", "手势提示线高度"),
         GESTURE_HANDLE_HOOK_BOTTOM to tr("手势提示线底边距", "手势提示线底边距"),
         GESTURE_HANDLE_HOOK_OPACITY to tr("手势提示线不透明度", "手势提示线不透明度"),
     )
+    SelectionCheckboxDialog(show, mask, tr("调整项目", "调整项目"), items, onDismiss, onApply)
+}
+
+@Composable
+private fun SelectionCheckboxDialog(
+    show: Boolean, mask: Int, title: String, items: List<Pair<Int, String>>,
+    onDismiss: () -> Unit, onApply: (Int) -> Unit,
+) {
+    var selected by remember(show, mask) { mutableIntStateOf(mask) }
     WindowDialog(show = show, onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(tr("调整项目", "调整项目"), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
+            Text(title, style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
             items.forEach { (bit, title) ->
                 val toggle = { selected = if (selected and bit != 0) selected and bit.inv() else selected or bit }
                 Row(Modifier.fillMaxWidth().clickable(onClick = toggle).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -12876,19 +12888,135 @@ private fun LockscreenWidgetSignatureColorDialog(
 
 @Composable
 private fun Camera(c: CameraSettings, update: ((CameraSettings) -> CameraSettings) -> Unit, openPage: (PageId) -> Unit, back: () -> Unit) = AppPage(tr("\u76f8\u673a\u4e0e\u76f8\u518c\u7f16\u8f91", "\u76f8\u673a\u4e0e\u76f8\u518c\u7f16\u8f91"), back, restartScopes = setOf(ScopeApplication.CAMERA, ScopeApplication.GALLERY, ScopeApplication.MEDIA_EDITOR)) { p, scroll ->
-    AppList(p, scroll, 28) { item { Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+    var showWatermarkModelDialog by remember { mutableStateOf(false) }
+    var showCustomFocalLengthsDialog by remember { mutableStateOf(false) }
+    var showWatermarkSuffixDialog by remember { mutableStateOf(false) }
+    AppList(p, scroll, 28) {
+        item { Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
         SwitchPreference(title = tr("\u542f\u7528\u76f8\u673a\u6a21\u5757", "\u542f\u7528\u76f8\u673a\u6a21\u5757"), checked = c.masterEnabled, onCheckedChange = { v -> update { it.copy(masterEnabled = v) } })
+        AnimatedVisibility(
+            visible = c.masterEnabled,
+            enter = expandVertically(tween(220)) + fadeIn(tween(180)),
+            exit = shrinkVertically(tween(180)) + fadeOut(tween(120)),
+        ) {
+        Column {
         SwitchPreference(title = tr("leica_lcc_ui", "Leica LCC UI"), checked = c.leicaUi, enabled = c.masterEnabled, onCheckedChange = { v -> update { it.copy(leicaUi = v) } })
         SwitchPreference(title = tr("\u4fdd\u7559\u539f\u751f\u7126\u6bb5", "\u4fdd\u7559\u539f\u751f\u7126\u6bb5"), checked = c.preserveNativeFocalLengths, enabled = c.masterEnabled, onCheckedChange = { v -> update { it.copy(preserveNativeFocalLengths = v) } })
-OverlayDropdownPreference(
-            title = tr("\u4e00\u77ac\u529f\u80fd", "\u4e00\u77ac\u529f\u80fd"),
-            items = listOf(tr("\u5f95\u5361\u4e00\u77ac", "\u5f95\u5361\u4e00\u77ac"), tr("\u4f20\u5947\u4e00\u77ac", "\u4f20\u5947\u4e00\u77ac")),
-            selectedIndex = c.instantMode.coerceIn(0, 1),
-            onSelectedIndexChange = { i -> update { it.copy(instantMode = i.coerceIn(0, 1)) } },
+        SwitchPreference(title = tr("camera_remove_model_limitation", "去除机型限制"), checked = c.removeModelLimitation, enabled = c.masterEnabled, onCheckedChange = { v -> update { it.copy(removeModelLimitation = v) } })
+        SwitchPreference(
+            title = tr("camera_all_xiaomi18_features", "解锁 Xiaomi 18 系列相机所有功能"),
+            checked = c.allXiaomi18Features,
+            enabled = c.masterEnabled,
+            onCheckedChange = { value -> update { it.copy(allXiaomi18Features = value) } },
         )
-        SwitchPreference(title = tr("\u76f8\u518c\u7f16\u8f91\u5168\u6c34\u5370", "\u76f8\u518c\u7f16\u8f91\u5168\u6c34\u5370"), checked = c.galleryAllWatermarks, onCheckedChange = { v -> update { it.copy(galleryAllWatermarks = v) } })
-        SwitchPreference(title = tr("\u89e3\u9501\u76f8\u518c\u7f16\u8f91 Xiaomi 18 \u7cfb\u5217\u65b0\u529f\u80fd", "\u89e3\u9501\u76f8\u518c\u7f16\u8f91 Xiaomi 18 \u7cfb\u5217\u65b0\u529f\u80fd"), checked = c.galleryPaletteUnlocked, onCheckedChange = { v -> update { it.copy(galleryPaletteUnlocked = v) } })
-    } } }
+        SharedViewArrowPreference(
+            title = tr("camera_custom_watermark_model", "自定义相机水印机型"),
+            summary = listOf(c.watermark.brand, c.customWatermarkModel).filter(String::isNotBlank).joinToString(" ").ifBlank { tr("camera_use_system_model", "使用系统机型") },
+            onClick = { showWatermarkModelDialog = true },
+        )
+        SharedViewArrowPreference(title = tr("camera_watermark_library", "水印库"), onClick = { openPage(PageId.CAMERA_WATERMARKS) })
+        SharedViewArrowPreference(title = tr("camera_shutter_sounds", "自定义快门声"), onClick = { openPage(PageId.CAMERA_SHUTTER_SOUNDS) })
+        SharedViewArrowPreference(
+            title = tr("camera_watermark_suffixes", "水印特殊后缀"),
+            summary = cameraWatermarkSuffixItems().filter { c.watermark.suffixes and it.first != 0 }
+                .joinToString(" / ") { it.second }.ifBlank { tr("camera_watermark_suffix_none", "不启用特殊后缀") },
+            onClick = { showWatermarkSuffixDialog = true },
+        )
+        OverlayDropdownPreference(
+            title = tr("camera_focal_length_source", "焦段来源"),
+            items = listOf(
+                tr("camera_focal_source_auto", "自动识别"),
+                tr("camera_focal_source_preset", "从预设库选择"),
+                tr("camera_focal_source_custom", "自定义"),
+            ),
+            selectedIndex = c.focalLengthSource.coerceIn(0, 2),
+            onSelectedIndexChange = { i ->
+                update { it.copy(focalLengthSource = i.coerceIn(0, 2)) }
+                if (i == 2) showCustomFocalLengthsDialog = true
+            },
+        )
+        if (c.focalLengthSource == 1) {
+            val presets = listOf(
+                "dada" to tr("camera_focal_preset_xiaomi15", "Xiaomi 15"),
+                "haotian" to tr("camera_focal_preset_xiaomi15_pro", "Xiaomi 15 Pro"),
+                "xuanyuan" to tr("camera_focal_preset_xiaomi15_ultra", "Xiaomi 15 Ultra"),
+                "aurora" to tr("camera_focal_preset_xiaomi14_ultra", "Xiaomi 14 Ultra"),
+                "degas" to tr("camera_focal_preset_xiaomi14t", "Xiaomi 14T"),
+                "rothko" to tr("camera_focal_preset_xiaomi14t_pro", "Xiaomi 14T Pro"),
+                "dijun" to tr("camera_focal_preset_xiaomi15s_pro", "Xiaomi 15S Pro"),
+                "goya" to tr("camera_focal_preset_xiaomi15t", "Xiaomi 15T"),
+                "klimt" to tr("camera_focal_preset_xiaomi15t_pro", "Xiaomi 15T Pro"),
+                "houji" to tr("camera_focal_preset_xiaomi14", "Xiaomi 14"),
+                "shennong" to tr("camera_focal_preset_xiaomi14_pro", "Xiaomi 14 Pro"),
+                "pandora" to tr("camera_focal_preset_xiaomi17_pro", "Xiaomi 17 Pro"),
+                "popsicle" to tr("camera_focal_preset_xiaomi17_pro_max", "Xiaomi 17 Pro Max"),
+                "byron" to tr("camera_focal_preset_xiaomi17_max", "Xiaomi 17 Max"),
+                "chagall" to tr("camera_focal_preset_xiaomi17t", "Xiaomi 17T"),
+                "warhol" to tr("camera_focal_preset_xiaomi17t_pro", "Xiaomi 17T Pro"),
+                "nezha" to tr("camera_focal_preset_xiaomi17_ultra", "Xiaomi 17 Ultra"),
+            )
+            OverlayDropdownPreference(
+                title = tr("camera_focal_preset", "预设库"),
+                items = presets.map { it.second },
+                selectedIndex = presets.indexOfFirst { it.first == c.focalLengthPreset }.coerceAtLeast(0),
+                onSelectedIndexChange = { i -> update { it.copy(focalLengthPreset = presets[i.coerceIn(0, presets.lastIndex)].first) } },
+            )
+        }
+        if (c.focalLengthSource == 2) {
+            SharedViewArrowPreference(
+                title = tr("camera_custom_focal_lengths", "自定义焦段档位"),
+                summary = c.customFocalLengths.ifBlank { tr("camera_focal_lengths_empty", "尚未输入") },
+                onClick = { showCustomFocalLengthsDialog = true },
+            )
+        }
+        }
+        }
+    } }
+        item { Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+            SwitchPreference(title = tr("相册编辑全部水印", "相册编辑全部水印"), checked = c.galleryAllWatermarks, onCheckedChange = { v -> update { it.copy(galleryAllWatermarks = v) } })
+            SwitchPreference(title = tr("解锁相册编辑 Xiaomi 18 系列新功能", "解锁相册编辑 Xiaomi 18 系列新功能"), checked = c.galleryPaletteUnlocked, onCheckedChange = { v -> update { it.copy(galleryPaletteUnlocked = v) } })
+        } }
+    }
+    WindowDialog(show = showWatermarkModelDialog, onDismissRequest = { showWatermarkModelDialog = false }) {
+        val previous = resolveCameraWatermarkIdentity(c.watermark.brand, c.customWatermarkModel, cameraSystemMarketName(), android.os.Build.BRAND)
+        var draftBrand by remember(showWatermarkModelDialog, c.watermark.brand) { mutableStateOf(if (c.customWatermarkModel.isBlank() && c.watermark.brand.isBlank()) "" else previous.brand) }
+        var draft by remember(showWatermarkModelDialog, c.customWatermarkModel) { mutableStateOf(if (c.customWatermarkModel.isBlank()) "" else previous.model) }
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(tr("camera_custom_watermark_model", "自定义相机水印机型"), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
+            TextField(value = draftBrand, onValueChange = { draftBrand = it.take(32) },
+                label = tr("camera_watermark_brand", "品牌"), useLabelAsPlaceholder = true, singleLine = true, modifier = Modifier.fillMaxWidth())
+            TextField(value = draft, onValueChange = { draft = it.take(64) },
+                label = tr("camera_watermark_model", "机型"), useLabelAsPlaceholder = true, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Text(tr("camera_watermark_identity_hint", "留空使用系统品牌与机型。机型中重复的品牌会自动去除。"), style = MiuixTheme.textStyles.body2)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GlassDialogButton(onClick = { showWatermarkModelDialog = false }, modifier = Modifier.weight(1f)) { Text(tr("取消", "取消")) }
+                GlassDialogButton(onClick = { update {
+                    val identity = resolveCameraWatermarkIdentity(draftBrand, draft, cameraSystemMarketName(), android.os.Build.BRAND)
+                    it.copy(customWatermarkModel = if (draft.isBlank()) "" else identity.model,
+                        watermark = it.watermark.copy(brand = draftBrand.trim().ifBlank {
+                            if (Regex("^(Xiaomi|REDMI|POCO)\\s+", RegexOption.IGNORE_CASE).containsMatchIn(draft.trim())) identity.brand else ""
+                        }))
+                }; showWatermarkModelDialog = false }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("保存", "保存")) }
+            }
+        }
+    }
+    SelectionCheckboxDialog(show = showWatermarkSuffixDialog, mask = c.watermark.suffixes,
+        title = tr("camera_watermark_suffixes", "水印特殊后缀"), items = cameraWatermarkSuffixItems(),
+        onDismiss = { showWatermarkSuffixDialog = false }, onApply = { mask ->
+            update { it.copy(watermark = it.watermark.copy(suffixes = mask)) }; showWatermarkSuffixDialog = false
+        })
+    WindowDialog(show = showCustomFocalLengthsDialog, onDismissRequest = { showCustomFocalLengthsDialog = false }) {
+        var draft by remember(showCustomFocalLengthsDialog, c.customFocalLengths) { mutableStateOf(c.customFocalLengths) }
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(tr("camera_custom_focal_lengths", "自定义焦段档位"), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
+            Text(tr("camera_focal_lengths_hint", "输入逗号分隔的倍率，例如 0.7,1,2,5,10。"), style = MiuixTheme.textStyles.body2)
+            TextField(value = draft, onValueChange = { draft = it.take(160) }, label = tr("camera_focal_lengths_example", "例如 0.7,1,2,5,10"), useLabelAsPlaceholder = true, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GlassDialogButton(onClick = { showCustomFocalLengthsDialog = false }, modifier = Modifier.weight(1f)) { Text(tr("取消", "取消")) }
+                GlassDialogButton(onClick = { update { it.copy(customFocalLengths = draft.trim(), focalLengthSource = 2) }; showCustomFocalLengthsDialog = false }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColorsPrimary()) { Text(tr("保存", "保存")) }
+            }
+        }
+    }
 }
 
 @Composable
@@ -15410,3 +15538,11 @@ private fun HyperMusicCoverOptions(section: HyperMusicCoverSection) {
         }
     }
 }
+
+private fun cameraWatermarkSuffixItems(): List<Pair<Int, String>> = listOf(
+    WATERMARK_SUFFIX_PRO to tr("camera_suffix_pro", "Pro"),
+    WATERMARK_SUFFIX_PRO_MAX to tr("camera_suffix_pro_max", "Pro Max"),
+    WATERMARK_SUFFIX_MAX to tr("camera_suffix_max", "Max"),
+    WATERMARK_SUFFIX_ULTRA to tr("camera_suffix_ultra", "Ultra"),
+    WATERMARK_SUFFIX_LEICA to tr("camera_suffix_leica", "by Leica"),
+)

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright 2026 btm_m
-package btm.m.leicaunlocker.shared;
+package btm.m.os4.systemuihook;
 
 import java.util.Map;
 
-public final class ModuleConfig {
+final class CameraModuleConfig {
     public static final String TARGET_PACKAGE = "com.android.camera";
     public static final String GALLERY_PACKAGE = "com.miui.gallery";
     public static final String GALLERY_PLUGIN_PACKAGE = "com.hyper.gallery.plugin";
@@ -19,6 +19,12 @@ public final class ModuleConfig {
     /** Enables the Xiaomi 18 Pro Max (madrid) gated MediaEditor AI features. */
     public static final String KEY_GALLERY_PALETTE_UNLOCKED = "gallery_palette_unlocked";
     public static final String KEY_INSTANT_MODE = "instant_mode";
+    public static final String KEY_ALL_XIAOMI18_FEATURES = "camera_all_xiaomi18_features";
+    public static final String KEY_CUSTOM_WATERMARK_MODEL = "camera_custom_watermark_model";
+    public static final String KEY_CUSTOM_FOCAL_LENGTHS = "camera_custom_focal_lengths";
+    public static final String KEY_FOCAL_LENGTH_SOURCE = "camera_focal_length_source";
+    public static final String KEY_FOCAL_LENGTH_PRESET = "camera_focal_length_preset";
+    public static final String KEY_REMOVE_MODEL_LIMITATION = "camera_remove_model_limitation";
 
     public static final String[] TARGET_PACKAGES = {
             TARGET_PACKAGE,
@@ -66,8 +72,9 @@ public final class ModuleConfig {
             Map.entry("ro.product.mod_device", "lhasa")
     );
 
-    private ModuleConfig() {
+    private CameraModuleConfig() {
     }
+
 
     public static boolean isSupportedPackage(String packageName) {
         return TARGET_PACKAGE.equals(packageName)
