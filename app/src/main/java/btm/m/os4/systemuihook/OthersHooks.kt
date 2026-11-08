@@ -98,6 +98,7 @@ internal class OthersHooks(
     fun installPowerBatteryInfoHooks(param: PackageLoadedParam, preferences: SharedPreferences) =
         powerBatteryInfoHooks.install(param, preferences)
 
+
     fun installHotspotTemperatureHooks(param: PackageLoadedParam, preferences: SharedPreferences) =
         hotspotTemperatureHooks.install(param, preferences)
 

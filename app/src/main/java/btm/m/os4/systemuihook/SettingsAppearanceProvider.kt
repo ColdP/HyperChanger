@@ -15,6 +15,7 @@ import java.io.File
 class SettingsAppearanceProvider : ContentProvider() {
     override fun onCreate(): Boolean = true
 
+
     override fun query(
         uri: Uri,
         projection: Array<out String>?,
@@ -41,6 +42,8 @@ class SettingsAppearanceProvider : ContentProvider() {
             COLUMN_FONT to font(prefs, slot),
             COLUMN_SCALE to prefs.getInt("logo_scale", 100),
             COLUMN_LOGO_MODE to prefs.getInt("logo_mode", LOGO_MODE_SYSTEM),
+            COLUMN_DEVICE_STYLE_CONTROLS to resolvedDeviceStyleCustomization(prefs).encode(),
+            COLUMN_STYLE3_UPDATE_STATUS_VISIBLE to if (prefs.getBoolean("style3_update_status_visible", true)) 1 else 0,
             COLUMN_LIGHT_CARD_OPACITY to prefs.getInt("light_card_opacity", 100),
             COLUMN_TUTORIAL_CARD_ENABLED to if (prefs.getBoolean("tutorial_card_enabled", false)) 1 else 0,
             COLUMN_TUTORIAL_CARD_TITLE to prefs.getString("tutorial_card_title", "").orEmpty(),
@@ -165,7 +168,7 @@ class SettingsAppearanceProvider : ContentProvider() {
     }
 
     private fun appearanceFile(slot: String): File {
-        require(slot == APPEARANCE_SLOT_HOME || slot == APPEARANCE_SLOT_DEVICE || slot == APPEARANCE_SLOT_LOGO || slot == APPEARANCE_SLOT_DEVICE_IMAGE || slot == APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO || slot == APPEARANCE_SLOT_STYLE1_UPDATE_BACKGROUND || slot == APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE || slot == APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO || slot == APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND || slot == LOCKSCREEN_WIDGET_SIGNATURE_SLOT || slot == LOCKSCREEN_EDITOR_BACKGROUND_SLOT)
+        require(slot == APPEARANCE_SLOT_HOME || slot == APPEARANCE_SLOT_DEVICE || slot == APPEARANCE_SLOT_LOGO || slot == APPEARANCE_SLOT_DEVICE_IMAGE || slot == APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO || slot == APPEARANCE_SLOT_STYLE1_UPDATE_BACKGROUND || slot == APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE || slot == APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO || slot == APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND || slot == APPEARANCE_SLOT_STYLE3_BACKGROUND || slot == APPEARANCE_SLOT_STYLE3_LOGO || slot == LOCKSCREEN_WIDGET_SIGNATURE_SLOT || slot == LOCKSCREEN_EDITOR_BACKGROUND_SLOT)
         if (slot == LOCKSCREEN_EDITOR_BACKGROUND_SLOT) {
             return File(requireContext().filesDir, "lockscreen_editor_background.bin")
         }
@@ -173,7 +176,7 @@ class SettingsAppearanceProvider : ContentProvider() {
             return File(File(requireContext().filesDir, "lockscreen_widget"), "signature.bin")
         }
         val prefs = requireContext().getSharedPreferences(SETTINGS_APPEARANCE_PREFERENCES, 0)
-        val effective = if (prefs.getBoolean("color_mode_assets_enabled", false) && slot in COLOR_MODE_ASSET_SLOTS) {
+        val effective = if (prefs.readDeviceStyleCustomization().assetsForStyle(appearanceAssetStyle(slot)) && slot in COLOR_MODE_ASSET_SLOTS) {
             colorModeAssetKey(slot, isNight())
         } else slot
         return File(File(requireContext().filesDir, "settings_appearance"), "$effective.bin")
@@ -186,6 +189,7 @@ class SettingsAppearanceProvider : ContentProvider() {
         APPEARANCE_SLOT_DEVICE_IMAGE, APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO, APPEARANCE_SLOT_STYLE1_UPDATE_BACKGROUND -> prefs.getInt("device_interface_style", if (prefs.getBoolean("tutorial_card_enabled", false)) DEVICE_INTERFACE_STYLE_ONE else DEVICE_INTERFACE_STYLE_SYSTEM) == DEVICE_INTERFACE_STYLE_ONE
         APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE, APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO -> prefs.getInt("device_interface_style", DEVICE_INTERFACE_STYLE_SYSTEM) == DEVICE_INTERFACE_STYLE_TWO
         APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND -> prefs.getInt("device_interface_style", DEVICE_INTERFACE_STYLE_SYSTEM) == DEVICE_INTERFACE_STYLE_TWO
+        APPEARANCE_SLOT_STYLE3_BACKGROUND, APPEARANCE_SLOT_STYLE3_LOGO -> prefs.getInt("device_interface_style", DEVICE_INTERFACE_STYLE_SYSTEM) == DEVICE_INTERFACE_STYLE_THREE
         else -> false
     }
 
@@ -236,7 +240,7 @@ class SettingsAppearanceProvider : ContentProvider() {
 
     private fun mimeKey(slot: String): String {
         val prefs = requireContext().getSharedPreferences(SETTINGS_APPEARANCE_PREFERENCES, 0)
-        if (prefs.getBoolean("color_mode_assets_enabled", false) && slot in COLOR_MODE_ASSET_SLOTS) {
+        if (prefs.readDeviceStyleCustomization().assetsForStyle(appearanceAssetStyle(slot)) && slot in COLOR_MODE_ASSET_SLOTS) {
             return "${colorModeAssetKey(slot, isNight())}_mime"
         }
         return when (slot) {
@@ -249,13 +253,25 @@ class SettingsAppearanceProvider : ContentProvider() {
         APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE -> "style2_image_mime"
         APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO -> "style2_logo_mime"
         APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND -> "style2_background_mime"
+        APPEARANCE_SLOT_STYLE3_BACKGROUND -> "style3_background_mime"
+        APPEARANCE_SLOT_STYLE3_LOGO -> "style3_logo_mime"
             else -> ""
         }
+    }
+
+    private fun resolvedDeviceStyleCustomization(prefs: android.content.SharedPreferences): DeviceStyleCustomization {
+        val controls = prefs.readDeviceStyleCustomization()
+        if (controls.buttonMaterial != 2) return controls
+        val store = SoftGlassSettingsStore(requireContext())
+        val preset = (builtInSoftGlassPresets() + store.presets).firstOrNull { it.id == controls.buttonGlassPresetId }
+        return if (preset != null) controls.copy(buttonGlassPresetJson = SoftGlassPresetCodec.encode(preset)) else controls
     }
 
     private fun isNight(): Boolean = requireContext().resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
 
     companion object {
+        const val COLUMN_DEVICE_STYLE_CONTROLS = "device_style_controls"
+        const val COLUMN_STYLE3_UPDATE_STATUS_VISIBLE = "style3_update_status_visible"
         const val COLUMN_MIME = "mime_type"
         const val COLUMN_SIZE = "size"
         const val COLUMN_MODIFIED = "modified"
@@ -329,6 +345,6 @@ class SettingsAppearanceProvider : ContentProvider() {
         const val COLUMN_STYLE1_BACKGROUND_VERTICAL_OFFSET = "style1_background_vertical_offset"
         const val COLUMN_STYLE1_BACKGROUND_HORIZONTAL_OFFSET = "style1_background_horizontal_offset"
         const val COLUMN_STYLE1_BACKGROUND_SCALE = "style1_background_scale"
-        private val COLUMNS = arrayOf(COLUMN_MIME, COLUMN_SIZE, COLUMN_MODIFIED, COLUMN_ENABLED, COLUMN_OPACITY, COLUMN_BLUR, COLUMN_FONT, COLUMN_SCALE, COLUMN_LOGO_MODE, COLUMN_LIGHT_CARD_OPACITY, COLUMN_TUTORIAL_CARD_ENABLED, COLUMN_TUTORIAL_CARD_TITLE, COLUMN_TUTORIAL_CARD_SLOGAN, COLUMN_TUTORIAL_CARD_AUTHOR, COLUMN_TUTORIAL_CARD_IMAGE_SCALE, COLUMN_TUTORIAL_CARD_LOGO_SCALE, COLUMN_TUTORIAL_CARD_LOGO_VERTICAL_OFFSET, COLUMN_TUTORIAL_CARD_IMAGE_LOGO_SPACING, COLUMN_TUTORIAL_CARD_TEXT_SPACING, COLUMN_TUTORIAL_CARD_INFO_CARDS_ENABLED, COLUMN_STYLE1_BACKGROUND_BLUR, COLUMN_STYLE1_BACKGROUND_VERTICAL_OFFSET, COLUMN_STYLE1_BACKGROUND_HORIZONTAL_OFFSET, COLUMN_STYLE1_BACKGROUND_SCALE, COLUMN_DEVICE_INTERFACE_STYLE, COLUMN_STYLE2_IMAGE_SCALE, COLUMN_STYLE2_LOGO_VERTICAL_OFFSET, COLUMN_STYLE2_IMAGE_LOGO_SPACING, COLUMN_STYLE2_LOGO_HORIZONTAL_OFFSET, COLUMN_STYLE2_LOGO_ALIGNMENT, COLUMN_STYLE2_LOGO_VERSION_SPACING, COLUMN_STYLE2_TEXT_ENABLED, COLUMN_STYLE2_TEXT, COLUMN_STYLE2_TEXT_INDEPENDENT, COLUMN_STYLE2_TEXT_SCALE, COLUMN_STYLE2_TEXT_POSITION, COLUMN_STYLE2_TEXT_SPACING_ABOVE, COLUMN_STYLE2_TEXT_SPACING_BELOW, COLUMN_STYLE2_TEXT_ALIGNMENT, COLUMN_STYLE2_TEXT_HORIZONTAL_OFFSET, COLUMN_STYLE2_TEXT_HORIZONTAL_OFFSET_LEFT, COLUMN_STYLE2_TEXT_HORIZONTAL_OFFSET_CENTER, COLUMN_STYLE2_TEXT_HORIZONTAL_OFFSET_RIGHT, COLUMN_STYLE2_TEXT_VERTICAL_OFFSET, COLUMN_STYLE2_TEXT_VERTICAL_OFFSET_LEFT, COLUMN_STYLE2_TEXT_VERTICAL_OFFSET_CENTER, COLUMN_STYLE2_TEXT_VERTICAL_OFFSET_RIGHT, COLUMN_STYLE2_LOGO_COLOR_MODE, COLUMN_STYLE2_VERSION_COLOR_MODE, COLUMN_STYLE2_TEXT_COLOR_MODE, COLUMN_STYLE2_BACKGROUND_BLUR, COLUMN_STYLE2_BACKGROUND_VERTICAL_OFFSET, COLUMN_STYLE2_BACKGROUND_HORIZONTAL_OFFSET, COLUMN_STYLE2_BACKGROUND_SCALE)
+        private val COLUMNS = arrayOf(COLUMN_DEVICE_STYLE_CONTROLS, COLUMN_STYLE3_UPDATE_STATUS_VISIBLE, COLUMN_MIME, COLUMN_SIZE, COLUMN_MODIFIED, COLUMN_ENABLED, COLUMN_OPACITY, COLUMN_BLUR, COLUMN_FONT, COLUMN_SCALE, COLUMN_LOGO_MODE, COLUMN_LIGHT_CARD_OPACITY, COLUMN_TUTORIAL_CARD_ENABLED, COLUMN_TUTORIAL_CARD_TITLE, COLUMN_TUTORIAL_CARD_SLOGAN, COLUMN_TUTORIAL_CARD_AUTHOR, COLUMN_TUTORIAL_CARD_IMAGE_SCALE, COLUMN_TUTORIAL_CARD_LOGO_SCALE, COLUMN_TUTORIAL_CARD_LOGO_VERTICAL_OFFSET, COLUMN_TUTORIAL_CARD_IMAGE_LOGO_SPACING, COLUMN_TUTORIAL_CARD_TEXT_SPACING, COLUMN_TUTORIAL_CARD_INFO_CARDS_ENABLED, COLUMN_STYLE1_BACKGROUND_BLUR, COLUMN_STYLE1_BACKGROUND_VERTICAL_OFFSET, COLUMN_STYLE1_BACKGROUND_HORIZONTAL_OFFSET, COLUMN_STYLE1_BACKGROUND_SCALE, COLUMN_DEVICE_INTERFACE_STYLE, COLUMN_STYLE2_IMAGE_SCALE, COLUMN_STYLE2_LOGO_VERTICAL_OFFSET, COLUMN_STYLE2_IMAGE_LOGO_SPACING, COLUMN_STYLE2_LOGO_HORIZONTAL_OFFSET, COLUMN_STYLE2_LOGO_ALIGNMENT, COLUMN_STYLE2_LOGO_VERSION_SPACING, COLUMN_STYLE2_TEXT_ENABLED, COLUMN_STYLE2_TEXT, COLUMN_STYLE2_TEXT_INDEPENDENT, COLUMN_STYLE2_TEXT_SCALE, COLUMN_STYLE2_TEXT_POSITION, COLUMN_STYLE2_TEXT_SPACING_ABOVE, COLUMN_STYLE2_TEXT_SPACING_BELOW, COLUMN_STYLE2_TEXT_ALIGNMENT, COLUMN_STYLE2_TEXT_HORIZONTAL_OFFSET, COLUMN_STYLE2_TEXT_HORIZONTAL_OFFSET_LEFT, COLUMN_STYLE2_TEXT_HORIZONTAL_OFFSET_CENTER, COLUMN_STYLE2_TEXT_HORIZONTAL_OFFSET_RIGHT, COLUMN_STYLE2_TEXT_VERTICAL_OFFSET, COLUMN_STYLE2_TEXT_VERTICAL_OFFSET_LEFT, COLUMN_STYLE2_TEXT_VERTICAL_OFFSET_CENTER, COLUMN_STYLE2_TEXT_VERTICAL_OFFSET_RIGHT, COLUMN_STYLE2_LOGO_COLOR_MODE, COLUMN_STYLE2_VERSION_COLOR_MODE, COLUMN_STYLE2_TEXT_COLOR_MODE, COLUMN_STYLE2_BACKGROUND_BLUR, COLUMN_STYLE2_BACKGROUND_VERTICAL_OFFSET, COLUMN_STYLE2_BACKGROUND_HORIZONTAL_OFFSET, COLUMN_STYLE2_BACKGROUND_SCALE)
     }
 }

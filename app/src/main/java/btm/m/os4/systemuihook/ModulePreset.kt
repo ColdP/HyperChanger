@@ -56,6 +56,10 @@ private val MODULE_PRESET_IMAGE_KEYS = setOf(
     "style2_logo_version",
     "style2_background_mime",
     "style2_background_version",
+    "style3_background_mime",
+    "style3_background_version",
+    "style3_logo_mime",
+    "style3_logo_version",
 )
 
 private fun isExcludedFromModulePreset(key: String): Boolean =
@@ -108,6 +112,13 @@ object ModulePresetCodec {
                 completeGmsUnlockPreset(values)
                 completeGmsQuickShareIslandPreset(values)
             }
+            if (groupName == SETTINGS_APPEARANCE_PREFERENCES) {
+                val legacy = values.optJSONObject("color_mode_assets_enabled")?.optBoolean("value", false) ?: false
+                // Normalize old uniform button scales and fill the new axis/position controls.
+                val controls = DeviceStyleCustomization.decode(values.optJSONObject(DEVICE_STYLE_CUSTOMIZATION_KEY)?.optString("value"), legacy)
+                values.put(DEVICE_STYLE_CUSTOMIZATION_KEY, typed("string", controls.encode()))
+                if (!values.has("style3_update_status_visible")) values.put("style3_update_status_visible", typed("boolean", true))
+            }
             if (groupName == "settings") {
                 completeCameraFeaturePreset(values)
                 completeCameraWatermarkPreset(values)
@@ -124,9 +135,21 @@ object ModulePresetCodec {
 
     fun exportZip(context: Context): ByteArray {
         val output = ByteArrayOutputStream()
+        // JSON-only presets preserve the current artwork. ZIP presets carry both the files and
+        // their MIME metadata so the restored style 3 assets can actually be decoded.
+        val appearance = SettingsAppearanceStore(context).settings
+        val assets = JSONObject()
+        val slots = COLOR_MODE_ASSET_SLOTS + COLOR_MODE_ASSET_SLOTS.flatMap { slot ->
+            listOf(colorModeAssetKey(slot, false), colorModeAssetKey(slot, true))
+        }
+        slots.forEach { slot ->
+            val file = appearanceFile(context, slot)
+            if (file.isFile && appearance.assetMime(slot).isNotBlank()) assets.put(slot, appearance.assetMime(slot))
+        }
+        val payload = JSONObject(exportJson(context)).put("appearanceAssets", assets).toString(2)
         ZipOutputStream(output).use { zip ->
             zip.putNextEntry(ZipEntry(MODULE_PRESET_JSON))
-            zip.write(exportJson(context).toByteArray(Charsets.UTF_8))
+            zip.write(payload.toByteArray(Charsets.UTF_8))
             zip.closeEntry()
             resourceFiles(context).forEach { file ->
                 zip.putNextEntry(ZipEntry(MODULE_PRESET_RESOURCE_ROOT + file.name))
@@ -181,6 +204,13 @@ object ModulePresetCodec {
                 completeGmsUnlockPreset(values)
                 completeGmsQuickShareIslandPreset(values)
             }
+            if (groupName == SETTINGS_APPEARANCE_PREFERENCES) {
+                val legacy = values.optJSONObject("color_mode_assets_enabled")?.optBoolean("value", false) ?: false
+                // Normalize old uniform button scales and fill the new axis/position controls.
+                val controls = DeviceStyleCustomization.decode(values.optJSONObject(DEVICE_STYLE_CUSTOMIZATION_KEY)?.optString("value"), legacy)
+                values.put(DEVICE_STYLE_CUSTOMIZATION_KEY, typed("string", controls.encode()))
+                if (!values.has("style3_update_status_visible")) values.put("style3_update_status_visible", typed("boolean", true))
+            }
             if (groupName == "settings") {
                 completeCameraFeaturePreset(values)
                 completeCameraWatermarkPreset(values)
@@ -214,6 +244,17 @@ object ModulePresetCodec {
         import(context, service, preset.toString(Charsets.UTF_8))
         entries.filterKeys { it.startsWith(MODULE_PRESET_RESOURCE_ROOT) }
             .forEach { (path, value) -> restoreResource(context, path.removePrefix(MODULE_PRESET_RESOURCE_ROOT), value) }
+        JSONObject(preset.toString(Charsets.UTF_8)).optJSONObject("appearanceAssets")?.let { assets ->
+            val allowed = (COLOR_MODE_ASSET_SLOTS + COLOR_MODE_ASSET_SLOTS.flatMap { slot ->
+                listOf(colorModeAssetKey(slot, false), colorModeAssetKey(slot, true))
+            }).toSet()
+            SettingsAppearanceStore(context).update(service) { current ->
+                assets.keys().asSequence().filter { it in allowed }.fold(current) { value, slot ->
+                    val file = appearanceFile(context, slot)
+                    if (file.isFile) value.withAsset(slot, assets.getString(slot), file.lastModified()) else value
+                }
+            }
+        }
         service?.let { CameraWatermarkRemote.publish(context, it); CameraShutterRemote.publish(context, it) }
     }
 
@@ -261,6 +302,13 @@ object ModulePresetCodec {
                 completePowerBatteryPreset(values)
                 completeGmsUnlockPreset(values)
                 completeGmsQuickShareIslandPreset(values)
+            }
+            if (groupName == SETTINGS_APPEARANCE_PREFERENCES) {
+                val legacy = values.optJSONObject("color_mode_assets_enabled")?.optBoolean("value", false) ?: false
+                // Normalize old uniform button scales and fill the new axis/position controls.
+                val controls = DeviceStyleCustomization.decode(values.optJSONObject(DEVICE_STYLE_CUSTOMIZATION_KEY)?.optString("value"), legacy)
+                values.put(DEVICE_STYLE_CUSTOMIZATION_KEY, typed("string", controls.encode()))
+                if (!values.has("style3_update_status_visible")) values.put("style3_update_status_visible", typed("boolean", true))
             }
             if (groupName == "settings") {
                 completeCameraFeaturePreset(values)

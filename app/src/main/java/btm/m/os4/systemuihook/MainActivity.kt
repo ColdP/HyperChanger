@@ -878,6 +878,8 @@ private fun Root(
                     APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE -> it.copy(style2ImageMime = mime, style2ImageVersion = target.lastModified())
                     APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO -> it.copy(style2LogoMime = mime, style2LogoVersion = target.lastModified())
                     APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND -> it.copy(style2BackgroundMime = mime, style2BackgroundVersion = target.lastModified())
+                    APPEARANCE_SLOT_STYLE3_BACKGROUND -> it.copy(style3BackgroundMime = mime, style3BackgroundVersion = target.lastModified())
+                    APPEARANCE_SLOT_STYLE3_LOGO -> it.copy(style3LogoMime = mime, style3LogoVersion = target.lastModified())
                     else -> it.copy(logoMime = mime, logoVersion = target.lastModified(), logoMode = LOGO_MODE_KEEP_ADVANCED_MATERIAL)
                 }
             }
@@ -906,6 +908,8 @@ private fun Root(
                     APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE -> it.copy(style2ImageMime = "", style2ImageVersion = System.currentTimeMillis())
                     APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO -> it.copy(style2LogoMime = "", style2LogoVersion = System.currentTimeMillis())
                     APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND -> it.copy(style2BackgroundMime = "", style2BackgroundVersion = System.currentTimeMillis())
+                    APPEARANCE_SLOT_STYLE3_BACKGROUND -> it.copy(style3BackgroundMime = "", style3BackgroundVersion = System.currentTimeMillis())
+                    APPEARANCE_SLOT_STYLE3_LOGO -> it.copy(style3LogoMime = "", style3LogoVersion = System.currentTimeMillis())
                     else -> it.copy(logoMime = "", logoVersion = System.currentTimeMillis(), logoMode = LOGO_MODE_SYSTEM)
                 }
             }
@@ -918,7 +922,7 @@ private fun Root(
     val pickAppearanceDevice = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { importAppearance(APPEARANCE_SLOT_DEVICE, it) }
     val pickTutorialDeviceImage = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { importAppearance(APPEARANCE_SLOT_DEVICE_IMAGE, it) }
     val pickStyle2DeviceImage = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { importAppearance(APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE, it) }
-    val pickStyle2UpdateBackground = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { importAppearance(APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND, it) }
+    val pickStyle2UpdateBackground = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { importAppearance(if (appearance.deviceInterfaceStyle == DEVICE_INTERFACE_STYLE_THREE) APPEARANCE_SLOT_STYLE3_BACKGROUND else APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND, it) }
     val pickStyle1UpdateBackground = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { importAppearance(APPEARANCE_SLOT_STYLE1_UPDATE_BACKGROUND, it) }
     val pickAppearanceLogo = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) importAppearance(APPEARANCE_SLOT_LOGO, result.data?.data)
@@ -927,7 +931,7 @@ private fun Root(
         if (result.resultCode == Activity.RESULT_OK) importAppearance(APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO, result.data?.data)
     }
     val pickStyle2DeviceLogo = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == Activity.RESULT_OK) importAppearance(APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO, result.data?.data)
+        if (result.resultCode == Activity.RESULT_OK) importAppearance(if (appearance.deviceInterfaceStyle == DEVICE_INTERFACE_STYLE_THREE) APPEARANCE_SLOT_STYLE3_LOGO else APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO, result.data?.data)
     }
     var pendingColorModeSlot by remember { mutableStateOf<String?>(null) }
     val pickColorModeAsset = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -1524,7 +1528,7 @@ private fun Root(
             onPickStyle2DeviceImage = { pickStyle2DeviceImage.launch(arrayOf("image/*")) },
             onClearStyle2DeviceImage = { clearAppearance(APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE) },
             onPickStyle2UpdateBackground = { pickStyle2UpdateBackground.launch(arrayOf("image/*")) },
-            onClearStyle2UpdateBackground = { clearAppearance(APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND) },
+            onClearStyle2UpdateBackground = { clearAppearance(if (appearance.deviceInterfaceStyle == DEVICE_INTERFACE_STYLE_THREE) APPEARANCE_SLOT_STYLE3_BACKGROUND else APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND) },
             onPickStyle1UpdateBackground = { pickStyle1UpdateBackground.launch(arrayOf("image/*")) },
             onClearStyle1UpdateBackground = { clearAppearance(APPEARANCE_SLOT_STYLE1_UPDATE_BACKGROUND) },
             onPickCustomDeviceLogo = {
@@ -1540,7 +1544,7 @@ private fun Root(
                     type = "*/*"
                 })
             },
-            onClearStyle2DeviceLogo = { clearAppearance(APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO) },
+            onClearStyle2DeviceLogo = { clearAppearance(if (appearance.deviceInterfaceStyle == DEVICE_INTERFACE_STYLE_THREE) APPEARANCE_SLOT_STYLE3_LOGO else APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO) },
             onPickAppearanceLogo = {
                 pickAppearanceLogo.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
@@ -4972,6 +4976,7 @@ private fun DeviceProfileEditor(
     back: () -> Unit,
 ) = AppPage(tr("我的设备与全部参数", "我的设备与全部参数"), back) { padding, scroll ->
     var editingField by remember { mutableStateOf<ProfileField?>(null) }
+    var showRestore by remember { mutableStateOf(false) }
     val basicFields = listOf(
         tr("手机型号", "手机型号") to profile.model,
         tr("处理器", "处理器") to profile.processor,
@@ -4999,6 +5004,7 @@ private fun DeviceProfileEditor(
         item {
             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp, insideMargin = PaddingValues(0.dp)) {
                 SharedViewArrowPreference(title = tr("预设库", "预设库"), onClick = openPresets)
+                SharedViewArrowPreference(title = tr("device_profile_restore_all", "一键恢复所有参数与信息"), onClick = { showRestore = true })
             }
         }
         item {
@@ -5059,6 +5065,15 @@ private fun DeviceProfileEditor(
         }
     }
 
+    DeviceProfileRestoreDialog(
+        show = showRestore,
+        profile = profile,
+        onDismiss = { showRestore = false },
+        onRestore = { basic, info ->
+            update { it.restoreDeviceProfileSections(basic, info) }
+            showRestore = false
+        },
+    )
     editingField?.let { field ->
         DeviceProfileFieldDialog(
             title = field.title,
@@ -5122,7 +5137,7 @@ private fun TutorialDeviceCardSettings(
     onColorModeAssetAction: (String, Boolean, Boolean) -> Unit,
     back: () -> Unit,
 ) = AppPage(tr("自定义我的设备界面", "自定义我的设备界面"), back, restartScopes = setOf(ScopeApplication.SETTINGS)) { padding, scroll ->
-    val style = appearance.deviceInterfaceStyle.coerceIn(DEVICE_INTERFACE_STYLE_SYSTEM, DEVICE_INTERFACE_STYLE_TWO)
+    val style = appearance.deviceInterfaceStyle.coerceIn(DEVICE_INTERFACE_STYLE_SYSTEM, DEVICE_INTERFACE_STYLE_THREE)
     val selectStyle: (Int) -> Unit = { selected ->
             update {
             it.copy(
@@ -5137,55 +5152,44 @@ private fun TutorialDeviceCardSettings(
             Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
 OverlayDropdownPreference(
                     title = tr("我的设备界面样式", "我的设备界面样式"),
-                    items = listOf(tr("系统默认", "系统默认"), tr("样式1 (来自酷安@Mr_Bocchi)", "样式1 (来自酷安@Mr_Bocchi)"), tr("样式2", "样式2")),
+                    items = listOf(tr("系统默认", "系统默认"), tr("样式1", "样式1"), tr("样式2", "样式2"), tr("样式3", "样式3")),
                     selectedIndex = style,
                     onSelectedIndexChange = selectStyle,
                 )
-            }
-        }
-        item {
-            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
                 SwitchPreference(
                     title = tr("按颜色模式使用独立素材", "按颜色模式使用独立素材"),
                     summary = tr("开启后分别使用浅色和深色素材；关闭时保持当前素材不变", "开启后分别使用浅色和深色素材；关闭时保持当前素材不变"),
-                    checked = appearance.colorModeAssetsEnabled,
-                    onCheckedChange = { enabled -> update { it.copy(colorModeAssetsEnabled = enabled) } },
+                    checked = appearance.deviceStyleCustomization.assetsForStyle(style),
+                    onCheckedChange = { enabled -> update { it.copy(deviceStyleCustomization = it.deviceStyleCustomization.withAssetsForStyle(style, enabled)) } },
                 )
             }
+        }
+        if (style == DEVICE_INTERFACE_STYLE_THREE) {
+            item { StyleThreeBackgroundControls(appearance, update) }
+            item { StyleThreeLogoControls(appearance, update) }
+            item { StyleThreeUpdateControls(appearance, update) }
         }
         if (style == DEVICE_INTERFACE_STYLE_SYSTEM) {
             item {
                 Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-                    SharedViewArrowPreference(
-                        title = tr("导入LOGO", "导入LOGO"),
-                        summary = appearance.logoMime.ifBlank { tr("未导入", "未导入") },
-                        onClick = onPickSystemLogo,
-                    )
-                    SharedViewArrowPreference(
-                        title = tr("清除LOGO", "清除LOGO"),
-                        summary = if (appearance.logoMime.isBlank()) tr("无LOGO", "无LOGO") else tr("已导入", "已导入"),
-                        onClick = onClearSystemLogo,
-                    )
+                    DeviceAppearanceAssetPreference(appearance, APPEARANCE_SLOT_LOGO, tr("自定义LOGO", "自定义LOGO"), update)
                 }
             }
         }
         if (style == DEVICE_INTERFACE_STYLE_ONE) {
             item {
                 Group(tr("机型图片", "机型图片")) {
-                    if (appearance.colorModeAssetsEnabled) ColorModeAssetRows(appearance, APPEARANCE_SLOT_DEVICE_IMAGE, tr("机型图片", "机型图片"), onColorModeAssetAction)
-                    else {
-                        SharedViewArrowPreference(title = tr("导入机型图片", "导入机型图片"), summary = appearance.tutorialCardImageMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle1Image)
-                        SharedViewArrowPreference(title = tr("清除机型图片", "清除机型图片"), summary = if (appearance.tutorialCardImageMime.isBlank()) tr("无图片", "无图片") else tr("已导入", "已导入"), onClick = onClearStyle1Image)
-                    }
+                    DeviceAppearanceAssetPreference(appearance, APPEARANCE_SLOT_DEVICE_IMAGE, tr("自定义机型图片", "自定义机型图片"), update)
                     EditableSliderPreference(
-                        value = appearance.tutorialCardImageScale.toFloat(),
-                        onValueChange = { value -> update { it.copy(tutorialCardImageScale = value.toInt()) } },
+                        value = (appearance.tutorialCardImageScale - 100).toFloat(),
+                        onValueChange = { value -> update { it.copy(tutorialCardImageScale = value.toInt() + 100) } },
                         onValueChangeFinished = {},
                         title = tr("机型图片缩放", "机型图片缩放"),
-                        valueText = "${appearance.tutorialCardImageScale}%",
-                        valueRange = 40f..200f,
-                        steps = 159,
-                        defaultValue = 100f,
+                        valueText = if (appearance.tutorialCardImageScale == 100) tr("系统默认", "系统默认") else "${appearance.tutorialCardImageScale - 100}%",
+                        valueRange = -100f..100f,
+                        steps = 199,
+                        defaultValue = 0f,
+                        centerValue = 0f,
                     )
                     EditableSliderPreference(
                         value = appearance.tutorialCardImageLogoSpacing.toFloat(),
@@ -5201,11 +5205,7 @@ OverlayDropdownPreference(
             }
             item {
                 Group(tr("背景图片", "背景图片")) {
-                    if (appearance.colorModeAssetsEnabled) ColorModeAssetRows(appearance, APPEARANCE_SLOT_STYLE1_UPDATE_BACKGROUND, tr("背景图片", "背景图片"), onColorModeAssetAction)
-                    else {
-                        SharedViewArrowPreference(title = tr("导入背景图片", "导入背景图片"), summary = appearance.tutorialCardBackgroundMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle1Background)
-                        SharedViewArrowPreference(title = tr("清除背景图片", "清除背景图片"), summary = if (appearance.tutorialCardBackgroundMime.isBlank()) tr("无图片", "无图片") else tr("已导入", "已导入"), onClick = onClearStyle1Background)
-                    }
+                    DeviceAppearanceAssetPreference(appearance, APPEARANCE_SLOT_STYLE1_UPDATE_BACKGROUND, tr("自定义背景", "自定义背景"), update)
                 EditableSliderPreference(
                     value = appearance.tutorialCardBackgroundBlur,
                     onValueChange = { value -> update { it.copy(tutorialCardBackgroundBlur = value) } },
@@ -5240,34 +5240,32 @@ OverlayDropdownPreference(
                     enabled = true,
                 )
                 EditableSliderPreference(
-                    value = appearance.tutorialCardBackgroundScale.toFloat(),
-                    onValueChange = { value -> update { it.copy(tutorialCardBackgroundScale = value.toInt()) } },
+                    value = (appearance.tutorialCardBackgroundScale - 100).toFloat(),
+                    onValueChange = { value -> update { it.copy(tutorialCardBackgroundScale = value.toInt() + 100) } },
                     onValueChangeFinished = {},
                     title = tr("背景图片缩放", "背景图片缩放"),
-                    valueText = "${appearance.tutorialCardBackgroundScale}%",
-                    valueRange = 40f..200f,
-                    steps = 159,
-                    defaultValue = 100f,
+                    valueText = if (appearance.tutorialCardBackgroundScale == 100) tr("系统默认", "系统默认") else "${appearance.tutorialCardBackgroundScale - 100}%",
+                    valueRange = -100f..100f,
+                    steps = 199,
+                    defaultValue = 0f,
+                        centerValue = 0f,
                     enabled = true,
                 )
                 }
             }
             item {
                 Group(tr("logo", "LOGO")) {
-                    if (appearance.colorModeAssetsEnabled) ColorModeAssetRows(appearance, APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO, "LOGO", onColorModeAssetAction)
-                    else {
-                        SharedViewArrowPreference(title = tr("导入LOGO", "导入LOGO"), summary = appearance.tutorialCardLogoMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle1Logo)
-                        SharedViewArrowPreference(title = tr("清除LOGO", "清除LOGO"), summary = if (appearance.tutorialCardLogoMime.isBlank()) tr("无LOGO", "无LOGO") else tr("已导入", "已导入"), onClick = onClearStyle1Logo)
-                    }
+                    DeviceAppearanceAssetPreference(appearance, APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO, tr("自定义LOGO", "自定义LOGO"), update)
                     EditableSliderPreference(
-                        value = appearance.tutorialCardLogoScale.toFloat(),
-                        onValueChange = { value -> update { it.copy(tutorialCardLogoScale = value.toInt()) } },
+                        value = (appearance.tutorialCardLogoScale - 100).toFloat(),
+                        onValueChange = { value -> update { it.copy(tutorialCardLogoScale = value.toInt() + 100) } },
                         onValueChangeFinished = {},
                         title = tr("LOGO缩放", "LOGO缩放"),
-                        valueText = "${appearance.tutorialCardLogoScale}%",
-                        valueRange = 40f..200f,
-                        steps = 159,
-                        defaultValue = 100f,
+                        valueText = if (appearance.tutorialCardLogoScale == 100) tr("系统默认", "系统默认") else "${appearance.tutorialCardLogoScale - 100}%",
+                        valueRange = -100f..100f,
+                        steps = 199,
+                        defaultValue = 0f,
+                        centerValue = 0f,
                     )
                     EditableSliderPreference(
                         value = appearance.tutorialCardLogoVerticalOffset.toFloat(),
@@ -5300,30 +5298,23 @@ OverlayDropdownPreference(
         if (style == DEVICE_INTERFACE_STYLE_TWO) {
             item {
                 Group(tr("机型图片", "机型图片")) {
-                    if (appearance.colorModeAssetsEnabled) ColorModeAssetRows(appearance, APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE, tr("机型图片", "机型图片"), onColorModeAssetAction)
-                    else {
-                        SharedViewArrowPreference(title = tr("导入机型图片", "导入机型图片"), summary = appearance.style2ImageMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle2Image)
-                        SharedViewArrowPreference(title = tr("清除机型图片", "清除机型图片"), summary = if (appearance.style2ImageMime.isBlank()) tr("无图片", "无图片") else tr("已导入", "已导入"), onClick = onClearStyle2Image)
-                    }
+                    DeviceAppearanceAssetPreference(appearance, APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE, tr("自定义机型图片", "自定义机型图片"), update)
                     EditableSliderPreference(
-                        value = appearance.style2ImageScale.toFloat(),
-                        onValueChange = { value -> update { it.copy(style2ImageScale = value.toInt()) } },
+                        value = (appearance.style2ImageScale - 100).toFloat(),
+                        onValueChange = { value -> update { it.copy(style2ImageScale = value.toInt() + 100) } },
                         onValueChangeFinished = {},
                         title = tr("机型图片缩放", "机型图片缩放"),
-                        valueText = "${appearance.style2ImageScale}%",
-                        valueRange = 40f..200f,
-                        steps = 159,
-                        defaultValue = 100f,
+                        valueText = if (appearance.style2ImageScale == 100) tr("系统默认", "系统默认") else "${appearance.style2ImageScale - 100}%",
+                        valueRange = -100f..100f,
+                        steps = 199,
+                        defaultValue = 0f,
+                        centerValue = 0f,
                     )
                 }
             }
             item {
                 Group(tr("背景图片", "背景图片")) {
-                    if (appearance.colorModeAssetsEnabled) ColorModeAssetRows(appearance, APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND, tr("背景图片", "背景图片"), onColorModeAssetAction)
-                    else {
-                        SharedViewArrowPreference(title = tr("导入背景图片", "导入背景图片"), summary = appearance.style2BackgroundMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle2Background)
-                        SharedViewArrowPreference(title = tr("清除背景图片", "清除背景图片"), summary = if (appearance.style2BackgroundMime.isBlank()) tr("无背景图", "无背景图") else tr("已导入", "已导入"), onClick = onClearStyle2Background)
-                    }
+                    DeviceAppearanceAssetPreference(appearance, APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND, tr("自定义背景", "自定义背景"), update)
                     EditableSliderPreference(
                         value = appearance.style2BackgroundBlur,
                         onValueChange = { value -> update { it.copy(style2BackgroundBlur = value) } },
@@ -5355,24 +5346,21 @@ OverlayDropdownPreference(
                         defaultValue = 0f,
                     )
                     EditableSliderPreference(
-                        value = appearance.style2BackgroundScale.toFloat(),
-                        onValueChange = { value -> update { it.copy(style2BackgroundScale = value.toInt()) } },
+                        value = (appearance.style2BackgroundScale - 100).toFloat(),
+                        onValueChange = { value -> update { it.copy(style2BackgroundScale = value.toInt() + 100) } },
                         onValueChangeFinished = {},
                         title = tr("背景图片缩放", "背景图片缩放"),
-                        valueText = "${appearance.style2BackgroundScale}%",
-                        valueRange = 40f..200f,
-                        steps = 159,
-                        defaultValue = 100f,
+                        valueText = if (appearance.style2BackgroundScale == 100) tr("系统默认", "系统默认") else "${appearance.style2BackgroundScale - 100}%",
+                        valueRange = -100f..100f,
+                        steps = 199,
+                        defaultValue = 0f,
+                        centerValue = 0f,
                     )
                 }
             }
             item {
                 Group(tr("LOGO与版本号", "LOGO与版本号")) {
-                    if (appearance.colorModeAssetsEnabled) ColorModeAssetRows(appearance, APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO, "LOGO", onColorModeAssetAction)
-                    else {
-                        SharedViewArrowPreference(title = tr("导入LOGO", "导入LOGO"), summary = appearance.style2LogoMime.ifBlank { tr("未导入", "未导入") }, onClick = onPickStyle2Logo)
-                        SharedViewArrowPreference(title = tr("清除LOGO", "清除LOGO"), summary = if (appearance.style2LogoMime.isBlank()) tr("无LOGO", "无LOGO") else tr("已导入", "已导入"), onClick = onClearStyle2Logo)
-                    }
+                    DeviceAppearanceAssetPreference(appearance, APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO, tr("自定义LOGO", "自定义LOGO"), update)
 OverlayDropdownPreference(
                         title = tr("LOGO与版本号对齐方式", "LOGO与版本号对齐方式"),
                         items = listOf(tr("左对齐", "左对齐"), tr("居中对齐", "居中对齐"), tr("右对齐", "右对齐")),
@@ -5426,14 +5414,15 @@ OverlayDropdownPreference(
                             onCheckedChange = { value -> update { it.copy(style2TextIndependent = value) } },
                         )
                         EditableSliderPreference(
-                            value = appearance.style2TextScale.toFloat(),
-                            onValueChange = { value -> update { it.copy(style2TextScale = value.toInt()) } },
+                            value = (appearance.style2TextScale - 100).toFloat(),
+                            onValueChange = { value -> update { it.copy(style2TextScale = value.toInt() + 100) } },
                             onValueChangeFinished = {},
                             title = tr("文案缩放", "文案缩放"),
-                            valueText = "${appearance.style2TextScale}%",
-                            valueRange = 40f..200f,
-                            steps = 159,
-                            defaultValue = 100f,
+                            valueText = if (appearance.style2TextScale == 100) tr("系统默认", "系统默认") else "${appearance.style2TextScale - 100}%",
+                            valueRange = -100f..100f,
+                            steps = 199,
+                            defaultValue = 0f,
+                        centerValue = 0f,
                         )
                         if (!appearance.style2TextIndependent) {
 OverlayDropdownPreference(
@@ -5500,21 +5489,21 @@ OverlayDropdownPreference(
                 Group(tr("文本颜色模式", "文本颜色模式")) {
 OverlayDropdownPreference(
                         title = tr("logo", "LOGO"),
-                        items = listOf(tr("跟随系统", "跟随系统"), tr("深色", "深色"), tr("浅色", "浅色")),
-                        selectedIndex = appearance.style2LogoColorMode.coerceIn(0, 2),
-                        onSelectedIndexChange = { value -> update { it.copy(style2LogoColorMode = value) } },
+                        items = listOf(tr("系统默认", "系统默认"), tr("浅色", "浅色"), tr("深色", "深色")),
+                        selectedIndex = when (appearance.style2LogoColorMode) { 1 -> 2; 2 -> 1; else -> 0 },
+                        onSelectedIndexChange = { value -> update { it.copy(style2LogoColorMode = when (value) { 1 -> 2; 2 -> 1; else -> 0 }) } },
                     )
 OverlayDropdownPreference(
                         title = tr("版本号", "版本号"),
-                        items = listOf(tr("跟随系统", "跟随系统"), tr("深色", "深色"), tr("浅色", "浅色")),
-                        selectedIndex = appearance.style2VersionColorMode.coerceIn(0, 2),
-                        onSelectedIndexChange = { value -> update { it.copy(style2VersionColorMode = value) } },
+                        items = listOf(tr("系统默认", "系统默认"), tr("浅色", "浅色"), tr("深色", "深色")),
+                        selectedIndex = when (appearance.style2VersionColorMode) { 1 -> 2; 2 -> 1; else -> 0 },
+                        onSelectedIndexChange = { value -> update { it.copy(style2VersionColorMode = when (value) { 1 -> 2; 2 -> 1; else -> 0 }) } },
                     )
 OverlayDropdownPreference(
                         title = tr("文案", "文案"),
-                        items = listOf(tr("跟随系统", "跟随系统"), tr("深色", "深色"), tr("浅色", "浅色")),
-                        selectedIndex = appearance.style2TextColorMode.coerceIn(0, 2),
-                        onSelectedIndexChange = { value -> update { it.copy(style2TextColorMode = value) } },
+                        items = listOf(tr("系统默认", "系统默认"), tr("浅色", "浅色"), tr("深色", "深色")),
+                        selectedIndex = when (appearance.style2TextColorMode) { 1 -> 2; 2 -> 1; else -> 0 },
+                        onSelectedIndexChange = { value -> update { it.copy(style2TextColorMode = when (value) { 1 -> 2; 2 -> 1; else -> 0 }) } },
                     )
                 }
             }
@@ -12709,7 +12698,7 @@ OverlayDropdownPreference(
 }
 
 @Composable
-private fun ShortcutBackgroundColorPreference(
+internal fun ShortcutBackgroundColorPreference(
     title: String = tr("\u80cc\u666f\u989c\u8272", "\u80cc\u666f\u989c\u8272"),
     color: Int,
     enabled: Boolean = true,
@@ -15349,7 +15338,7 @@ private fun openUrl(context: android.content.Context, url: String) = runCatching
     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
 }
 
-private fun appearanceFile(context: android.content.Context, slot: String): File =
+internal fun appearanceFile(context: android.content.Context, slot: String): File =
     File(File(context.filesDir, "settings_appearance"), "$slot.bin")
 
 private fun lockscreenWidgetPreviewFile(context: android.content.Context): File =
@@ -15443,7 +15432,7 @@ private fun copyLockscreenWidgetPreview(context: android.content.Context, uri: U
     return target
 }
 
-private fun copyAppearanceFile(context: android.content.Context, slot: String, uri: Uri): File {
+internal fun copyAppearanceFile(context: android.content.Context, slot: String, uri: Uri): File {
     val directory = File(context.filesDir, "settings_appearance")
     check(directory.exists() || directory.mkdirs()) { tr("无法创建配置目录", "无法创建配置目录") }
     val target = appearanceFile(context, slot)
@@ -15467,10 +15456,11 @@ private fun copyAppearanceFile(context: android.content.Context, slot: String, u
     check(!target.exists() || target.delete()) { tr("无法替换旧文件", "无法替换旧文件") }
     check(temporary.renameTo(target)) { tr("无法保存文件", "无法保存文件") }
     target.setLastModified(System.currentTimeMillis())
+    File(directory, "$slot.name").writeText(appearanceAssetDisplayName(context, uri))
     return target
 }
 
-private fun detectAppearanceMime(context: android.content.Context, uri: Uri): String {
+internal fun detectAppearanceMime(context: android.content.Context, uri: Uri): String {
     val reported = context.contentResolver.getType(uri).orEmpty()
     if (reported.isNotBlank() && reported != "application/octet-stream") return reported
     val name = runCatching {

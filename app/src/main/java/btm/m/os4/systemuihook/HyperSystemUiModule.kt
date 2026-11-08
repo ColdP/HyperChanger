@@ -7531,33 +7531,7 @@ class HyperSystemUiModule : XposedModule() {
                 }
             }
         }
-        viewClass.getMethod("clearMiBackgroundBlendColor").invoke(view)
-        viewClass.getMethod("setPassWindowBlurEnabled", Boolean::class.javaPrimitiveType)
-            .invoke(view, true)
-        viewClass.getMethod("setMiViewBlurMode", Int::class.javaPrimitiveType)
-            .invoke(view, SHORTCUT_GLASS_BLUR_MODE)
-        viewClass.getMethod("setMiBackgroundBlurMode", Int::class.javaPrimitiveType)
-            .invoke(view, SHORTCUT_GLASS_BLUR_MODE)
-        viewClass.getMethod("setMiBackgroundBlurRadius", Int::class.javaPrimitiveType)
-            .invoke(view, blurRadius.coerceIn(0, MAX_SHORTCUT_BACKDROP_BLUR_RADIUS))
-        viewClass.getMethod(
-            "addMiBackgroundBlendColor",
-            Int::class.javaPrimitiveType,
-            Int::class.javaPrimitiveType,
-        ).invoke(
-            view,
-            Color.argb(
-                opacity.coerceIn(0, MAX_SHORTCUT_OPACITY) * 255 / MAX_SHORTCUT_OPACITY,
-                Color.red(color),
-                Color.green(color),
-                Color.blue(color),
-            ),
-            SHORTCUT_GLASS_BLEND_MODE,
-        )
-        if (showHighlight) {
-            viewClass.getMethod("setMiBloomStroke", FloatArray::class.java)
-                .invoke(view, SHORTCUT_BLOOM_STROKE_PARAMETERS)
-        }
+        HyperOsBackdropMaterial.apply(view, opacity, blurRadius, color, showHighlight, SHORTCUT_BLOOM_STROKE_PARAMETERS)
     }
 
     private fun lockscreenGlassSampleRadii(view: View): Pair<Int, Int> {

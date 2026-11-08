@@ -20,9 +20,9 @@ internal object PortalGlassMaterial {
         0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f,
     )
 
-    fun apply(view: View, glass: SoftGlassSettings) {
+    fun apply(view: View, glass: SoftGlassSettings, backgroundRadius: Int = 80) {
         val intType = Int::class.javaPrimitiveType
-        View::class.java.getMethod("setMiBackgroundBlurRadius", intType).invoke(view, 80)
+        View::class.java.getMethod("setMiBackgroundBlurRadius", intType).invoke(view, backgroundRadius)
         View::class.java.getMethod("setMiViewBlurMode", intType).invoke(view, 1)
         View::class.java.getMethod("setMiGlassBlurRadius", intType, intType)
             .invoke(view, softGlassBlur(36, glass.refractionBlur), softGlassBlur(72, glass.refractionBlur))

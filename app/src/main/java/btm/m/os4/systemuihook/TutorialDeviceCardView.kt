@@ -100,19 +100,19 @@ class TutorialDeviceCardView(
         backgroundImage.setImageDrawable(bg)
         if (bg == null) backgroundHiddenByLongPress = false
         backgroundImage.visibility = if (bg == null || backgroundHiddenByLongPress) GONE else VISIBLE
-        backgroundImage.scaleX = backgroundScale.coerceIn(40, 200) / 100f
+        backgroundImage.scaleX = backgroundScale.coerceIn(0, 200) / 100f
         backgroundImage.scaleY = backgroundImage.scaleX
         backgroundImage.translationX = dp(92f) * backgroundHorizontalOffset.coerceIn(-120, 120) / 60f
         backgroundImage.translationY = -dp(92f) * backgroundVerticalOffset.coerceIn(-120, 120) / 60f
         backgroundImage.setRenderEffect(if (backgroundBlur > 0f) RenderEffect.createBlurEffect(dp(backgroundBlur).toFloat(), dp(backgroundBlur).toFloat(), Shader.TileMode.CLAMP) else null)
         phone.setImageDrawable(decode(context, imageSource))
         phone.visibility = if (phone.drawable == null) GONE else VISIBLE
-        val scale = imageScale.coerceIn(40, 200) / 100f
+        val scale = imageScale.coerceIn(0, 200) / 100f
         phone.scaleX = scale
         phone.scaleY = scale
         topLogo.setImageDrawable(decode(context, logoSource))
         topLogo.visibility = if (topLogo.drawable == null) GONE else VISIBLE
-        val logoScaleFactor = logoScale.coerceIn(40, 200) / 100f
+        val logoScaleFactor = logoScale.coerceIn(0, 200) / 100f
         topLogo.scaleX = logoScaleFactor
         topLogo.scaleY = logoScaleFactor
         val spacingShift = dp(25f) * imageLogoSpacing.coerceIn(-120, 120) / 60f

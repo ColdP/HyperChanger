@@ -27,6 +27,7 @@ import java.lang.ref.WeakReference
 import java.lang.reflect.Proxy
 import java.util.Collections
 import java.util.WeakHashMap
+import kotlin.math.roundToInt
 
 /** Hooks only Settings' presentation models; no system property is written. */
 class SettingsDeviceModule : XposedModule() {
@@ -63,7 +64,7 @@ class SettingsDeviceModule : XposedModule() {
             if (hookPreferences.getBoolean(KEY_REMOVE_NOTIFICATION_IMPORTANCE_LIMIT, false)) {
                 installNotificationImportanceHooks(param.defaultClassLoader)
             }
-            installCardBindingHook(param.defaultClassLoader, preferences)
+            installCardBindingHook(param.defaultClassLoader, preferences, appearance)
             installDirectDetailHooks(param.defaultClassLoader, preferences)
             installCpuIconHook(param.defaultClassLoader, preferences)
             installDetailCardMarker(param.defaultClassLoader)
@@ -1092,6 +1093,7 @@ class SettingsDeviceModule : XposedModule() {
 
     private fun installAppearanceHooks(classLoader: ClassLoader, homeEnabled: Boolean, deviceEnabled: Boolean) {
         installActivityAppearanceHooks(classLoader, homeEnabled, deviceEnabled)
+        if (deviceEnabled) installModelHeaderSpacingHook(classLoader)
         if (homeEnabled) runCatching {
             val home = classLoader.loadClass(MIUI_SETTINGS)
             hookLifecycle(home, "home", after = { target ->
@@ -1265,7 +1267,7 @@ class SettingsDeviceModule : XposedModule() {
         fragment.javaClass.getMethod("getActivity").invoke(fragment) as? Activity
     }.getOrNull()
 
-    private fun installCardBindingHook(classLoader: ClassLoader, preferences: SharedPreferences) {
+    private fun installCardBindingHook(classLoader: ClassLoader, preferences: SharedPreferences, appearance: SharedPreferences) {
         val adapter = classLoader.loadClass(DEVICE_INFO_ADAPTER)
         val setDataList = adapter.declaredMethods.firstOrNull {
             it.name == "setDataList" && it.parameterCount == 1
@@ -1282,7 +1284,7 @@ class SettingsDeviceModule : XposedModule() {
                 result
             }
         val bind = adapter.declaredMethods.firstOrNull {
-            it.name == "onBindViewHolder" && it.parameterCount == 2
+            it.name == "onBindViewHolder" && it.parameterCount == 2 && !it.isBridge
         } ?: error("DeviceInfoAdapter.onBindViewHolder not found")
         hook(bind)
             .setExceptionMode(ExceptionMode.PROTECTIVE)
@@ -1296,8 +1298,86 @@ class SettingsDeviceModule : XposedModule() {
                 if (profile.enabled) {
                     applyCardOverride(chain.thisObject, chain.getArg(1) as? Int ?: -1, profile)
                 }
-                chain.proceed()
+                val result = chain.proceed()
+                bindStyleThreeModelHeader(chain.thisObject, chain.getArg(0), chain.getArg(1) as? Int ?: -1,
+                    appearance.getInt("device_interface_style", DEVICE_INTERFACE_STYLE_SYSTEM) == DEVICE_INTERFACE_STYLE_THREE)
+                result
             }
+    }
+
+    private fun installModelHeaderSpacingHook(classLoader: ClassLoader) {
+        runCatching {
+            val decoration = classLoader.loadClass("com.android.settings.device.DeviceBasicInfoPresenter\$SpaceItemDecoration")
+            val method = decoration.declaredMethods.single { it.name == "getItemOffsets" && it.parameterCount == 4 }
+            hook(method).setExceptionMode(ExceptionMode.PROTECTIVE)
+                .setId("settings-style3:model-header-spacing").intercept { chain ->
+                    val result = chain.proceed()
+                    val child = chain.getArg(1) as? View
+                    val header = child?.findViewWithTag<View>("hyperchanger_model_build_header")
+                    if (header?.visibility == View.VISIBLE && SettingsAppearanceSources.query(header.context, APPEARANCE_SLOT_DEVICE_IMAGE).deviceInterfaceStyle == DEVICE_INTERFACE_STYLE_THREE) {
+                        // The stock header contributes another 20dp below our divider block.
+                        // Keep the native processor row intact; tighten only the header's trailing gap.
+                        (chain.getArg(0) as? android.graphics.Rect)?.let { it.bottom = (it.bottom * .60f).roundToInt() }
+                    }
+                    result
+                }
+        }.onFailure { error -> HookModuleLogger.log(this, Log.WARN, TAG, "Could not adjust model-header spacing", error) }
+    }
+
+    /** Extend the existing model header (adapter type 2/index 6), keeping every parameter row intact. */
+    private fun bindStyleThreeModelHeader(adapter: Any, holder: Any?, position: Int, enabled: Boolean) {
+        runCatching {
+            val card = holder?.javaClass?.getDeclaredField("card")?.apply { isAccessible = true }?.get(holder) as? ViewGroup ?: return
+            val tag = "hyperchanger_model_build_header"
+            val old = card.findViewWithTag<View>(tag)
+            val data = adapter.javaClass.getDeclaredField("cardInfos").apply { isAccessible = true }.get(adapter) as? Array<*> ?: return
+            val item = data.getOrNull(position) ?: return
+            val modelHeader = adapterType(adapter) == 2 && item.javaClass.getMethod("getIndex").invoke(item) == 6
+            if (!enabled || !modelHeader) {
+                old?.visibility = View.GONE
+                return
+            }
+            val titleId = card.resources.getIdentifier("card_big_title", "id", SETTINGS_PACKAGE)
+            val title = card.findViewById<TextView>(titleId) ?: return
+            val version = Class.forName("android.os.SystemProperties").getMethod("get", String::class.java, String::class.java)
+                .invoke(null, "ro.mi.os.version.incremental", "") as String
+            if (old != null) {
+                old.visibility = View.VISIBLE
+                (old as? ViewGroup)?.getChildAt(0)?.let { (it as? TextView)?.text = version }
+                return
+            }
+            val parent = title.parent as? ViewGroup ?: return
+            val density = card.resources.displayMetrics.density
+            fun dp(value: Int) = (value * density).toInt()
+            val night = card.resources.configuration.uiMode and 0x30 == 0x20
+            val block = android.widget.LinearLayout(card.context).apply {
+                this.tag = tag
+                orientation = android.widget.LinearLayout.VERTICAL
+                addView(TextView(context).apply {
+                    text = version
+                    textSize = 14f
+                    includeFontPadding = false
+                    setTextColor(if (night) 0xFFAAAAAA.toInt() else 0xFF999999.toInt())
+                }, android.widget.LinearLayout.LayoutParams(-1, -2).apply { topMargin = (6 * density * .86f).roundToInt() })
+                addView(DeviceStyleDividerView(context),
+                    android.widget.LinearLayout.LayoutParams(-1, dp(1).coerceAtLeast(1)).apply { topMargin = (20 * density * .86f).roundToInt(); bottomMargin = dp(4) })
+            }
+            if (parent is android.widget.LinearLayout && parent.orientation == android.widget.LinearLayout.VERTICAL) {
+                parent.addView(block, parent.indexOfChild(title) + 1, android.widget.LinearLayout.LayoutParams(-1, -2))
+            } else {
+                val index = parent.indexOfChild(title)
+                val params = title.layoutParams
+                parent.removeView(title)
+                val column = android.widget.LinearLayout(card.context).apply {
+                    orientation = android.widget.LinearLayout.VERTICAL
+                    addView(title, android.widget.LinearLayout.LayoutParams(-1, -2))
+                    addView(block, android.widget.LinearLayout.LayoutParams(-1, -2))
+                }
+                parent.addView(column, index, params)
+            }
+        }.onFailure { error ->
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not bind style 3 model header", error)
+        }
     }
 
     private fun installCpuIconHook(classLoader: ClassLoader, preferences: SharedPreferences) {

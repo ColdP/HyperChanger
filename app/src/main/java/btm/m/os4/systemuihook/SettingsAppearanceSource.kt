@@ -64,10 +64,16 @@ data class SettingsAppearanceSource(
     val style2BackgroundVerticalOffset: Int,
     val style2BackgroundHorizontalOffset: Int,
     val style2BackgroundScale: Int,
+    val style3BackgroundMime: String,
+    val style3BackgroundVersion: Long,
+    val style3LogoMime: String,
+    val style3LogoVersion: Long,
+    val style3UpdateStatusVisible: Boolean = true,
+    val deviceStyleCustomization: DeviceStyleCustomization = DeviceStyleCustomization(),
 ) {
     val exists: Boolean get() = enabled && size >= 0L
     val isVideo: Boolean get() = mime.startsWith("video/")
-    fun cacheKey(): String = "$slot:$mime:$size:$modified:$enabled:$opacity:$blur:$fontMode:$scale:$logoMode:$lightCardOpacity:$tutorialCardEnabled:$tutorialCardTitle:$tutorialCardSlogan:$tutorialCardAuthor:$tutorialCardImageScale:$tutorialCardLogoScale:$tutorialCardLogoVerticalOffset:$tutorialCardImageLogoSpacing:$tutorialCardTextSpacing:$tutorialCardInfoCardsEnabled:$tutorialCardBackgroundBlur:$tutorialCardBackgroundVerticalOffset:$tutorialCardBackgroundHorizontalOffset:$tutorialCardBackgroundScale:$deviceInterfaceStyle:$style2ImageScale:$style2LogoVerticalOffset:$style2ImageLogoSpacing:$style2LogoHorizontalOffset:$style2LogoAlignment:$style2LogoVersionSpacing:$style2TextEnabled:$style2Text:$style2TextIndependent:$style2TextScale:$style2TextPosition:$style2TextSpacingAbove:$style2TextSpacingBelow:$style2TextAlignment:$style2TextHorizontalOffset:$style2TextHorizontalOffsetLeft:$style2TextHorizontalOffsetCenter:$style2TextHorizontalOffsetRight:$style2TextVerticalOffset:$style2TextVerticalOffsetLeft:$style2TextVerticalOffsetCenter:$style2TextVerticalOffsetRight:$style2LogoColorMode:$style2VersionColorMode:$style2TextColorMode:$style2BackgroundBlur:$style2BackgroundVerticalOffset:$style2BackgroundHorizontalOffset:$style2BackgroundScale"
+    fun cacheKey(): String = "$slot:$mime:$size:$modified:$enabled:$opacity:$blur:$fontMode:$scale:$logoMode:$lightCardOpacity:$tutorialCardEnabled:$tutorialCardTitle:$tutorialCardSlogan:$tutorialCardAuthor:$tutorialCardImageScale:$tutorialCardLogoScale:$tutorialCardLogoVerticalOffset:$tutorialCardImageLogoSpacing:$tutorialCardTextSpacing:$tutorialCardInfoCardsEnabled:$tutorialCardBackgroundBlur:$tutorialCardBackgroundVerticalOffset:$tutorialCardBackgroundHorizontalOffset:$tutorialCardBackgroundScale:$deviceInterfaceStyle:$style2ImageScale:$style2LogoVerticalOffset:$style2ImageLogoSpacing:$style2LogoHorizontalOffset:$style2LogoAlignment:$style2LogoVersionSpacing:$style2TextEnabled:$style2Text:$style2TextIndependent:$style2TextScale:$style2TextPosition:$style2TextSpacingAbove:$style2TextSpacingBelow:$style2TextAlignment:$style2TextHorizontalOffset:$style2TextHorizontalOffsetLeft:$style2TextHorizontalOffsetCenter:$style2TextHorizontalOffsetRight:$style2TextVerticalOffset:$style2TextVerticalOffsetLeft:$style2TextVerticalOffsetCenter:$style2TextVerticalOffsetRight:$style2LogoColorMode:$style2VersionColorMode:$style2TextColorMode:$style2BackgroundBlur:$style2BackgroundVerticalOffset:$style2BackgroundHorizontalOffset:$style2BackgroundScale:$style3UpdateStatusVisible:${deviceStyleCustomization.encode()}"
 }
 
 fun SettingsAppearanceSource.style2TextHorizontalOffsetForAlignment(): Int = when (style2TextAlignment.coerceIn(0, 2)) {
@@ -127,8 +133,8 @@ object SettingsAppearanceSources {
                     tutorialCardTitle = cursor.string(SettingsAppearanceProvider.COLUMN_TUTORIAL_CARD_TITLE),
                     tutorialCardSlogan = cursor.string(SettingsAppearanceProvider.COLUMN_TUTORIAL_CARD_SLOGAN),
                     tutorialCardAuthor = cursor.string(SettingsAppearanceProvider.COLUMN_TUTORIAL_CARD_AUTHOR),
-                    tutorialCardImageScale = cursor.int(SettingsAppearanceProvider.COLUMN_TUTORIAL_CARD_IMAGE_SCALE).coerceIn(40, 200),
-                    tutorialCardLogoScale = cursor.int(SettingsAppearanceProvider.COLUMN_TUTORIAL_CARD_LOGO_SCALE).coerceIn(40, 200),
+                    tutorialCardImageScale = cursor.int(SettingsAppearanceProvider.COLUMN_TUTORIAL_CARD_IMAGE_SCALE).coerceIn(0, 200),
+                    tutorialCardLogoScale = cursor.int(SettingsAppearanceProvider.COLUMN_TUTORIAL_CARD_LOGO_SCALE).coerceIn(0, 200),
                     tutorialCardLogoVerticalOffset = cursor.int(SettingsAppearanceProvider.COLUMN_TUTORIAL_CARD_LOGO_VERTICAL_OFFSET).coerceIn(-120, 120),
                     tutorialCardImageLogoSpacing = cursor.int(SettingsAppearanceProvider.COLUMN_TUTORIAL_CARD_IMAGE_LOGO_SPACING).coerceIn(-120, 120),
                     tutorialCardTextSpacing = cursor.int(SettingsAppearanceProvider.COLUMN_TUTORIAL_CARD_TEXT_SPACING).coerceIn(-120, 120),
@@ -136,9 +142,9 @@ object SettingsAppearanceSources {
                     tutorialCardBackgroundBlur = cursor.float(SettingsAppearanceProvider.COLUMN_STYLE1_BACKGROUND_BLUR).coerceIn(0f, 25f),
                     tutorialCardBackgroundVerticalOffset = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE1_BACKGROUND_VERTICAL_OFFSET).coerceIn(-120, 120),
                     tutorialCardBackgroundHorizontalOffset = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE1_BACKGROUND_HORIZONTAL_OFFSET).coerceIn(-120, 120),
-                    tutorialCardBackgroundScale = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE1_BACKGROUND_SCALE).coerceIn(40, 200),
-                    deviceInterfaceStyle = cursor.int(SettingsAppearanceProvider.COLUMN_DEVICE_INTERFACE_STYLE).coerceIn(DEVICE_INTERFACE_STYLE_SYSTEM, DEVICE_INTERFACE_STYLE_TWO),
-                    style2ImageScale = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE2_IMAGE_SCALE).coerceIn(40, 200),
+                    tutorialCardBackgroundScale = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE1_BACKGROUND_SCALE).coerceIn(0, 200),
+                    deviceInterfaceStyle = cursor.int(SettingsAppearanceProvider.COLUMN_DEVICE_INTERFACE_STYLE).coerceIn(DEVICE_INTERFACE_STYLE_SYSTEM, DEVICE_INTERFACE_STYLE_THREE),
+                    style2ImageScale = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE2_IMAGE_SCALE).coerceIn(0, 200),
                     style2LogoVerticalOffset = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE2_LOGO_VERTICAL_OFFSET).coerceIn(-120, 120),
                     style2ImageLogoSpacing = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE2_IMAGE_LOGO_SPACING).coerceIn(-50, 50),
                     style2LogoHorizontalOffset = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE2_LOGO_HORIZONTAL_OFFSET).coerceIn(-120, 120),
@@ -147,7 +153,7 @@ object SettingsAppearanceSources {
                     style2TextEnabled = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE2_TEXT_ENABLED) != 0,
                     style2Text = cursor.string(SettingsAppearanceProvider.COLUMN_STYLE2_TEXT),
                     style2TextIndependent = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE2_TEXT_INDEPENDENT) != 0,
-                    style2TextScale = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE2_TEXT_SCALE).coerceIn(40, 200),
+                    style2TextScale = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE2_TEXT_SCALE).coerceIn(0, 200),
                     style2TextPosition = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE2_TEXT_POSITION).coerceIn(0, 1),
                     style2TextSpacingAbove = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE2_TEXT_SPACING_ABOVE).coerceIn(-120, 120),
                     style2TextSpacingBelow = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE2_TEXT_SPACING_BELOW).coerceIn(-120, 120),
@@ -166,7 +172,10 @@ object SettingsAppearanceSources {
                     style2BackgroundBlur = cursor.float(SettingsAppearanceProvider.COLUMN_STYLE2_BACKGROUND_BLUR).coerceIn(0f, 25f),
                     style2BackgroundVerticalOffset = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE2_BACKGROUND_VERTICAL_OFFSET).coerceIn(-120, 120),
                     style2BackgroundHorizontalOffset = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE2_BACKGROUND_HORIZONTAL_OFFSET).coerceIn(-120, 120),
-                    style2BackgroundScale = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE2_BACKGROUND_SCALE).coerceIn(40, 200),
+                    style2BackgroundScale = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE2_BACKGROUND_SCALE).coerceIn(0, 200),
+                    style3BackgroundMime = "", style3BackgroundVersion = 0L, style3LogoMime = "", style3LogoVersion = 0L,
+                    deviceStyleCustomization = DeviceStyleCustomization.decode(cursor.string(SettingsAppearanceProvider.COLUMN_DEVICE_STYLE_CONTROLS)),
+                    style3UpdateStatusVisible = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE3_UPDATE_STATUS_VISIBLE) != 0,
                 )
             } ?: missing(slot, uri)
         }.getOrElse { missing(slot, uri) }
@@ -205,6 +214,8 @@ object SettingsAppearanceSources {
         style2LogoColorMode = 0, style2VersionColorMode = 0, style2TextColorMode = 0,
         style2BackgroundVerticalOffset = 0, style2BackgroundHorizontalOffset = 0,
         style2BackgroundScale = 100,
+        style3BackgroundMime = "", style3BackgroundVersion = 0L,
+        style3LogoMime = "", style3LogoVersion = 0L,
     )
 
     private fun android.database.Cursor.index(name: String) = getColumnIndex(name)

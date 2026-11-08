@@ -83,7 +83,7 @@ class HarmonyUpdateCardView(
                 ImageDecoder.decodeDrawable(ImageDecoder.createSource(context.contentResolver, backgroundSource.uri))
             }.getOrNull())
             backgroundImage.visibility = if (backgroundImage.drawable == null) View.GONE else View.VISIBLE
-            backgroundImage.scaleX = style.style2BackgroundScale.coerceIn(40, 200) / 100f
+            backgroundImage.scaleX = style.style2BackgroundScale.coerceIn(0, 200) / 100f
             backgroundImage.scaleY = backgroundImage.scaleX
             backgroundImage.translationX = dp(92f) * style.style2BackgroundHorizontalOffset.coerceIn(-120, 120) / 60f
             backgroundImage.translationY = -dp(92f) * style.style2BackgroundVerticalOffset.coerceIn(-120, 120) / 60f
@@ -149,7 +149,7 @@ class HarmonyUpdateCardView(
         val enabled = style.style2TextEnabled && style.style2Text.isNotBlank()
         customText.text = style.style2Text
         customText.setTextColor(textColor(style.style2TextColorMode, color))
-        customText.textSize = 14f * style.style2TextScale.coerceIn(40, 200) / 100f
+        customText.textSize = 14f * style.style2TextScale.coerceIn(0, 200) / 100f
         customText.visibility = if (enabled) View.VISIBLE else View.GONE
         if (!enabled) return
         if (!style.style2TextIndependent) {
@@ -249,7 +249,7 @@ class HarmonyUpdateCardView(
 }
 
 /** Draws the system Xiaomi/OS vector as two independently colorable regions. */
-private class SplitXiaomiOsLogoDrawable(
+internal class SplitXiaomiOsLogoDrawable(
     private val source: Drawable?,
     private val xiaomiColor: Int?,
 ) : Drawable() {
@@ -339,7 +339,7 @@ class HarmonyInfoCardsView(
             decodedImageKey = imageKey
         }
         phone.visibility = if (phone.drawable == null) View.GONE else View.VISIBLE
-        phone.scaleX = imageScale.coerceIn(40, 200) / 100f
+        phone.scaleX = imageScale.coerceIn(0, 200) / 100f
         phone.scaleY = phone.scaleX
         (phone.parent as? View)?.background = GradientDrawable().apply {
             setColor(if (night) 0x223E7FEA else 0x154D83E8)

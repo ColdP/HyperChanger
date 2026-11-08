@@ -35,6 +35,9 @@ object SettingsAppearanceApplier {
     private val deviceInfoCards = Collections.synchronizedMap(WeakHashMap<Any, DeviceInfoCardsSession>())
     private val harmonyCards = Collections.synchronizedMap(WeakHashMap<Any, HarmonyCardSession>())
     private val harmonyInfoCards = Collections.synchronizedMap(WeakHashMap<Any, HarmonyInfoCardsSession>())
+    private val colorOsCards = Collections.synchronizedMap(WeakHashMap<Any, ColorOsCardSession>())
+    private val colorOsInfoCards = Collections.synchronizedMap(WeakHashMap<Any, ColorOsInfoCardsSession>())
+    private val deviceCardSpacing = Collections.synchronizedMap(WeakHashMap<Any, DeviceCardSpacingSession>())
     private val cardLikeViews = Collections.synchronizedMap(WeakHashMap<View, Boolean>())
     private val cardColorResources = Collections.synchronizedMap(WeakHashMap<Resources, MutableMap<Int, Boolean>>())
     private val internalTextColor = ThreadLocal<Boolean>()
@@ -138,6 +141,9 @@ object SettingsAppearanceApplier {
         deviceInfoCards.remove(fragment)?.remove()
         harmonyCards.remove(fragment)?.remove()
         harmonyInfoCards.remove(fragment)?.remove()
+        colorOsCards.remove(fragment)?.remove()
+        colorOsInfoCards.remove(fragment)?.remove()
+        deviceCardSpacing.remove(fragment)?.remove()
     }
     fun stop(activity: Activity?) { activity?.let { layers[it]?.view?.onHostStop() } }
     fun destroy(activity: Activity?) {
@@ -168,6 +174,21 @@ object SettingsAppearanceApplier {
             // before adding our independent replacement card.
             val animationSource = target.findViewById<View>(animationLayoutId)
             val style = SettingsAppearanceSources.query(context, APPEARANCE_SLOT_DEVICE_IMAGE).deviceInterfaceStyle
+            if (style != DEVICE_INTERFACE_STYLE_THREE) {
+                colorOsCards.remove(fragment)?.remove()
+                colorOsInfoCards.remove(fragment)?.remove()
+            }
+            val nameCard = root.findViewById<View>(context.resources.getIdentifier("device_name_card_view", "id", context.packageName))
+            val infoContainer = nameCard?.parent as? View
+            val detailContainer = root.findViewById<View>(context.resources.getIdentifier("device_params", "id", context.packageName))
+            if (style in DEVICE_INTERFACE_STYLE_ONE..DEVICE_INTERFACE_STYLE_THREE && infoContainer != null && detailContainer != null) {
+                val oldSpacing = deviceCardSpacing[fragment]
+                if (oldSpacing == null || !oldSpacing.matches(infoContainer, detailContainer)) {
+                    oldSpacing?.remove()
+                    deviceCardSpacing[fragment] = DeviceCardSpacingSession(infoContainer, detailContainer)
+                }
+                deviceCardSpacing[fragment]?.enforce()
+            } else deviceCardSpacing.remove(fragment)?.remove()
             when (style) {
                 DEVICE_INTERFACE_STYLE_ONE -> {
                     harmonyCards.remove(fragment)?.remove()
@@ -221,6 +242,45 @@ object SettingsAppearanceApplier {
                     }
                     applyHarmonyInfoCards(fragment, context, root, image)
                 }
+                DEVICE_INTERFACE_STYLE_THREE -> {
+                    tutorialCards.remove(fragment)?.remove()
+                    deviceInfoCards.remove(fragment)?.remove()
+                    harmonyCards.remove(fragment)?.remove()
+                    harmonyInfoCards.remove(fragment)?.remove()
+                    val background = SettingsAppearanceSources.query(context, APPEARANCE_SLOT_STYLE3_BACKGROUND)
+                    val logo = SettingsAppearanceSources.query(context, APPEARANCE_SLOT_STYLE3_LOGO)
+                    val old = colorOsCards[fragment]
+                    val key = background.cacheKey() + logo.cacheKey()
+                    val updateSource = root.findViewById<View>(context.resources.getIdentifier("miui_version_text", "id", context.packageName))
+                    if (old != null && old.matches(target, spacer) && old.key == key) {
+                        old.enforce(context)
+                        old.view.refresh(background, logo)
+                    } else {
+                        old?.remove()
+                        val card = ColorOsUpdateCardView(context, background, logo, updateSource, spacer ?: target)
+                        target.addView(card, colorOsCardLayoutParams(context))
+                        val session = ColorOsCardSession(target, spacer, spacer?.layoutParams, animationSource, card, key)
+                        session.enforce(context)
+                        colorOsCards[fragment] = session
+                    }
+                    val name = root.findViewById<View>(context.resources.getIdentifier("device_name_card_view", "id", context.packageName))
+                    val storage = root.findViewById<View>(context.resources.getIdentifier("device_memory_card_view", "id", context.packageName))
+                    if (name != null && storage != null && name.parent === storage.parent && name.parent is LinearLayout) {
+                        val parent = name.parent as LinearLayout
+                        val oldInfo = colorOsInfoCards[fragment]
+                        if (oldInfo == null || !oldInfo.matches(parent, name, storage)) {
+                            oldInfo?.remove()
+                            val row = ColorOsInfoCardsView(context, name, storage, background)
+                            parent.addView(row, parent.indexOfChild(name), LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT))
+                            val info = ColorOsInfoCardsSession(parent, name, storage, row)
+                            info.enforce()
+                            colorOsInfoCards[fragment] = info
+                        } else {
+                            oldInfo.enforce()
+                            oldInfo.view.refresh(background)
+                        }
+                    }
+                }
                 else -> {
                     tutorialCards.remove(fragment)?.remove()
                     deviceInfoCards.remove(fragment)?.remove()
@@ -247,10 +307,7 @@ object SettingsAppearanceApplier {
         old?.remove()
         val row = HarmonyInfoCardsView(context, name, storage, image)
         val index = parent.indexOfChild(name).coerceAtLeast(0)
-        // The stock parameter card adds a 12dp top margin. Reduce this
-        // replacement row's contribution from 10dp to 5dp so the combined
-        // gap is approximately 75% of the previous spacing.
-        parent.addView(row, index, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, tutorialDp(context, 182)).apply { bottomMargin = tutorialDp(context, 4.88f) })
+        parent.addView(row, index, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, tutorialDp(context, 182)))
         val session = HarmonyInfoCardsSession(parent, name, storage, row, image.cacheKey())
         session.enforce()
         harmonyInfoCards[fragment] = session
@@ -284,9 +341,7 @@ object SettingsAppearanceApplier {
         parent.addView(row, index, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             tutorialDp(context, 148),
-        ).apply {
-            bottomMargin = tutorialDp(context, 6)
-        })
+        ))
         val session = DeviceInfoCardsSession(parent, name, storage, row)
         session.enforce()
         deviceInfoCards[fragment] = session
@@ -532,6 +587,16 @@ object SettingsAppearanceApplier {
     private fun harmonyCardLayoutParams(context: android.content.Context) = FrameLayout.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
         tutorialDp(context, 243),
+        Gravity.TOP,
+    ).apply {
+        leftMargin = tutorialDp(context, 12)
+        rightMargin = tutorialDp(context, 12)
+        topMargin = tutorialDp(context, 18)
+    }
+
+    private fun colorOsCardLayoutParams(context: android.content.Context) = FrameLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        tutorialDp(context, 320),
         Gravity.TOP,
     ).apply {
         leftMargin = tutorialDp(context, 12)
@@ -786,7 +851,7 @@ object SettingsAppearanceApplier {
             val original = spacerLayoutParams ?: return
             spacer?.layoutParams = SettingsAppearanceApplier.compactVersionCardSpacer(
                 original,
-                SettingsAppearanceApplier.tutorialDp(context, 211),
+                SettingsAppearanceApplier.tutorialDp(context, 210),
             )
         }
 
@@ -810,7 +875,7 @@ object SettingsAppearanceApplier {
         private fun syncCardAnimation() {
             val source = animationSource ?: return
             view.translationX = source.translationX
-            view.translationY = source.translationY
+            view.translationY = 0f
             view.scaleX = source.scaleX
             view.scaleY = source.scaleY
             view.alpha = source.alpha
@@ -845,7 +910,7 @@ object SettingsAppearanceApplier {
             }
             sync()
             val original = spacerLayoutParams ?: return
-            spacer?.layoutParams = SettingsAppearanceApplier.compactVersionCardSpacer(original, SettingsAppearanceApplier.tutorialDp(context, 274))
+            spacer?.layoutParams = SettingsAppearanceApplier.compactVersionCardSpacer(original, SettingsAppearanceApplier.tutorialDp(context, 273))
         }
 
         fun remove() {
@@ -861,7 +926,7 @@ object SettingsAppearanceApplier {
         private fun sync() {
             val source = animationSource ?: return
             view.translationX = source.translationX
-            view.translationY = source.translationY
+            view.translationY = 0f
             view.scaleX = source.scaleX
             view.scaleY = source.scaleY
             view.alpha = source.alpha

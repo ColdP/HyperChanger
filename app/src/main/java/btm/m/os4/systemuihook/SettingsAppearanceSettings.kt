@@ -31,17 +31,22 @@ const val APPEARANCE_SLOT_STYLE1_UPDATE_BACKGROUND = "style1_update_background"
 const val APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE = "style2_device_image"
 const val APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO = "style2_custom_device_logo"
 const val APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND = "style2_update_background"
+const val APPEARANCE_SLOT_STYLE3_BACKGROUND = "style3_background"
+const val APPEARANCE_SLOT_STYLE3_LOGO = "style3_logo"
 const val COLOR_MODE_LIGHT = "light"
 const val COLOR_MODE_DARK = "dark"
 val COLOR_MODE_ASSET_SLOTS = listOf(
+    APPEARANCE_SLOT_LOGO,
     APPEARANCE_SLOT_DEVICE_IMAGE, APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO, APPEARANCE_SLOT_STYLE1_UPDATE_BACKGROUND,
     APPEARANCE_SLOT_STYLE2_DEVICE_IMAGE, APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO, APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND,
+    APPEARANCE_SLOT_STYLE3_BACKGROUND, APPEARANCE_SLOT_STYLE3_LOGO,
 )
 fun colorModeAssetKey(slot: String, dark: Boolean) = "$slot:${if (dark) COLOR_MODE_DARK else COLOR_MODE_LIGHT}"
 
 const val DEVICE_INTERFACE_STYLE_SYSTEM = 0
 const val DEVICE_INTERFACE_STYLE_ONE = 1
 const val DEVICE_INTERFACE_STYLE_TWO = 2
+const val DEVICE_INTERFACE_STYLE_THREE = 3
 
 const val LOGO_MODE_SYSTEM = 0
 const val LOGO_MODE_NO_ADVANCED_MATERIAL = 1
@@ -128,6 +133,11 @@ private const val KEY_STYLE2_BACKGROUND_BLUR = "style2_background_blur"
 private const val KEY_STYLE2_BACKGROUND_VERTICAL_OFFSET = "style2_background_vertical_offset"
 private const val KEY_STYLE2_BACKGROUND_HORIZONTAL_OFFSET = "style2_background_horizontal_offset"
 private const val KEY_STYLE2_BACKGROUND_SCALE = "style2_background_scale"
+private const val KEY_STYLE3_BACKGROUND_MIME = "style3_background_mime"
+private const val KEY_STYLE3_BACKGROUND_VERSION = "style3_background_version"
+private const val KEY_STYLE3_LOGO_MIME = "style3_logo_mime"
+private const val KEY_STYLE3_LOGO_VERSION = "style3_logo_version"
+private const val KEY_STYLE3_UPDATE_STATUS_VISIBLE = "style3_update_status_visible"
 
 data class SettingsAppearanceSettings(
     val homeEnabled: Boolean = false,
@@ -212,6 +222,12 @@ data class SettingsAppearanceSettings(
     val style2BackgroundVerticalOffset: Int = 0,
     val style2BackgroundHorizontalOffset: Int = 0,
     val style2BackgroundScale: Int = 100,
+    val style3BackgroundMime: String = "",
+    val style3BackgroundVersion: Long = 0L,
+    val style3LogoMime: String = "",
+    val style3LogoVersion: Long = 0L,
+    val style3UpdateStatusVisible: Boolean = true,
+    val deviceStyleCustomization: DeviceStyleCustomization = DeviceStyleCustomization(),
 )
 
 class SettingsAppearanceStore(context: Context) {
@@ -235,7 +251,11 @@ class SettingsAppearanceStore(context: Context) {
 
     fun syncRemote(service: XposedService) {
         val remote = service.getRemotePreferences(SETTINGS_APPEARANCE_PREFERENCES)
+        val localControls = settings.deviceStyleCustomization
         settings = if (remote.contains(KEY_INITIALIZED)) remote.toSettingsAppearance() else settings
+        if (!remote.contains(DEVICE_STYLE_CUSTOMIZATION_KEY) && local.contains(DEVICE_STYLE_CUSTOMIZATION_KEY)) {
+            settings = settings.copy(deviceStyleCustomization = localControls)
+        }
         remote.writeSettingsAppearance(settings)
         local.writeSettingsAppearance(settings)
     }
@@ -333,6 +353,12 @@ internal fun SharedPreferences.toSettingsAppearance() = SettingsAppearanceSettin
     style2BackgroundVerticalOffset = getInt(KEY_STYLE2_BACKGROUND_VERTICAL_OFFSET, 0),
     style2BackgroundHorizontalOffset = getInt(KEY_STYLE2_BACKGROUND_HORIZONTAL_OFFSET, 0),
     style2BackgroundScale = getInt(KEY_STYLE2_BACKGROUND_SCALE, 100),
+    style3BackgroundMime = getString(KEY_STYLE3_BACKGROUND_MIME, "").orEmpty(),
+    style3BackgroundVersion = getLong(KEY_STYLE3_BACKGROUND_VERSION, 0L),
+    style3LogoMime = getString(KEY_STYLE3_LOGO_MIME, "").orEmpty(),
+    style3LogoVersion = getLong(KEY_STYLE3_LOGO_VERSION, 0L),
+    style3UpdateStatusVisible = getBoolean(KEY_STYLE3_UPDATE_STATUS_VISIBLE, true),
+    deviceStyleCustomization = readDeviceStyleCustomization(),
 ).normalized()
 
 private fun SettingsAppearanceSettings.normalized() = copy(
@@ -345,17 +371,17 @@ private fun SettingsAppearanceSettings.normalized() = copy(
     logoMode = logoMode.coerceIn(LOGO_MODE_SYSTEM, LOGO_MODE_KEEP_ADVANCED_MATERIAL),
     logoScale = logoScale.coerceIn(50, 200),
     lightCardOpacity = lightCardOpacity.coerceIn(0, 100),
-    tutorialCardImageScale = tutorialCardImageScale.coerceIn(40, 200),
+    tutorialCardImageScale = tutorialCardImageScale.coerceIn(0, 200),
     tutorialCardLogoVerticalOffset = tutorialCardLogoVerticalOffset.coerceIn(-120, 120),
-    tutorialCardLogoScale = tutorialCardLogoScale.coerceIn(40, 200),
+    tutorialCardLogoScale = tutorialCardLogoScale.coerceIn(0, 200),
     tutorialCardImageLogoSpacing = tutorialCardImageLogoSpacing.coerceIn(-120, 120),
     tutorialCardTextSpacing = tutorialCardTextSpacing.coerceIn(-120, 120),
     tutorialCardBackgroundBlur = tutorialCardBackgroundBlur.coerceIn(0f, 25f),
     tutorialCardBackgroundVerticalOffset = tutorialCardBackgroundVerticalOffset.coerceIn(-120, 120),
     tutorialCardBackgroundHorizontalOffset = tutorialCardBackgroundHorizontalOffset.coerceIn(-120, 120),
-    tutorialCardBackgroundScale = tutorialCardBackgroundScale.coerceIn(40, 200),
-    deviceInterfaceStyle = deviceInterfaceStyle.coerceIn(DEVICE_INTERFACE_STYLE_SYSTEM, DEVICE_INTERFACE_STYLE_TWO),
-    style2ImageScale = style2ImageScale.coerceIn(40, 200),
+    tutorialCardBackgroundScale = tutorialCardBackgroundScale.coerceIn(0, 200),
+    deviceInterfaceStyle = deviceInterfaceStyle.coerceIn(DEVICE_INTERFACE_STYLE_SYSTEM, DEVICE_INTERFACE_STYLE_THREE),
+    style2ImageScale = style2ImageScale.coerceIn(0, 200),
     style2LogoVerticalOffset = style2LogoVerticalOffset.coerceIn(-120, 120),
     style2LogoVerticalOffsetLeft = style2LogoVerticalOffsetLeft.coerceIn(-120, 120),
     style2LogoVerticalOffsetCenter = style2LogoVerticalOffsetCenter.coerceIn(-120, 120),
@@ -367,7 +393,7 @@ private fun SettingsAppearanceSettings.normalized() = copy(
     style2LogoHorizontalOffsetRight = style2LogoHorizontalOffsetRight.coerceIn(-120, 120),
     style2LogoAlignment = style2LogoAlignment.coerceIn(0, 2),
     style2LogoVersionSpacing = style2LogoVersionSpacing.coerceIn(-120, 120),
-    style2TextScale = style2TextScale.coerceIn(40, 200),
+    style2TextScale = style2TextScale.coerceIn(0, 200),
     style2TextPosition = style2TextPosition.coerceIn(0, 1),
     style2TextSpacingAbove = style2TextSpacingAbove.coerceIn(-120, 120),
     style2TextSpacingBelow = style2TextSpacingBelow.coerceIn(-120, 120),
@@ -386,7 +412,7 @@ private fun SettingsAppearanceSettings.normalized() = copy(
     style2BackgroundBlur = style2BackgroundBlur.coerceIn(0f, 25f),
     style2BackgroundVerticalOffset = style2BackgroundVerticalOffset.coerceIn(-120, 120),
     style2BackgroundHorizontalOffset = style2BackgroundHorizontalOffset.coerceIn(-120, 120),
-    style2BackgroundScale = style2BackgroundScale.coerceIn(40, 200),
+    style2BackgroundScale = style2BackgroundScale.coerceIn(0, 200),
 )
 
 private fun SharedPreferences.writeSettingsAppearance(value: SettingsAppearanceSettings) {
@@ -472,6 +498,12 @@ private fun SharedPreferences.writeSettingsAppearance(value: SettingsAppearanceS
         .putInt(KEY_STYLE2_BACKGROUND_VERTICAL_OFFSET, value.style2BackgroundVerticalOffset)
         .putInt(KEY_STYLE2_BACKGROUND_HORIZONTAL_OFFSET, value.style2BackgroundHorizontalOffset)
         .putInt(KEY_STYLE2_BACKGROUND_SCALE, value.style2BackgroundScale)
+        .putString(KEY_STYLE3_BACKGROUND_MIME, value.style3BackgroundMime)
+        .putLong(KEY_STYLE3_BACKGROUND_VERSION, value.style3BackgroundVersion)
+        .putString(KEY_STYLE3_LOGO_MIME, value.style3LogoMime)
+        .putLong(KEY_STYLE3_LOGO_VERSION, value.style3LogoVersion)
+        .putBoolean(KEY_STYLE3_UPDATE_STATUS_VISIBLE, value.style3UpdateStatusVisible)
+        .putDeviceStyleCustomization(value.deviceStyleCustomization)
         .apply {
             COLOR_MODE_ASSET_SLOTS.forEach { slot ->
                 listOf(false, true).forEach { dark ->
