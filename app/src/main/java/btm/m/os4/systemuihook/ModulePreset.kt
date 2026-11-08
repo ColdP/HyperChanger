@@ -114,7 +114,7 @@ object ModulePresetCodec {
             }
             if (groupName == SETTINGS_APPEARANCE_PREFERENCES) {
                 val legacy = values.optJSONObject("color_mode_assets_enabled")?.optBoolean("value", false) ?: false
-                // Normalize old uniform button scales and fill the new axis/position controls.
+                // Normalize legacy scales and include all dedicated style-3 card/icon controls.
                 val controls = DeviceStyleCustomization.decode(values.optJSONObject(DEVICE_STYLE_CUSTOMIZATION_KEY)?.optString("value"), legacy)
                 values.put(DEVICE_STYLE_CUSTOMIZATION_KEY, typed("string", controls.encode()))
                 if (!values.has("style3_update_status_visible")) values.put("style3_update_status_visible", typed("boolean", true))
@@ -139,7 +139,7 @@ object ModulePresetCodec {
         // their MIME metadata so the restored style 3 assets can actually be decoded.
         val appearance = SettingsAppearanceStore(context).settings
         val assets = JSONObject()
-        val slots = COLOR_MODE_ASSET_SLOTS + COLOR_MODE_ASSET_SLOTS.flatMap { slot ->
+        val slots = listOf(APPEARANCE_SLOT_CPU_ICON, APPEARANCE_SLOT_STYLE3_CPU_ICON, APPEARANCE_SLOT_STYLE3_CAMERA_BRAND) + COLOR_MODE_ASSET_SLOTS + COLOR_MODE_ASSET_SLOTS.flatMap { slot ->
             listOf(colorModeAssetKey(slot, false), colorModeAssetKey(slot, true))
         }
         slots.forEach { slot ->
@@ -206,7 +206,7 @@ object ModulePresetCodec {
             }
             if (groupName == SETTINGS_APPEARANCE_PREFERENCES) {
                 val legacy = values.optJSONObject("color_mode_assets_enabled")?.optBoolean("value", false) ?: false
-                // Normalize old uniform button scales and fill the new axis/position controls.
+                // Normalize legacy scales and include all dedicated style-3 card/icon controls.
                 val controls = DeviceStyleCustomization.decode(values.optJSONObject(DEVICE_STYLE_CUSTOMIZATION_KEY)?.optString("value"), legacy)
                 values.put(DEVICE_STYLE_CUSTOMIZATION_KEY, typed("string", controls.encode()))
                 if (!values.has("style3_update_status_visible")) values.put("style3_update_status_visible", typed("boolean", true))
@@ -245,7 +245,7 @@ object ModulePresetCodec {
         entries.filterKeys { it.startsWith(MODULE_PRESET_RESOURCE_ROOT) }
             .forEach { (path, value) -> restoreResource(context, path.removePrefix(MODULE_PRESET_RESOURCE_ROOT), value) }
         JSONObject(preset.toString(Charsets.UTF_8)).optJSONObject("appearanceAssets")?.let { assets ->
-            val allowed = (COLOR_MODE_ASSET_SLOTS + COLOR_MODE_ASSET_SLOTS.flatMap { slot ->
+            val allowed = (listOf(APPEARANCE_SLOT_CPU_ICON, APPEARANCE_SLOT_STYLE3_CPU_ICON, APPEARANCE_SLOT_STYLE3_CAMERA_BRAND) + COLOR_MODE_ASSET_SLOTS + COLOR_MODE_ASSET_SLOTS.flatMap { slot ->
                 listOf(colorModeAssetKey(slot, false), colorModeAssetKey(slot, true))
             }).toSet()
             SettingsAppearanceStore(context).update(service) { current ->
@@ -305,7 +305,7 @@ object ModulePresetCodec {
             }
             if (groupName == SETTINGS_APPEARANCE_PREFERENCES) {
                 val legacy = values.optJSONObject("color_mode_assets_enabled")?.optBoolean("value", false) ?: false
-                // Normalize old uniform button scales and fill the new axis/position controls.
+                // Normalize legacy scales and include all dedicated style-3 card/icon controls.
                 val controls = DeviceStyleCustomization.decode(values.optJSONObject(DEVICE_STYLE_CUSTOMIZATION_KEY)?.optString("value"), legacy)
                 values.put(DEVICE_STYLE_CUSTOMIZATION_KEY, typed("string", controls.encode()))
                 if (!values.has("style3_update_status_visible")) values.put("style3_update_status_visible", typed("boolean", true))

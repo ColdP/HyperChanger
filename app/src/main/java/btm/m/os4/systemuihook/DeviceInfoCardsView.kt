@@ -26,6 +26,7 @@ class DeviceInfoCardsView(
     context: Context,
     private val nameSource: View,
     private val storageSource: View,
+    backgroundSource: SettingsAppearanceSource,
 ) : LinearLayout(context) {
     private val nameTitle = TextView(context)
     private val nameSummary = TextView(context)
@@ -47,6 +48,7 @@ class DeviceInfoCardsView(
         addView(deviceCard(context), LayoutParams(0, dp(148), 1f).apply { rightMargin = dp(4) })
         addView(storageCard(context), LayoutParams(0, dp(148), 1f).apply { leftMargin = dp(4) })
         isClickable = false
+        refreshBackground(backgroundSource)
         refresh()
     }
 
@@ -61,6 +63,10 @@ class DeviceInfoCardsView(
             runCatching { viewTreeObserver.removeOnPreDrawListener(updateListener) }
             listenerAttached = false
         }
+    }
+
+    fun refreshBackground(source: SettingsAppearanceSource) {
+        storageProgress.setBackgroundSource(source)
     }
 
     private fun deviceCard(context: Context): View {
@@ -112,6 +118,7 @@ class DeviceInfoCardsView(
         storageTitle.text = sourceText(storageSource, "title").ifBlank { "存储空间" }
         storageSummary.text = sourceText(storageSource, "summary")
         storageProgress.progress = storageFraction(storageSummary.text?.toString().orEmpty())
+        storageProgress.refreshTheme()
 
         val primary = themedColor(android.R.attr.textColorPrimary, if (isNight()) 0xFFFFFFFF.toInt() else 0xFF1B1B1B.toInt())
         val secondary = themedColor(android.R.attr.textColorSecondary, if (isNight()) 0xB3FFFFFF.toInt() else 0x991B1B1B.toInt())
@@ -195,18 +202,21 @@ class DeviceInfoCardsView(
         }
     }
 
-    private class StorageProgressView(context: Context) : View(context) {
+    private class StorageProgressView(context: Context) : MonetStorageAccentView(context) {
         var progress: Int = 0
             set(value) {
                 field = value.coerceIn(0, 1000)
                 invalidate()
             }
-        private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x33FFFFFF }
-        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF8CB8FF.toInt() }
+        private val track = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
         private val radius = context.resources.displayMetrics.density * 555f
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
+            val night = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+            track.color = if (night) 0x33FFFFFF else 0xFFE6E6E6.toInt()
+            fill.color = accentColor
             val bounds = RectF(0f, 0f, width.toFloat(), height.toFloat())
             canvas.drawRoundRect(bounds, radius, radius, track)
             if (progress > 0) {

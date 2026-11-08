@@ -81,7 +81,7 @@ class SettingsDeviceModule : XposedModule() {
             val lightCards = appearance.getInt("light_card_opacity", 100) < 100
             val forcedText = appearance.getInt("home_font", 0) != 0 || appearance.getInt("device_font", 0) != 0
             if (homeAppearance || deviceAppearance) {
-                installAppearanceHooks(param.defaultClassLoader, homeAppearance, deviceAppearance)
+                installAppearanceHooks(param.defaultClassLoader, homeAppearance, deviceAppearance, preferences)
             }
             if (logoAppearance) {
                 installPersistentLogoHooks()
@@ -1091,7 +1091,14 @@ class SettingsDeviceModule : XposedModule() {
         return strings[key].orEmpty().ifBlank { fallback }
     }
 
-    private fun installAppearanceHooks(classLoader: ClassLoader, homeEnabled: Boolean, deviceEnabled: Boolean) {
+    private fun installAppearanceHooks(classLoader: ClassLoader, homeEnabled: Boolean, deviceEnabled: Boolean, profilePreferences: SharedPreferences) {
+        val prepareSeparateCards: (Any) -> Unit = { adapter ->
+            val profile = profilePreferences.toDeviceProfileSettings()
+            if (profile.enabled) {
+                val data = adapter.javaClass.getDeclaredField("cardInfos").apply { isAccessible = true }.get(adapter)
+                applyDataListOverride(adapter, data, profile)
+            }
+        }
         installActivityAppearanceHooks(classLoader, homeEnabled, deviceEnabled)
         if (deviceEnabled) installModelHeaderSpacingHook(classLoader)
         if (homeEnabled) runCatching {
@@ -1139,7 +1146,7 @@ class SettingsDeviceModule : XposedModule() {
                     .setId("settings-appearance:device-view")
                     .intercept { chain ->
                         val result = chain.proceed()
-                        SettingsAppearanceApplier.applyDevice(chain.thisObject)
+                        SettingsAppearanceApplier.applyDevice(chain.thisObject, prepareSeparateCards)
                         SettingsAppearanceApplier.applyLogo(chain.thisObject)
                         result
                     }
@@ -1150,12 +1157,12 @@ class SettingsDeviceModule : XposedModule() {
                     .setId("settings-appearance:device-background-$index")
                     .intercept { chain ->
                         val result = chain.proceed()
-                        SettingsAppearanceApplier.applyDevice(chain.thisObject)
+                        SettingsAppearanceApplier.applyDevice(chain.thisObject, prepareSeparateCards)
                         result
                     }
             }
             hookLifecycle(device, "device", after = { target ->
-                SettingsAppearanceApplier.applyDevice(target)
+                SettingsAppearanceApplier.applyDevice(target, prepareSeparateCards)
                 SettingsAppearanceApplier.applyLogo(target)
             }, stop = { target -> SettingsAppearanceApplier.stopDevice(target) }, destroy = { target ->
                 SettingsAppearanceApplier.destroyDevice(target)

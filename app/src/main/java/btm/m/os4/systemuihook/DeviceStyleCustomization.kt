@@ -6,6 +6,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 internal const val DEVICE_STYLE_CUSTOMIZATION_KEY = "device_style_customization_v1"
+internal const val APPEARANCE_SLOT_STYLE3_CPU_ICON = "style3_cpu_icon"
+internal const val APPEARANCE_SLOT_STYLE3_CAMERA_BRAND = "style3_camera_brand"
 
 /** Dedicated controls; persisted and synchronized by the existing appearance store. */
 data class DeviceStyleCustomization(
@@ -23,6 +25,7 @@ data class DeviceStyleCustomization(
     val contentScale: Int = 0,
     val logoColorMode: Int = 0,
     val versionColorMode: Int = 0,
+    val versionText: String = "",
     val buttonOverallScale: Int = 0,
     val buttonTextScale: Int = 0,
     val buttonBackgroundLengthScale: Int = 0,
@@ -39,6 +42,18 @@ data class DeviceStyleCustomization(
     val buttonColorMode: Int = 0,
     val buttonGlassPresetId: String = "builtin-custom-a",
     val buttonGlassPresetJson: String = "",
+    val cpuIconMime: String = "",
+    val cpuIconVersion: Long = 0L,
+    val separateDetailsEnabled: Boolean = false,
+    val separateDetailsIconStyle: Int = 0,
+    /** 0 native/default, 1 follow the all-parameters processor choice, 2..9 vendor/custom. */
+    val separateProcessorIcon: Int = 0,
+    val separateProcessorIconMime: String = "",
+    val separateProcessorIconVersion: Long = 0L,
+    val cameraBrand: Int = 0,
+    val cameraBrandText: String = "",
+    val cameraBrandMime: String = "",
+    val cameraBrandVersion: Long = 0L,
 ) {
     fun assetsForStyle(style: Int) = independentAssets.getOrElse(style.coerceIn(0, 3)) { false }
     fun withAssetsForStyle(style: Int, enabled: Boolean) = copy(independentAssets = List(4) { if (it == style) enabled else assetsForStyle(it) })
@@ -58,6 +73,7 @@ data class DeviceStyleCustomization(
         put("contentScale", contentScale)
         put("logoColorMode", logoColorMode)
         put("versionColorMode", versionColorMode)
+        put("versionText", versionText)
         put("buttonOverallScale", buttonOverallScale)
         put("buttonTextScale", buttonTextScale)
         put("buttonBackgroundLengthScale", buttonBackgroundLengthScale)
@@ -74,6 +90,17 @@ data class DeviceStyleCustomization(
         put("buttonColorMode", buttonColorMode)
         put("buttonGlassPresetId", buttonGlassPresetId)
         put("buttonGlassPresetJson", buttonGlassPresetJson)
+        put("cpuIconMime", cpuIconMime)
+        put("cpuIconVersion", cpuIconVersion)
+        put("separateDetailsEnabled", separateDetailsEnabled)
+        put("separateDetailsIconStyle", separateDetailsIconStyle)
+        put("separateProcessorIcon", separateProcessorIcon)
+        put("separateProcessorIconMime", separateProcessorIconMime)
+        put("separateProcessorIconVersion", separateProcessorIconVersion)
+        put("cameraBrand", cameraBrand)
+        put("cameraBrandText", cameraBrandText)
+        put("cameraBrandMime", cameraBrandMime)
+        put("cameraBrandVersion", cameraBrandVersion)
     }.toString()
 
     internal fun glass(): SoftGlassSettings = runCatching {
@@ -100,6 +127,7 @@ data class DeviceStyleCustomization(
                 contentScale = json.optInt("contentScale", 0).coerceIn(-100..100),
                 logoColorMode = json.optInt("logoColorMode", 0).coerceIn(0..2),
                 versionColorMode = json.optInt("versionColorMode", 0).coerceIn(0..2),
+                versionText = json.optString("versionText", "").take(256),
                 buttonOverallScale = json.optInt("buttonOverallScale", 0).coerceIn(-100..100),
                 buttonTextScale = json.optInt("buttonTextScale", 0).coerceIn(-100..100),
                 // Older presets scaled both background axes together.
@@ -117,6 +145,17 @@ data class DeviceStyleCustomization(
                 buttonColorMode = json.optInt("buttonColorMode", 0).coerceIn(0..2),
                 buttonGlassPresetId = json.optString("buttonGlassPresetId", "builtin-custom-a"),
                 buttonGlassPresetJson = json.optString("buttonGlassPresetJson", ""),
+                cpuIconMime = json.optString("cpuIconMime", ""),
+                cpuIconVersion = json.optLong("cpuIconVersion", 0L),
+                separateDetailsEnabled = json.optBoolean("separateDetailsEnabled", false),
+                separateDetailsIconStyle = json.optInt("separateDetailsIconStyle", 0).coerceIn(0..1),
+                separateProcessorIcon = json.optInt("separateProcessorIcon", 0).coerceIn(0..9),
+                separateProcessorIconMime = json.optString("separateProcessorIconMime", ""),
+                separateProcessorIconVersion = json.optLong("separateProcessorIconVersion", 0L),
+                cameraBrand = json.optInt("cameraBrand", 0).coerceIn(0..10),
+                cameraBrandText = json.optString("cameraBrandText", "").take(256),
+                cameraBrandMime = json.optString("cameraBrandMime", ""),
+                cameraBrandVersion = json.optLong("cameraBrandVersion", 0L),
             )
         }.getOrElse { DeviceStyleCustomization(independentAssets = List(4) { legacyAssets }) }
     }

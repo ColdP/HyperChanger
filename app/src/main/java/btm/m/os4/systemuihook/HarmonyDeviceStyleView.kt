@@ -293,6 +293,7 @@ class HarmonyInfoCardsView(
     private val nameSource: View,
     private val storageSource: View,
     private val imageSource: SettingsAppearanceSource,
+    backgroundSource: SettingsAppearanceSource,
 ) : LinearLayout(context) {
     private val nameTitle = TextView(context)
     private val nameSummary = TextView(context)
@@ -317,6 +318,7 @@ class HarmonyInfoCardsView(
         clipToPadding = false
         addView(nameCard(), LayoutParams(0, dp(182), 1f).apply { rightMargin = dp(6) })
         addView(storageCard(), LayoutParams(0, dp(182), 1f).apply { leftMargin = dp(6) })
+        refreshBackground(backgroundSource)
         refresh(currentScale)
     }
 
@@ -333,6 +335,7 @@ class HarmonyInfoCardsView(
         storageTitle.text = sourceText(storageSource, "title").ifBlank { "存储空间" }
         storageSummary.text = sourceText(storageSource, "summary")
         ring.progress = storageFraction(storageSummary.text?.toString().orEmpty())
+        ring.refreshTheme()
         val imageKey = imageSource.cacheKey()
         if (imageKey != decodedImageKey) {
             phone.setImageDrawable(decode(imageSource))
@@ -353,6 +356,10 @@ class HarmonyInfoCardsView(
         if (listenerAttached) return
         viewTreeObserver.addOnPreDrawListener(updateListener)
         listenerAttached = true
+    }
+
+    fun refreshBackground(source: SettingsAppearanceSource) {
+        ring.setBackgroundSource(source)
     }
 
     fun dispose() {
@@ -455,7 +462,7 @@ class HarmonyInfoCardsView(
     private fun isNight() = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
 
-    private class StorageRingView(context: Context) : View(context) {
+    private class StorageRingView(context: Context) : MonetStorageAccentView(context) {
         var progress: Int = 0
             set(value) { field = value.coerceIn(0, 1000); invalidate() }
         private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = context.resources.displayMetrics.density * 10f; strokeCap = Paint.Cap.ROUND }
@@ -464,7 +471,7 @@ class HarmonyInfoCardsView(
             val bounds = RectF(inset, inset, width - inset, height - inset)
             stroke.color = if (isNight()) 0x443F4C63 else 0x223C5B8F
             canvas.drawArc(bounds, -90f, 360f, false, stroke)
-            stroke.color = if (isNight()) 0xFFB9D4FF.toInt() else 0xFF4D83E8.toInt()
+            stroke.color = accentColor
             canvas.drawArc(bounds, -90f, 360f * progress / 1000f, false, stroke)
         }
         private fun isNight() = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES

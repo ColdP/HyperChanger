@@ -5,6 +5,8 @@ import android.view.View
 import android.view.ViewGroup
 import kotlin.math.roundToInt
 
+internal const val DEVICE_STYLE_CARD_GAP_DP = 12
+
 /** One visible 12dp gap at each custom card boundary; native parameter contents are untouched. */
 internal class DeviceCardSpacingSession(private val info: View, private val detail: View) {
     private val infoMargins = (info.layoutParams as? ViewGroup.MarginLayoutParams)?.let { it.topMargin to it.bottomMargin }
@@ -14,7 +16,7 @@ internal class DeviceCardSpacingSession(private val info: View, private val deta
 
     fun enforce() {
         setMargins(info, 0, 0)
-        setMargins(detail, (12 * detail.resources.displayMetrics.density).roundToInt(), null)
+        setMargins(detail, (DEVICE_STYLE_CARD_GAP_DP * detail.resources.displayMetrics.density).roundToInt(), null)
     }
 
     fun remove() {

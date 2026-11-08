@@ -37,6 +37,7 @@ object SettingsAppearanceApplier {
     private val harmonyInfoCards = Collections.synchronizedMap(WeakHashMap<Any, HarmonyInfoCardsSession>())
     private val colorOsCards = Collections.synchronizedMap(WeakHashMap<Any, ColorOsCardSession>())
     private val colorOsInfoCards = Collections.synchronizedMap(WeakHashMap<Any, ColorOsInfoCardsSession>())
+    private val separateDeviceDetails = Collections.synchronizedMap(WeakHashMap<Any, SeparateDeviceDetailsSession>())
     private val deviceCardSpacing = Collections.synchronizedMap(WeakHashMap<Any, DeviceCardSpacingSession>())
     private val cardLikeViews = Collections.synchronizedMap(WeakHashMap<View, Boolean>())
     private val cardColorResources = Collections.synchronizedMap(WeakHashMap<Resources, MutableMap<Int, Boolean>>())
@@ -49,7 +50,7 @@ object SettingsAppearanceApplier {
         SettingsAppearanceSources.query(context, APPEARANCE_SLOT_DEVICE).exists
     }.getOrDefault(false)
 
-    fun applyDevice(fragment: Any) {
+    fun applyDevice(fragment: Any, prepareSeparateCards: (Any) -> Unit = {}) {
         runCatching {
             val context = fragment.javaClass.getMethod("getContext").invoke(fragment) as? android.content.Context ?: return
             val source = SettingsAppearanceSources.query(context, APPEARANCE_SLOT_DEVICE)
@@ -64,7 +65,7 @@ object SettingsAppearanceApplier {
                 // selected, even if the stock device background is disabled.
                 if (old != null || source.deviceInterfaceStyle != DEVICE_INTERFACE_STYLE_SYSTEM || source.tutorialCardEnabled) {
                     fragmentActivity(fragment)?.let { applyFontMode(it, source.fontMode) }
-                    applyTutorialCard(fragment)
+                    applyTutorialCard(fragment, prepareSeparateCards)
                 }
                 return
             }
@@ -74,12 +75,12 @@ object SettingsAppearanceApplier {
                 old.view.onHostResume()
                 old.refresh(context)
                 fragmentActivity(fragment)?.let { applyFontMode(it, source.fontMode) }
-                applyTutorialCard(fragment)
+                applyTutorialCard(fragment, prepareSeparateCards)
                 return
             }
             val background = findDeviceBackground(fragment, context) ?: run {
                 Log.w(TAG, "device fragment has no mBgEffectView class=${fragment.javaClass.name}")
-                applyTutorialCard(fragment)
+                applyTutorialCard(fragment, prepareSeparateCards)
                 return
             }
             val parent = background.parent as? ViewGroup ?: return
@@ -94,7 +95,7 @@ object SettingsAppearanceApplier {
             deviceLayers[fragment] = session
             Log.i(TAG, "device attached media=${media.javaClass.name} parent=${media.parent?.javaClass?.name}")
             fragmentActivity(fragment)?.let { applyFontMode(it, source.fontMode) }
-            applyTutorialCard(fragment)
+            applyTutorialCard(fragment, prepareSeparateCards)
         }.onFailure { error -> Log.e(TAG, "device apply failed", error) }
     }
 
@@ -143,6 +144,7 @@ object SettingsAppearanceApplier {
         harmonyInfoCards.remove(fragment)?.remove()
         colorOsCards.remove(fragment)?.remove()
         colorOsInfoCards.remove(fragment)?.remove()
+        separateDeviceDetails.remove(fragment)?.remove()
         deviceCardSpacing.remove(fragment)?.remove()
     }
     fun stop(activity: Activity?) { activity?.let { layers[it]?.view?.onHostStop() } }
@@ -158,7 +160,7 @@ object SettingsAppearanceApplier {
         logoSessions.remove(fragment)?.restore()
     }
 
-    fun applyTutorialCard(fragment: Any) {
+    fun applyTutorialCard(fragment: Any, prepareSeparateCards: (Any) -> Unit = {}) {
         runCatching {
             val context = fragment.javaClass.getMethod("getContext").invoke(fragment) as? android.content.Context ?: return
             val root = fragment.javaClass.getMethod("getView").invoke(fragment) as? View ?: return
@@ -177,6 +179,7 @@ object SettingsAppearanceApplier {
             if (style != DEVICE_INTERFACE_STYLE_THREE) {
                 colorOsCards.remove(fragment)?.remove()
                 colorOsInfoCards.remove(fragment)?.remove()
+                separateDeviceDetails.remove(fragment)?.remove()
             }
             val nameCard = root.findViewById<View>(context.resources.getIdentifier("device_name_card_view", "id", context.packageName))
             val infoContainer = nameCard?.parent as? View
@@ -195,9 +198,9 @@ object SettingsAppearanceApplier {
                     harmonyInfoCards.remove(fragment)?.remove()
                     val source = SettingsAppearanceSources.query(context, APPEARANCE_SLOT_DEVICE_IMAGE)
                     val logo = SettingsAppearanceSources.query(context, APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO)
-                    applyDeviceInfoCards(fragment, context, root, source.copy(tutorialCardInfoCardsEnabled = true))
                     val old = tutorialCards[fragment]
                     val background = SettingsAppearanceSources.query(context, APPEARANCE_SLOT_STYLE1_UPDATE_BACKGROUND)
+                    applyDeviceInfoCards(fragment, context, root, source.copy(tutorialCardInfoCardsEnabled = true), background)
                     val key = source.cacheKey() + logo.cacheKey() + background.cacheKey()
                     if (old != null && old.matches(target, spacer) && old.key == key) {
                         old.enforceTutorialLayout(context)
@@ -240,7 +243,7 @@ object SettingsAppearanceApplier {
                         harmonyCards[fragment] = session
                         card.refresh(image)
                     }
-                    applyHarmonyInfoCards(fragment, context, root, image)
+                    applyHarmonyInfoCards(fragment, context, root, image, background)
                 }
                 DEVICE_INTERFACE_STYLE_THREE -> {
                     tutorialCards.remove(fragment)?.remove()
@@ -280,18 +283,68 @@ object SettingsAppearanceApplier {
                             oldInfo.view.refresh(background)
                         }
                     }
+                    applySeparateDeviceDetails(
+                        fragment,
+                        context,
+                        detailContainer,
+                        SettingsAppearanceSources.query(context, APPEARANCE_SLOT_DEVICE_IMAGE),
+                        prepareSeparateCards,
+                    )
                 }
                 else -> {
                     tutorialCards.remove(fragment)?.remove()
                     deviceInfoCards.remove(fragment)?.remove()
                     harmonyCards.remove(fragment)?.remove()
                     harmonyInfoCards.remove(fragment)?.remove()
+                    separateDeviceDetails.remove(fragment)?.remove()
                 }
             }
         }.onFailure { error -> Log.e(TAG, "tutorial card apply failed", error) }
     }
 
-    private fun applyHarmonyInfoCards(fragment: Any, context: android.content.Context, root: View, image: SettingsAppearanceSource) {
+    private fun applySeparateDeviceDetails(
+        fragment: Any,
+        context: android.content.Context,
+        detailContainer: View?,
+        source: SettingsAppearanceSource,
+        prepareSeparateCards: (Any) -> Unit,
+    ) {
+        val enabled = source.deviceStyleCustomization.separateDetailsEnabled
+        val host = detailContainer as? ViewGroup
+        val recycler = host?.findViewById<View>(context.resources.getIdentifier("description_grid", "id", context.packageName))
+        if (!enabled || host == null || recycler == null) {
+            separateDeviceDetails.remove(fragment)?.remove()
+            return
+        }
+        val old = separateDeviceDetails[fragment]
+        val iconStyle = source.deviceStyleCustomization.separateDetailsIconStyle
+        val follows = source.deviceStyleCustomization.separateProcessorIcon == 1
+        val processorIconStyle = if (follows) {
+            if (source.processorIconReplacement == PROCESSOR_ICON_SYSTEM) 0 else source.processorIconReplacement + 1
+        } else source.deviceStyleCustomization.separateProcessorIcon
+        val iconSlot = if (follows) APPEARANCE_SLOT_CPU_ICON else APPEARANCE_SLOT_STYLE3_CPU_ICON
+        val assetKey = if (processorIconStyle == 9) SettingsAppearanceSources.query(context, iconSlot).cacheKey() else ""
+        val cameraAssetKey = if (source.deviceStyleCustomization.cameraBrand == 10) {
+            SettingsAppearanceSources.query(context, APPEARANCE_SLOT_STYLE3_CAMERA_BRAND).cacheKey()
+        } else ""
+        val key = "$iconStyle:$processorIconStyle:$iconSlot:$assetKey:$cameraAssetKey:${source.deviceStyleCustomization.encode()}"
+        if (old != null && old.matches(host, recycler, key)) {
+            old.refresh()
+            return
+        }
+        old?.remove()
+        val replacement = SeparateDeviceDetailsView(
+            context,
+            iconStyle,
+            processorIconStyle,
+            prepareSeparateCards,
+            iconSlot,
+            source.deviceStyleCustomization,
+        )
+        separateDeviceDetails[fragment] = SeparateDeviceDetailsSession(host, recycler, replacement, key)
+    }
+
+    private fun applyHarmonyInfoCards(fragment: Any, context: android.content.Context, root: View, image: SettingsAppearanceSource, background: SettingsAppearanceSource) {
         val old = harmonyInfoCards[fragment]
         val nameId = context.resources.getIdentifier("device_name_card_view", "id", context.packageName)
         val storageId = context.resources.getIdentifier("device_memory_card_view", "id", context.packageName)
@@ -301,11 +354,12 @@ object SettingsAppearanceApplier {
         if (parent !== storage.parent) return
         if (old != null && old.matches(parent, name, storage, image.cacheKey())) {
             old.enforce()
+            old.view.refreshBackground(background)
             old.view.refresh(image.style2ImageScale)
             return
         }
         old?.remove()
-        val row = HarmonyInfoCardsView(context, name, storage, image)
+        val row = HarmonyInfoCardsView(context, name, storage, image, background)
         val index = parent.indexOfChild(name).coerceAtLeast(0)
         parent.addView(row, index, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, tutorialDp(context, 182)))
         val session = HarmonyInfoCardsSession(parent, name, storage, row, image.cacheKey())
@@ -318,6 +372,7 @@ object SettingsAppearanceApplier {
         context: android.content.Context,
         root: View,
         source: SettingsAppearanceSource,
+        background: SettingsAppearanceSource,
     ) {
         val old = deviceInfoCards[fragment]
         if (!source.tutorialCardInfoCardsEnabled) {
@@ -333,10 +388,11 @@ object SettingsAppearanceApplier {
         if (parent !== storage.parent) return
         if (old != null && old.matches(parent, name, storage)) {
             old.enforce()
+            old.view.refreshBackground(background)
             return
         }
         old?.remove()
-        val row = DeviceInfoCardsView(context, name, storage)
+        val row = DeviceInfoCardsView(context, name, storage, background)
         val index = parent.indexOfChild(name).coerceAtLeast(0)
         parent.addView(row, index, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -937,7 +993,7 @@ object SettingsAppearanceApplier {
         private val parent: LinearLayout,
         private val name: View,
         private val storage: View,
-        private val view: DeviceInfoCardsView,
+        val view: DeviceInfoCardsView,
     ) {
         private val originalBackground = parent.background
         private val originalChildVisibility = List(parent.childCount) { index ->

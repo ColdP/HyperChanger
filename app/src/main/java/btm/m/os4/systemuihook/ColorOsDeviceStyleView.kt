@@ -213,7 +213,7 @@ internal class ColorOsUpdateCardView(
         else -> if (backgroundPresent || resources.configuration.uiMode and 0x30 == 0x20) Color.WHITE else Color.DKGRAY
     }
     private fun refreshVersion() {
-        val current = (updateSource as? TextView)?.text ?: ""
+        val current = controls.versionText.takeIf { it.isNotBlank() } ?: (updateSource as? TextView)?.text ?: ""
         if (version.text.toString() != current.toString()) version.text = current
         val now = android.os.SystemClock.elapsedRealtime()
         if (updateCard.visibility == View.VISIBLE && now >= nextUpdateCheck) {
@@ -296,7 +296,7 @@ internal class ColorOsInfoCardsView(context: Context, private val nameSource: Vi
             val surfaceColor = if (surfaceId != 0) runCatching { context.getColor(surfaceId) }.getOrNull() else null
             background = GradientDrawable().apply { setColor(surfaceColor ?: if (night) 0x33FFFFFF else Color.WHITE); cornerRadius = dp(22).toFloat() }
             listOf(name, storage).forEach { it.setTextColor(if (night) Color.WHITE else 0xFF17181C.toInt()) }
-            listOf(nameValue, storageValue).forEach { it.setTextColor(0xFF999999.toInt()) }
+            listOf(nameValue, storageValue).forEach { it.setTextColor(if (night) 0xB8E9ECF5.toInt() else 0xFF999999.toInt()) }
             divider.invalidate()
             progress.invalidate()
         }

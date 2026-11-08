@@ -4617,20 +4617,6 @@ private fun SystemSettings(
             }
         }
     }
-    var cpuIconImported by remember {
-        mutableStateOf(runCatching { appearanceFile(cpuIconContext, APPEARANCE_SLOT_CPU_ICON).exists() }.getOrDefault(false))
-    }
-    val pickCpuIcon = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            runCatching {
-                copyAppearanceFile(cpuIconContext, APPEARANCE_SLOT_CPU_ICON, uri)
-                cpuIconImported = true
-                Toast.makeText(cpuIconContext, tr("已导入", "已导入"), Toast.LENGTH_SHORT).show()
-            }.onFailure {
-                Toast.makeText(cpuIconContext, tr("导入失败", "导入失败"), Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
     AppList(padding, scroll) {
         item { PowerBatteryPreferences() }
         item {
@@ -4737,21 +4723,12 @@ private fun SystemSettings(
                     enter = expandVertically(animationSpec = tween(220)) + fadeIn(animationSpec = tween(180)),
                     exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(animationSpec = tween(120)),
                 ) {
-                    Column(Modifier.fillMaxWidth()) {
-                        SharedViewArrowPreference(
-                            title = tr("导入处理器图标", "导入处理器图标"),
-                            summary = if (cpuIconImported) tr("已导入", "已导入") else tr("未导入", "未导入"),
-                            onClick = { pickCpuIcon.launch(arrayOf("image/*", "application/xml", "text/xml")) },
-                        )
-                        SharedViewArrowPreference(
-                            title = tr("清除处理器图标", "清除处理器图标"),
-                            summary = if (cpuIconImported) tr("已导入", "已导入") else tr("无图标", "无图标"),
-                            onClick = {
-                                runCatching { appearanceFile(cpuIconContext, APPEARANCE_SLOT_CPU_ICON).delete() }
-                                cpuIconImported = false
-                            },
-                        )
-                    }
+                    DeviceAppearanceAssetPreference(
+                        appearance = appearance,
+                        slot = APPEARANCE_SLOT_CPU_ICON,
+                        title = tr("device3_processor_custom_file", "自定义处理器图标"),
+                        update = updateAppearance,
+                    )
                 }
                 SwitchPreference(
                     title = tr("解锁更多自动锁屏选项", "解锁更多自动锁屏选项"),
@@ -5167,6 +5144,7 @@ OverlayDropdownPreference(
         if (style == DEVICE_INTERFACE_STYLE_THREE) {
             item { StyleThreeBackgroundControls(appearance, update) }
             item { StyleThreeLogoControls(appearance, update) }
+            item { StyleThreeSeparateDetailsControls(appearance, update) }
             item { StyleThreeUpdateControls(appearance, update) }
         }
         if (style == DEVICE_INTERFACE_STYLE_SYSTEM) {
@@ -5665,7 +5643,7 @@ OverlayDropdownPreference(
 }
 
 @Composable
-private fun DeviceProfileFieldDialog(
+internal fun DeviceProfileFieldDialog(
     title: String,
     current: String,
     onDismiss: () -> Unit,

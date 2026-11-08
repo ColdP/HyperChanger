@@ -44,6 +44,9 @@ internal fun SettingsAppearanceSettings.assetMime(slot: String): String {
         APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND -> style2BackgroundMime
         APPEARANCE_SLOT_STYLE3_BACKGROUND -> style3BackgroundMime
         APPEARANCE_SLOT_STYLE3_LOGO -> style3LogoMime
+        APPEARANCE_SLOT_CPU_ICON -> deviceStyleCustomization.cpuIconMime
+        APPEARANCE_SLOT_STYLE3_CPU_ICON -> deviceStyleCustomization.separateProcessorIconMime
+        APPEARANCE_SLOT_STYLE3_CAMERA_BRAND -> deviceStyleCustomization.cameraBrandMime
         else -> ""
     }
 }
@@ -64,6 +67,9 @@ internal fun SettingsAppearanceSettings.withAsset(slot: String, mime: String, ve
         APPEARANCE_SLOT_STYLE2_UPDATE_BACKGROUND -> copy(style2BackgroundMime = mime, style2BackgroundVersion = version)
         APPEARANCE_SLOT_STYLE3_BACKGROUND -> copy(style3BackgroundMime = mime, style3BackgroundVersion = version)
         APPEARANCE_SLOT_STYLE3_LOGO -> copy(style3LogoMime = mime, style3LogoVersion = version)
+        APPEARANCE_SLOT_CPU_ICON -> copy(deviceStyleCustomization = deviceStyleCustomization.copy(cpuIconMime = mime, cpuIconVersion = version))
+        APPEARANCE_SLOT_STYLE3_CPU_ICON -> copy(deviceStyleCustomization = deviceStyleCustomization.copy(separateProcessorIconMime = mime, separateProcessorIconVersion = version))
+        APPEARANCE_SLOT_STYLE3_CAMERA_BRAND -> copy(deviceStyleCustomization = deviceStyleCustomization.copy(cameraBrandMime = mime, cameraBrandVersion = version))
         else -> this
     }
 }
@@ -109,7 +115,7 @@ private fun AppearanceAssetRow(mime: String, slot: String, title: String, update
     var revision by remember { mutableIntStateOf(0) }
     val file = appearanceFile(context, slot)
     val savedName = remember(mime, revision) { runCatching { assetNameFile(context, slot).readText() }.getOrDefault("").ifBlank { file.name } }
-    val imported = mime.isNotEmpty() && file.isFile
+    val imported = file.isFile && (mime.isNotEmpty() || slot == APPEARANCE_SLOT_CPU_ICON)
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             if ((imported && !cleared) || selected != null) replacement = uri
@@ -125,7 +131,7 @@ private fun AppearanceAssetRow(mime: String, slot: String, title: String, update
             else if (imported) previewBitmap(context, Uri.fromFile(file)) else null
         }
         val name = selected?.let { appearanceAssetDisplayName(context, it) } ?: if (imported && !cleared) savedName else ""
-        val isLogo = slot.substringBefore(':') in listOf(APPEARANCE_SLOT_LOGO, APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO, APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO, APPEARANCE_SLOT_STYLE3_LOGO)
+        val isLogo = slot.substringBefore(':') in listOf(APPEARANCE_SLOT_LOGO, APPEARANCE_SLOT_CUSTOM_DEVICE_LOGO, APPEARANCE_SLOT_STYLE2_CUSTOM_DEVICE_LOGO, APPEARANCE_SLOT_STYLE3_LOGO, APPEARANCE_SLOT_CPU_ICON, APPEARANCE_SLOT_STYLE3_CPU_ICON, APPEARANCE_SLOT_STYLE3_CAMERA_BRAND)
         WindowDialog(show = true, onDismissRequest = { open = false }) {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp), horizontalAlignment = Alignment.Start) {
                 Text(title, style = MiuixTheme.textStyles.title3)

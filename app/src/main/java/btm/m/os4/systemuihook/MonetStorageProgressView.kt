@@ -17,41 +17,17 @@ import com.materialkolor.quantize.QuantizerCelebi
 import com.materialkolor.score.Score
 import java.util.concurrent.Executors
 
-/** Single occupied-space indicator. Settings remains the source of both byte counts and text. */
-internal class MonetStorageProgressView(context: Context) : View(context) {
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private var occupied = 0f
-    private var foreground = Color.TRANSPARENT
+private val storageMonetWorker = Executors.newSingleThreadExecutor { task -> Thread(task, "HyperChanger-StorageMonet").apply { isDaemon = true } }
+
+/** Shared artwork/wallpaper Monet colors for all three storage indicator shapes. */
+internal open class MonetStorageAccentView(context: Context) : View(context) {
+    protected var accentColor = Color.TRANSPARENT
+        private set
     private var backgroundSource: SettingsAppearanceSource? = null
     private var sourceKey = ""
     private var palette: Accent? = null
     private var colorRequest = 0
-    private var readRequest = 0
-    private var reading = false
     private var hostAttached = false
-
-    private val refreshUsage = object : Runnable {
-        override fun run() {
-            if (!hostAttached || reading) return
-            reading = true
-            val request = ++readRequest
-            worker.execute {
-                val fraction = runCatching {
-                    val type = context.classLoader.loadClass("com.android.settings.device.MiuiAboutPhoneUtils")
-                    val native = type.getMethod("getInstance", Context::class.java).invoke(null, context)
-                    val total = (type.getMethod("getTotalMemoryBytes").invoke(native) as Number).toLong()
-                    val available = (type.getMethod("getAvailableMemorySize").invoke(native) as Number).toLong()
-                    storageOccupiedFraction(total, available)
-                }.getOrNull()
-                post {
-                    if (!hostAttached || request != readRequest) return@post
-                    reading = false
-                    if (fraction != null && occupied != fraction) { occupied = fraction; invalidate() }
-                    postDelayed(this, 15_000L)
-                }
-            }
-        }
-    }
 
     fun setBackgroundSource(source: SettingsAppearanceSource) {
         backgroundSource = source
@@ -69,7 +45,7 @@ internal class MonetStorageProgressView(context: Context) : View(context) {
         if (palette != null) return
         val key = sourceKey
         val request = ++colorRequest
-        worker.execute {
+        storageMonetWorker.execute {
             val accent = runCatching { extractAccent(context, source) }.getOrNull()
             if (accent != null) accents.put(key, accent)
             post {
@@ -85,7 +61,7 @@ internal class MonetStorageProgressView(context: Context) : View(context) {
         val next = palette?.let { if (night) it.dark else it.light } ?: context.getColor(
             if (night) android.R.color.system_accent1_200 else android.R.color.system_accent1_600,
         )
-        if (next != foreground) { foreground = next; invalidate() }
+        if (next != accentColor) { accentColor = next; invalidate() }
     }
 
     override fun onAttachedToWindow() {
@@ -93,15 +69,11 @@ internal class MonetStorageProgressView(context: Context) : View(context) {
         hostAttached = true
         refreshTheme()
         extractArtwork()
-        post(refreshUsage)
     }
 
     override fun onDetachedFromWindow() {
         hostAttached = false
         colorRequest++
-        readRequest++
-        reading = false
-        removeCallbacks(refreshUsage)
         super.onDetachedFromWindow()
     }
 
@@ -111,26 +83,9 @@ internal class MonetStorageProgressView(context: Context) : View(context) {
         invalidate()
     }
 
-    override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
-        val night = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
-        val bounds = RectF(0f, 0f, width.toFloat(), height.toFloat())
-        val radius = height / 2f
-        paint.color = if (night) 0x24FFFFFF else 0xFFE6E6E6.toInt()
-        canvas.drawRoundRect(bounds, radius, radius, paint)
-        if (occupied <= 0f) return
-        paint.color = foreground
-        // Clip the rounded occupied pill to the real byte fraction, even for very small usage.
-        canvas.save()
-        canvas.clipRect(0f, 0f, width * occupied, height.toFloat())
-        canvas.drawRoundRect(bounds, radius, radius, paint)
-        canvas.restore()
-    }
-
     private data class Accent(val light: Int, val dark: Int)
 
     companion object {
-        private val worker = Executors.newSingleThreadExecutor { task -> Thread(task, "HyperChanger-StorageMonet").apply { isDaemon = true } }
         private val accents = LruCache<String, Accent>(8)
 
         private fun extractAccent(context: Context, source: SettingsAppearanceSource): Accent? {
@@ -160,6 +115,68 @@ internal class MonetStorageProgressView(context: Context) : View(context) {
             } finally { bitmap.recycle() }
         }
     }
+}
+
+/** Single occupied-space indicator. Settings remains the source of both byte counts and text. */
+internal class MonetStorageProgressView(context: Context) : MonetStorageAccentView(context) {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private var occupied = 0f
+    private var readRequest = 0
+    private var reading = false
+    private var hostAttached = false
+    private val refreshUsage = object : Runnable {
+        override fun run() {
+            if (!hostAttached || reading) return
+            reading = true
+            val request = ++readRequest
+            storageMonetWorker.execute {
+                val fraction = runCatching {
+                    val type = context.classLoader.loadClass("com.android.settings.device.MiuiAboutPhoneUtils")
+                    val native = type.getMethod("getInstance", Context::class.java).invoke(null, context)
+                    val total = (type.getMethod("getTotalMemoryBytes").invoke(native) as Number).toLong()
+                    val available = (type.getMethod("getAvailableMemorySize").invoke(native) as Number).toLong()
+                    storageOccupiedFraction(total, available)
+                }.getOrNull()
+                post {
+                    if (!hostAttached || request != readRequest) return@post
+                    reading = false
+                    if (fraction != null && occupied != fraction) { occupied = fraction; invalidate() }
+                    postDelayed(this, 15_000L)
+                }
+            }
+        }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        hostAttached = true
+        post(refreshUsage)
+    }
+
+    override fun onDetachedFromWindow() {
+        hostAttached = false
+        readRequest++
+        reading = false
+        removeCallbacks(refreshUsage)
+        super.onDetachedFromWindow()
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val night = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+        val bounds = RectF(0f, 0f, width.toFloat(), height.toFloat())
+        val radius = height / 2f
+        paint.color = if (night) 0x24FFFFFF else 0xFFE6E6E6.toInt()
+        canvas.drawRoundRect(bounds, radius, radius, paint)
+        if (occupied <= 0f) return
+        paint.color = accentColor
+        // Clip the rounded occupied pill to the real byte fraction, even for very small usage.
+        canvas.save()
+        canvas.clipRect(0f, 0f, width * occupied, height.toFloat())
+        canvas.drawRoundRect(bounds, radius, radius, paint)
+        canvas.restore()
+    }
+
 }
 
 internal fun storageOccupiedFraction(total: Long, available: Long): Float =

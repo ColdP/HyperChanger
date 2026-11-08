@@ -1,0 +1,20 @@
+{
+  "description": "Brand artwork used for the optional Style 3 imaging-brand row. Downloaded 2026-11-08. Converted to cropped transparent PNG resources.",
+  "sources": {
+    "leica": "https://cdn.jsdelivr.net/npm/simple-icons@13.0.0/icons/leica.svg",
+    "fujifilm": "https://cdn.jsdelivr.net/npm/simple-icons@13.0.0/icons/fujifilm.svg",
+    "sony": "https://cdn.jsdelivr.net/npm/simple-icons@13.0.0/icons/sony.svg",
+    "nikon": "https://cdn.jsdelivr.net/npm/simple-icons@13.0.0/icons/nikon.svg",
+    "panasonic": "https://cdn.jsdelivr.net/npm/simple-icons@13.0.0/icons/panasonic.svg",
+    "zeiss": "https://upload.wikimedia.org/wikipedia/commons/9/95/Zeiss_logo.svg",
+    "hasselblad": "https://upload.wikimedia.org/wikipedia/commons/6/6b/Hasselblad_Logo.svg",
+    "canon": "https://upload.wikimedia.org/wikipedia/commons/0/0a/Canon_wordmark.svg"
+  },
+  "simpleIconsVersion": "13.0.0",
+  "simpleIconsLicense": "https://github.com/simple-icons/simple-icons/blob/13.0.0/LICENSE.md",
+  "commonsPages": {
+    "zeiss": "https://commons.wikimedia.org/wiki/File:Zeiss_logo.svg",
+    "hasselblad": "https://commons.wikimedia.org/wiki/File:Hasselblad_Logo.svg",
+    "canon": "https://commons.wikimedia.org/wiki/File:Canon_wordmark.svg"
+  }
+}

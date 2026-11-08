@@ -70,6 +70,7 @@ data class SettingsAppearanceSource(
     val style3LogoVersion: Long,
     val style3UpdateStatusVisible: Boolean = true,
     val deviceStyleCustomization: DeviceStyleCustomization = DeviceStyleCustomization(),
+    val processorIconReplacement: Int = PROCESSOR_ICON_SYSTEM,
 ) {
     val exists: Boolean get() = enabled && size >= 0L
     val isVideo: Boolean get() = mime.startsWith("video/")
@@ -174,6 +175,7 @@ object SettingsAppearanceSources {
                     style2BackgroundHorizontalOffset = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE2_BACKGROUND_HORIZONTAL_OFFSET).coerceIn(-120, 120),
                     style2BackgroundScale = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE2_BACKGROUND_SCALE).coerceIn(0, 200),
                     style3BackgroundMime = "", style3BackgroundVersion = 0L, style3LogoMime = "", style3LogoVersion = 0L,
+                    processorIconReplacement = cursor.int(SettingsAppearanceProvider.COLUMN_PROCESSOR_ICON).coerceIn(0, PROCESSOR_ICON_MAX),
                     deviceStyleCustomization = DeviceStyleCustomization.decode(cursor.string(SettingsAppearanceProvider.COLUMN_DEVICE_STYLE_CONTROLS)),
                     style3UpdateStatusVisible = cursor.int(SettingsAppearanceProvider.COLUMN_STYLE3_UPDATE_STATUS_VISIBLE) != 0,
                 )

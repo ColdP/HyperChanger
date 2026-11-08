@@ -25,9 +25,15 @@ internal fun StyleThreeBackgroundControls(appearance: SettingsAppearanceSettings
 @Composable
 internal fun StyleThreeLogoControls(appearance: SettingsAppearanceSettings, update: AppearanceUpdate) {
     val s = appearance.deviceStyleCustomization
+    var editVersion by remember { mutableStateOf(false) }
     fun save(transform: (DeviceStyleCustomization) -> DeviceStyleCustomization) = update { it.copy(deviceStyleCustomization = transform(it.deviceStyleCustomization)) }
     Group(tr("device3_logo_version", "LOGO与版本号")) {
         DeviceAppearanceAssetPreference(appearance, APPEARANCE_SLOT_STYLE3_LOGO, tr("自定义LOGO", "自定义LOGO"), update)
+        SharedViewArrowPreference(
+            title = tr("device3_custom_version", "自定义版本号"),
+            summary = s.versionText.ifBlank { tr("device3_version_default_hint", "留空时保持系统默认") },
+            onClick = { editVersion = true },
+        )
         OverlayDropdownPreference(
             title = tr("LOGO对齐方式", "LOGO对齐方式"),
             items = listOf(tr("左对齐", "左对齐"), tr("居中", "居中"), tr("右对齐", "右对齐")),
@@ -42,6 +48,13 @@ internal fun StyleThreeLogoControls(appearance: SettingsAppearanceSettings, upda
         DeviceColorMode(tr("LOGO颜色模式", "LOGO颜色模式"), s.logoColorMode) { v -> save { it.copy(logoColorMode = v) } }
         DeviceColorMode(tr("版本号颜色模式", "版本号颜色模式"), s.versionColorMode) { v -> save { it.copy(versionColorMode = v) } }
     }
+    if (editVersion) DeviceProfileFieldDialog(
+        title = tr("device3_custom_version", "自定义版本号"),
+        current = s.versionText,
+        inputLabel = tr("device3_version_default_hint", "留空时保持系统默认"),
+        onDismiss = { editVersion = false },
+        onSave = { text -> save { it.copy(versionText = text) }; editVersion = false },
+    )
 }
 
 @Composable
@@ -96,6 +109,85 @@ internal fun StyleThreeUpdateControls(appearance: SettingsAppearanceSettings, up
                 DeviceColorMode(tr("device3_button_color_mode", "按钮颜色模式"), s.buttonColorMode) { v -> save { it.copy(buttonColorMode = v) } }
             }
         }
+    }
+}
+
+@Composable
+internal fun StyleThreeSeparateDetailsControls(appearance: SettingsAppearanceSettings, update: AppearanceUpdate) {
+    val s = appearance.deviceStyleCustomization
+    var editCameraBrand by remember { mutableStateOf(false) }
+    fun save(transform: (DeviceStyleCustomization) -> DeviceStyleCustomization) =
+        update { it.copy(deviceStyleCustomization = transform(it.deviceStyleCustomization)) }
+    Group(tr("device3_separate_details", "分离式详细信息卡片")) {
+        SwitchPreference(
+            title = tr("device3_separate_details_enabled", "启用分离式详细信息卡片"),
+            summary = tr("device3_separate_details_summary", "将详细参数拆分为独立卡片"),
+            checked = s.separateDetailsEnabled,
+            onCheckedChange = { enabled -> save { it.copy(separateDetailsEnabled = enabled) } },
+        )
+        PortalAppearanceVisibility(s.separateDetailsEnabled) {
+            Column {
+                OverlayDropdownPreference(
+                    title = tr("device3_details_icon_style", "图标风格"),
+                    items = listOf(tr("HyperOS", "HyperOS"), tr("ColorOS", "ColorOS")),
+                    selectedIndex = s.separateDetailsIconStyle,
+                    onSelectedIndexChange = { value -> save { it.copy(separateDetailsIconStyle = value) } },
+                )
+                OverlayDropdownPreference(
+                    title = tr("device3_details_processor_icon", "处理器图标"),
+                    items = listOf(
+                        tr("device3_processor_default", "默认"),
+                        tr("device3_processor_follow", "跟随全部参数替换"),
+                        tr("骁龙", "骁龙"), tr("玄戒", "玄戒"), tr("天玑", "天玑"),
+                        tr("Apple", "Apple"), tr("英特尔", "英特尔"), tr("英伟达", "英伟达"),
+                        tr("AMD", "AMD"), tr("自定义", "自定义"),
+                    ),
+                    selectedIndex = s.separateProcessorIcon,
+                    onSelectedIndexChange = { value -> save { it.copy(separateProcessorIcon = value) } },
+                )
+                PortalAppearanceVisibility(s.separateProcessorIcon == 9) {
+                    DeviceAppearanceAssetPreference(
+                        appearance = appearance,
+                        slot = APPEARANCE_SLOT_STYLE3_CPU_ICON,
+                        title = tr("device3_processor_custom_file", "自定义处理器图标"),
+                        update = update,
+                    )
+                }
+                OverlayDropdownPreference(
+                    title = tr("device3_camera_brand", "影像联名"),
+                    items = listOf(
+                        tr("不显示", "不显示"), tr("device3_brand_leica", "徕卡"),
+                        tr("device3_brand_zeiss", "蔡司"), tr("device3_brand_hasselblad", "哈苏"),
+                        tr("device3_brand_fujifilm", "富士"), tr("device3_brand_sony", "SONY"),
+                        tr("device3_brand_nikon", "尼康"), tr("device3_brand_canon", "佳能"),
+                        tr("device3_brand_panasonic", "松下"), tr("device3_brand_custom_text", "自定义文本"),
+                        tr("device3_brand_custom_image", "自定义图片"),
+                    ),
+                    selectedIndex = s.cameraBrand,
+                    onSelectedIndexChange = { value -> save { it.copy(cameraBrand = value) } },
+                )
+                PortalAppearanceVisibility(s.cameraBrand == 9) {
+                    SharedViewArrowPreference(
+                        title = tr("device3_brand_custom_text", "自定义文本"),
+                        summary = s.cameraBrandText.ifBlank { tr("device3_brand_text_hint", "点击输入影像联名文本") },
+                        onClick = { editCameraBrand = true },
+                    )
+                }
+                PortalAppearanceVisibility(s.cameraBrand == 10) {
+                    DeviceAppearanceAssetPreference(appearance, APPEARANCE_SLOT_STYLE3_CAMERA_BRAND,
+                        tr("device3_brand_custom_image", "自定义图片"), update)
+                }
+            }
+        }
+    }
+    if (editCameraBrand && s.separateDetailsEnabled && s.cameraBrand == 9) {
+        DeviceProfileFieldDialog(
+            title = tr("device3_brand_custom_text", "自定义文本"),
+            current = s.cameraBrandText,
+            inputLabel = tr("device3_camera_brand", "影像联名"),
+            onDismiss = { editCameraBrand = false },
+            onSave = { text -> save { it.copy(cameraBrandText = text) }; editCameraBrand = false },
+        )
     }
 }
 
