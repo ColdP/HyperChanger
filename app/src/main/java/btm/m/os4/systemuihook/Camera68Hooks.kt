@@ -35,6 +35,7 @@ internal class Camera68Hooks(
         watermarkCatalog.install(loader)
         shutterHooks.install(loader)
         livePhotoHooks.install(loader)
+        installLeicaNaturalExifFix(loader)
         val capability = Class.forName("l9.g", false, loader)
         val pe = Class.forName("Pe.b", false, loader)
         hook(pe.getDeclaredMethod("Y"), "lcc-ui") { result, _, _ ->
@@ -525,6 +526,83 @@ internal class Camera68Hooks(
         }
     }
 
+    /**
+     * Leica Original Color uses the normal camera pipeline, but 2090 can leave
+     * the legacy XiaomiCvSessionkeyType value that Gallery classifies as
+     * Master Portrait. Normalize that metadata at the same EXIF boundaries as
+     * the camera's native writer. This changes only the classification tag;
+     * the EffectController values and rendered pixels remain native.
+     */
+    private fun installLeicaNaturalExifFix(loader: ClassLoader) = optional("leica-natural-exif") {
+        val exifBuilder = Class.forName("l7.e" + '$' + "a", false, loader)
+        val exif = exifBuilder.getDeclaredField("b").apply { isAccessible = true }
+        val modeStart = exifBuilder.getDeclaredField("u").apply { isAccessible = true }
+        val modeEnd = exifBuilder.getDeclaredField("v").apply { isAccessible = true }
+        hook(exifBuilder.getDeclaredMethod("d"), "leica-natural-exif-build") { result, obj, _ ->
+            normalizeLeicaNaturalCvType(
+                exif.get(obj), modeStart.getInt(obj), modeEnd.getInt(obj), "l7.e" + '$' + "a.d",
+            )
+            result
+        }
+
+        val exifData = Class.forName("vf.b", false, loader)
+        hook(exifData.getDeclaredMethod("Z"), "leica-natural-exif-parse") { result, obj, _ ->
+            normalizeLeicaNaturalCvType(obj, -1, -1, "vf.b.Z")
+            result
+        }
+        hookBefore(exifData.getDeclaredMethod("e0", Class.forName("vf.b\$c", false, loader)),
+            "leica-natural-exif-write") { obj, _ ->
+            normalizeLeicaNaturalCvType(obj, -1, -1, "vf.b.e0")
+        }
+
+        val exifParser = Class.forName("vf.a", false, loader)
+        hookBefore(exifParser.getDeclaredMethod("j", Class.forName("Vh.f", false, loader), exifData),
+            "leica-natural-exif-parser") { _, args ->
+            normalizeLeicaNaturalCvType(args.getOrNull(1), -1, -1, "vf.a.j")
+        }
+    }
+
+    private fun normalizeLeicaNaturalCvType(value: Any?, start: Int, end: Int, source: String) {
+        if (value == null) return
+        runCatching {
+            val mode = value.javaClass.getMethod("f", String::class.java).invoke(value, "mode") as? String
+            val modeStart = modeNumber(mode, start)
+            val modeEnd = modeNumber(mode, end)
+            // Keep the reference boundary: portrait/AI-style EXIF objects are
+            // the ones whose legacy value is later shown as Master Portrait.
+            if (modeStart != 171 && modeEnd != 171 && mode != "171" &&
+                modeStart != 256 && modeEnd != 256 && mode != "256") return
+
+            val tag = value.javaClass.getMethod("j", String::class.java)
+                .invoke(value, "XiaomiCvSessionkeyType") ?: return
+            val bytes = tag.javaClass.getDeclaredField("d").apply { isAccessible = true }
+                .get(tag) as? ByteArray
+            val legacyBytes = bytes?.firstOrNull()?.toInt()?.and(0xff) == 2 ||
+                bytes?.firstOrNull()?.toInt()?.and(0xff) == 0x32
+            val text = value.javaClass.getMethod("f", String::class.java)
+                .invoke(value, "XiaomiCvSessionkeyType") as? String
+            val legacyText = text?.startsWith("2") == true || text == "2"
+            if (!legacyBytes && !legacyText) return
+
+            value.javaClass.getMethod("V", String::class.java, ByteArray::class.java)
+                .invoke(value, "XiaomiCvSessionkeyType", byteArrayOf(4))
+            val holder = value.javaClass.getDeclaredField("h").apply { isAccessible = true }.get(value)
+            val entries = holder?.javaClass?.getDeclaredField("a")?.apply { isAccessible = true }
+                ?.get(holder) as? Map<*, *> ?: return
+            entries.values.forEach { entry ->
+                if (entry?.javaClass?.name != "yf.j") return@forEach
+                val keyHolder = entry.javaClass.getDeclaredField("a").apply { isAccessible = true }.get(entry)
+                val map = keyHolder?.javaClass?.getDeclaredField("b")?.apply { isAccessible = true }
+                    ?.get(keyHolder) as? MutableMap<Any?, Any?>
+                map?.set("889f", "\u0004")
+                entry.javaClass.getDeclaredField("b").apply { isAccessible = true }.set(entry, null)
+            }
+            log("Normalized Leica Original Color EXIF type at $source")
+        }.onFailure { log("Leica Original Color EXIF normalization skipped at $source: ${it.javaClass.simpleName}") }
+    }
+
+    private fun modeNumber(mode: String?, fallback: Int): Int = mode?.toIntOrNull() ?: fallback
+
     private fun installProviderType(type: Class<*>) {
         optional("master-live-focal-profiles") {
             val profiles = type.getMethod("c0")
@@ -632,6 +710,24 @@ internal class Camera68Hooks(
                     // Installation/transform failure must not rerun the original.
                     runCatching { transform(result, chain.thisObject, chain.args) }
                         .onFailure { log("$id failed: ${it.javaClass.simpleName}") }.getOrDefault(result)
+                }
+            installed.add(method)
+            log("Installed $id: ${method.toGenericString()}")
+        }
+    }
+
+    private fun hookBefore(method: Method, id: String, transform: (Any?, List<Any?>) -> Unit) {
+        synchronized(installed) {
+            if (method in installed) return
+            check(!Modifier.isAbstract(method.modifiers)) { "Abstract camera hook: $method" }
+            method.isAccessible = true
+            module.hook(method).setPriority(XposedInterface.PRIORITY_HIGHEST)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .setId("camera2090:$id:${method.declaringClass.name}")
+                .intercept { chain ->
+                    if (enabled()) runCatching { transform(chain.thisObject, chain.args) }
+                        .onFailure { log("$id failed: ${it.javaClass.simpleName}") }
+                    chain.proceed()
                 }
             installed.add(method)
             log("Installed $id: ${method.toGenericString()}")
