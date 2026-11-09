@@ -1173,6 +1173,9 @@ class HyperSystemUiModule : XposedModule() {
         }
         if (param.packageName == SETTINGS_PACKAGE) {
             runCatching {
+                othersHooks.installSettingsFloatingSearchHooks(param, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+            }.onFailure { error -> HookModuleLogger.log(this, Log.WARN, TAG, "Could not install Settings floating search", error) }
+            runCatching {
                 othersHooks.installSettingsTitleBarBlurHooks(param, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
             }.onFailure { error -> HookModuleLogger.log(this, Log.WARN, TAG, "Could not install Settings title bar gradient blur", error) }
             othersHooks.installHotspotTemperatureHooks(param, getRemotePreferences(REMOTE_PREFERENCE_GROUP))

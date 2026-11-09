@@ -326,7 +326,7 @@ private enum class PageId {
     GESTURE_HANDLE_STYLE, DESKTOP, DESKTOP_MATERIAL,
     ISLAND, ISLAND_COLLAPSED, ISLAND_EXPANDED, ISLAND_EXPANDED_BACKGROUND, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_HEADER_SETTINGS, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_ADJUSTMENT, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_MUSIC, LOCKSCREEN_CAPSULE, LOCKSCREEN_SHORTCUT_BACKGROUND, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
     DEVICE_PROFILE_PRESETS, DEVICE_PROFILE_CLOUD_PRESETS, CUSTOM_DEPTH_WALLPAPER,
-    SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, SETTINGS_ENTRY_ICONS, SETTINGS_ENTRY_APPEARANCE, THEME_AND_COLOR, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
+    SETTINGS_FLOATING_SEARCH_PARAMETERS, SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, SETTINGS_ENTRY_ICONS, SETTINGS_ENTRY_APPEARANCE, THEME_AND_COLOR, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
     SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, SIDEBAR, SIDEBAR_GLASS, PERSONAL_ASSISTANT, ASSISTANT_WIDGET_GLASS, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, PORTAL_MATERIAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND, MODULE_PRESET_IMPORT_PREVIEW,
     STATUS_MOBILE_NETWORK_TYPE_TUNING,
@@ -577,6 +577,7 @@ private fun categoryDeepSearchItems(): List<CategorySearchItem> {
         entry("rearSwipeAppTitle", "背屏左滑应用", PageId.REAR_SWIPE_APP, ScopeApplication.SUBSCREEN_CENTER),
         entry("设备信息预设", "设备信息预设", PageId.DEVICE_PROFILE_PRESETS, settings),
         entry("设备信息云预设", "设备信息云预设", PageId.DEVICE_PROFILE_CLOUD_PRESETS, settings),
+        entry("settingsFloatingSearchParameters", "高级材质搜索框参数自定义", PageId.SETTINGS_FLOATING_SEARCH_PARAMETERS, settings),
         entry("settingsEntryAppearance", "设置入口外观", PageId.SETTINGS_ENTRY_APPEARANCE, settings),
         entry("tutorialDeviceCard", "自定义我的设备卡片", PageId.TUTORIAL_DEVICE_CARD, settings),
         entry("桌面材质调整", "桌面材质调整", PageId.DESKTOP_MATERIAL, ScopeApplication.DESKTOP),
@@ -1256,6 +1257,7 @@ private fun Root(
                 appThemeStore.syncRemote(it)
                 SettingsAdvancedColorStyleSettingsStore(context).syncRemote(it)
                 SettingsTitleBarBlurSettingsStore(context).syncRemote(it)
+                SettingsFloatingSearchSettingsStore(context).syncRemote(it)
                 superXiaoAiStore.syncRemote(it)
                 systemUpdateStore.syncRemote(it)
                 settings = hooks.settings
@@ -4593,6 +4595,12 @@ private fun SystemSettings(
             advancedColorStyle = advancedColorStyleStore.settings
         }
     }
+    val floatingSearchStore = remember(cpuIconContext) { SettingsFloatingSearchSettingsStore(cpuIconContext) }
+    var floatingSearch by remember { mutableStateOf(floatingSearchStore.settings) }
+    LaunchedEffect(appScopeService) {
+        appScopeService?.let(floatingSearchStore::syncRemote)
+        floatingSearch = floatingSearchStore.settings
+    }
     val titleBarBlurStore = remember(cpuIconContext) { SettingsTitleBarBlurSettingsStore(cpuIconContext) }
     var titleBarBlur by remember { mutableStateOf(titleBarBlurStore.settings) }
     LaunchedEffect(appScopeService) {
@@ -4698,6 +4706,21 @@ private fun SystemSettings(
         }
         item {
             Group(tr("设置应用", "设置应用")) {
+                SwitchPreference(
+                    title = tr("settingsFloatingSearchEnabled", "启用高级材质搜索框"),
+                    summary = tr("settingsFloatingSearchSummary", "使用高级材质替换系统设置首页搜索框，跟随原生搜索动画过渡。重新启动设置应用后生效。"),
+                    checked = floatingSearch.enabled,
+                    onCheckedChange = { enabled ->
+                        floatingSearchStore.update(appScopeService) { it.copy(enabled = enabled) }
+                        floatingSearch = floatingSearchStore.settings
+                    },
+                )
+                AnimatedVisibility(floatingSearch.enabled) {
+                    SharedViewArrowPreference(
+                        title = tr("settingsFloatingSearchParameters", "高级材质搜索框参数自定义"),
+                        onClick = { open(PageId.SETTINGS_FLOATING_SEARCH_PARAMETERS) },
+                    )
+                }
                 SwitchPreference(
                     title = tr("解锁更多自动锁屏选项", "解锁更多自动锁屏选项"),
                     checked = settingsApp.unlockNeverScreenTimeout,
@@ -5928,6 +5951,7 @@ private fun Detail(
         PageId.CAMERA_PALETTE -> CameraPalette(cameras, updateCamera, back)
         PageId.SYSTEM_UPDATE -> SystemUpdate(systemUpdate, updateSystemUpdate, back)
         PageId.SYSTEM_FRAMEWORK -> FrameworkPage(back)
+        PageId.SETTINGS_FLOATING_SEARCH_PARAMETERS -> SettingsFloatingSearchPage(back)
     PageId.SYSTEM_SETTINGS -> SystemSettings(settingsApp, updateSettingsApp, deviceProfile, updateDeviceProfile, appearance, updateAppearance, openPage, onPickAppearanceLogo, onClearAppearanceLogo, back)
         PageId.DEVICE_PROFILE -> DeviceProfileEditor(deviceProfile, updateDeviceProfile, { openPage(PageId.DEVICE_PROFILE_PRESETS) }, back)
         PageId.DEVICE_PROFILE_PRESETS -> DeviceProfilePresetsPage(deviceProfile, updateDeviceProfile, { openPage(PageId.DEVICE_PROFILE_CLOUD_PRESETS) }, back)

@@ -65,6 +65,7 @@ internal fun restartRecommendationSnapshot(group: String, preferences: SharedPre
     readSettingsModuleEntryIconSettings(p)
     readSettingsAdvancedColorStyleSettings(p)
     readSettingsTitleBarBlurSettings(p)
+    values[KEY_SETTINGS_FLOATING_SEARCH_PARAMETERS] = readSettingsFloatingSearchSettings(p).parameters()
     readSettingsAppScopePreferences(p)
     readMiSettingsPreferences(p)
     readSoundEffectPreferences(p)

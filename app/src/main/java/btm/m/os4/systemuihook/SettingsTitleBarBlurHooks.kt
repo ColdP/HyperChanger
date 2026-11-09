@@ -10,9 +10,11 @@ package btm.m.os4.systemuihook
 import android.content.SharedPreferences
 import android.graphics.Canvas
 import android.graphics.drawable.Drawable
+import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 import io.github.libxposed.api.XposedInterface.HookBuilder
 import io.github.libxposed.api.XposedModule
@@ -22,6 +24,7 @@ import java.lang.reflect.Executable
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.util.Collections
+import java.util.IdentityHashMap
 import java.util.WeakHashMap
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -43,6 +46,7 @@ internal class SettingsTitleBarBlurHooks(
     )
 
     private val owned = Collections.synchronizedMap(WeakHashMap<ViewGroup, State>())
+    private val homeMasks = IdentityHashMap<Any, HomeMask>()
     private var installed = false
     private lateinit var preferences: SharedPreferences
     private lateinit var maskAlpha: Field
@@ -121,8 +125,111 @@ internal class SettingsTitleBarBlurHooks(
                 }
                 result
             }
+        // Optional homepage integration: unknown structures retain their native mask.
+        runCatching { installHomeMask(loader, type) }.onFailure {
+            HookModuleLogger.log(module, Log.WARN, TAG, "Keeping native Settings nested header mask", it)
+        }
         HookModuleLogger.log(module, Log.INFO, TAG,
             "Installed Settings title bar gradient blur: mask=${painter.name}, alpha=${maskAlpha.name}")
+    }
+
+    private fun installHomeMask(loader: ClassLoader, barType: Class<*>) {
+        val fragment = loader.loadClass("com.android.settings.SettingsFragment")
+        val nestedType = loader.loadClass("miuix.nestedheader.widget.NestedHeaderLayout")
+        val nestedField = fragment.getDeclaredField("mNestedHeaderLayout").apply { isAccessible = true }
+        val maskField = nestedType.getDeclaredField("mOverBgView").apply { isAccessible = true }
+        val created = fragment.getDeclaredMethod("onViewCreated", View::class.java, Bundle::class.java)
+        val destroyed = fragment.getDeclaredMethod("onDestroyView")
+        hookDeoptimized(created).setExceptionMode(ExceptionMode.PROTECTIVE)
+            .setId("hyperchanger:settings-titlebar:home-create").intercept { chain ->
+                val result = chain.proceed()
+                val host = chain.thisObject ?: return@intercept result
+                runCatching {
+                    homeMasks.remove(host)?.destroy()
+                    val root = chain.args[0] as? ViewGroup ?: return@runCatching
+                    val nested = nestedField.get(host) as? ViewGroup ?: return@runCatching
+                    val mask = maskField.get(nested) as? View ?: return@runCatching
+                    // The observed homepage root owns its own ActionBarContainer directly.
+                    // Do not select the Activity's outer bar or another fragment's mask.
+                    var ancestor: View? = nested
+                    while (ancestor != null && ancestor !== root) ancestor = ancestor.parent as? View
+                    if (ancestor !== root || mask.parent !== nested ||
+                        mask.javaClass.name != "miuix.nestedheader.widget.NestedHeaderOverlayMaskView") return@runCatching
+                    val bars = (0 until root.childCount).map { root.getChildAt(it) }
+                        .filter { barType.isInstance(it) && !isSplit.getBoolean(it) }
+                    val bar = bars.singleOrNull() as? ViewGroup ?: return@runCatching
+                    if (owned[bar] == null) return@runCatching
+                    val binding = HomeMask(root, bar, mask)
+                    homeMasks[host] = binding
+                    binding.attach()
+                }.onFailure {
+                    homeMasks.remove(host)?.destroy()
+                    HookModuleLogger.log(module, Log.WARN, TAG, "Keeping native Settings homepage mask", it)
+                }
+                result
+            }
+        hookDeoptimized(destroyed).setExceptionMode(ExceptionMode.PROTECTIVE)
+            .setId("hyperchanger:settings-titlebar:home-destroy").intercept { chain ->
+                homeMasks.remove(chain.thisObject)?.destroy()
+                chain.proceed()
+            }
+    }
+
+    /** This is a second opaque mask outside ActionBarContainer, not its animated painter. */
+    private inner class HomeMask(
+        private val root: ViewGroup,
+        private val bar: ViewGroup,
+        private val mask: View,
+    ) : View.OnAttachStateChangeListener, ViewTreeObserver.OnPreDrawListener {
+        private val originalAlpha = mask.alpha
+        private var observer: ViewTreeObserver? = null
+        private var failed = false
+
+        fun attach() {
+            root.addOnAttachStateChangeListener(this)
+            if (root.isAttachedToWindow) onViewAttachedToWindow(root)
+        }
+
+        override fun onViewAttachedToWindow(view: View) {
+            if (observer != null || failed) return
+            root.viewTreeObserver.let {
+                it.addOnPreDrawListener(this)
+                observer = it
+            }
+        }
+
+        override fun onPreDraw(): Boolean {
+            val state = owned[bar]
+            try {
+                if (state != null) update(bar, state)
+                val active = state != null && state.cleared && !state.failed &&
+                    bar.isShown && bar.height > 0 && readSettingsTitleBarBlurSettings(preferences).enabled
+                val alpha = if (active) 0f else originalAlpha
+                if (mask.alpha != alpha) mask.alpha = alpha
+            } catch (error: Throwable) {
+                failed = true
+                detach()
+                if (state != null) {
+                    state.failed = true
+                    runCatching { restore(bar, state) }
+                }
+                HookModuleLogger.log(module, Log.WARN, TAG, "Restored native Settings homepage mask", error)
+            }
+            return true
+        }
+
+        private fun detach() {
+            observer?.takeIf { it.isAlive }?.removeOnPreDrawListener(this)
+            observer = null
+            if (mask.alpha != originalAlpha) mask.alpha = originalAlpha
+        }
+
+        override fun onViewDetachedFromWindow(view: View) = detach()
+
+        fun destroy() {
+            root.removeOnAttachStateChangeListener(this)
+            detach()
+        }
     }
 
     private fun discoverMask(type: Class<*>, loader: ClassLoader, apk: String): Method {
