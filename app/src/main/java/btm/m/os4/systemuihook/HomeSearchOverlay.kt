@@ -35,6 +35,7 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
@@ -61,7 +62,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Close
 import top.yukonga.miuix.kmp.icon.extended.Search
-import btm.m.os4.systemuihook.InterfaceArrowPreference as ArrowPreference
+import top.yukonga.miuix.kmp.icon.extended.ChevronForward
 import top.yukonga.miuix.kmp.shader.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlin.math.PI
@@ -75,6 +76,7 @@ internal data class HomeSearchResult(
     val title: String,
     val description: String,
     val scopes: String,
+    val iconRes: Int? = null,
     val requiresService: Boolean = true,
     val onClick: () -> Unit,
 )
@@ -200,12 +202,11 @@ internal fun HomeSearchOverlay(
                         }
                     } else if (!snapshot.searching) items(snapshot.results, key = { it.key }) { result ->
                         SearchGlassCard(base, LocalAppInterfaceStyle.current == AppInterfaceStyle.COLOR) {
-                            ArrowPreference(result.title, summary = result.description,
-                                enabled = interactionEnabled && (enabled || !result.requiresService) && expanded && contentAlpha > .98f && snapshot.query == query, onClick = result.onClick)
-                            Text(result.scopes,
-                                modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 16.dp),
-                                style = MiuixTheme.textStyles.footnote1,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                            SearchResultPreference(
+                                result = result,
+                                enabled = interactionEnabled && (enabled || !result.requiresService) && expanded && contentAlpha > .98f && snapshot.query == query,
+                                onClick = result.onClick,
+                            )
                         }
                     }
                 }
@@ -254,6 +255,66 @@ internal fun HomeSearchOverlay(
             ),
             enabled = interactionEnabled && expanded, onClick = onDismiss,
         )
+    }
+}
+
+@Composable
+private fun SearchResultPreference(result: HomeSearchResult, enabled: Boolean, onClick: () -> Unit) {
+    val colors = MiuixTheme.colorScheme
+    val interactionSource = remember { MutableInteractionSource() }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                enabled = enabled,
+                onClick = onClick,
+            )
+            .padding(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 14.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                Text(
+                    result.title,
+                    style = MiuixTheme.textStyles.body1,
+                    color = colors.onSurface.copy(alpha = if (enabled) 1f else .38f),
+                )
+                if (result.description.isNotBlank()) {
+                    Text(
+                        result.description,
+                        modifier = Modifier.padding(top = 4.dp),
+                        style = MiuixTheme.textStyles.body2,
+                        color = colors.onSurfaceVariantSummary.copy(alpha = if (enabled) 1f else .38f),
+                    )
+                }
+            }
+            result.iconRes?.let { resource ->
+                androidx.compose.foundation.Image(
+                    painter = painterResource(resource),
+                    contentDescription = null,
+                    modifier = Modifier.size(28.dp),
+                    colorFilter = ColorFilter.tint(colors.primary.copy(alpha = if (enabled) 1f else .38f)),
+                )
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                result.scopes,
+                modifier = Modifier.weight(1f),
+                style = MiuixTheme.textStyles.footnote1,
+                color = colors.onSurfaceVariantSummary.copy(alpha = if (enabled) 1f else .38f),
+            )
+            androidx.compose.foundation.Image(
+                imageVector = MiuixIcons.Regular.ChevronForward,
+                contentDescription = null,
+                modifier = Modifier.padding(start = 12.dp).size(18.dp),
+                colorFilter = ColorFilter.tint(colors.onSurfaceVariantSummary.copy(alpha = if (enabled) 1f else .38f)),
+            )
+        }
     }
 }
 

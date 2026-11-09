@@ -354,6 +354,82 @@ private data class CategoryPageEntry(
     val icon: Int,
 )
 
+private fun categoryIconResource(page: PageId?): Int? = when (page) {
+    PageId.SHADE,
+    PageId.SHADE_PRESETS,
+    PageId.SOFT_GLASS_PARAMETERS,
+    PageId.SOFT_GLASS_PRESETS,
+    PageId.GESTURE_HANDLE_STYLE -> R.drawable.hc_home_systemui_material
+    PageId.DESKTOP,
+    PageId.DESKTOP_MATERIAL -> R.drawable.hc_home_launcher
+    PageId.ISLAND,
+    PageId.ISLAND_COLLAPSED,
+    PageId.ISLAND_EXPANDED,
+    PageId.ISLAND_EXPANDED_BACKGROUND,
+    PageId.IOS_NOTIFICATION_CENTER,
+    PageId.IOS_NOTIFICATION_HEADER_SETTINGS,
+    PageId.IOS_NOTIFICATION_CLOCK_GLASS,
+    PageId.UNLOCK_ISLAND,
+    PageId.NOTIFICATION_RESTRICTIONS,
+    PageId.NOTIFICATION_MEDIA_CARD -> R.drawable.hc_home_island
+    PageId.STATUS,
+    PageId.STATUS_ADJUSTMENT,
+    PageId.STATUS_SIGNAL_CUSTOMIZATION,
+    PageId.STATUS_SIGNAL_TUNING,
+    PageId.STATUS_MOBILE_NETWORK_TYPE_TUNING,
+    PageId.CONTROL,
+    PageId.CONTROL_CENTER_TOP_BUTTONS,
+    PageId.CONTROL_CENTER_TILE_LAYOUT -> R.drawable.hc_home_statusbar
+    PageId.LOCK,
+    PageId.LOCKSCREEN_MUSIC,
+    PageId.LOCKSCREEN_CAPSULE,
+    PageId.LOCKSCREEN_SHORTCUT_BACKGROUND,
+    PageId.LIFT_TO_WAKE_SCHEDULE,
+    PageId.LOCKSCREEN_WIDGET_EDITOR,
+    PageId.LOCKSCREEN_WIDGET_BACKGROUND,
+    PageId.LYRIC_LIBRARY,
+    PageId.RASTER_WALLPAPER,
+    PageId.CUSTOM_DEPTH_WALLPAPER -> R.drawable.hc_home_lockscreen
+    PageId.SYSTEM_FRAMEWORK -> R.drawable.hc_home_framework
+    PageId.SUPER_XIAOAI -> R.drawable.hc_home_xiaoai
+    PageId.CAMERA,
+    PageId.CAMERA_WATERMARKS,
+    PageId.CAMERA_SHUTTER_SOUNDS,
+    PageId.CAMERA_PALETTE -> R.drawable.hc_home_camera
+    PageId.SYSTEM_UPDATE -> R.drawable.hc_home_updater
+    PageId.SYSTEM_SETTINGS,
+    PageId.DEVICE_PROFILE,
+    PageId.DEVICE_PROFILE_PRESETS,
+    PageId.DEVICE_PROFILE_CLOUD_PRESETS,
+    PageId.SETTINGS_FLOATING_SEARCH_PARAMETERS,
+    PageId.SETTINGS_APPEARANCE_HOME,
+    PageId.SETTINGS_APPEARANCE_DEVICE,
+    PageId.SETTINGS_ENTRY_LABELS,
+    PageId.SETTINGS_ENTRY_ICONS,
+    PageId.SETTINGS_ENTRY_APPEARANCE,
+    PageId.TUTORIAL_DEVICE_CARD -> R.drawable.hc_home_settings
+    PageId.REAR_SCREEN,
+    PageId.REAR_SCREEN_SHELL,
+    PageId.REAR_CUSTOM_CENTER,
+    PageId.REAR_MUSIC_APPS,
+    PageId.REAR_SWIPE_APP,
+    PageId.REAR_MINI_PLAYER -> R.drawable.hc_home_backscreen
+    PageId.APP_NAVIGATION -> R.drawable.hc_home_navigation
+    PageId.OTHER,
+    PageId.SIDEBAR,
+    PageId.SIDEBAR_GLASS,
+    PageId.PERSONAL_ASSISTANT,
+    PageId.ASSISTANT_WIDGET_GLASS,
+    PageId.CONTACTS_DIALER,
+    PageId.CONTACTS_DIALER_BACKGROUND,
+    PageId.PORTAL,
+    PageId.PORTAL_MATERIAL,
+    PageId.ENVIRONMENT_DETECTION,
+    PageId.CLOUD_CONTROL,
+    PageId.PRIVACY_GUARD -> R.drawable.hc_home_other
+    else -> null
+}
+
 private fun categorySearchItems(): List<CategorySearchItem> = listOf(
     CategorySearchItem(
         tr("系统界面与材质调整", "系统界面与材质调整"),
@@ -2250,6 +2326,7 @@ private fun CategoryHome(
                 catalog?.get(item.page?.name)?.titles.orEmpty(), item.title),
             scopes = if (item.moduleSetting) tr("category_search_module_scope", "HyperChanger 设置")
                 else item.scopes.joinToString(" · ") { tr(it.title, it.title) },
+            iconRes = if (item.moduleSetting) null else categoryIconResource(item.page),
             requiresService = !item.moduleSetting,
             onClick = {
                 if (!navigatingFromSearch) {
