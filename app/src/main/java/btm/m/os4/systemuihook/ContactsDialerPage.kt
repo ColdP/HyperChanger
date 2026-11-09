@@ -20,7 +20,7 @@ import kotlin.math.roundToInt
 import java.util.Locale
 import btm.m.os4.systemuihook.SeamlessCard as Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
-import top.yukonga.miuix.kmp.preference.SwitchPreference
+import btm.m.os4.systemuihook.InterfaceSwitchPreference as SwitchPreference
 
 @Composable
 internal fun ContactsDialerPage(openBackground: () -> Unit, back: () -> Unit) {

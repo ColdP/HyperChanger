@@ -30,7 +30,7 @@ object NavigationScaleSettings {
     }
 
     fun supports(style: NavigationStyle): Boolean = style == NavigationStyle.LIQUID_GLASS ||
-        style == NavigationStyle.HYPER_OS_FLOATING || style == NavigationStyle.HARMONY_OS_FLOATING
+        style == NavigationStyle.HYPER_OS_FLOATING || style == NavigationStyle.HARMONY_OS_FLOATING || style == NavigationStyle.HYPER_OS_FLOATING
     fun key(packageName: String, name: String): String = ScopedSettings.key(packageName, name)
     fun isPreference(key: String): Boolean = key.startsWith("scope.") &&
         key.substringAfterLast('.') in flags + values

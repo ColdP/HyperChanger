@@ -1173,6 +1173,12 @@ class HyperSystemUiModule : XposedModule() {
         }
         if (param.packageName == SETTINGS_PACKAGE) {
             runCatching {
+                othersHooks.installSettingsDualPaneHooks(param, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+            }.onFailure { error -> HookModuleLogger.log(this, Log.WARN, TAG, "Could not install Settings dual-pane unlock", error) }
+            runCatching {
+                othersHooks.installSettingsLandscapeHooks(param, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
+            }.onFailure { error -> HookModuleLogger.log(this, Log.WARN, TAG, "Could not install Settings landscape unlock", error) }
+            runCatching {
                 othersHooks.installSettingsFloatingSearchHooks(param, getRemotePreferences(REMOTE_PREFERENCE_GROUP))
             }.onFailure { error -> HookModuleLogger.log(this, Log.WARN, TAG, "Could not install Settings floating search", error) }
             runCatching {

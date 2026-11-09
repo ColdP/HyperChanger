@@ -5,7 +5,7 @@ import android.content.SharedPreferences
 import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
-import top.yukonga.miuix.kmp.preference.SwitchPreference
+import btm.m.os4.systemuihook.InterfaceSwitchPreference as SwitchPreference
 
 private typealias AppearanceUpdate = (((SettingsAppearanceSettings) -> SettingsAppearanceSettings) -> Unit)
 

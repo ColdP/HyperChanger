@@ -20,8 +20,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.preference.ArrowPreference
-import top.yukonga.miuix.kmp.preference.SwitchPreference
+import btm.m.os4.systemuihook.InterfaceArrowPreference as ArrowPreference
+import btm.m.os4.systemuihook.InterfaceSwitchPreference as SwitchPreference
 
 @Composable
 internal fun PortalJapaneseOcrPreferences(enabled: Boolean, onChange: (Boolean) -> Unit) {

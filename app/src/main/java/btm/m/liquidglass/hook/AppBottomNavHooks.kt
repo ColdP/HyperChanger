@@ -1443,6 +1443,7 @@ object AppBottomNavHooks {
                                     it != 0 && NavigationStyle.fromPreference(navigationStyle) in setOf(
                                         NavigationStyle.LIQUID_GLASS,
                                         NavigationStyle.HARMONY_OS_FLOATING,
+
                                         NavigationStyle.HYPER_OS_FLOATING,
                                     )
                                 }?.let { androidx.compose.ui.graphics.Color(it) },

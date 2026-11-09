@@ -6,7 +6,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.preference.SwitchPreference
+import btm.m.os4.systemuihook.InterfaceSwitchPreference as SwitchPreference
 
 @Composable
 internal fun TemperatureWarningSwitch(

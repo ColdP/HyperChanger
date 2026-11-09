@@ -32,10 +32,10 @@ import btm.m.os4.systemuihook.WindowDialog
 import btm.m.os4.systemuihook.tr
 import kotlinx.coroutines.delay
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.Card
+import btm.m.os4.systemuihook.SeamlessCard as Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.preference.SwitchPreference
+import btm.m.os4.systemuihook.InterfaceSwitchPreference as SwitchPreference
 
 /** Experimental notice first, then the scope description, disclaimer and issue guidance. */
 private const val NOTICE_STEPS = 4

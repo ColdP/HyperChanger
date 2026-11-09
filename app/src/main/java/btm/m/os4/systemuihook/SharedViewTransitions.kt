@@ -33,7 +33,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import top.yukonga.miuix.kmp.basic.CardDefaults
-import top.yukonga.miuix.kmp.preference.ArrowPreference
+import btm.m.os4.systemuihook.InterfaceArrowPreference as ArrowPreference
 import kotlin.math.min
 import kotlin.math.sqrt
 

@@ -4292,6 +4292,93 @@
       false
     ]
   ],
+  "SETTINGS_FLOATING_SEARCH_PARAMETERS": [
+    [
+      "settingsFloatingSearchParameters",
+      "高级材质搜索框参数自定义",
+      false
+    ],
+    [
+      "settingsFloatingSearchHint",
+      "搜索",
+      false
+    ],
+    [
+      "参数调整",
+      "参数调整",
+      false
+    ],
+    [
+      "navMaterialOpacity",
+      "背景不透明度",
+      false
+    ],
+    [
+      "navMaterialBlur",
+      "模糊度",
+      true
+    ],
+    [
+      "settingsFloatingSearchBlurValue",
+      "%d px",
+      false
+    ],
+    [
+      "显示高光",
+      "显示高光",
+      true
+    ],
+    [
+      "settingsFloatingSearchHeight",
+      "搜索框高度缩放",
+      false
+    ],
+    [
+      "settingsFloatingSearchWidth",
+      "搜索框宽度缩放",
+      false
+    ],
+    [
+      "settingsFloatingSearchIconScale",
+      "搜索图标缩放",
+      false
+    ],
+    [
+      "settingsFloatingSearchTextScale",
+      "搜索文本缩放",
+      false
+    ],
+    [
+      "settingsFloatingSearchIconTextSpacing",
+      "图标和文本的间距",
+      true
+    ],
+    [
+      "settingsFloatingSearchSpacingValue",
+      "%d dp",
+      false
+    ],
+    [
+      "navMaterialResetParameters",
+      "恢复默认参数",
+      true
+    ],
+    [
+      "settingsFloatingSearchResetConfirm",
+      "确定恢复搜索框的默认材质和尺寸参数吗？",
+      false
+    ],
+    [
+      "取消",
+      "取消",
+      false
+    ],
+    [
+      "恢复默认",
+      "恢复默认",
+      false
+    ]
+  ],
   "SYSTEM_SETTINGS": [
     [
       "系统设置",
@@ -4422,6 +4509,46 @@
       "解锁屏幕色彩风格的高级模式",
       "解锁屏幕色彩风格的高级模式",
       true
+    ],
+    [
+      "settingsHomepageDualPane",
+      "开启设置首页双栏模式",
+      true
+    ],
+    [
+      "settingsHomepageDualPaneSummary",
+      "在普通手机上启用原生双栏布局，左侧显示首页，右侧显示设置详情。需要系统支持 Activity Embedding，重新启动设置应用后生效。",
+      false
+    ],
+    [
+      "settingsDualPaneBalance",
+      "左右页面占比",
+      true
+    ],
+    [
+      "settingsDualPaneBalanceValue",
+      "%d%%（左 %.1f%% / 右 %.1f%%）",
+      false
+    ],
+    [
+      "settingsDualPaneLandscapeOnly",
+      "仅横屏使用双栏",
+      true
+    ],
+    [
+      "settingsDualPaneLandscapeOnlySummary",
+      "竖屏保持原生单栏布局，横屏使用双栏。普通手机需配合系统自动旋转和“强制解锁横屏模式”。重新启动设置应用后生效。",
+      false
+    ],
+    [
+      "settingsUnlockLandscape",
+      "强制解锁横屏模式",
+      true
+    ],
+    [
+      "settingsUnlockLandscapeSummary",
+      "解除系统设置的竖屏限制，跟随系统自动旋转。重新启动设置应用后生效。",
+      false
     ],
     [
       "小米设置",
@@ -4703,6 +4830,11 @@
     [
       "预设库",
       "预设库",
+      true
+    ],
+    [
+      "device_profile_restore_all",
+      "一键恢复所有参数与信息",
       true
     ],
     [
@@ -5284,13 +5416,23 @@
       false
     ],
     [
-      "样式1 (来自酷安@Mr_Bocchi)",
-      "样式1 (来自酷安@Mr_Bocchi)",
+      "样式1",
+      "样式1",
       false
     ],
     [
       "样式2",
       "样式2",
+      false
+    ],
+    [
+      "样式3",
+      "样式3",
+      false
+    ],
+    [
+      "样式4",
+      "样式4",
       false
     ],
     [
@@ -5304,28 +5446,8 @@
       false
     ],
     [
-      "导入LOGO",
-      "导入LOGO",
-      true
-    ],
-    [
-      "未导入",
-      "未导入",
-      false
-    ],
-    [
-      "清除LOGO",
-      "清除LOGO",
-      true
-    ],
-    [
-      "无LOGO",
-      "无LOGO",
-      false
-    ],
-    [
-      "已导入",
-      "已导入",
+      "自定义LOGO",
+      "自定义LOGO",
       false
     ],
     [
@@ -5334,18 +5456,8 @@
       false
     ],
     [
-      "导入机型图片",
-      "导入机型图片",
-      true
-    ],
-    [
-      "清除机型图片",
-      "清除机型图片",
-      true
-    ],
-    [
-      "无图片",
-      "无图片",
+      "自定义机型图片",
+      "自定义机型图片",
       false
     ],
     [
@@ -5364,14 +5476,9 @@
       false
     ],
     [
-      "导入背景图片",
-      "导入背景图片",
-      true
-    ],
-    [
-      "清除背景图片",
-      "清除背景图片",
-      true
+      "自定义背景",
+      "自定义背景",
+      false
     ],
     [
       "背景图片模糊度",
@@ -5424,11 +5531,6 @@
       false
     ],
     [
-      "无背景图",
-      "无背景图",
-      false
-    ],
-    [
       "LOGO与版本号",
       "LOGO与版本号",
       false
@@ -5534,18 +5636,13 @@
       false
     ],
     [
-      "跟随系统",
-      "跟随系统",
+      "浅色",
+      "浅色",
       false
     ],
     [
       "深色",
       "深色",
-      false
-    ],
-    [
-      "浅色",
-      "浅色",
       false
     ],
     [
@@ -5633,11 +5730,6 @@
     [
       "隐私政策",
       "隐私政策",
-      true
-    ],
-    [
-      "本项目基于 MIUIX 构建",
-      "本项目基于 MIUIX 构建",
       true
     ],
     [
@@ -7678,93 +7770,6 @@
     [
       "包含 %d 个资源文件",
       "包含 %d 个资源文件",
-      false
-    ]
-  ],
-  "SETTINGS_FLOATING_SEARCH_PARAMETERS": [
-    [
-      "settingsFloatingSearchParameters",
-      "高级材质搜索框参数自定义",
-      false
-    ],
-    [
-      "settingsFloatingSearchHint",
-      "搜索",
-      false
-    ],
-    [
-      "参数调整",
-      "参数调整",
-      false
-    ],
-    [
-      "navMaterialOpacity",
-      "背景不透明度",
-      false
-    ],
-    [
-      "navMaterialBlur",
-      "模糊度",
-      false
-    ],
-    [
-      "settingsFloatingSearchBlurValue",
-      "%d px",
-      false
-    ],
-    [
-      "显示高光",
-      "显示高光",
-      true
-    ],
-    [
-      "settingsFloatingSearchHeight",
-      "搜索框高度缩放",
-      false
-    ],
-    [
-      "settingsFloatingSearchWidth",
-      "搜索框宽度缩放",
-      false
-    ],
-    [
-      "settingsFloatingSearchIconScale",
-      "搜索图标缩放",
-      false
-    ],
-    [
-      "settingsFloatingSearchTextScale",
-      "搜索文本缩放",
-      false
-    ],
-    [
-      "settingsFloatingSearchIconTextSpacing",
-      "图标和文本的间距",
-      true
-    ],
-    [
-      "settingsFloatingSearchSpacingValue",
-      "%d dp",
-      false
-    ],
-    [
-      "navMaterialResetParameters",
-      "恢复默认参数",
-      true
-    ],
-    [
-      "settingsFloatingSearchResetConfirm",
-      "确定恢复搜索框的默认材质和尺寸参数吗？",
-      false
-    ],
-    [
-      "取消",
-      "取消",
-      false
-    ],
-    [
-      "恢复默认",
-      "恢复默认",
       false
     ]
   ]

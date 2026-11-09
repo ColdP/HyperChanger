@@ -28,7 +28,7 @@ object NavigationMaterialSettings {
     const val KEY_FOLLOW = "navigation_material_use_global"
     const val KEY_MODULE = "${PREFIX}module_enabled"
     const val PREVIEW_FILE = "navigation_material/preview.jpg"
-    val styles = listOf(NavigationStyle.HYPER_OS_FLOATING, NavigationStyle.LIQUID_GLASS, NavigationStyle.HARMONY_OS_FLOATING, NavigationStyle.HYPER_OS)
+    val styles = listOf(NavigationStyle.HYPER_OS_FLOATING, NavigationStyle.LIQUID_GLASS, NavigationStyle.HARMONY_OS_FLOATING,  NavigationStyle.HYPER_OS)
     private val fields = listOf("blur", "opacity", "refraction", "thickness", "highlight", "dispersion", "selection_opacity", "press_boost")
     fun defaults(style: NavigationStyle): NavigationMaterial = when (style) {
         NavigationStyle.HYPER_OS_FLOATING -> NavigationMaterial(

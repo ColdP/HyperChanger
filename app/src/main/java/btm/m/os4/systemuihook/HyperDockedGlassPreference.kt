@@ -10,7 +10,7 @@ import androidx.compose.ui.unit.dp
 import btm.m.liquidglass.HyperDockedNavigationSettings
 import io.github.libxposed.service.XposedService
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.preference.SwitchPreference
+import btm.m.os4.systemuihook.InterfaceSwitchPreference as SwitchPreference
 
 @Composable
 internal fun rememberHyperDockedGlassEnabled(): Boolean {

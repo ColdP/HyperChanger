@@ -29,7 +29,7 @@ import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import btm.m.os4.systemuihook.SeamlessCard as Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.preference.ArrowPreference
+import btm.m.os4.systemuihook.InterfaceArrowPreference as ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 private fun SettingsEntryIconEntry.label() = tr("settingsIcon_$id", title)

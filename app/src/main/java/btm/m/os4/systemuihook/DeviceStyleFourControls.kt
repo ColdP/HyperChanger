@@ -3,7 +3,7 @@ package btm.m.os4.systemuihook
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.*
-import top.yukonga.miuix.kmp.preference.SwitchPreference
+import btm.m.os4.systemuihook.InterfaceSwitchPreference as SwitchPreference
 
 private typealias StyleFourUpdate = (((SettingsAppearanceSettings) -> SettingsAppearanceSettings) -> Unit)
 private fun styleFourSave(update: StyleFourUpdate, transform: (DeviceStyleFourSettings) -> DeviceStyleFourSettings) =

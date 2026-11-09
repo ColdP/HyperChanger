@@ -21,10 +21,10 @@ import btm.m.os4.systemuihook.securitycenter.SecurityCenterRootedCheckDiagnostic
 import btm.m.os4.systemuihook.trustservice.TrustServiceSettingsPreference
 import kotlinx.coroutines.delay
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.Card
+import btm.m.os4.systemuihook.SeamlessCard as Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.preference.SwitchPreference
+import btm.m.os4.systemuihook.InterfaceSwitchPreference as SwitchPreference
 
 @Composable
 internal fun EnvironmentDetectionPage(back: () -> Unit) {

@@ -3,6 +3,14 @@
   "creator": "btm_m",
   "locale": "en",
   "strings": {
+    "settingsDualPaneBalance": "左右页面占比",
+    "settingsDualPaneBalanceValue": "%d%%（左 %.1f%% / 右 %.1f%%）",
+    "settingsDualPaneLandscapeOnly": "仅横屏使用双栏",
+    "settingsDualPaneLandscapeOnlySummary": "竖屏保持原生单栏布局，横屏使用双栏。普通手机需配合系统自动旋转和“强制解锁横屏模式”。重新启动设置应用后生效。",
+    "settingsHomepageDualPane": "开启设置首页双栏模式",
+    "settingsHomepageDualPaneSummary": "在普通手机上启用原生双栏布局，左侧显示首页，右侧显示设置详情。需要系统支持 Activity Embedding，重新启动设置应用后生效。",
+    "settingsUnlockLandscape": "强制解锁横屏模式",
+    "settingsUnlockLandscapeSummary": "解除系统设置的竖屏限制，跟随系统自动旋转。重新启动设置应用后生效。",
     "settingsFloatingSearchIconScale": "搜索图标缩放",
     "settingsFloatingSearchTextScale": "搜索文本缩放",
     "settingsFloatingSearchIconTextSpacing": "图标和文本的间距",
@@ -875,7 +883,6 @@
     "背屏": "Back Screen",
     "背屏音乐控件": "Backscreen music controls",
     "背屏音乐控件白名单": "Whitelist of backscreen music controls",
-    "本项目基于 MIUIX 构建": "This project is built on MIUIX",
     "避让锁屏通知": "Avoid lock screen notifications",
     "边缘厚度": "Edge Thickness",
     "边缘与反射": "Edges and Reflection",
@@ -2536,5 +2543,14 @@
   "camera_watermark_reselect": "重新选择",
   "camera_watermark_delete_confirm": "确定删除这个水印吗？",
   "camera_watermark_exported": "水印已导出",
-  "camera_watermark_operation_failed": "操作失败，请检查水印 ZIP 或重试"
+  "camera_watermark_operation_failed": "操作失败，请检查水印 ZIP 或重试",
+  "appInterfaceStyle": "Interface style",
+  "Hyper": "Hyper",
+  "Harmony": "Harmony",
+  "Color": "Color",
+  "主题": "Theme",
+  "HyperOS 底部导航栏": "HyperOS bottom navigation bar",
+  "HyperOS 悬浮导航栏": "HyperOS floating navigation bar",
+  "Harmony 悬浮导航栏": "Harmony floating navigation bar",
+  "ColorOS 底部导航栏": "ColorOS bottom navigation bar"
 }

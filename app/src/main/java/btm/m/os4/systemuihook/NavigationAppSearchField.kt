@@ -60,22 +60,23 @@ internal fun NavigationAppSearchField(
     enabled: Boolean = true,
 ) {
     val backdrop = LocalToolbarBackdrop.current
+    val colorStyle = LocalAppInterfaceStyle.current == AppInterfaceStyle.COLOR
     val shape = remember { Capsule(RoundedCornerStyle.Continuous) }
     val surface = MiuixTheme.colorScheme.surfaceContainer
     val light = surface.luminance() > .5f
     val glassAvailable = backdrop != null && isRuntimeShaderSupported()
     val tint = (if (light) Color(0xFFF8F8F8) else surface)
-        .copy(alpha = if (glassAvailable) .30f else .90f)
+        .copy(alpha = if (glassAvailable && colorStyle) .62f else if (glassAvailable) .30f else .90f)
     val glass = if (!drawSurface) Modifier else if (glassAvailable) {
         Modifier.drawBackdrop(
             backdrop = requireNotNull(backdrop),
             shape = { shape },
             effects = {
                 vibrancy()
-                blur(SEARCH_GLASS_BLUR.toPx())
-                lens(18.dp.toPx(), SEARCH_GLASS_REFRACTION.toPx(), depthEffect = true, chromaticAberration = false)
+                blur((if (colorStyle) 14.dp else SEARCH_GLASS_BLUR).toPx())
+                lens(18.dp.toPx(), if (colorStyle) 0f else SEARCH_GLASS_REFRACTION.toPx(), depthEffect = true, chromaticAberration = false)
             },
-            highlight = { Highlight.Default.copy(alpha = .25f) },
+            highlight = { Highlight.Default.copy(alpha = if (colorStyle) .82f else .25f) },
             shadow = {
                 Shadow.Default.copy(radius = 12.dp, color = if (light) Color.Gray else Color.Black, alpha = .25f)
             },

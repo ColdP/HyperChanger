@@ -89,6 +89,11 @@ fun GlassDropdownPreference(
     disabledIndices: Set<Int> = emptySet(),
     onSelectedIndexChange: (Int) -> Unit,
 ) {
+    if (LocalAppInterfaceStyle.current == AppInterfaceStyle.COLOR) {
+        ColorDropdownPreference(title, items, selectedIndex, modifier, enabled && items.isNotEmpty(),
+            showValueOnEnd, disabledIndices, onSelectedIndexChange)
+        return
+    }
     val selected = selectedIndex.coerceIn(0, items.lastIndex.coerceAtLeast(0))
     GlassDropdownMenu(
         entry = DropdownEntry(

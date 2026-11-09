@@ -9,7 +9,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import top.yukonga.miuix.kmp.preference.ArrowPreference
+import btm.m.os4.systemuihook.InterfaceArrowPreference as ArrowPreference
 
 @Composable
 internal fun SettingsModuleEntryIconPreference() {

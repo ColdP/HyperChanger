@@ -27,8 +27,8 @@ import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import top.yukonga.miuix.kmp.basic.*
-import top.yukonga.miuix.kmp.preference.SwitchPreference
-import top.yukonga.miuix.kmp.preference.ArrowPreference
+import btm.m.os4.systemuihook.InterfaceSwitchPreference as SwitchPreference
+import btm.m.os4.systemuihook.InterfaceArrowPreference as ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlin.math.*
 

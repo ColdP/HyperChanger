@@ -3,9 +3,11 @@ package btm.m.os4.systemuihook
 
 import android.content.ContentProvider
 import android.content.ContentValues
+import android.content.Context
 import android.content.SharedPreferences
 import android.database.Cursor
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.net.Uri
 import android.os.Binder
 import android.os.ParcelFileDescriptor
@@ -52,25 +54,48 @@ internal class SettingsEntryIconHooks {
                     val nextRevision = readSettingsEntryIconRevision(prefs)
                     val moduleSettings = readSettingsModuleEntryIconSettings(prefs)
                     val appearance = readSettingsEntryAppearanceSettings(prefs)
-                    if (nextRevision == 0L && !moduleSettings.enabled && !appearance.anyEnabled) return@runCatching
                     val holder = chain.getArg(0) ?: return@runCatching
-                    applySettingsEntryAppearance(holder, appearance)
+                    if (nextRevision != 0L || moduleSettings.enabled || appearance.anyEnabled) {
+                        applySettingsEntryAppearance(holder, appearance)
+                    }
                     val icon = holder.javaClass.getField("icon").get(holder) as? ImageView ?: return@runCatching
-                    if (icon.visibility != View.VISIBLE) return@runCatching
                     val header = getItem.invoke(chain.thisObject, chain.getArg(1)) ?: return@runCatching
                     val headerId = header.javaClass.getField("id").getLong(header)
+                    if (nextRevision == 0L && !moduleSettings.enabled && !appearance.anyEnabled &&
+                        headerId != SETTINGS_MODULE_ENTRY_HEADER_ID) return@runCatching
                     if (headerId == SETTINGS_MODULE_ENTRY_HEADER_ID) {
-                        if (!moduleSettings.enabled) return@runCatching
-                        if (moduleRevision != moduleSettings.revision) {
-                            val loaded = icon.context.contentResolver.openInputStream(
-                                Uri.parse("content://$SETTINGS_ENTRY_ICON_AUTHORITY/module"),
-                            )?.use { decodeSettingsEntryIcon(it.readBytes()) } ?: return@runCatching
-                            moduleIcon = loaded
-                            moduleRevision = moduleSettings.revision
+                        if (moduleSettings.enabled && moduleRevision != moduleSettings.revision) {
+                            runCatching {
+                                icon.context.contentResolver.openInputStream(
+                                    Uri.parse("content://$SETTINGS_ENTRY_ICON_AUTHORITY/module"),
+                                )?.use { decodeSettingsEntryIcon(it.readBytes()) }
+                            }.getOrNull()?.let {
+                                moduleIcon = it
+                                moduleRevision = moduleSettings.revision
+                            }
                         }
-                        moduleIcon?.let { icon.setImageBitmap(it) }
+                        val customIcon = moduleIcon.takeIf { moduleSettings.enabled && moduleRevision == moduleSettings.revision }
+                        if (customIcon != null) {
+                            icon.setImageBitmap(customIcon)
+                        } else {
+                            runCatching {
+                                val drawable = icon.context.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY)
+                                    .getDrawable(R.drawable.ic_hyperchanger_settings_entry)
+                                    ?: return@runCatching null
+                                val sizeId = icon.resources.getIdentifier("header_icon_size", "dimen", "com.android.settings")
+                                if (sizeId == 0) return@runCatching null
+                                val size = icon.resources.getDimensionPixelSize(sizeId)
+                                if (size <= 0) return@runCatching null
+                                Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888).also { bitmap ->
+                                    drawable.setBounds(0, 0, size, size)
+                                    drawable.draw(Canvas(bitmap))
+                                }
+                            }.getOrNull()?.let { icon.setImageBitmap(it) }
+                        }
+                        icon.visibility = View.VISIBLE
                         return@runCatching
                     }
+                    if (icon.visibility != View.VISIBLE) return@runCatching
                     if (nextRevision == 0L) return@runCatching
                     if (revision != nextRevision) {
                         val loaded = icon.context.contentResolver.openInputStream(

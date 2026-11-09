@@ -50,9 +50,9 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 import kotlin.math.roundToInt
-import top.yukonga.miuix.kmp.basic.Card
+import btm.m.os4.systemuihook.SeamlessCard as Card
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.preference.SwitchPreference
+import btm.m.os4.systemuihook.InterfaceSwitchPreference as SwitchPreference
 
 @Composable
 internal fun rememberNavigationMaterialRevision(p: SharedPreferences): Int {
@@ -166,11 +166,11 @@ internal fun NavigationMaterialPage(packageName: String?, back: () -> Unit) {
         header = {
             SoftGlassHeaderTabs(availableStyles.map { when (it) {
                 NavigationStyle.HYPER_OS -> tr("navMaterialDocked", "贴边导航栏")
-                NavigationStyle.HYPER_OS_FLOATING -> tr("HyperOS", "HyperOS")
+                NavigationStyle.HYPER_OS_FLOATING -> tr("Hyper", "Hyper")
                 NavigationStyle.LIQUID_GLASS -> tr("液态玻璃", "液态玻璃")
-                NavigationStyle.HARMONY_OS_FLOATING -> tr("HarmonyOS", "HarmonyOS")
-            } }, activeTab, widthScale = if (dockedGlass) 1.2f else 1f,
-                finalWidthScale = if (dockedGlass) .95f else 1f) { tab = it }
+                NavigationStyle.HARMONY_OS_FLOATING -> tr("Harmony", "Harmony")
+            } }, activeTab, widthScale = if (dockedGlass) 1.42f else 1.28f,
+                finalWidthScale = if (dockedGlass) 1f else .98f) { tab = it }
         },
     ) { padding, scroll ->
         AppList(padding, scroll, 28) {

@@ -41,6 +41,7 @@ import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.highlight.Highlight
 import com.kyant.shapes.Capsule
 import com.kyant.shapes.RoundedCornerStyle
+import btm.m.liquidglass.hook.DampedDragAnimation
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Search
 
@@ -68,7 +69,14 @@ internal fun SettingsFloatingSearchSurface(
     onClick: () -> Unit = {},
     onPressScale: (Float) -> Unit = {},
 ) {
+    val colorStyle = LocalAppInterfaceStyle.current == AppInterfaceStyle.COLOR
     val interaction = remember { MutableInteractionSource() }
+    val scope = rememberCoroutineScope()
+    val drag = remember(scope) {
+        DampedDragAnimation(scope, 0f, -1f..1f, .001f, 1f, 1.08f,
+            onDragStopped = { animateToValue(0f) },
+            onDrag = { size, amount -> updateValue((targetValue + amount.x / size.width.coerceAtLeast(1)).coerceIn(-1f, 1f)) })
+    }
     val pressed by interaction.collectIsPressedAsState()
     val press by animateFloatAsState(if (pressed) 1f else 0f, label = "settingsSearchPress")
     val scale = 1f + .015f * press
@@ -79,10 +87,10 @@ internal fun SettingsFloatingSearchSurface(
         shape = { SettingsSearchShape },
         // Pure advanced material: no lens, refraction, dispersion or vibrancy pass.
         effects = { if (settings.blurRadius > 0) blur(settings.blurRadius.toFloat()) },
-        highlight = if (settings.highlight) ({ Highlight.Default }) else null,
+        highlight = if (settings.highlight) ({ Highlight.Default.copy(alpha = if (colorStyle) .85f else Highlight.Default.alpha) }) else null,
         shadow = null,
         onDrawSurface = {
-            drawRect((if (dark) Color(0xFF17181C) else Color.White).copy(alpha = settings.opacity / 100f))
+            drawRect((if (dark) Color(0xFF17181C) else Color.White).copy(alpha = if (colorStyle) maxOf(settings.opacity / 100f, .72f) else settings.opacity / 100f))
         },
     )
     // Give the alpha/blur recording real space for the outer shadow. Keep the outer
@@ -92,7 +100,7 @@ internal fun SettingsFloatingSearchSurface(
         Box(
             Modifier.matchParentSize().wrapContentSize(Alignment.Center, unbounded = true)
                 .requiredSize(maxWidth + shadowSpace * 2, maxHeight + shadowSpace * 2)
-                .graphicsLayer { alpha = motionAlpha; scaleX = scale; scaleY = scale }
+                .graphicsLayer { alpha = motionAlpha; scaleX = scale * drag.scaleX; scaleY = scale * drag.scaleY; translationX = drag.value * 5.dp.toPx() }
                 .contentBlur(motionBlur, edgeTreatment = BlurredEdgeTreatment.Unbounded)
                 .padding(shadowSpace),
         ) {
@@ -110,7 +118,7 @@ internal fun SettingsFloatingSearchSurface(
                             }
                         }
                     }
-                    .then(previewMaterial)
+                    .then(drag.modifier).then(previewMaterial)
                     .clip(SettingsSearchShape)
                     .clickable(enabled = enabled, interactionSource = interaction, indication = null, onClick = onClick)
                     .semantics { contentDescription = text }

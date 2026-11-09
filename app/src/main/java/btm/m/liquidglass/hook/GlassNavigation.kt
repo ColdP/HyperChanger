@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.tappableElement
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -75,6 +77,8 @@ import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
@@ -110,6 +114,12 @@ import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import com.kyant.shapes.Capsule
+import com.itos.coui.effect.CouiFloatingRenderer
+import com.itos.coui.navigation.CouiNavigationItem as CoubNavigationItem
+import com.itos.coui.navigation.NavigationBar as CouiNavigationBar
+import com.itos.coui.backdrop.rememberCouiBackdrop
+import com.itos.coui.backdrop.couiBackdrop
+import com.itos.coui.theme.CouiTheme
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.delay
@@ -239,6 +249,9 @@ internal fun CustomNavigation(
     tabImageVector: ((Int) -> ImageVector)? = null,
     tabIconContent: (@Composable (Int, Color) -> Unit)? = null,
     trailingAction: HostTab? = null,
+    onColorSearchPositioned: ((androidx.compose.ui.geometry.Rect) -> Unit)? = null,
+    hideColorTrailingAction: Boolean = false,
+    colorSearchProgress: Float = 0f,
     suppressFloatingShadow: Boolean = false,
     floatingShadow: Shadow = Shadow.Default,
     softBackdropShadow: Boolean = false
@@ -275,7 +288,7 @@ internal fun CustomNavigation(
     if (scale.widthFactor == 0f || scale.heightFactor == 0f) return@CompositionLocalProvider
     if (style != NavigationStyle.LIQUID_GLASS) {
         Box(Modifier.fillMaxSize()) {
-            if (concealHostBottomBar) {
+            if (concealHostBottomBar && style != NavigationStyle.HYPER_OS_FLOATING) {
                 HostBottomBarConcealment(backdrop, hostIsDarkTheme, density)
             }
             HyperNavigation(
@@ -507,7 +520,7 @@ private fun TrailingActionButton(
     val view = LocalView.current
     val density = LocalDensity.current
     val liquid = style == NavigationStyle.LIQUID_GLASS
-    val harmony = style == NavigationStyle.HARMONY_OS_FLOATING
+    val harmony = style == NavigationStyle.HARMONY_OS_FLOATING || style == NavigationStyle.HYPER_OS_FLOATING
     val floating = style == NavigationStyle.HYPER_OS_FLOATING || harmony
     val useEffects = advancedMaterial && isRuntimeShaderSupported()
     val surfaceColor = action.actionBackgroundColor ?: if (action.actionFollowsNavigationBackground && !liquid) {
@@ -1118,7 +1131,7 @@ private fun HyperNavigation(
                     floatingShadow = floatingShadow,
                     softBackdropShadow = softBackdropShadow,
                     dimensionScale = dimensionScale,
-                    enableDrag = !harmonyFloating,
+                    enableDrag = style != NavigationStyle.HARMONY_OS_FLOATING,
                     tabImageVector = tabImageVector,
                     tabIconContent = tabIconContent,
                     onTabSelected = { index ->
@@ -1153,7 +1166,7 @@ private fun HyperNavigation(
                         floatingShadow = floatingShadow,
                         softBackdropShadow = softBackdropShadow,
                         dimensionScale = dimensionScale,
-                        enableDrag = !harmonyFloating,
+                        enableDrag = style != NavigationStyle.HARMONY_OS_FLOATING,
                         tabImageVector = tabImageVector,
                         tabIconContent = tabIconContent,
                         modifier = Modifier.weight(1f),
@@ -1296,6 +1309,69 @@ private fun HyperNavigation(
     }
 }
 
+@Composable
+private fun ColorOsNavigationBar(
+    backdrop: Backdrop, tabs: List<HostTab>, selectedIndex: MutableIntState, modifier: Modifier,
+    tabImageVector: ((Int) -> ImageVector)?, tabIconContent: (@Composable (Int, Color) -> Unit)?,
+    showIcons: Boolean, showLabels: Boolean, hostIsDarkTheme: Boolean, trailingAction: HostTab?,
+    adaptiveFloatingWidth: Boolean, dimensionScale: NavigationScaleSettings.Settings,
+    onColorSearchPositioned: ((Rect) -> Unit)?, hideTrailingAction: Boolean,
+    onTabSelected: (Int) -> Unit, rightProgress: Float,
+) {
+    val density = LocalDensity.current
+    val currentBackdrop by rememberUpdatedState(backdrop)
+    var sourceCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    // COUI demo structure: the source is a full-size sibling, while NavigationBar
+    // is only the destination surface. Never record a small rectangle as its scene.
+    val couiBackdrop = rememberCouiBackdrop {
+        with(currentBackdrop) { drawBackdrop(density, sourceCoordinates, null) }
+    }
+    val view = LocalView.current
+    val items = tabs.mapIndexed { index, tab ->
+        val icon = tab.icon ?: tabImageVector?.invoke(index) ?: hyperIcon(tab.label)
+        CoubNavigationItem(tab.label, icon)
+    }
+    Box(modifier.fillMaxSize()) {
+        Box(Modifier.matchParentSize().onGloballyPositioned { sourceCoordinates = it }
+            .couiBackdrop(couiBackdrop))
+        BoxWithConstraints(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+            .navigationBarsPadding().padding(start = 14.dp, end = 14.dp, bottom = 6.dp)) {
+            val count = tabs.size.coerceAtLeast(1)
+            val fraction = if (adaptiveFloatingWidth) (0.25f + count * .135f +
+                if (trailingAction != null) .27f else 0f).coerceIn(.53f, .92f) else .53f
+            val width = maxWidth * fraction * dimensionScale.widthFactor
+            Box(Modifier.align(Alignment.Center).width(width)
+                .height(56.dp * dimensionScale.heightFactor)
+                .onGloballyPositioned { coordinates ->
+                    if (trailingAction != null && onColorSearchPositioned != null) {
+                        val bounds = coordinates.boundsInWindow()
+                        val right = bounds.right - with(density) { 16.dp.toPx() }
+                        val bottom = bounds.bottom
+                        val size = with(density) { 56.dp.toPx() }
+                        onColorSearchPositioned(Rect(right - size, bottom - size, right, bottom))
+                    }
+                }) {
+                CouiNavigationBar(
+                    modifier = Modifier.fillMaxSize(), backdrop = couiBackdrop,
+                    renderer = remember { CouiFloatingRenderer() }, items = items,
+                    selectedIndex = selectedIndex.intValue.coerceIn(0, items.lastIndex),
+                    dark = hostIsDarkTheme,
+                    selectedColor = if (hostIsDarkTheme) Color.White else Color.Black,
+                    unselectedColor = (if (hostIsDarkTheme) Color.White else Color.Black).copy(alpha = .62f),
+                    rightVisible = trailingAction != null && !hideTrailingAction && rightProgress < .98f,
+                    rightIcon = trailingAction?.icon ?: HyperIcons.Search,
+                    rightDescription = trailingAction?.label,
+                    onRightClick = trailingAction?.let { action -> {
+                        view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                        action.onClick()
+                    } },
+                    onSelection = { view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); onTabSelected(it) },
+                )
+            }
+        }
+    }
+}
+
 /** OS4-style floating navigation: one capsule, a moving selected pill, and a damped drag. */
 @Composable
 private fun HyperFloatingNavigationBar(
@@ -1311,6 +1387,7 @@ private fun HyperFloatingNavigationBar(
     adaptiveFloatingWidth: Boolean,
     dragWholeFloatingBar: Boolean,
     harmonyFloating: Boolean,
+    colorOs: Boolean = false,
     suppressShadow: Boolean = false,
     floatingShadow: Shadow = Shadow.Default,
     softBackdropShadow: Boolean = false,
@@ -1389,7 +1466,7 @@ private fun HyperFloatingNavigationBar(
         if (!dragAnimation.isDragging) dragAnimation.animateToValue(selectedIndex.intValue.coerceIn(0, tabCount - 1).toFloat())
     }
     val contentColor = if (isDarkTheme) Color.White else Color.Black
-    val selectedContentColor = accentColorOverride ?: if (harmonyFloating) Color(0xFF0088FF) else contentColor
+    val selectedContentColor = accentColorOverride ?: if (colorOs) Color.Black else if (harmonyFloating) Color(0xFF0088FF) else contentColor
     val pressedIndex by remember(dragAnimation, tabCount) {
         derivedStateOf {
             if (dragAnimation.pressProgress > 0.001f) {

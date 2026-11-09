@@ -20,6 +20,8 @@ class HookApplication : Application(), XposedServiceHelper.OnServiceListener {
     }
 
     override fun onServiceBind(service: XposedService) {
+        AppInterfaceStyleSettings.sync(getSharedPreferences(REMOTE_PREFERENCE_GROUP, MODE_PRIVATE),
+            service.getRemotePreferences(REMOTE_PREFERENCE_GROUP))
         CameraVersionCompatibility.enforce(this, service)
         Thread({
             runCatching { CameraWatermarkRemote.publish(this, service) }

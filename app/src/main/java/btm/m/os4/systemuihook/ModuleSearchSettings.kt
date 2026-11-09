@@ -7,7 +7,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import io.github.libxposed.service.XposedService
 import org.json.JSONObject
-import top.yukonga.miuix.kmp.preference.SwitchPreference
+import btm.m.os4.systemuihook.InterfaceSwitchPreference as SwitchPreference
 
 /** App search preferences stay outside HookSettings and its serialization. */
 internal object ModuleSearchSettings {

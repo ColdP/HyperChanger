@@ -3,6 +3,14 @@
   "creator": "btm_m",
   "locale": "ja",
   "strings": {
+    "settingsDualPaneBalance": "左右のペインの比率",
+    "settingsDualPaneBalanceValue": "%d%%（左 %.1f%% / 右 %.1f%%）",
+    "settingsDualPaneLandscapeOnly": "横画面のみ2ペイン表示にする",
+    "settingsDualPaneLandscapeOnlySummary": "縦画面では標準の1ペイン表示を維持し、横画面では2ペイン表示にします。通常のスマートフォンでは、システムの自動回転と「横画面モードを強制的に有効にする」も有効にしてください。設定アプリの再起動後に反映されます。",
+    "settingsHomepageDualPane": "設定ホームの2ペイン表示を有効にする",
+    "settingsHomepageDualPaneSummary": "通常のスマートフォンで標準の2ペイン表示を有効にし、左側にホーム、右側に設定の詳細を表示します。システムの Activity Embedding 対応が必要です。設定アプリの再起動後に反映されます。",
+    "settingsUnlockLandscape": "横画面モードを強制的に有効にする",
+    "settingsUnlockLandscapeSummary": "設定アプリの縦画面制限を解除し、システムの自動回転に従います。設定アプリの再起動後に反映されます。",
     "settingsFloatingSearchIconScale": "検索アイコンの拡大率",
     "settingsFloatingSearchTextScale": "検索テキストの拡大率",
     "settingsFloatingSearchIconTextSpacing": "アイコンとテキストの間隔",
@@ -875,7 +883,6 @@
     "背屏": "バックスクリーン",
     "背屏音乐控件": "バックスクリーンミュージックコントロール",
     "背屏音乐控件白名单": "バックスクリーンミュージックコントロールのホワイトリスト",
-    "本项目基于 MIUIX 构建": "このプロジェクトはMIUIX上に構築されています",
     "避让锁屏通知": "ロック画面の通知を回避する",
     "边缘厚度": "エッジの厚さ",
     "边缘与反射": "エッジと反射",
@@ -2587,5 +2594,14 @@
   "camera_watermark_reselect": "選び直す",
   "camera_watermark_delete_confirm": "この透かしを削除しますか？",
   "camera_watermark_exported": "透かしをエクスポートしました",
-  "camera_watermark_operation_failed": "操作に失敗しました。透かし ZIP を確認するか、再試行してください"
+  "camera_watermark_operation_failed": "操作に失敗しました。透かし ZIP を確認するか、再試行してください",
+  "appInterfaceStyle": "インターフェーススタイル",
+  "Hyper": "Hyper",
+  "Harmony": "Harmony",
+  "Color": "Color",
+  "主题": "テーマ",
+  "HyperOS 底部导航栏": "HyperOS ボトムナビゲーションバー",
+  "HyperOS 悬浮导航栏": "HyperOS フローティングナビゲーションバー",
+  "Harmony 悬浮导航栏": "Harmony フローティングナビゲーションバー",
+  "ColorOS 底部导航栏": "ColorOS ボトムナビゲーションバー"
 }

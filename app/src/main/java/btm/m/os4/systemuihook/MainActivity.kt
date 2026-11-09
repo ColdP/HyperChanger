@@ -219,7 +219,9 @@ import top.yukonga.miuix.kmp.icon.extended.Settings
 import top.yukonga.miuix.kmp.icon.extended.SelectAll
 import top.yukonga.miuix.kmp.icon.extended.Home
 import top.yukonga.miuix.kmp.preference.*
-import top.yukonga.miuix.kmp.preference.SliderPreference as MiuixSliderPreference
+import btm.m.os4.systemuihook.InterfaceSwitchPreference as SwitchPreference
+import btm.m.os4.systemuihook.InterfaceArrowPreference as ArrowPreference
+import btm.m.os4.systemuihook.InterfaceSliderPreference as MiuixSliderPreference
 import top.yukonga.miuix.kmp.shader.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.theme.*
 import java.io.ByteArrayOutputStream
@@ -1259,6 +1261,7 @@ private fun Root(
                 SettingsAdvancedColorStyleSettingsStore(context).syncRemote(it)
                 SettingsTitleBarBlurSettingsStore(context).syncRemote(it)
                 SettingsFloatingSearchSettingsStore(context).syncRemote(it)
+                SettingsLayoutSettingsStore(context).syncRemote(it)
                 superXiaoAiStore.syncRemote(it)
                 systemUpdateStore.syncRemote(it)
                 settings = hooks.settings
@@ -1280,7 +1283,7 @@ private fun Root(
             }
         }
     }
-    MiuixTheme(controller = controller) {
+    AppInterfaceTheme(controller = controller, monetEnabled = appThemeSettings.monetEnabled) {
         ApplySystemBarAppearance()
         val animatedThemeSurface by animateColorAsState(
             targetValue = MiuixTheme.colorScheme.surface,
@@ -2138,6 +2141,7 @@ private fun BottomBar(
     }
     val docked = navigationSettings.style == "hyper_os"
     val liquid = navigationSettings.style == "liquid_glass"
+    val colorOs = navigationSettings.style == "color_os"
     val reveal by animateFloatAsState(if (tab == Tab.CATEGORY) 1f else 0f,
         tween(480, easing = FastOutSlowInEasing), label = "navigationSearchReveal")
     val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -2147,7 +2151,7 @@ private fun BottomBar(
         val barWidth = maxWidth * (.53f * .82f * 1.12f * .95f)
         val gap = 8.dp
         val buttonSize = if (docked) 60.dp else barHeight
-        val shift = if (docked) 0.dp else -(buttonSize + gap) / 2 * reveal
+        val shift = if (docked || colorOs) 0.dp else -(buttonSize + gap) / 2 * reveal
         val right = maxWidth / 2 + barWidth / 2 + shift
         val centerY = maxHeight - navInset - (8f * .82f).dp - barHeight / 2
         val buttonLeft = if (docked) maxWidth - 24.dp - buttonSize else right + gap + 24.dp * (1f - reveal)
@@ -2180,17 +2184,21 @@ private fun BottomBar(
                     Image(if (i == Tab.CATEGORY.ordinal) MiuixIcons.Regular.Home else MiuixIcons.Regular.Settings,
                         null, Modifier.size(28.dp), colorFilter = ColorFilter.tint(color))
                 },
+                trailingAction = if (colorOs && tab == Tab.CATEGORY) HostTab(
+                    label = tr("搜索", "Search"), className = "module_search",
+                    icon = MiuixIcons.Regular.Search, onClick = onSearch,
+                ) else null,
+                onColorSearchPositioned = onSearchPositioned,
+                colorSearchProgress = if (colorOs && tab == Tab.CATEGORY && searchMounted) searchProgress else 0f,
             )
         }
-        if (!searchMounted && reveal > .001f) {
+        if (!colorOs && !searchMounted && reveal > .001f) {
             SearchRoundButton(
                 backdrop = backdrop, size = buttonSize,
                 primary = docked, closeProgress = 0f, navigationStyle = navigationSettings.style,
                 motionAlpha = reveal, motionBlur = ((1f - reveal) * 6f).dp,
                 modifier = Modifier.offset(buttonLeft, buttonTop)
-                    .graphicsLayer {
-                        translationY = (1f - reveal) * 16.dp.toPx()
-                    }
+                    .graphicsLayer { translationY = (1f - reveal) * 16.dp.toPx() }
                     .onGloballyPositioned { onSearchPositioned(it.boundsInWindow()) },
                 enabled = tab == Tab.CATEGORY && reveal > .98f,
                 onClick = onSearch,
@@ -3605,9 +3613,10 @@ private fun ThemeAndColorPage(
     ) { padding, scroll ->
         AppList(padding, scroll) {
             item {
-                Group(tr("主题模式", "主题模式")) {
+                Group(tr("主题", "主题")) {
+                    AppInterfaceStylePreference(service)
                     OverlayDropdownPreference(
-                        title = tr("主题模式", "主题模式"),
+                        title = tr("theme_mode", "主题模式"),
                         items = listOf(
                             tr("followSystem", "跟随系统"),
                             tr("light_mode", "浅色模式"),
@@ -4610,6 +4619,12 @@ private fun SystemSettings(
             titleBarBlur = titleBarBlurStore.settings
         }
     }
+    val settingsLayoutStore = remember(cpuIconContext) { SettingsLayoutSettingsStore(cpuIconContext) }
+    var settingsLayout by remember { mutableStateOf(settingsLayoutStore.settings) }
+    LaunchedEffect(appScopeService) {
+        appScopeService?.let(settingsLayoutStore::syncRemote)
+        settingsLayout = settingsLayoutStore.settings
+    }
     val soundEffectStore = remember(cpuIconContext) { SoundEffectPreferencesStore(cpuIconContext) }
     var soundEffect by remember { mutableStateOf(soundEffectStore.settings) }
     val nativeBoseSupported by (cpuIconContext.applicationContext as HookApplication)
@@ -4747,6 +4762,56 @@ private fun SystemSettings(
                     onCheckedChange = { value ->
                         advancedColorStyleStore.update(appScopeService) { it.copy(enabled = value) }
                         advancedColorStyle = advancedColorStyleStore.settings
+                    },
+                )
+                SwitchPreference(
+                    title = tr("settingsHomepageDualPane", "开启设置首页双栏模式"),
+                    summary = tr("settingsHomepageDualPaneSummary", "在普通手机上启用原生双栏布局，左侧显示首页，右侧显示设置详情。需要系统支持 Activity Embedding，重新启动设置应用后生效。"),
+                    checked = settingsLayout.dualPane,
+                    onCheckedChange = { value ->
+                        settingsLayoutStore.update(appScopeService) { it.copy(dualPane = value) }
+                        settingsLayout = settingsLayoutStore.settings
+                    },
+                )
+                AnimatedVisibility(
+                    visible = settingsLayout.dualPane,
+                    enter = expandVertically(animationSpec = tween(220)) + fadeIn(animationSpec = tween(180)),
+                    exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(animationSpec = tween(120)),
+                ) {
+                    Column(Modifier.fillMaxWidth()) {
+                        var balance by remember(settingsLayout.balance) { mutableFloatStateOf(settingsLayout.balance.toFloat()) }
+                        val leftPercent = settingsDualPaneRatio(balance.roundToInt()) * 100f
+                        EditableSliderPreference(
+                            title = tr("settingsDualPaneBalance", "左右页面占比"),
+                            value = balance,
+                            valueText = tr("settingsDualPaneBalanceValue", "%d%%（左 %.1f%% / 右 %.1f%%）")
+                                .format(balance.roundToInt(), leftPercent, 100f - leftPercent),
+                            valueRange = -100f..100f, steps = 199, centerValue = 0f,
+                            defaultValue = DEFAULT_SETTINGS_DUAL_PANE_BALANCE.toFloat(),
+                            onValueChange = { balance = it },
+                            onValueChangeFinished = {
+                                settingsLayoutStore.update(appScopeService) { it.copy(balance = balance.roundToInt()) }
+                                settingsLayout = settingsLayoutStore.settings
+                            },
+                        )
+                        SwitchPreference(
+                            title = tr("settingsDualPaneLandscapeOnly", "仅横屏使用双栏"),
+                            summary = tr("settingsDualPaneLandscapeOnlySummary", "竖屏保持原生单栏布局，横屏使用双栏。普通手机需配合系统自动旋转和“强制解锁横屏模式”。重新启动设置应用后生效。"),
+                            checked = settingsLayout.landscapeOnly,
+                            onCheckedChange = { value ->
+                                settingsLayoutStore.update(appScopeService) { it.copy(landscapeOnly = value) }
+                                settingsLayout = settingsLayoutStore.settings
+                            },
+                        )
+                    }
+                }
+                SwitchPreference(
+                    title = tr("settingsUnlockLandscape", "强制解锁横屏模式"),
+                    summary = tr("settingsUnlockLandscapeSummary", "解除系统设置的竖屏限制，跟随系统自动旋转。重新启动设置应用后生效。"),
+                    checked = settingsLayout.unlockLandscape,
+                    onCheckedChange = { value ->
+                        settingsLayoutStore.update(appScopeService) { it.copy(unlockLandscape = value) }
+                        settingsLayout = settingsLayoutStore.settings
                     },
                 )
             }
@@ -14182,7 +14247,6 @@ private fun About(back: () -> Unit, openPage: (PageId) -> Unit, monetEnabled: Bo
                 SharedViewArrowPreference(title = tr("用户协议", "用户协议"), onClick = { openPage(PageId.LEGAL_USER_AGREEMENT) })
                 SharedViewArrowPreference(title = tr("免责声明", "免责声明"), onClick = { openPage(PageId.LEGAL_DISCLAIMER) })
                 SharedViewArrowPreference(title = tr("隐私政策", "隐私政策"), onClick = { openPage(PageId.LEGAL_PRIVACY) })
-                SharedViewArrowPreference(title = tr("\u672c\u9879\u76ee\u57fa\u4e8e MIUIX \u6784\u5efa", "\u672c\u9879\u76ee\u57fa\u4e8e MIUIX \u6784\u5efa"), onClick = { openUrl(context, "https://compose-miuix-ui.github.io/miuix/") })
                 SharedViewArrowPreference(title = tr("\u5f00\u6e90\u4ee3\u7801\u58f0\u660e", "\u5f00\u6e90\u4ee3\u7801\u58f0\u660e"), onClick = { openPage(PageId.OPEN) })
                 SharedViewArrowPreference(title = tr("contributors", "\u8d21\u732e\u8005"), onClick = { openPage(PageId.CONTRIBUTORS) })
             }
@@ -14402,6 +14466,11 @@ private fun openProjects() = listOf(
         tr("miuixVersion", "0.9.4"),
         tr("miuixAttribution", "提供 HyperOS 风格界面组件、偏好设置、图标与模糊效果，构成本模块设置界面的基础。感谢 MIUIX 作者与贡献者。"),
         "https://github.com/compose-miuix-ui/miuix",
+    ),
+    OpenProject(
+        tr("COUI-Kit", "COUI-Kit"), tr("couiVersion", "0.0.1-alpha8"),
+        tr("couiAttribution", "提供 Color 风格的界面组件与视觉效果。感谢 COUI-Kit 作者与贡献者。"),
+        "https://github.com/ItosEO/COUI-Kit", tr("MPL-2.0", "MPL-2.0"),
     ),
     OpenProject("LSPosed API", "102", tr("LSPosed \u6a21\u5757 API \u4e0e\u670d\u52a1\u901a\u4fe1", "LSPosed \u6a21\u5757 API \u4e0e\u670d\u52a1\u901a\u4fe1"), "https://github.com/LSPosed/LSPosed"),
     OpenProject("Backdrop / AndroidLiquidGlass", "2.0.0", tr("\u6db2\u6001\u73bb\u7483\u6e32\u67d3\u4e0e\u5e95\u90e8\u5bfc\u822a\u4ea4\u4e92", "\u6db2\u6001\u73bb\u7483\u6e32\u67d3\u4e0e\u5e95\u90e8\u5bfc\u822a\u4ea4\u4e92"), "https://github.com/Kyant0/AndroidLiquidGlass"),

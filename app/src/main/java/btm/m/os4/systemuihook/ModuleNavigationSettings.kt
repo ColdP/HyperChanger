@@ -10,7 +10,8 @@ import org.json.JSONObject
 enum class ModuleNavigationStyle(val preferenceValue: String, val displayName: String) {
     HYPER_OS_FLOATING("hyper_os_floating", "HyperOS 悬浮导航栏"),
     HYPER_OS("hyper_os", "HyperOS 底部导航栏"),
-    HARMONY_OS_FLOATING("harmony_os_floating", "HarmonyOS 悬浮导航栏"),
+    HARMONY_OS_FLOATING("harmony_os_floating", "Harmony 悬浮导航栏"),
+    COLOR_OS("color_os", "ColorOS 底部导航栏"),
     LIQUID_GLASS("liquid_glass", "液态玻璃底部导航栏");
 
     companion object {

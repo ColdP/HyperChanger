@@ -91,6 +91,7 @@ object ModulePresetCodec {
                 completeModuleNavigationPreset(values)
                 completeSharedViewAnimationPreset(values)
                 completeModuleSearchPreset(values)
+                completeAppInterfaceStylePreset(values)
                 completeStackedMobileCornerPreset(values)
                 completeStatusBarSecondsPreset(values)
                 completeCcTileLayoutPreset(values)
@@ -114,6 +115,7 @@ object ModulePresetCodec {
                 completeGmsQuickShareIslandPreset(values)
                 completeSettingsTitleBarBlurPreset(values)
                 completeSettingsFloatingSearchPreset(values)
+                completeSettingsLayoutPreset(values)
             }
             if (groupName == SETTINGS_APPEARANCE_PREFERENCES) {
                 val legacy = values.optJSONObject("color_mode_assets_enabled")?.optBoolean("value", false) ?: false
@@ -186,6 +188,7 @@ object ModulePresetCodec {
                 completeModuleNavigationPreset(values)
                 completeSharedViewAnimationPreset(values)
                 completeModuleSearchPreset(values)
+                completeAppInterfaceStylePreset(values)
                 completeStackedMobileCornerPreset(values)
                 completeStatusBarSecondsPreset(values)
                 completeCcTileLayoutPreset(values)
@@ -209,6 +212,7 @@ object ModulePresetCodec {
                 completeGmsQuickShareIslandPreset(values)
                 completeSettingsTitleBarBlurPreset(values)
                 completeSettingsFloatingSearchPreset(values)
+                completeSettingsLayoutPreset(values)
             }
             if (groupName == SETTINGS_APPEARANCE_PREFERENCES) {
                 val legacy = values.optJSONObject("color_mode_assets_enabled")?.optBoolean("value", false) ?: false
@@ -288,6 +292,7 @@ object ModulePresetCodec {
                 completeModuleNavigationPreset(values)
                 completeSharedViewAnimationPreset(values)
                 completeModuleSearchPreset(values)
+                completeAppInterfaceStylePreset(values)
                 completeStackedMobileCornerPreset(values)
                 completeStatusBarSecondsPreset(values)
                 completeCcTileLayoutPreset(values)
@@ -311,6 +316,7 @@ object ModulePresetCodec {
                 completeGmsQuickShareIslandPreset(values)
                 completeSettingsTitleBarBlurPreset(values)
                 completeSettingsFloatingSearchPreset(values)
+                completeSettingsLayoutPreset(values)
             }
             if (groupName == SETTINGS_APPEARANCE_PREFERENCES) {
                 val legacy = values.optJSONObject("color_mode_assets_enabled")?.optBoolean("value", false) ?: false

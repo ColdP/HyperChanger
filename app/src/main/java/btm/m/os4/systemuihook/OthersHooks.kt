@@ -80,6 +80,14 @@ internal class OthersHooks(
     fun installSettingsTitleBarBlurHooks(param: PackageLoadedParam, preferences: SharedPreferences) =
         settingsTitleBarBlurHooks.install(param, preferences)
 
+    private val settingsLayoutHooks = SettingsLayoutHooks(module, hookDeoptimized)
+
+    fun installSettingsDualPaneHooks(param: PackageLoadedParam, preferences: SharedPreferences) =
+        settingsLayoutHooks.installDualPane(param, preferences)
+
+    fun installSettingsLandscapeHooks(param: PackageLoadedParam, preferences: SharedPreferences) =
+        settingsLayoutHooks.installLandscape(param, preferences)
+
     fun installPortalHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
         portalHooks.install(classLoader, preferences)
 
@@ -636,21 +644,6 @@ internal class OthersHooks(
 
     private fun setObjectField(target: Any, name: String, value: Any?) { settingsField(target, name)?.set(target, value) }
 
-    private fun attachModuleResources(context: Context): Boolean = runCatching {
-        if (android.os.Build.VERSION.SDK_INT < 30) return false
-        val loader = synchronized(settingsResourcesLock) {
-            settingsModuleResourcesLoader ?: run {
-                val apk = context.packageManager.getApplicationInfo(BuildConfig.APPLICATION_ID, 0).sourceDir
-                val provider = ParcelFileDescriptor.open(java.io.File(apk), ParcelFileDescriptor.MODE_READ_ONLY).use {
-                    ResourcesProvider.loadFromApk(it)
-                }
-                ResourcesLoader().apply { addProvider(provider) }.also { settingsModuleResourcesLoader = it }
-            }
-        }
-        runCatching { context.resources.addLoaders(loader) }
-        true
-    }.getOrDefault(false)
-
     fun installSettingsAppEntryHook(loader: ClassLoader, prefs: SharedPreferences) {
         val settingsClass = runCatching { loader.loadClass("com.android.settings.MiuiSettings") }.getOrNull() ?: return
         val update = settingsClass.methods.firstOrNull {
@@ -675,12 +668,11 @@ internal class OthersHooks(
             val moduleContext = runCatching {
                 settingsContext.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY)
             }.getOrNull()
-            attachModuleResources(settingsContext)
-            val settingsIcon = if (moduleContext != null) {
-                R.drawable.ic_hyperchanger_settings_entry
-            } else {
-                android.R.drawable.ic_menu_manage
-            }
+            // Never add the module APK as a ResourcesLoader to Settings. Resource IDs are
+            // package-local; merging the full module table makes Settings resolve its own
+            // integer IDs to unrelated module XML/string entries and crash in MIUIX.
+            // The entry remains usable with the platform fallback icon.
+            val settingsIcon = android.R.drawable.ic_menu_manage
             setIntField(header, "iconRes", settingsIcon)
             // A custom title wins over the module's application label; blank keeps the default.
             val customTitle = prefs.getString(KEY_SETTINGS_APP_ENTRY_TITLE, "").orEmpty()
@@ -2061,7 +2053,6 @@ internal class OthersHooks(
         private const val AIRDROP_AVAILABILITY_CLASS = "com.miui.mishare.connectivity.c"
         private const val SETTINGS_HEADER_ID = SETTINGS_MODULE_ENTRY_HEADER_ID
         private const val MIUI_SETTINGS_HEADER_ADAPTER = "com.android.settings.MiuiSettings\$HeaderAdapter"
-        @Volatile private var settingsModuleResourcesLoader: ResourcesLoader? = null
         private const val REAR_SCREEN_APP_WIDGET_PROPERTY = "persist.sys.app.widget.enable"
         private const val REAR_SCREEN_APP_WIDGET_SETTING = "subscreen_app_widget_enable"
         private const val REAR_SCREEN_THEME_WIDGET_SETTING = "theme_rear_widget"

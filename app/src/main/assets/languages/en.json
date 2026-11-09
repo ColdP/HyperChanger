@@ -3,6 +3,14 @@
   "creator": "btm_m",
   "locale": "en",
   "strings": {
+    "settingsDualPaneBalance": "Left and right pane balance",
+    "settingsDualPaneBalanceValue": "%d%% (left %.1f%% / right %.1f%%)",
+    "settingsDualPaneLandscapeOnly": "Use dual panes only in landscape",
+    "settingsDualPaneLandscapeOnlySummary": "Keep the native single-pane layout in portrait and use dual panes in landscape. On phones, also enable system auto-rotate and Force unlock landscape mode. Restart Settings to apply.",
+    "settingsHomepageDualPane": "Enable Settings homepage dual-pane mode",
+    "settingsHomepageDualPaneSummary": "Use the native dual-pane layout on phones, with the homepage on the left and settings details on the right. Requires system support for Activity Embedding. Restart Settings to apply.",
+    "settingsUnlockLandscape": "Force unlock landscape mode",
+    "settingsUnlockLandscapeSummary": "Remove the portrait restriction in Settings and follow system auto-rotate. Restart Settings to apply.",
     "settingsFloatingSearchIconScale": "Search icon scale",
     "settingsFloatingSearchTextScale": "Search text scale",
     "settingsFloatingSearchIconTextSpacing": "Icon and text spacing",
@@ -875,7 +883,6 @@
     "背屏": "Back screen",
     "背屏音乐控件": "Back-screen music controls",
     "背屏音乐控件白名单": "Back-screen music controls whitelist",
-    "本项目基于 MIUIX 构建": "This project is built on MIUIX",
     "避让锁屏通知": "Avoid lock screen notifications",
     "边缘厚度": "Edge thickness",
     "边缘与反射": "Edges and reflection",
@@ -2587,5 +2594,14 @@
   "camera_watermark_reselect": "Choose again",
   "camera_watermark_delete_confirm": "Delete this watermark?",
   "camera_watermark_exported": "Watermark exported",
-  "camera_watermark_operation_failed": "Operation failed. Check the watermark ZIP or try again"
+  "camera_watermark_operation_failed": "Operation failed. Check the watermark ZIP or try again",
+  "appInterfaceStyle": "Interface style",
+  "Hyper": "Hyper",
+  "Harmony": "Harmony",
+  "Color": "Color",
+  "主题": "Theme",
+  "HyperOS 底部导航栏": "HyperOS bottom navigation bar",
+  "HyperOS 悬浮导航栏": "HyperOS floating navigation bar",
+  "Harmony 悬浮导航栏": "Harmony floating navigation bar",
+  "ColorOS 底部导航栏": "ColorOS bottom navigation bar"
 }

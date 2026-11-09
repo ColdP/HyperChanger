@@ -4,7 +4,7 @@ import android.content.SharedPreferences
 import androidx.compose.runtime.*
 import btm.m.liquidglass.hook.RedditCreateSettings
 import io.github.libxposed.service.XposedService
-import top.yukonga.miuix.kmp.preference.SwitchPreference
+import btm.m.os4.systemuihook.InterfaceSwitchPreference as SwitchPreference
 
 @Composable
 internal fun RedditCreatePreferences(preferences: SharedPreferences, service: XposedService?, onChanged: () -> Unit) {
