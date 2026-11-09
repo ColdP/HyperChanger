@@ -1673,6 +1673,76 @@
       false
     ],
     [
+      "statusBarSeconds",
+      "状态栏显秒",
+      true
+    ],
+    [
+      "statusBarSecondsHidden",
+      "不显示",
+      false
+    ],
+    [
+      "statusBarSecondsLongPress",
+      "长按显示",
+      false
+    ],
+    [
+      "statusBarSecondsAlways",
+      "始终显示",
+      false
+    ],
+    [
+      "statusBarSecondsDuration",
+      "长按后的显示时间",
+      true
+    ],
+    [
+      "statusBarSeconds30Seconds",
+      "30秒",
+      false
+    ],
+    [
+      "statusBarSeconds1Minute",
+      "1分钟",
+      false
+    ],
+    [
+      "statusBarSeconds3Minutes",
+      "3分钟",
+      false
+    ],
+    [
+      "statusBarSeconds5Minutes",
+      "5分钟",
+      false
+    ],
+    [
+      "statusBarSeconds10Minutes",
+      "10分钟",
+      false
+    ],
+    [
+      "statusBarSeconds15Minutes",
+      "15分钟",
+      false
+    ],
+    [
+      "statusBarSeconds20Minutes",
+      "20分钟",
+      false
+    ],
+    [
+      "statusBarSeconds30Minutes",
+      "30分钟",
+      false
+    ],
+    [
+      "statusBarSeconds60Minutes",
+      "60分钟",
+      false
+    ],
+    [
       "状态栏调整",
       "状态栏调整",
       true

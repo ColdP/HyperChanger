@@ -461,7 +461,7 @@
     "statusBarSecondsHidden": "Do not show",
     "statusBarSecondsAlways": "Always show",
     "statusBarSecondsLongPress": "Show on long press",
-    "statusBarSecondsDuration": "Display duration",
+    "statusBarSecondsDuration": "Display duration after long press",
     "statusBarSeconds30Seconds": "30 seconds",
     "statusBarSeconds1Minute": "1 minute",
     "statusBarSeconds3Minutes": "3 minutes",

@@ -461,7 +461,7 @@
     "statusBarSecondsHidden": "表示しない",
     "statusBarSecondsAlways": "常に表示",
     "statusBarSecondsLongPress": "長押しで表示",
-    "statusBarSecondsDuration": "表示時間",
+    "statusBarSecondsDuration": "長押し後の表示時間",
     "statusBarSeconds30Seconds": "30秒",
     "statusBarSeconds1Minute": "1分",
     "statusBarSeconds3Minutes": "3分",

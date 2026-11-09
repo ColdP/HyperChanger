@@ -4,6 +4,7 @@ package btm.m.os4.systemuihook
 import android.content.Context
 import android.content.SharedPreferences
 import io.github.libxposed.service.XposedService
+import org.json.JSONObject
 
 internal const val KEY_STATUS_BAR_SECONDS_MODE = "status_bar_seconds_mode"
 internal const val KEY_STATUS_BAR_SECONDS_DURATION = "status_bar_seconds_duration_seconds"
@@ -52,4 +53,15 @@ internal class StatusBarSecondsSettingsStore(context: Context) {
             .putInt(KEY_STATUS_BAR_SECONDS_DURATION, settings.durationSeconds)
             .apply()
     }
+}
+
+internal fun completeStatusBarSecondsPreset(values: JSONObject) {
+    val mode = values.optJSONObject(KEY_STATUS_BAR_SECONDS_MODE)
+        ?.optInt("value", STATUS_BAR_SECONDS_MODE_HIDDEN) ?: STATUS_BAR_SECONDS_MODE_HIDDEN
+    val duration = values.optJSONObject(KEY_STATUS_BAR_SECONDS_DURATION)
+        ?.optInt("value", STATUS_BAR_SECONDS_DEFAULT_DURATION) ?: STATUS_BAR_SECONDS_DEFAULT_DURATION
+    values.put(KEY_STATUS_BAR_SECONDS_MODE, JSONObject().put("type", "int")
+        .put("value", mode.coerceIn(STATUS_BAR_SECONDS_MODE_HIDDEN, STATUS_BAR_SECONDS_MODE_LONG_PRESS)))
+    values.put(KEY_STATUS_BAR_SECONDS_DURATION, JSONObject().put("type", "int")
+        .put("value", duration.coerceIn(30, 3600)))
 }
