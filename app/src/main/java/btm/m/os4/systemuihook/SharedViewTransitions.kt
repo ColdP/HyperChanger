@@ -278,12 +278,13 @@ internal fun SharedViewArrowPreference(
     title: String,
     summary: String? = null,
     enabled: Boolean = true,
+    startAction: (@Composable () -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val activity = LocalContext.current as? MainActivity
     val navigation = LocalSeamlessNavigation.current
     if (navigation == null || activity?.sharedViewAnimations?.enabled != true) {
-        ArrowPreference(title = title, summary = summary, enabled = enabled, onClick = onClick)
+        ArrowPreference(title = title, summary = summary, enabled = enabled, startAction = startAction, onClick = onClick)
         return
     }
     val layer = rememberGraphicsLayer()
@@ -310,7 +311,7 @@ internal fun SharedViewArrowPreference(
         }
         drawLayer(layer)
     }) {
-        ArrowPreference(title = title, summary = summary, enabled = enabled, onClick = {
+        ArrowPreference(title = title, summary = summary, enabled = enabled, startAction = startAction, onClick = {
             navigation.pendingSource = source
             try { onClick() } finally { navigation.pendingSource = null }
         })

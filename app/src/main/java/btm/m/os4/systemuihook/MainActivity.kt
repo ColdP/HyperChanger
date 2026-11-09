@@ -351,6 +351,7 @@ private enum class ModuleSettingsSection(val listIndex: Int) { MODULE(1), APPEAR
 private data class CategoryPageEntry(
     val title: String,
     val page: PageId,
+    val icon: Int,
 )
 
 private fun categorySearchItems(): List<CategorySearchItem> = listOf(
@@ -2313,11 +2314,11 @@ private fun CategoryHome(
                 CategoryGroup(
                     title = tr("系统界面", "系统界面"),
                     entries = listOf(
-                        CategoryPageEntry(tr("系统界面与材质调整", "系统界面与材质调整"), PageId.SHADE),
-                        CategoryPageEntry(tr("桌面", "桌面"), PageId.DESKTOP),
-                        CategoryPageEntry(tr("通知与超级岛", "通知与超级岛"), PageId.ISLAND),
-                        CategoryPageEntry(tr("状态栏与控制中心", "状态栏与控制中心"), PageId.STATUS),
-                        CategoryPageEntry(tr("锁屏", "锁屏"), PageId.LOCK),
+                        CategoryPageEntry(tr("系统界面与材质调整", "系统界面与材质调整"), PageId.SHADE, R.drawable.hc_home_systemui_material),
+                        CategoryPageEntry(tr("桌面", "桌面"), PageId.DESKTOP, R.drawable.hc_home_launcher),
+                        CategoryPageEntry(tr("通知与超级岛", "通知与超级岛"), PageId.ISLAND, R.drawable.hc_home_island),
+                        CategoryPageEntry(tr("状态栏与控制中心", "状态栏与控制中心"), PageId.STATUS, R.drawable.hc_home_statusbar),
+                        CategoryPageEntry(tr("锁屏", "锁屏"), PageId.LOCK, R.drawable.hc_home_lockscreen),
                     ),
                     enabled = connected,
                     open = open,
@@ -2327,12 +2328,12 @@ private fun CategoryHome(
                 CategoryGroup(
                     title = tr("系统功能", "系统功能"),
                     entries = listOf(
-                        CategoryPageEntry(tr("系统框架", "系统框架"), PageId.SYSTEM_FRAMEWORK),
-                        CategoryPageEntry(tr("超级小爱与输入法", "超级小爱与输入法"), PageId.SUPER_XIAOAI),
-                        CategoryPageEntry(tr("相机与相册编辑", "相机与相册编辑"), PageId.CAMERA),
-                        CategoryPageEntry(tr("系统更新", "系统更新"), PageId.SYSTEM_UPDATE),
-                        CategoryPageEntry(tr("系统设置", "系统设置"), PageId.SYSTEM_SETTINGS),
-                        CategoryPageEntry(tr("背屏", "背屏"), PageId.REAR_SCREEN),
+                        CategoryPageEntry(tr("系统框架", "系统框架"), PageId.SYSTEM_FRAMEWORK, R.drawable.hc_home_framework),
+                        CategoryPageEntry(tr("超级小爱与输入法", "超级小爱与输入法"), PageId.SUPER_XIAOAI, R.drawable.hc_home_xiaoai),
+                        CategoryPageEntry(tr("相机与相册编辑", "相机与相册编辑"), PageId.CAMERA, R.drawable.hc_home_camera),
+                        CategoryPageEntry(tr("系统更新", "系统更新"), PageId.SYSTEM_UPDATE, R.drawable.hc_home_updater),
+                        CategoryPageEntry(tr("系统设置", "系统设置"), PageId.SYSTEM_SETTINGS, R.drawable.hc_home_settings),
+                        CategoryPageEntry(tr("背屏", "背屏"), PageId.REAR_SCREEN, R.drawable.hc_home_backscreen),
                     ),
                     enabled = connected,
                     open = open,
@@ -2342,8 +2343,8 @@ private fun CategoryHome(
                 CategoryGroup(
                     title = tr("其他", "其他"),
                     entries = listOf(
-                        CategoryPageEntry(tr("应用底部导航", "应用底部导航"), PageId.APP_NAVIGATION),
-                        CategoryPageEntry(tr("其他", "其他"), PageId.OTHER),
+                        CategoryPageEntry(tr("应用底部导航", "应用底部导航"), PageId.APP_NAVIGATION, R.drawable.hc_home_navigation),
+                        CategoryPageEntry(tr("其他", "其他"), PageId.OTHER, R.drawable.hc_home_other),
                     ),
                     enabled = connected,
                     open = open,
@@ -2369,6 +2370,20 @@ private fun CategoryGroup(
             SharedViewArrowPreference(
                 title = entry.title,
                 enabled = enabled,
+                startAction = {
+                    Image(
+                        painter = painterResource(entry.icon),
+                        contentDescription = null,
+                        // Miuix's native start slot currently adds 8.dp after the icon.
+                        // Hyper rows use 128% of that icon-to-title spacing (10.24.dp).
+                        modifier = Modifier.size(26.dp).then(
+                            if (LocalAppInterfaceStyle.current == AppInterfaceStyle.HYPER) {
+                                Modifier.padding(end = 2.24.dp)
+                            } else Modifier
+                        ),
+                        colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else .38f)),
+                    )
+                },
                 onClick = { open(entry.page) },
             )
         }
