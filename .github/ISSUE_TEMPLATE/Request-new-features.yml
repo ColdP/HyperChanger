@@ -17,10 +17,11 @@ body:
       required: true
 
   - type: input
-    id: hyperos-version
+    id: sayfeatures
     attributes:
       label: 大致效果描述
       description: 请精细的描述您想要的功能
+      placeholder: 
     validations:
       required: true
       
