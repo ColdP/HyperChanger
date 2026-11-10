@@ -8,6 +8,7 @@ import android.graphics.drawable.GradientDrawable
 import android.text.TextUtils
 import android.view.*
 import android.widget.*
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /** Style 3 shares style 2's native host and lifecycle. */
@@ -18,6 +19,10 @@ internal class ColorOsUpdateCardView(
     private val updateSource: View?,
     private val clickSource: View,
 ) : FrameLayout(context) {
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    private var touchDownX = 0f
+    private var touchDownY = 0f
+    private var scrollingTouch = false
     private val image = ImageView(context)
     private val logo = ImageView(context)
     private val version = TextView(context)
@@ -91,9 +96,43 @@ internal class ColorOsUpdateCardView(
         update.setPadding(dp(20), dp(10), dp(20), dp(10))
         updateCard.addView(update, LayoutParams(-2, -2, Gravity.CENTER))
         addView(updateCard, LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(30) })
+        // Only the explicit update-status button navigates to the native update page.
+        // The rest of the replacement card must consume touches without forwarding
+        // them, especially after the scroll fade makes the card visually transparent;
+        // forwarding the outer card click lets the native update target underneath win.
         updateCard.setOnClickListener { clickSource.performClick() }
-        setOnClickListener { clickSource.performClick() }
+        setOnClickListener { /* consume blank-card taps */ }
         refresh(backgroundSource, logoSource)
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                touchDownX = event.x
+                touchDownY = event.y
+                scrollingTouch = false
+                // Keep a tap on the replacement card from reaching the native update view.
+                parent?.requestDisallowInterceptTouchEvent(true)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = abs(event.x - touchDownX)
+                val dy = abs(event.y - touchDownY)
+                if (!scrollingTouch && dy > touchSlop && dy > dx) {
+                    scrollingTouch = true
+                    // The card consumed the down event only to block click passthrough.
+                    // Once this is a vertical gesture, return interception to the page scroll.
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                parent?.requestDisallowInterceptTouchEvent(false)
+                if (scrollingTouch) {
+                    scrollingTouch = false
+                    return true
+                }
+            }
+        }
+        return super.onTouchEvent(event)
     }
 
     override fun onAttachedToWindow() {
