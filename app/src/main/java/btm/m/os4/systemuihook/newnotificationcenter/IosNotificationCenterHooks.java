@@ -25,6 +25,27 @@ public final class IosNotificationCenterHooks {
             Xp.log("[IOSShade] backdrop blur caller deoptimization unavailable: " + error);
         }
         IosNotificationStackHooks.install(loader);
+        for (String faceName : new String[]{"AllInOneHourClock", "AllInOneMinuteClock"}) {
+            try {
+                Class<?> face = Xp.findClass("com.miui.clock.allInOne." + faceName, loader);
+                Xp.hookAll(face, "updateDepthContentVisibility", chain -> {
+                    Object result = chain.proceed();
+                    IosNotificationCenterPresentation.onHostedClockDepthChanged(chain.getThisObject());
+                    return result;
+                });
+                IosNotificationAnimationHooks.deoptimize(face, "updateDepthContentVisibility");
+            } catch (Throwable error) {
+                Xp.log("[IOSShade] hosted " + faceName + " depth visibility callback unavailable: " + error);
+            }
+        }
+        try {
+            // These callers can inline the depth callback, bypassing its hook on compiled ROMs.
+            IosNotificationAnimationHooks.deoptimize(Xp.findClass(
+                    "com.miui.clock.allInOne.AllInOneBase", loader),
+                    "setAllInOneClockRectParams", "setClockStyleInfo");
+        } catch (Throwable error) {
+            Xp.log("[IOSShade] hosted clock depth callers unavailable: " + error);
+        }
         try {
             Class<?> shortcuts = Xp.findClass(
                     "com.android.keyguard.shortcut.MiuiShortcutController", loader);

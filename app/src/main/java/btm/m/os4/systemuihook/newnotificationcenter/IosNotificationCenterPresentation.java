@@ -88,6 +88,8 @@ public final class IosNotificationCenterPresentation {
     private static float layoutProgress;
     private static float lastNotificationY = Float.NaN;
     private static float restingNotificationY = Float.NaN;
+    private static Object lastNotificationAnimation;
+    private static boolean clockNotificationFailureLogged;
     private static final ThreadLocal<Boolean> DRIVING_HOSTED_CLOCK = new ThreadLocal<>();
     private static final ViewTreeObserver.OnPreDrawListener CLEAR_SYNC = () -> {
         syncClearButton();
@@ -738,7 +740,6 @@ public final class IosNotificationCenterPresentation {
         if (oldHeader == null) findHeader();
         syncStackTransform();
         syncLandscapeLayout();
-        ensureHostedClockMinuteVisible();
         syncLandscapeClockHeight();
         if (sheet != null && sheet.isAttachedToWindow()) {
             ViewOutlineProvider provider = landscapeLayout
@@ -758,10 +759,6 @@ public final class IosNotificationCenterPresentation {
         syncClearButton();
         syncShortcuts();
         syncEmptyText();
-        // The OEM clock's depth layout may hide minute_view when its clockDepthType is a
-        // lockscreen-only region. This hosted copy has no depth foreground layer, so that state
-        // would make the minute half disappear until the next clock rebuild. Re-assert the
-        // minute subtree after every layout/pre-draw pass while the iOS clock owns the surface.
         // Ease the clock from a soft, blurred entrance to a crisp resting state. Using the
         // same smooth-step curve as the sheet alpha avoids a sharp focus jump near the end of
         // an upward swipe when native expansion reports uneven frame deltas.
@@ -788,6 +785,9 @@ public final class IosNotificationCenterPresentation {
         syncNotificationHeader();
         syncNotifications();
         syncClockInfo();
+        // Notification avoidance can update the face rect and hide the depth-region minute
+        // again. Repair after those writes, including builds without the depth callback hook.
+        ensureHostedClockMinuteVisible();
     }
 
     private static void hideNativeHeader() {
@@ -1280,11 +1280,18 @@ public final class IosNotificationCenterPresentation {
         if (clock.getVisibility() != View.VISIBLE) clock.setVisibility(View.VISIBLE);
         if (hostedClockMinuteViews == null || hasDetachedClockMinuteView()) {
             hostedClockMinuteViews = new ArrayList<>();
+            try {
+                Object controller = Xp.getObjectField(clock, "mMiuiClockController");
+                Object face = Xp.getObjectField(controller, "mClockView");
+                collectHostedClockGlyphs(face, hostedClockMinuteViews);
+            } catch (Throwable ignored) {
+                // Older clock libraries still use the resource-name fallback below.
+            }
             String[] names = {"minute_view", "minute1", "minute2", "time_minute",
                     "time_minute_right", "current_time_minute_style1", "time_below_view_minute1",
                     "time_below_view_minute2", "tv_minute", "hour_view", "hour1", "hour2",
                     "time_hour", "time_hour_left", "time_hour_right",
-                    "current_time_hour_style1", "tv_hour"};
+                    "current_time_hour_style1", "tv_hour", "colon_view"};
             for (String name : names) {
                 View minute = findDescendantByEntryName(clock, name);
                 if (minute != null && !hostedClockMinuteViews.contains(minute)) {
@@ -1293,12 +1300,47 @@ public final class IosNotificationCenterPresentation {
             }
         }
         for (View minute : hostedClockMinuteViews) {
-            for (View current = minute; current != null; ) {
-                if (current.getVisibility() != View.VISIBLE) current.setVisibility(View.VISIBLE);
-                if (current == clock) break;
-                android.view.ViewParent parent = current.getParent();
-                current = parent instanceof View ? (View) parent : null;
-            }
+            showHostedClockGlyph(minute);
+        }
+    }
+
+    /** Called after the OEM depth callback, including callbacks later than our pre-draw. */
+    static void onHostedClockDepthChanged(Object face) {
+        if (!(face instanceof View) || !isHostedClockView((View) face)
+                || host == null || progress <= 0f) return;
+        // The known all-in-one faces expose these getters independently of resource tables.
+        for (String getter : new String[]{"getMHourView", "getMMinuteView", "getMColonView"}) {
+            try {
+                Object glyph = Xp.callMethod(face, getter);
+                if (glyph instanceof View) showHostedClockGlyph((View) glyph);
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    private static void collectHostedClockGlyphs(Object face, ArrayList<View> glyphs) throws Exception {
+        Class<?> type = Class.forName("com.miui.clock.module.ClockViewType", false,
+                clock.getClass().getClassLoader());
+        Method getter = face.getClass().getMethod("getIClockView", type);
+        for (String name : new String[]{"FULL_HOUR", "FULL_MINUTE", "FULL_COLON",
+                "HOUR1", "HOUR2", "MIN1", "MIN2", "COLON1", "COLON2"}) {
+            try {
+                Object candidate = getter.invoke(face, type.getField(name).get(null));
+                // Unsupported slots may return ALL_VIEW. Do not force that whole face visible.
+                if (candidate instanceof View && candidate != face && candidate != clock
+                        && isHostedClockView((View) candidate) && !glyphs.contains(candidate)) {
+                    glyphs.add((View) candidate);
+                }
+            } catch (ReflectiveOperationException ignored) {}
+        }
+    }
+
+    private static void showHostedClockGlyph(View glyph) {
+        if (!isHostedClockView(glyph)) return;
+        for (View current = glyph; current != null; ) {
+            if (current.getVisibility() != View.VISIBLE) current.setVisibility(View.VISIBLE);
+            if (current == clock) break;
+            android.view.ViewParent parent = current.getParent();
+            current = parent instanceof View ? (View) parent : null;
         }
     }
 
@@ -1608,22 +1650,28 @@ public final class IosNotificationCenterPresentation {
         float notificationY = stackPoint[1] - panelPoint[1]
                 + nativeTop + stackOffset(currentStack, nativeTop) - host.getTranslationY();
         if (layoutProgress >= .95f && progress >= .95f) {
-            if (Float.isNaN(restingNotificationY)) restingNotificationY = notificationY;
             int scrollY = 0;
             try {
                 scrollY = ((Number) currentStack.getClass().getMethod("getOwnScrollY")
                         .invoke(currentStack)).intValue();
             } catch (Throwable ignored) {}
             if (scrollY > 0) {
+                if (Float.isNaN(restingNotificationY)) restingNotificationY = notificationY;
+                float scrolledTop = restingNotificationY - scrollY;
+                notificationY = scrolledTop;
                 float firstTop = firstNotificationTop(currentStack, panelPoint);
                 if (!Float.isNaN(firstTop)) firstTop -= host.getTranslationY();
                 if (!Float.isNaN(firstTop)) {
-                    float lower = restingNotificationY - scrollY
+                    float lower = scrolledTop
                             - 16f * panel.getResources().getDisplayMetrics().density;
-                    notificationY = Math.min(restingNotificationY, Math.max(lower, firstTop));
+                    // Stacked rows can stay pinned while logical scrolling continues. Never
+                    // let their drawn top cancel the scroll requested by the user.
+                    notificationY = Math.min(scrolledTop, Math.max(lower, firstTop));
                 }
             } else {
-                notificationY = restingNotificationY;
+                // Reservation changes with inserted/removed/grouped rows and full-height
+                // media/focus cards. Refresh it whenever the list is at rest.
+                restingNotificationY = notificationY;
             }
         }
         // Apply the header edge after native resting/scroll clamping, otherwise that
@@ -1635,24 +1683,62 @@ public final class IosNotificationCenterPresentation {
             float headerTop = headerPoint[1] - panelPoint[1] - host.getTranslationY();
             notificationY = Math.min(notificationY, headerTop);
         }
-        if (Float.isNaN(lastNotificationY) || Math.abs(notificationY - lastNotificationY) > 1f) {
+        Object animation = notificationClockAnimation();
+        if (animation != lastNotificationAnimation || Float.isNaN(lastNotificationY)
+                || Math.abs(notificationY - lastNotificationY) > 1f) {
             try {
-                Class<?> kind = Class.forName(
-                        "com.miui.systemui.notification.data.repository.NotificationTopChangeType",
-                        false, clock.getClass().getClassLoader());
-                Object changed = kind.getField("NOTIFS_CHANGED").get(null);
-                Method method = clock.getClass().getMethod("notifStateChange", float.class, boolean.class, kind);
                 DRIVING_HOSTED_CLOCK.set(true);
                 try {
-                    method.invoke(clock, notificationY, true, changed);
-                    lastNotificationY = notificationY;
+                    if (driveHostedClockNotification(animation, notificationY)) {
+                        lastNotificationY = notificationY;
+                        lastNotificationAnimation = animation;
+                        clockNotificationFailureLogged = false;
+                    }
                 } finally {
                     DRIVING_HOSTED_CLOCK.remove();
                 }
-            } catch (Throwable ignored) {
-                // Other OEM builds may use a different notification change type.
+            } catch (Throwable error) {
+                if (!clockNotificationFailureLogged) {
+                    Xp.log(TAG + "hosted clock notification sync unavailable: " + error);
+                    clockNotificationFailureLogged = true;
+                }
             }
         }
+    }
+
+    private static Object notificationClockAnimation() {
+        try {
+            Object helper = Xp.getObjectField(clock, "mAnimationHelper");
+            Object animation = Xp.getObjectField(helper, "mClockAnima");
+            if (animation != null) return animation;
+        } catch (Throwable ignored) {}
+        return clock;
+    }
+
+    private static boolean driveHostedClockNotification(Object animation, float notificationY) {
+        if (animation != null && animation.getClass().getName().equals(
+                "com.android.keyguard.clock.animation.allinone.AllInOneClockAnimation")) {
+            // OEM Folme uses one process-wide "all_in_one_clock" target and animates toward
+            // lockscreen notificationYState. The unlocked hosted copy must apply its own
+            // squeeze result immediately, without retargeting that shared animation.
+            Object interactor = Xp.getObjectField(animation, "keyguardClockNotifInteractor");
+            Object result = Xp.callMethod(interactor, "setNotifY", notificationY);
+            if (result == null) return false; // Layout parameters are not ready; retry next frame.
+            Xp.callMethod(animation, "updateLockScreenStyle", result);
+            Xp.callMethod(animation, "updateElementPosition", result);
+            return true;
+        }
+        ClassLoader loader = clock.getClass().getClassLoader();
+        Class<?> kind = Xp.findClass(
+                "com.miui.systemui.notification.data.repository.NotificationTopChangeType", loader);
+        Object changed;
+        try {
+            changed = kind.getField("NOTIFS_CHANGED").get(null);
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException(error);
+        }
+        Xp.callMethod(clock, "notifStateChange", notificationY, true, changed);
+        return true;
     }
 
     private static View findClockAnimation(View info) {
@@ -1736,6 +1822,8 @@ public final class IosNotificationCenterPresentation {
         layoutProgress = 0f;
         lastNotificationY = Float.NaN;
         restingNotificationY = Float.NaN;
+        lastNotificationAnimation = null;
+        clockNotificationFailureLogged = false;
         lastDepthDrawable = null;
         if (host != null && host.getParent() instanceof ViewGroup) {
             ((ViewGroup) host.getParent()).removeView(host);
