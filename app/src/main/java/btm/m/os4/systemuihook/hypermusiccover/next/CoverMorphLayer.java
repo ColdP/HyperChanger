@@ -6,6 +6,8 @@ import btm.m.os4.systemuihook.hypermusiccover.next.Gen;
 import btm.m.os4.systemuihook.hypermusiccover.next.island.MiniPlayerViewKt;
 import btm.m.os4.systemuihook.hypermusiccover.next.island.MiniPlayerRuntime;
 import android.content.Context;
+import btm.m.os4.systemuihook.hypermusiccover.next.lyrics.CompactLyricsRenderer;
+import btm.m.os4.systemuihook.hypermusiccover.next.lyrics.LockLyrics;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
@@ -24,6 +26,8 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
     private final CoverMorphMotion motion = new CoverMorphMotion();
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final RectF drawn = new RectF();
+    private final RectF vinylArtwork = new RectF();
+    private final VinylRecordRenderer vinylRenderer = new VinylRecordRenderer();
     /** Per-frame scratch, kept rather than allocated on every draw. */
     private final int[] tmpLoc = new int[2];
     private final RectF srcRect = new RectF();
@@ -36,7 +40,7 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
     private CoverMorphMotion.Box thumb, cover;
     private long lastFrame, startedAt;
     private boolean awaitArtworkPush;
-    private float fullAlpha;
+    private float fullAlpha, thumbRadius;
     /** Volatile: written on the main thread, read by the hot-reload check off it. */
     private volatile boolean running;
     /** The far end is the mini player's artwork slot, not the OEM card's thumbnail. */
@@ -154,6 +158,7 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
         if (root.getChildAt(root.getChildCount() - 1) != v) v.bringToFront();
         v.reset(art, Main.coverMorphCardMode(), thumb, cover, toCover);
         v.mini = mini;
+        v.thumbRadius = mini ? MiniPlayerRuntime.artworkRadius() : Main.coverMorphThumbnailRadius();
         if (mini) MiniPlayerRuntime.setArtBridged(true);
         v.setVisibility(VISIBLE);
         v.running = true;
@@ -270,7 +275,10 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
         if (liveThumb != null) thumb = chase(thumb, liveThumb, follow);
         CoverMorphMotion.Box liveCover = Main.coverMorphTarget(art);
         if (liveCover != null) cover = chase(cover, liveCover, follow);
-        boolean endsSettled = (liveThumb == null || near(thumb, liveThumb))
+        float liveRadius = mini ? MiniPlayerRuntime.artworkRadius() : Main.coverMorphThumbnailRadius();
+        thumbRadius += (liveRadius - thumbRadius) * follow;
+        boolean endsSettled = Math.abs(thumbRadius - liveRadius) < .25f
+                && (liveThumb == null || near(thumb, liveThumb))
                 && (liveCover == null || near(cover, liveCover));
         boolean artworkReady = !awaitArtworkPush || Main.coverMorphHandoffReady(cardMode)
                 || SystemClock.uptimeMillis() - startedAt > 2200L;
@@ -312,11 +320,10 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
         drawn.set(box.x - root[0], box.y - root[1],
                 box.x + box.w - root[0], box.y + box.h - root[1]);
         float p = Math.max(0f, Math.min(1f, motion.value));
-        float startRadius = mini ? MiniPlayerRuntime.artworkRadius()
-                : Math.min(14f * density, Math.min(thumb.w, thumb.h) * 0.20f);
+        float startRadius = thumbRadius;
         CoverCardStyle style = Main.sCoverCardStyle;
         float endRadius = cardMode ? style.radius(Math.min(cover.w, cover.h)) : 0f;
-        float radius = startRadius + (endRadius - startRadius) * p;
+        float radius = CoverMorphMotion.radius(startRadius, endRadius, p, Math.min(drawn.width(), drawn.height()));
         float decoration = cardMode ? CoverMorphMotion.cardDecoration(motion.value) : 0f;
         // `cover` is the landing box, so the corner share it asks for is the one the card will
         // have when it gets there - which is where this shadow is read. See cornerShare.
@@ -329,13 +336,23 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
         float alpha = cardMode ? 1f : fullAlpha;
         paint.setAlpha(Math.round(255f * alpha));
         if (paint.getAlpha() == 0) return;
+        boolean vinyl = cardMode && style.mode == CoverCardStyle.VINYL;
+        int recordSave = canvas.save();
+        RectF destination = drawn;
+        if (vinyl) {
+            vinylRenderer.draw(canvas, drawn, radius, alpha, p);
+            canvas.rotate(CoverCardLayer.vinylAngle() * p, drawn.centerX(), drawn.centerY());
+            VinylRecordRenderer.artworkBounds(drawn, vinylArtwork, p);
+            destination = vinylArtwork;
+            radius = Math.min(radius, Math.min(destination.width(), destination.height()) * .5f);
+        }
         int side = Math.min(art.getWidth(), art.getHeight());
         int cropW = Math.round(side + (art.getWidth() - side) * p);
         int cropH = Math.round(side + (art.getHeight() - side) * p);
         if (cardMode) {
             // The card lands in the artwork's own shape (CoverCardStyle.aspect), so the art is
             // cut to the box it is in on every frame: square at the thumbnail, its own at the end.
-            float shape = drawn.width() / Math.max(1f, drawn.height());
+            float shape = destination.width() / Math.max(1f, destination.height());
             cropW = Math.min(art.getWidth(), Math.round(art.getHeight() * shape));
             cropH = Math.min(art.getHeight(), Math.round(art.getWidth() / shape));
         }
@@ -349,18 +366,26 @@ final class CoverMorphLayer extends View implements Choreographer.FrameCallback 
                     android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP);
             shaderArt = art;
         }
-        artMatrix.setRectToRect(source, drawn, android.graphics.Matrix.ScaleToFit.FILL);
+        artMatrix.setRectToRect(source, destination, android.graphics.Matrix.ScaleToFit.FILL);
         artShader.setLocalMatrix(artMatrix);
         paint.setShader(artShader);
-        canvas.drawRoundRect(drawn, radius, radius, paint);
+        canvas.drawRoundRect(destination, radius, radius, paint);
         paint.setShader(null);
+        canvas.restoreToCount(recordSave);
+        if (vinyl) vinylRenderer.drawArtworkFinish(canvas, destination, alpha, p);
         if (decoration > 0f) {
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(density);
             paint.setColor(0x40FFFFFF);
             paint.setAlpha(Math.round(64f * decoration));
-            canvas.drawRoundRect(drawn, radius, radius, paint);
+            float outlineRadius = vinyl ? style.radius(Math.min(drawn.width(), drawn.height())) * p
+                    + startRadius * (1f - p) : radius;
+            canvas.drawRoundRect(drawn, outlineRadius, outlineRadius, paint);
             paint.setStyle(Paint.Style.FILL);
+        }
+        if (vinyl) vinylRenderer.drawTonearm(canvas, drawn, alpha, p);
+        if (cardMode && !LockLyrics.wantsAttached() && !CompactLyricsRenderer.pageMorphActive()) {
+            CompactLyricsRenderer.draw(canvas, drawn, CoverMorphMotion.cardDecoration((p - .35f) / .65f), density);
         }
     }
 

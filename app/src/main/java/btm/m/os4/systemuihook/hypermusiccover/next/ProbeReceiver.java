@@ -4,6 +4,7 @@ package btm.m.os4.systemuihook.hypermusiccover.next;
 
 import btm.m.os4.systemuihook.hypermusiccover.next.lyrics.LocalLyrics;
 import btm.m.os4.systemuihook.hypermusiccover.next.lyrics.LockLyrics;
+import btm.m.os4.systemuihook.hypermusiccover.next.lyrics.CompactLyricsRenderer;
 import btm.m.os4.systemuihook.hypermusiccover.next.lyrics.LyricSource;
 import btm.m.os4.systemuihook.hypermusiccover.next.lyrics.LyriconSource;
 import btm.m.os4.systemuihook.hypermusiccover.next.lyrics.NcmLyrics;
@@ -116,6 +117,7 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
             CoverCardStyle next = Main.sCoverCardStyle.with(key, value);
             boolean modeChanged = next.mode != Main.sCoverCardStyle.mode;
             Main.sCoverCardStyle = next;
+            KeepWallpaper.sync(false);
             CoverCardLayer.style(next);
             CoverCardLayer.refresh();
             ModuleState.saveStateSoon();
@@ -123,7 +125,7 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
                 // Leaving 保留壁纸, the dim belongs to the style that is going away. The clock
                 // may well stay held (another style's cover), so no exit frame will clear it.
                 if (!Main.keepsWallpaper()) KeepDim.apply(0f);
-                if (next.mode == CoverCardStyle.CARD) {
+                if (next.isCard()) {
                     CoverCardLayer.attach(CoverPush.coverLayer());
                     CoverCardLayer.playback(Main.sCoverCardPlaying);
                 }
@@ -174,6 +176,13 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
             if (LockLyrics.setStyle(key, i.getFloatExtra("v", Float.NaN))) {
                 ModuleState.saveStateSoon();
             }
+        } else if ("compactlyrics".equals(op)) {
+            CompactLyricsRenderer.configure(i.getBooleanExtra("on", false),
+                    i.getFloatExtra("scale", 1f),
+                    i.getFloatExtra("offset", 0f), i.getFloatExtra("spacing", 8f),
+                    i.getBooleanExtra("keep", false), i.getStringExtra("appearance"));
+            LockLyrics.setCompactEnabled(i.getBooleanExtra("on", false), Main.sTrackKey, Main.sWatched);
+            CoverCardLayer.refresh();
         } else if ("lyricappearance".equals(op)) {
             if (i.hasExtra("json")) {
                 LockLyrics.setAppearance(i.getStringExtra("json"));
@@ -515,6 +524,7 @@ final class ProbeReceiver extends ProbeGuard.Receiver {
             // It starts with no dim; if it came back while the lyric page was up, hand it
             // the one on record. See KeepDim.resend().
             KeepDim.resend();
+            KeepWallpaper.sync(true);
             // A restarted wallpaper process has forgotten the lyrics' blur.
             LockLyrics.resendBlur();
             if (composes != Main.sWpComposes) {

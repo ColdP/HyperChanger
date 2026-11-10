@@ -86,10 +86,11 @@ public final class CoverPush {
         // already up - the style switched with cover mode on - fades back to the wallpaper, and
         // so everything the way out drops (the motion cover, the square, a live wallpaper's view)
         // goes with it. The track key stays: it is what tells the next track change from this one.
-        boolean keep = on && Main.keepsWallpaper();
+        boolean keep = on && KeepWallpaper.background();
+        boolean keepCard = keep && Main.sCoverCardStyle.isCard();
         if (keep) on = false;
         Intent out = wallpaperIntent("art");
-        out.putExtra("cardmode", Main.sCoverCardStyle.mode == CoverCardStyle.CARD);
+        out.putExtra("cardmode", Main.sCoverCardStyle.isCard());
         // The blur travels with the cover. A lyricblur broadcast is one shot - dropped, or
         // overtaken on the other side - and nothing else ever corrected it, so a song could play
         // out sharp under its lyrics. This makes every track change an agreement between the two
@@ -117,8 +118,12 @@ public final class CoverPush {
         // looking at, and the clock is not springing either.
         out.putExtra("fade", Main.sFadeWp && Main.screenOn());
         if (!on) {
-            MotionCover.onCoverOff();
-            CoverCardLayer.clear();
+            if (keepCard) MotionCover.onCover(true);
+            else MotionCover.onCoverOff();
+            if (keepCard && art != null) {
+                CoverCardLayer.publish(art);
+                CoverCardLayer.releaseHeld();
+            } else CoverCardLayer.clear();
             if (Main.sVideoWallpaper) showVideoCover(ctx, false, null, null, 0);
             out.putExtra("off", true);
             ProbeGuard.send(ctx, out);
@@ -139,8 +144,8 @@ public final class CoverPush {
             return;
         }
         if (art == null) { Xp.log(Main.TAG + "pushart: no album art"); return; }
-        if (Main.sCoverCardStyle.mode == CoverCardStyle.CARD) CoverCardLayer.publish(art);
-        MotionCover.onCover(Main.sCoverCardStyle.mode == CoverCardStyle.CARD);
+        if (Main.sCoverCardStyle.isCard()) CoverCardLayer.publish(art);
+        MotionCover.onCover(Main.sCoverCardStyle.isCard());
         int w = Main.sScreenW, h = Main.sScreenH;
         if (!Main.sVideoWallpaper && Main.sWpComposes) {
             // The source goes over instead of the composed picture, and the wallpaper process
@@ -162,7 +167,7 @@ public final class CoverPush {
                 // Named, so the wallpaper process keeps it under this key and the next tap can
                 // ask for it by name - and so a push for the picture the tap already put up
                 // (sendKeptFirst) is let pass.
-                boolean card = Main.sCoverCardStyle.mode == CoverCardStyle.CARD;
+                boolean card = Main.sCoverCardStyle.isCard();
                 String keptKey = preKey(art, w, h, card);
                 out.putExtra("prekey", keptKey);
                 noteKept(keptKey, layoutKey(w, h, card), Long.MAX_VALUE);
@@ -229,7 +234,7 @@ public final class CoverPush {
         if (Main.sVideoWallpaper) {
             final Bitmap srcArt = art;
             final int fw = w, fh = h;
-            final float fb = Main.sCoverCardStyle.mode == CoverCardStyle.CARD ? 0.5f : Main.sBias;
+            final float fb = Main.sCoverCardStyle.isCard() ? 0.5f : Main.sBias;
             frostTask = new java.util.concurrent.FutureTask<>(
                     () -> CoverCompose.frostedFor(srcArt, fw, fh, fb));
             Gen.thread("mc-cover-frost", frostTask);
@@ -368,7 +373,7 @@ public final class CoverPush {
                         Gen.ownView(layer, iv);
                         Main.sCover = iv;
                     }
-                    if (Main.sCoverCardStyle.mode == CoverCardStyle.CARD) {
+                    if (Main.sCoverCardStyle.isCard()) {
                         CoverCardLayer.attach(layer);
                         CoverCardLayer.style(Main.sCoverCardStyle);
                         // The backdrop is this view here, not the wallpaper process, so nothing
@@ -1414,7 +1419,7 @@ public final class CoverPush {
                     Bitmap art = AlbumArt.albumArt(ctx, false);
                     if (art == null) return;
                     int w = Main.sScreenW, h = Main.sScreenH;
-                    boolean card = Main.sCoverCardStyle.mode == CoverCardStyle.CARD;
+                    boolean card = Main.sCoverCardStyle.isCard();
                     String key = preKey(art, w, h, card);
                     long now = android.os.SystemClock.uptimeMillis();
                     if (key.equals(sPreKey) && now - sPreAt < PRE_RESEND_MS) return;
@@ -1464,11 +1469,11 @@ public final class CoverPush {
         Context ctx = Main.sAppCtx;
         if (ctx == null || android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) return;
         String key = sKeptKey;
-        if (key.isEmpty() || !Main.sWpComposes || Main.sVideoWallpaper || Main.keepsWallpaper()) {
+        if (key.isEmpty() || !Main.sWpComposes || Main.sVideoWallpaper || KeepWallpaper.background()) {
             return;
         }
         if (android.os.SystemClock.uptimeMillis() >= sKeptUntil) return;
-        boolean card = Main.sCoverCardStyle.mode == CoverCardStyle.CARD;
+        boolean card = Main.sCoverCardStyle.isCard();
         if (!layoutKey(Main.sScreenW, Main.sScreenH, card).equals(sKeptLayout)) return;
         String title = sKeptTitle;
         if (title == null || !title.equals(Main.watchedTitle())) return;
@@ -1497,7 +1502,7 @@ public final class CoverPush {
      */
     private static String preSourceFor(Bitmap art, int w, int h) {
         if (sPreKey.isEmpty()) return null;
-        boolean card = Main.sCoverCardStyle.mode == CoverCardStyle.CARD;
+        boolean card = Main.sCoverCardStyle.isCard();
         if (!preKey(art, w, h, card).equals(sPreKey)) return null;
         java.io.File f = new java.io.File(SHARE_DIR, SHARE_PRE_SOURCE);
         return f.isFile() ? f.getAbsolutePath() : null;
@@ -1506,7 +1511,7 @@ public final class CoverPush {
     /** Only where a cover would be composed from the source by the wallpaper process. */
     private static boolean precomposeWanted() {
         return !Main.sCoverMode && Main.sCoverFeatureOn && Main.sWpComposes && Main.sScreenOn
-                && !Main.sVideoWallpaper && !Main.keepsWallpaper() && MediaCard.sCardPresent;
+                && !Main.sVideoWallpaper && !KeepWallpaper.background() && MediaCard.sCardPresent;
     }
 
     static void pushArtAsync(final boolean on, final boolean fresh) {
@@ -2412,7 +2417,7 @@ public final class CoverPush {
      * mode the wallpaper is only the blurred backdrop - the square itself is CoverCardLayer.
      */
     private static Bitmap composeWallpaper(Bitmap src, int w, int h, float bias) {
-        return Main.sCoverCardStyle.mode == CoverCardStyle.CARD
+        return Main.sCoverCardStyle.isCard()
                 ? CoverCompose.cardBackground(src, w, h)
                 : CoverCompose.composeWallpaper(src, w, h, bias);
     }

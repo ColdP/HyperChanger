@@ -20,6 +20,7 @@ final class CoverCardStyle {
      * the lock screen is the OEM's, big clock and all. What #84's bug looked like, asked for.
      */
     static final int KEEP = 2;
+    static final int VINYL = 3;
     /** Least room kept to the clock, the media card and the screen edges. */
     static final float GAP_DP = 16f;
     static final float MIN_FILL = 0.4f;
@@ -72,7 +73,7 @@ final class CoverCardStyle {
     final float corner;
 
     CoverCardStyle(int mode, float fill, float pos, float corner) {
-        this.mode = mode == CARD || mode == KEEP ? mode : FULL;
+        this.mode = mode == CARD || mode == KEEP || mode == VINYL ? mode : FULL;
         this.fill = finite(fill, MIN_FILL, 1f, FIXED_FILL);
         this.pos = finite(pos, 0f, 1f, FIXED_POS);
         this.corner = Float.isFinite(corner) ? Math.max(0f, Math.min(1f, corner)) : Float.NaN;
@@ -80,6 +81,10 @@ final class CoverCardStyle {
 
     static CoverCardStyle defaults() {
         return new CoverCardStyle(FULL, FIXED_FILL, FIXED_POS, Float.NaN);
+    }
+
+    boolean isCard() {
+        return mode == CARD || mode == VINYL;
     }
 
     CoverCardStyle with(String key, float value) {
@@ -100,6 +105,7 @@ final class CoverCardStyle {
      */
     float radius(float side) {
         float half = side * 0.5f;
+        if (mode == VINYL) return half;
         if (Float.isFinite(corner)) return half * corner;
         float r = sMediaCardRadiusPx;
         return r > 0f ? Math.min(r, half) : half * FALLBACK_CORNER;

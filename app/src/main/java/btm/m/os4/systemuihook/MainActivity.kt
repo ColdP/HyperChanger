@@ -10760,6 +10760,8 @@ private fun MusicLockscreenPage(
     open: (PageId) -> Unit,
     back: () -> Unit,
 ) {
+    var showScopeDialog by rememberSaveable { mutableStateOf(false) }
+    MusicLockscreenScopeDialog(showScopeDialog) { showScopeDialog = false }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val context = LocalContext.current
     val service by HookApplication.service.collectAsStateWithLifecycle()
@@ -10802,6 +10804,7 @@ private fun MusicLockscreenPage(
                         enabled = !conflicts.musicBlocked,
                         onCheckedChange = { value ->
                             store.update(service, value)
+                            if (value && s.lockscreenMusicLockscreenEnabled && !conflicts.coverConflict) showScopeDialog = true
                             masterEnabled = value
                             changed()
                         },
@@ -10822,7 +10825,10 @@ private fun MusicLockscreenPage(
                                     else tr("需要同时重启“系统界面”和“壁纸”应用", "需要同时重启“系统界面”和“壁纸”应用"),
                                 checked = s.lockscreenMusicLockscreenEnabled && !conflicts.coverConflict,
                                 enabled = !conflicts.coverConflict,
-                                onCheckedChange = { value -> update { it.copy(lockscreenMusicLockscreenEnabled = value) } },
+                                onCheckedChange = { value ->
+                                    update { it.copy(lockscreenMusicLockscreenEnabled = value) }
+                                    if (value) showScopeDialog = true
+                                },
                             )
                             AnimatedVisibility(visible = s.lockscreenMusicLockscreenEnabled && !conflicts.coverConflict) {
                                 HyperMusicCoverOptions(HyperMusicCoverSection.COVER)
@@ -10857,6 +10863,17 @@ private fun MusicLockscreenPage(
                             }
                             SharedViewArrowPreference(title = tr("歌词库", "歌词库"), onClick = { open(PageId.LYRIC_LIBRARY) })
                         }
+                    }
+                }
+            }
+            item {
+                AnimatedVisibility(
+                    visible = visible && tab == 1,
+                    enter = expandVertically(tween(220)) + fadeIn(tween(180)),
+                    exit = shrinkVertically(tween(180)) + fadeOut(tween(120)),
+                ) {
+                    Group(tr("compactLyricsCard", "简略歌词")) {
+                        MusicLockscreenCompactLyricsPreference()
                     }
                 }
             }
@@ -15743,7 +15760,13 @@ private fun HyperMusicCoverOptions(section: HyperMusicCoverSection) {
                 SwitchPreference(title = tr("hmcNavigationKeepOn", "锁屏导航时保持屏幕常亮"), checked = state.navigationKeepOn, onCheckedChange = { value -> update { it.copy(navigationKeepOn = value) } })
             }
             HyperMusicCoverSection.COVER -> {
-                OverlayDropdownPreference(title = tr("hmcCoverStyle", "音乐封面样式"), items = listOf(tr("hmcFullCover", "全屏封面"), tr("hmcCardCover", "方形封面"), tr("hmcKeepWallpaper", "保留壁纸")), selectedIndex = state.coverStyle, onSelectedIndexChange = { value -> update { it.copy(coverStyle = value) } })
+                OverlayDropdownPreference(title = tr("hmcCoverStyle", "音乐封面样式"), items = listOf(tr("hmcFullCover", "全屏封面"), tr("hmcCardCover", "方形封面"), tr("hmcKeepWallpaper", "保留壁纸"), tr("hmcVinylCover", "黑胶")), selectedIndex = state.coverStyle, onSelectedIndexChange = { value -> update { it.copy(coverStyle = value) } })
+                AnimatedVisibility(visible = state.coverStyle == 3) {
+                    MusicLockscreenVinylPreference()
+                }
+                AnimatedVisibility(visible = state.coverStyle in 1..3) {
+                    MusicLockscreenWallpaperPreference(cardStyle = state.coverStyle != 2)
+                }
                 SwitchPreference(title = tr("hmcAutoEnter", "自动进入音乐锁屏"), checked = state.autoEnter, onCheckedChange = { value -> update { it.copy(autoEnter = value) } })
                 SwitchPreference(title = tr("hmcMotion", "Apple Music 动态封面"), checked = state.motionCover, onCheckedChange = { value -> update { it.copy(motionCover = value) } })
                 SwitchPreference(title = tr("hmcMotionData", "允许使用移动数据加载动态封面"), checked = state.motionOnData, onCheckedChange = { value -> update { it.copy(motionOnData = value) } })

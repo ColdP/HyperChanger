@@ -1006,7 +1006,7 @@ public final class Main {
             if (sVideoWallpaper) sCover = null;
             CoverPush.pushArtAsync(true, false);
         }
-        if (sCoverMode && sCoverCardStyle.mode == CoverCardStyle.CARD) {
+        if (sCoverMode && sCoverCardStyle.isCard()) {
             CoverCardLayer.attach(CoverPush.coverLayer());
             CoverCardLayer.style(sCoverCardStyle);
             CoverCardLayer.playback(sCoverCardPlaying);
@@ -1675,6 +1675,7 @@ public final class Main {
                     // The shade goes away with the screen, on the same silent path as unlock.
                     // HyperChanger retains the existing owner / excludes this standalone feature.
                 }
+                KeepWallpaper.sync(false);
                 if (Intent.ACTION_USER_PRESENT.equals(a)) {
                     CoverMorphLayer.cancel();
                     CoverCardLayer.hideNow();
@@ -2517,6 +2518,7 @@ public final class Main {
         // The cover is the media card's alone: the focus notifications stay out of the stack.
         LockIslands.INSTANCE.setCoverMode(true);
         MiniPlayerRuntime.refresh();
+        KeepWallpaper.sync(false);
         CoverCardLayer.entering();
         Diagnostics.armTransitionTrace("entering cover mode");
         // Whatever the user decided about the last song does not carry into this one.
@@ -2527,7 +2529,7 @@ public final class Main {
         // the clock's own frames instead of blinking away before the clock has begun to move.
         // Without an animation there is nothing to fade, and the settled look goes on directly.
         MediaCard.sCardP = animate ? 0f : 1f;
-        if (sCoverCardStyle.mode == CoverCardStyle.CARD) {
+        if (sCoverCardStyle.isCard()) {
             CoverCardLayer.attach(CoverPush.coverLayer());
             CoverCardLayer.style(sCoverCardStyle);
             CoverCardLayer.playback(sCoverCardPlaying);
@@ -2572,6 +2574,7 @@ public final class Main {
     private static void exitCoverMode(boolean animate) {
         CoverCardLayer.leaving();
         sCoverMode = false;
+        KeepWallpaper.sync(false);
         PaletteThrottle.INSTANCE.retriggerSoon(CoverPush.PALETTE_AFTER_PUSH_MS);
         ClockGlass.applyGlassBrightness();
         LockIslands.INSTANCE.setCoverMode(false);
@@ -2950,7 +2953,7 @@ public final class Main {
     /** The full-screen AOD may show a faint static colour wash even with the square hidden. */
     static boolean coverCardBackdropInAod() {
         View c = sContainer;
-        return sCoverMode && sCoverCardStyle.mode == CoverCardStyle.CARD && !sScreenOn
+        return sCoverMode && sCoverCardStyle.isCard() && !KeepWallpaper.background() && !sScreenOn
                 && ClockCollapse.phase() == ClockCollapse.Phase.AOD
                 && ClockCollapse.aodFullScreen() && keyguardShowing()
                 && !LockLyrics.lockScreenGone() && c != null && c.isShown();
@@ -3002,13 +3005,25 @@ public final class Main {
         if (art == null || art.getWidth() <= 0 || art.getHeight() <= 0) {
             return 14f * density();
         }
-        float radius = art.getClipToOutline() ? outlineRadius(art) : 0f;
-        if (radius <= 0f && art.getParent() instanceof View) {
-            View box = (View) art.getParent();
-            if (box.getClipToOutline()) radius = outlineRadius(box);
+        float radius = clippedArtworkRadius(art);
+        if (!Float.isFinite(radius) && art.getParent() instanceof View) {
+            radius = clippedArtworkRadius((View) art.getParent());
         }
-        if (radius > 0f) return radius;
+        // Zero is an explicit square outline (including a negative user radius offset).
+        if (Float.isFinite(radius)) return Math.min(radius, Math.min(art.getWidth(), art.getHeight()) * .5f);
         return Math.min(14f * density(), Math.min(art.getWidth(), art.getHeight()) * 0.20f);
+    }
+
+    private static float clippedArtworkRadius(View view) {
+        if (!view.getClipToOutline() || view.getOutlineProvider() == null) return Float.NaN;
+        try {
+            android.graphics.Outline outline = new android.graphics.Outline();
+            view.getOutlineProvider().getOutline(view, outline);
+            float radius = outline.getRadius();
+            return radius >= 0f && Float.isFinite(radius) ? radius : Float.NaN;
+        } catch (Throwable ignored) {
+            return Float.NaN;
+        }
     }
 
     static ViewGroup coverMorphRoot() {
@@ -3052,7 +3067,7 @@ public final class Main {
     }
 
     static boolean coverMorphCardMode() {
-        return sCoverCardStyle.mode == CoverCardStyle.CARD;
+        return sCoverCardStyle.isCard();
     }
 
     /** A manual entry must keep its moving artwork until the asynchronous backdrop can take it. */
@@ -3085,13 +3100,14 @@ public final class Main {
                 mediaTop = cardXY[1];
             }
         }
-        CoverCardStyle.Rect r = sCoverCardStyle.place(layer.getWidth(), layer.getHeight(),
+        CoverCardStyle.Rect r = CoverCardLayer.place(sCoverCardStyle, layer.getWidth(), layer.getHeight(),
                 layer.getResources().getDisplayMetrics().density,
                 ClockCollapse.contentBottomFor(layer) - xy[1],
                 ClockCollapse.unzoomY(layer, mediaTop) - xy[1]);
         return r == null ? null : CoverMorphMotion.cardBox(xy[0] + r.x,
                 xy[1] + r.y, r.side, CoverCardLayer.renderedScale(layer),
-                CoverCardStyle.aspect(art.getWidth(), art.getHeight()));
+                sCoverCardStyle.mode == CoverCardStyle.VINYL ? 1f
+                        : CoverCardStyle.aspect(art.getWidth(), art.getHeight()));
     }
 
     /** Keep the shared media card at its real state while the moving copy owns its pixels. */
@@ -4231,7 +4247,7 @@ public final class Main {
         // The cover is pushed off the media card's key, and the session's metadata can still be
         // the last song's at that moment - so the motion cover follows the metadata itself. It
         // keys on the song, so a player singing into TITLE does not look it up per line.
-        if (sCoverMode) MotionCover.onCover(sCoverCardStyle.mode == CoverCardStyle.CARD);
+        if (sCoverMode) MotionCover.onCover(sCoverCardStyle.isCard());
         if (!sAuto || !MediaCard.sCardShowing) return;
         // Metadata and lyrics continue updating after a manual dismissal. Only scene entry
         // below is held off by sTapSuppressed.

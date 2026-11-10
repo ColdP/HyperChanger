@@ -4,6 +4,7 @@ package btm.m.os4.systemuihook.hypermusiccover.next;
 import btm.m.os4.systemuihook.hypermusiccover.next.Gen;
 
 import btm.m.os4.systemuihook.hypermusiccover.next.lyrics.LockLyrics;
+import btm.m.os4.systemuihook.hypermusiccover.next.lyrics.CompactLyricsRenderer;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BlurMaskFilter;
@@ -31,10 +32,12 @@ public final class CoverCardLayer extends View implements Choreographer.FrameCal
         final Bitmap art;
         final Bitmap aodBackdrop;
         final int generation;
-        Prepared(Bitmap art, Bitmap aodBackdrop, int generation) {
+        final int vinylColor;
+        Prepared(Bitmap art, Bitmap aodBackdrop, int generation, int vinylColor) {
             this.art = art;
             this.aodBackdrop = aodBackdrop;
             this.generation = generation;
+            this.vinylColor = vinylColor;
         }
         void recycle() {
             art.recycle();
@@ -54,6 +57,35 @@ public final class CoverCardLayer extends View implements Choreographer.FrameCal
     private CoverCardStyle style = sStyle;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final RectF square = new RectF();
+    private final RectF vinylArtwork = new RectF();
+    private final VinylRecordRenderer vinylRenderer = new VinylRecordRenderer();
+    private float vinylAngle;
+    private static volatile boolean vinylRotationKeepOn;
+    private boolean vinylKeepScreenOn;
+
+    /** Called by the host's existing main-thread preference refresh. */
+    public static void configureVinyl(boolean rotation, boolean keepOn, boolean tonearm, int colorMode, int color) {
+        if (VinylRecordRenderer.rotation == rotation && VinylRecordRenderer.colorMode == colorMode
+                && vinylRotationKeepOn == keepOn && VinylRecordRenderer.tonearm == tonearm
+                && VinylRecordRenderer.customColor == color) return;
+        VinylRecordRenderer.rotation = rotation;
+        vinylRotationKeepOn = keepOn;
+        VinylRecordRenderer.tonearm = tonearm;
+        VinylRecordRenderer.colorMode = colorMode;
+        VinylRecordRenderer.customColor = color;
+        refresh();
+    }
+
+    static float vinylAngle() {
+        CoverCardLayer v = sView;
+        return v == null ? 0f : v.vinylAngle;
+    }
+
+    static int vinylColor() {
+        CoverCardLayer v = sView;
+        Prepared p = v == null ? sPending : v.current;
+        return p == null ? 0xFF292929 : p.vinylColor;
+    }
     /** Per-frame scratch, kept rather than allocated on every draw. */
     private final int[] tmpLoc = new int[2];
     private ViewTreeObserver geometryObserver;
@@ -241,7 +273,7 @@ public final class CoverCardLayer extends View implements Choreographer.FrameCal
             v.style = config;
             // The pre-draw guard runs on every frame of the shade window, lock screen or not.
             // Only the square needs it, so the full-screen cover does not pay for it.
-            if (config.mode == CoverCardStyle.CARD) {
+            if (config.isCard()) {
                 if (v.getParent() instanceof ViewGroup) v.watchGeometry((ViewGroup) v.getParent());
                 v.start();
             } else {
@@ -284,7 +316,8 @@ public final class CoverCardLayer extends View implements Choreographer.FrameCal
             } catch (Throwable t) {
                 Xp.w("[MCCard] AOD backdrop preparation failed: " + t);
             }
-            final Prepared p = new Prepared(art, aodBackdrop, generation);
+            int vinylColor = btm.m.os4.systemuihook.MusicLockscreenVinylPalette.fromArtwork(art);
+            final Prepared p = new Prepared(art, aodBackdrop, generation, vinylColor);
             art = null;
             aodBackdrop = null;
             final Prepared old = sPending;
@@ -374,6 +407,8 @@ public final class CoverCardLayer extends View implements Choreographer.FrameCal
         sView = null;
         if (v == null) return;
         v.stop();
+        v.releaseScreenHold();
+        CompactLyricsRenderer.cancelTick();
         v.unwatchGeometry();
         if (v.getParent() instanceof ViewGroup) ((ViewGroup) v.getParent()).removeView(v);
         if (v.wash.getParent() instanceof ViewGroup) {
@@ -483,8 +518,16 @@ public final class CoverCardLayer extends View implements Choreographer.FrameCal
         if (getTransitionAlpha() != a) setTransitionAlpha(a);
     }
 
+    private void releaseScreenHold() {
+        if (!vinylKeepScreenOn) return;
+        vinylKeepScreenOn = false;
+        setKeepScreenOn(false);
+    }
+
     private void hideImmediately() {
         stop();
+        releaseScreenHold();
+        CompactLyricsRenderer.cancelTick();
         opacity = 0f;
         videoAlpha = 0f;
         CardVideo.want(false);
@@ -570,7 +613,10 @@ public final class CoverCardLayer extends View implements Choreographer.FrameCal
         CoverCardLayer v = sView;
         if (v == null || v.current == null || v.getParent() == null) return false;
         float target = v.playing ? CardSpring.PLAYING : CardSpring.PAUSED;
-        return v.opacity >= 0.995f && v.scale.atRest(target);
+        CoverCardStyle.Rect goal = v.placeNow();
+        return goal != null && Math.abs(v.drawX - goal.x) < .5f
+                && Math.abs(v.drawY - goal.y) < .5f && Math.abs(v.drawSide - goal.side) < .5f
+                && v.rise >= .998f && v.opacity >= 0.995f && v.scale.atRest(target);
     }
 
     private void adoptPending() {
@@ -608,13 +654,15 @@ public final class CoverCardLayer extends View implements Choreographer.FrameCal
         super.onAttachedToWindow();
         // A detached/re-attached keyguard layer gets a new ViewTreeObserver. Keep the guard even
         // when SystemUI reuses this same card view for the shade.
-        if (style.mode == CoverCardStyle.CARD && getParent() instanceof ViewGroup) {
+        if (style.isCard() && getParent() instanceof ViewGroup) {
             watchGeometry((ViewGroup) getParent());
         }
     }
 
     @Override protected void onDetachedFromWindow() {
         stop();
+        releaseScreenHold();
+        CompactLyricsRenderer.cancelTick();
         unwatchGeometry();
         super.onDetachedFromWindow();
     }
@@ -661,12 +709,40 @@ public final class CoverCardLayer extends View implements Choreographer.FrameCal
      * Both as drawn, not as laid out: a swipe zooms the clock's and the card's containers and
      * not this layer, so a place taken from their layout sat still while they came in round it.
      */
+    static CoverCardStyle.Rect place(CoverCardStyle style, float width, float height,
+                                     float density, float clock, float media) {
+        float reserve = style.isCard() ? CompactLyricsRenderer.reservedHeight(width, density) : 0f;
+        return style.place(width, height, density, clock, media - reserve);
+    }
+
+    /** The compact text destination in screen coordinates, also while the cover is hidden. */
+    public static boolean compactPageMorphAllowed() {
+        CoverCardLayer v = sView;
+        return v != null && v.style.isCard() && Main.screenOnCached() && !Main.coverCardInAod()
+                && layerVisible();
+    }
+
+    public static boolean compactMorphArtworkReady() { return !CoverMorphLayer.active(); }
+
+    public static RectF compactLyricBounds() {
+        CoverCardLayer v = sView;
+        if (v == null || !v.style.isCard() || v.current == null) return null;
+        CoverCardStyle.Rect r = v.placeNow();
+        if (r == null) return null;
+        boolean live = !LockLyrics.wantsAttached() && !Float.isNaN(v.drawX) && v.opacity > .01f;
+        CoverMorphMotion.Box box = CoverMorphMotion.cardBox(live ? v.drawX : r.x,
+                live ? v.drawY : r.y, live ? v.drawSide : r.side,
+                v.scale.value, v.shownAspect());
+        int[] xy = new int[2]; v.getLocationOnScreen(xy);
+        return new RectF(box.x + xy[0], box.y + xy[1], box.x + box.w + xy[0], box.y + box.h + xy[1]);
+    }
+
     private CoverCardStyle.Rect placeNow() {
         float clock = ClockCollapse.contentBottomFor(this);
         float media = ClockCollapse.unzoomY(this, Main.coverCardMediaTop());
         int[] loc = tmpLoc;
         getLocationOnScreen(loc);
-        return style.place(getWidth(), getHeight(), getResources().getDisplayMetrics().density,
+        return place(style, getWidth(), getHeight(), getResources().getDisplayMetrics().density,
                 clock - loc[1], media - loc[1]);
     }
 
@@ -816,7 +892,7 @@ public final class CoverCardLayer extends View implements Choreographer.FrameCal
         if (phase != ClockCollapse.Phase.AOD) aodSince = 0L;
         else if (aodSince == 0L) aodSince = nowNs;
         boolean inAod = Main.coverCardInAod();
-        boolean visible = style.mode == CoverCardStyle.CARD && Main.coverCardVisible();
+        boolean visible = style.isCard() && Main.coverCardVisible();
         // 0.2.2 can keep lyrics in the full-screen AOD. The selected lyric page owns this space.
         boolean lyrics = LockLyrics.wantsAttached();
         // A doze under the OEM's big clock hides the square. Its wake holds the square at the
@@ -889,15 +965,34 @@ public final class CoverCardLayer extends View implements Choreographer.FrameCal
             previous = null;
         }
         boolean videoMoving = followVideo(visible, phase, inAod, dt);
+        boolean rotating = style.mode == CoverCardStyle.VINYL && VinylRecordRenderer.rotation
+                && playing && visible && Main.screenOn() && !inAod && !lyrics
+                && phase == ClockCollapse.Phase.ON && opacity > 0f && current != null
+                && getWindowVisibility() == VISIBLE && getTransitionAlpha() > 0f
+                && !CoverMorphLayer.cardSuppressed();
+        if (rotating) vinylAngle = (vinylAngle + dt * 18f) % 360f;
+        boolean actuallyVisible = visible && !inAod && Main.screenOnCached()
+                && !lyrics && Main.coverModeOn() && Main.keyguardShowing()
+                && !LockLyrics.lockScreenGone() && playing && current != null && opacity > .01f
+                && getWindowVisibility() == VISIBLE && getTransitionAlpha() > .01f
+                && !CoverMorphLayer.cardSuppressed();
+        boolean wantKeepScreenOn = actuallyVisible &&
+                ((vinylRotationKeepOn && VinylRecordRenderer.rotation && style.mode == CoverCardStyle.VINYL)
+                || CompactLyricsRenderer.wantsKeepScreenOn());
+        if (vinylKeepScreenOn != wantKeepScreenOn) {
+            vinylKeepScreenOn = wantKeepScreenOn;
+            setKeepScreenOn(wantKeepScreenOn);
+        }
         boolean backdrop = Main.coverCardBackdropInAod() && current != null
                 && current.aodBackdrop != null;
         wash.show(backdrop);
         int visibility = opacity > 0f || target > 0f ? VISIBLE : GONE;
         if (getVisibility() != visibility) setVisibility(visibility);
         if (visibility == VISIBLE) invalidate();
-        boolean settling = blurring || videoMoving || Math.abs(target - opacity) > 0.001f
+        boolean settling = rotating || blurring || videoMoving || Math.abs(target - opacity) > 0.001f
                 || (phase != ClockCollapse.Phase.AOD && !scale.atRest(scaleTarget))
                 || previous != null || placing || (rise < 1f && opacity > 0f)
+                || CompactLyricsRenderer.animating()
                 || (aodSince != 0L && nowNs - aodSince < AOD_SETTLE_NS)
                 // Still waking from the big clock: keep looking until the clock has landed.
                 || (afterBigClock && phase != ClockCollapse.Phase.AOD);
@@ -929,6 +1024,12 @@ public final class CoverCardLayer extends View implements Choreographer.FrameCal
         // The shadow is keyed on the corner at the RESTING side, not the moving one - see
         // CoverCardStyle.cornerShare, and the note on shadowTile below.
         drawShadow(canvas, square, style.cornerShare(drawSide), opacity, paint);
+        boolean vinyl = style.mode == CoverCardStyle.VINYL;
+        if (vinyl) vinylRenderer.draw(canvas, square, radius, opacity, 1f);
+        int recordSave = canvas.save();
+        if (vinyl) {
+            canvas.rotate(vinylAngle, square.centerX(), square.centerY());
+        }
         // Each picture is its own rounded rect, not drawn inside a clip to one: an antialiased
         // path clip has the GPU build a coverage mask for the card every frame it draws, and
         // this one draws every frame of the morph and of a motion cover. A rounded rect is
@@ -942,12 +1043,18 @@ public final class CoverCardLayer extends View implements Choreographer.FrameCal
         if (frame != null) lastVideo = frame;
         else if (videoAlpha <= 0f) lastVideo = null;
         if (videoAlpha > 0f && lastVideo != null) drawBitmap(canvas, lastVideo, videoAlpha);
+        canvas.restoreToCount(recordSave);
+        if (vinyl) vinylRenderer.drawArtworkFinish(canvas, vinylArtwork, opacity, 1f);
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(density);
         paint.setColor(0x40FFFFFF);
         paint.setAlpha(Math.round(opacity * 64f));
         canvas.drawRoundRect(square, radius, radius, paint);
         paint.setStyle(Paint.Style.FILL);
+        if (vinyl) vinylRenderer.drawTonearm(canvas, square, opacity, 1f);
+        if (style.isCard() && !LockLyrics.wantsAttached() && !CompactLyricsRenderer.pageMorphActive()) {
+            CompactLyricsRenderer.draw(canvas, square, opacity, density);
+        }
     }
 
     /**
@@ -1166,6 +1273,7 @@ public final class CoverCardLayer extends View implements Choreographer.FrameCal
      * turns over rather than jumping.
      */
     private float shownAspect() {
+        if (style.mode == CoverCardStyle.VINYL) return 1f;
         float to = aspectOf(current);
         if (previous == null) return to;
         float from = aspectOf(previous);
@@ -1185,15 +1293,21 @@ public final class CoverCardLayer extends View implements Choreographer.FrameCal
         // Centre-cropped to the card's shape, which is only ever off this art's own through a
         // crossfade between two shapes - drawn into it as it is, one of the two would stretch.
         int w = art.getWidth(), h = art.getHeight();
-        float box = square.width() / Math.max(1f, square.height());
+        RectF destination = square;
+        if (style.mode == CoverCardStyle.VINYL) {
+            VinylRecordRenderer.artworkBounds(square, vinylArtwork, 1f);
+            destination = vinylArtwork;
+        }
+        float box = destination.width() / Math.max(1f, destination.height());
         int cw = Math.min(w, Math.round(h * box));
         int ch = Math.min(h, Math.round(w / box));
         artSrc.set((w - cw) / 2, (h - ch) / 2, (w + cw) / 2, (h + ch) / 2);
-        artMatrix.setRectToRect(artSrc, square, android.graphics.Matrix.ScaleToFit.FILL);
+        artMatrix.setRectToRect(artSrc, destination, android.graphics.Matrix.ScaleToFit.FILL);
         android.graphics.BitmapShader shader = shaderFor(art);
         shader.setLocalMatrix(artMatrix);
         paint.setShader(shader);
-        canvas.drawRoundRect(square, artRadius, artRadius, paint);
+        float radius = style.mode == CoverCardStyle.VINYL ? destination.width() * .5f : artRadius;
+        canvas.drawRoundRect(destination, radius, radius, paint);
         paint.setShader(null);
     }
 

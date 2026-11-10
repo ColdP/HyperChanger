@@ -54,6 +54,24 @@ public final class LockLyrics {
      */
     public static volatile boolean sEnabled = true;
 
+    /** Full page and cover treatment independently request the same lyric source. */
+    private static volatile boolean sCompactEnabled;
+
+    private static boolean dataEnabled() {
+        return sEnabled || sCompactEnabled;
+    }
+
+    public static void setCompactEnabled(boolean on, String key, MediaController controller) {
+        if (sCompactEnabled == on) return;
+        sCompactEnabled = on;
+        if (on && sLines.isEmpty() && !sLoading && !sDemo) {
+            // The full page may already have been hidden before compact lyrics were enabled.
+            sKey = "";
+            onTrack(key, controller);
+        } else if (!sEnabled) show(on, key, controller, "compact lyrics disabled");
+        refresh();
+    }
+
     /**
      * Whether the lock screen's two-finger tap has taken the lyrics away.
      *
@@ -139,7 +157,7 @@ public final class LockLyrics {
     /** Invalidate the current track when a user imports, edits or deletes a library entry. */
     public static void hostLibraryChanged() {
         CACHE.clear();
-        if (!sEnabled || sDemo || sKey.isEmpty() || sController == null) return;
+        if (!dataEnabled() || sDemo || sKey.isEmpty() || sController == null) return;
         Main.main().removeCallbacks(SETTLED_LOOKUP);
         unpark();
         lookup(sKey, sController, false);
@@ -150,7 +168,7 @@ public final class LockLyrics {
         sOnline = on;
         Main.main().post(() -> {
             CACHE.clear();
-            if (!sEnabled || sDemo || sKey.isEmpty() || sController == null) return;
+            if (!dataEnabled() || sDemo || sKey.isEmpty() || sController == null) return;
             if (!on && sLines.isEmpty() && !sLoading) return;
             Main.main().removeCallbacks(SETTLED_LOOKUP);
             unpark();
@@ -916,7 +934,7 @@ public final class LockLyrics {
         Main.main().removeCallbacks(SETTLED_LOOKUP);
         unpark();
         sBlurVideoReloaded = false;
-        if (sEnabled && !key.isEmpty()) scheduleBlurKick(BLUR_ENTER_DELAY_MS + 16L);
+        if (dataEnabled() && !key.isEmpty()) scheduleBlurKick(BLUR_ENTER_DELAY_MS + 16L);
         // A different song: the budget above is per track, and so is the payload it was spent on.
         sInfoSeen = null;
         sInfoTries = 0;
@@ -931,9 +949,9 @@ public final class LockLyrics {
         // - two messages, in the middle of the track change's crossfade, which is exactly when
         // the wallpaper process holds a switch back to wait for the fade. Those two could then
         // land in the wrong order and leave the cover sharp.
-        sLoading = sEnabled && !key.isEmpty();
+        sLoading = dataEnabled() && !key.isEmpty();
         setLines(Collections.<LyricLine>emptyList(), "track changed");
-        if (!sEnabled || key.isEmpty()) return;
+        if (!dataEnabled() || key.isEmpty()) return;
         Cached hit = CACHE.get(key);
         if (hit != null) {
             sLoading = false;
@@ -988,7 +1006,7 @@ public final class LockLyrics {
         public void run() {
             String key = sKey;
             MediaController c = sController;
-            if (!sEnabled || sDemo || key.isEmpty()) return;
+            if (!dataEnabled() || sDemo || key.isEmpty()) return;
             Cached hit = CACHE.get(key);
             if (hit != null) {
                 sLoading = false;
@@ -1025,7 +1043,7 @@ public final class LockLyrics {
         // the network by now, and the session's own lyric outranks anything it can find. Turned
         // away, Apple's lyric - on the session 0.55s after the track change - waited out ten
         // seconds of catalogues that had nothing (2026-10-06, Here's to Never Growing Up).
-        if (!sEnabled || key.isEmpty() || sDemo) return;
+        if (!dataEnabled() || key.isEmpty() || sDemo) return;
         if (sLoading && sParked == null && !sLines.isEmpty()) return;
         if (sParked != null && sParked.rereading) return;
         String info = LyricSource.infoFor(c);
@@ -1063,7 +1081,7 @@ public final class LockLyrics {
      */
     static void onProviderLyrics() {
         Main.main().post(() -> {
-            if (!sEnabled || sDemo || sKey.isEmpty() || sController == null) return;
+            if (!dataEnabled() || sDemo || sKey.isEmpty() || sController == null) return;
             if (!sLines.isEmpty() && (sSource == LyricSource.SRC_LYRIC_INFO
                     || sSource == LyricSource.SRC_LOCAL || sSource == LyricSource.SRC_LYRICON)) {
                 return;
@@ -1273,6 +1291,7 @@ public final class LockLyrics {
         sStateReadAt = SystemClock.uptimeMillis();
         LyricView v = sView;
         if (v != null) v.kick();
+        CoverCardLayer.refresh();
     }
 
     /**
@@ -1314,6 +1333,7 @@ public final class LockLyrics {
      * for the lyric again.
      */
     public static void retire() {
+        CompactLyricsRenderer.cancelPageMorph();
         // A lookup still on its thread answers into this generation later; its gen check is what
         // drops that answer instead of putting the page back up. Not in a dry run: the same
         // generation comes straight back, and its lookup's answer is still the one it wants.
@@ -1459,6 +1479,7 @@ public final class LockLyrics {
      */
     public static void toggleByTap(String key, MediaController c) {
         if (!sEnabled) return;
+        CompactLyricsRenderer.beginPageMorph(sTapHidden);
         sTapHidden = !sTapHidden;
         Xp.log(TAG + "two-finger tap: lyrics " + (sTapHidden ? "hidden" : "shown"));
         show(!sTapHidden, key, c, "hidden by the two-finger tap");
@@ -1472,8 +1493,16 @@ public final class LockLyrics {
      */
     private static void show(boolean on, String key, MediaController c, String why) {
         if (on) {
-            sKey = "";
+            // Compact and full-page lyrics already share this track. Preserve it across the
+            // page morph instead of clearing it and replaying the same cached lookup.
+            if (!sCompactEnabled || sLines.isEmpty()) sKey = "";
             onTrack(key, c);
+        } else if (sCompactEnabled && !sDemo) {
+            // A page toggle must not empty the cover treatment's shared lyric data.
+            if (sLines.isEmpty() && !sLoading) {
+                sKey = "";
+                onTrack(key, c);
+            }
         } else if (!sDemo) {
             sGen++;
             unpark();

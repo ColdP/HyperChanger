@@ -787,7 +787,9 @@ public class WallpaperProbe {
                 // The still image's fragment shader, and only it: the vertex shader has no
                 // uDarken, and the effect programs have their own fragment sources.
                 if (!src.contains("uniform int uDarken;")) return r;
-                String out = src.replace("uniform int uDarken;",
+                String blurred = KeepWallpaperBlur.shader(src);
+                if (blurred.equals(src)) Xp.w(TAG + "wallpaper blur: unsupported still shader; keeping the OEM source");
+                String out = blurred.replace("uniform int uDarken;",
                         "uniform int uDarken;\nuniform float uKeepDim;");
                 int end = out.lastIndexOf('}');
                 if (end < 0) return r;
@@ -1243,6 +1245,8 @@ public class WallpaperProbe {
                     "com.miui.miwallpaper.opengl.ordinary.AnimImageGLProgram", sCl);
             Xp.hookAll("wall.render.draw_frame", base, "onDrawFrame", chain -> {
                 final boolean mine = chain.getThisObject() == sKeyguardRenderer;
+                KeepWallpaperBlur.drawing = mine || (KeepWallpaperBlur.active() && sSharedLock
+                        && sharedKeyguardShown() && chain.getThisObject() == sDesktopRenderer);
                 // The program draw hook reads this to know whose texture it is setting the
                 // dim on. Single GL thread, so a plain flag is enough.
                 if (mine) {
@@ -1269,6 +1273,7 @@ public class WallpaperProbe {
                     return r;
                 } finally {
                     if (mine) sKeyguardDrawing = false;
+                    KeepWallpaperBlur.drawing = false;
                 }
             });
             sDrawHooked = true;
@@ -1283,7 +1288,11 @@ public class WallpaperProbe {
         try {
             Class<?> glw = Xp.findClass("com.miui.miwallpaper.opengl.ImageGLWallpaper", sCl);
             Xp.hookAll("wall.render.gl_draw", glw, "draw", chain -> {
-                if (sKeyguardDrawing) applyKeepDim();
+                KeepWallpaperBlur.apply(sSurfaceW > 0 ? sSurfaceW : sReportedW,
+                        sSurfaceH > 0 ? sSurfaceH : sReportedH);
+                // Keep the zero-uniform cleanup live after the feature is disabled. The
+                // existing dim mutation still yields to the host's original cover policy.
+                if (sKeyguardDrawing && btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.coverAllowed()) applyKeepDim();
                 return chain.proceed();
             });
             Xp.log(TAG + "keep-dim uniform hooked");
@@ -2220,6 +2229,7 @@ public class WallpaperProbe {
             askForArt("host feature enabled");
             return;
         }
+        KeepWallpaperBlur.amount(0f);
         boolean hadCover = sArt != null || sTexShowsCover;
         sSrcSeq++;
         sArtSeq++;
@@ -2279,7 +2289,8 @@ public class WallpaperProbe {
                 String op = i.getStringExtra("op");
                 if (!btm.m.os4.systemuihook.HyperMusicCoverRuntimeBridge.coverAllowed()
                         && !"hello".equals(op) && !"state".equals(op)
-                        && !("art".equals(op) && i.getBooleanExtra("off", false))) return;
+                        && !("art".equals(op) && i.getBooleanExtra("off", false))
+                        && !("keepblur".equals(op) && i.getFloatExtra("v", 0f) == 0f)) return;
                 byte[] carried = i.getByteArrayExtra("jpg");
                 Xp.d(TAG + "recv op=" + op
                         + (carried == null ? " " + i.getExtras() : " jpg=" + carried.length + "B"));
@@ -2309,6 +2320,8 @@ public class WallpaperProbe {
                             sKeepMsgs++;
                         }
                         startKeepPump();
+                    } else if ("keepblur".equals(op)) {
+                        KeepWallpaperBlur.amount(i.getFloatExtra("v", 0f));
                     } else if ("keepdimreport".equals(op)) {
                         setResultData(keepDimReport());
                     } else if ("bmp".equals(op)) {

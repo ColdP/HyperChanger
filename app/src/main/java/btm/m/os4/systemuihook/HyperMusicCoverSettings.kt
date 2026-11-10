@@ -32,7 +32,7 @@ data class HyperMusicCoverSettings(
     val navigationKeepOn: Boolean = false,
 ) {
     fun normalized() = copy(
-        coverStyle = coverStyle.coerceIn(0, 2),
+        coverStyle = coverStyle.coerceIn(0, 3),
         clockSize = if (clockSize.isFinite()) clockSize.coerceIn(0.05f, 1f) else 0.09f,
         lyricsAlign = lyricsAlign.coerceIn(0, 2),
         lyricsSize = if (lyricsSize.isFinite()) lyricsSize.coerceIn(18f, 36f) else 25f,

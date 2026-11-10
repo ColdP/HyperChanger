@@ -65,6 +65,14 @@ public final class CoverMorphMotion {
         return p * p * (3f - 2f * p);
     }
 
+    /** The actual endpoints, including a square thumbnail, share the artwork's progress. */
+    static float radius(float thumbnail, float cover, float progress, float shortSide) {
+        float p = Math.max(0f, Math.min(1f, progress));
+        float from = Float.isFinite(thumbnail) ? Math.max(0f, thumbnail) : 0f;
+        float to = Float.isFinite(cover) ? Math.max(0f, cover) : 0f;
+        return Math.min(Math.max(0f, shortSide) * .5f, from + (to - from) * p);
+    }
+
     /** The same bowed path is used in both directions; only progress reverses. */
     static Box frame(Box thumb, Box cover, float progress, float density) {
         float p = Math.max(0f, Math.min(1f, progress));

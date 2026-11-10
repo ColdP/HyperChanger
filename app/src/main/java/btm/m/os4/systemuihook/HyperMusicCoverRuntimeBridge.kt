@@ -33,7 +33,9 @@ object HyperMusicCoverRuntimeBridge {
     } == true
     @JvmStatic fun lyricsAllowed(): Boolean = preferences?.let {
         HmcConflictMonitor.policy.lyrics(musicLockscreenMaster(it),
-            it.getBoolean("lockscreen_music_lyrics_enabled", false) || it.getBoolean("lockscreen_mini_player_lyrics_enabled", false))
+            it.getBoolean("lockscreen_music_lyrics_enabled", false) ||
+                it.getBoolean("lockscreen_mini_player_lyrics_enabled", false) ||
+                readMusicLockscreenCompactLyricsSettings(it).enabled)
     } == true
     @JvmStatic fun capsuleAllowed(): Boolean = preferences?.let {
         HmcConflictMonitor.policy.capsule(it.getBoolean("lockscreen_mini_player_enabled", false))
@@ -44,7 +46,7 @@ object HyperMusicCoverRuntimeBridge {
     @JvmStatic fun allowsHook(id: String): Boolean = when {
         id.startsWith("sysui.clock.container_") || id.startsWith("sysui.wallpaper.manager_ctor") ||
             id.startsWith("sysui.mini.shortcut_views") || id.startsWith("wall.app.create") ||
-            id.startsWith("wall.engine.") -> true
+            id.startsWith("wall.engine.") || id == "wall.render.gl_draw" -> true
         id.startsWith("wall.") -> coverAllowed()
         id.startsWith("sysui.mini.") || id.startsWith("sysui.island.") ||
             id.startsWith("sysui.numstate.") || id.startsWith("sysui.datestatus.") ||
@@ -144,6 +146,10 @@ object HyperMusicCoverRuntimeBridge {
         }
         val ctx = context ?: return
         val s = readHyperMusicCoverSettings(prefs)
+        val vinyl = readMusicLockscreenVinylSettings(prefs)
+        val compactLyrics = readMusicLockscreenCompactLyricsSettings(prefs)
+        btm.m.os4.systemuihook.hypermusiccover.next.CoverCardLayer.configureVinyl(
+            vinyl.rotation, vinyl.rotationKeepOn, vinyl.tonearm, vinyl.colorMode, vinyl.customColor)
         val notificationTypes = readCapsuleNotificationTypes(prefs)
         val automaticTypes = readLockscreenCapsuleAutoCollapseTypes(prefs)
         val music = coverAllowed()
@@ -158,6 +164,8 @@ object HyperMusicCoverRuntimeBridge {
         mediaMode = if (island && notificationTypes and CAPSULE_NOTIFICATION_MEDIA != 0) mode
             else LOCKSCREEN_MEDIA_NOTIFICATION_DO_NOT_HIDE
         autoCoverEntry = music && s.autoEnter
+        btm.m.os4.systemuihook.hypermusiccover.next.KeepWallpaper.configure(
+            prefs.getBoolean(KEY_MUSIC_LOCKSCREEN_KEEP_WALLPAPER, false), musicLockscreenWallpaperBlur(prefs))
         val wasScene = Main.coverModeOn()
         Main.updateHostFeatures(music, lyrics, sceneLayoutAllowed())
         val config = JSONObject(MiniPlayerConfig.defaultJson()).apply {
@@ -182,6 +190,14 @@ object HyperMusicCoverRuntimeBridge {
         MiniPlayerRuntime.applyConfig(ctx, config.toString())
         MiniPlayerRuntime.refreshHostMaterial()
         send("coverstyle") { putExtra("key", "mode"); putExtra("v", if (music) s.coverStyle.toFloat() else 2f) }
+        send("compactlyrics") {
+            putExtra("on", compactLyrics.enabled && music)
+            putExtra("scale", compactLyrics.scale)
+            putExtra("offset", compactLyrics.verticalOffset)
+            putExtra("spacing", compactLyrics.lineSpacing)
+            putExtra("keep", compactLyrics.keepScreenOn)
+            putExtra("appearance", compactLyrics.appearance)
+        }
         send("clocksize") { putExtra("v", s.clockSize) }
         send("lyrichdr") { putExtra("on", prefs.getBoolean("lockscreen_music_lyrics_hdr_enabled", false)) }
         send("lyrickeep") { putExtra("on", prefs.getBoolean("lockscreen_music_lyrics_keep_screen_on", false)) }
@@ -192,8 +208,10 @@ object HyperMusicCoverRuntimeBridge {
         send("lyricstyle") { putExtra("key", "size"); putExtra("v", s.lyricsSize) }
         send("lyricstyle") { putExtra("key", "bgsize"); putExtra("v", s.lyricsBackgroundSize) }
         send("lyricappearance") { putExtra("json", s.lyricAppearance) }
-        send("lyrics") { putExtra("on", lyrics) }
-        send("mediacard") { putExtra("pagebtn", lyrics) }
+        val fullLyrics = lyrics && (prefs.getBoolean("lockscreen_music_lyrics_enabled", false) ||
+            prefs.getBoolean("lockscreen_mini_player_lyrics_enabled", false))
+        send("lyrics") { putExtra("on", fullLyrics) }
+        send("mediacard") { putExtra("pagebtn", fullLyrics) }
         send("motion") { putExtra("on", s.motionCover && music); putExtra("data", s.motionOnData) }
         send("coverfeature") { putExtra("on", music || lyrics) }
         // Upstream's sAuto owns session observation, card binding and lyric track updates.
