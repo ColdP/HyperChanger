@@ -1,0 +1,27 @@
+name: 请求新功能
+description: 请求为HyperChanger增加您想要的功能
+title: "[New Features]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢您对HyperChanger提出想法！
+
+  - type: input
+    id: features
+    attributes:
+      label: 新功能名称
+      description: 新功能名称
+      placeholder: 例如：IOS音乐磁贴
+    validations:
+      required: true
+
+  - type: input
+    id: sayfeatures
+    attributes:
+      label: 大致效果描述
+      description: 请精细的描述您想要的功能
+      placeholder: 
+    validations:
+      required: true
+      
