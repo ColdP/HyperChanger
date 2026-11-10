@@ -1,6 +1,6 @@
 name: 请求新功能
-description: 
-title: "[Bug]: "
+description: 请求新的功能
+title: "[New Features]: "
 body:
   - type: markdown
     attributes:
