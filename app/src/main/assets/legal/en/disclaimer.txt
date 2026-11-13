@@ -1,40 +1,40 @@
 HyperChanger Disclaimer
 
 Effective date: November 1, 2026
-Last revised: November 1, 2026
+Last revised: November 13, 2026
 
-Back up important data and ensure you can disable the module and recover your device before use. System modifications may cause failures, boot problems, or data loss. Full compatibility is not guaranteed even on HyperOS 4.
+Before using HyperChanger, back up your important data and make sure you know how to disable modules in your framework and recover your device. Xposed modules modify system and app behavior at runtime, and stable operation cannot be guaranteed in all scenarios even on supported HyperOS 4 devices.
 
-## 1. Independent project and compatibility
+## 1. Independent Project and Compatibility
 
-1.1 HyperChanger is an independent third-party open-source project with no official authorization from or affiliation with Xiaomi or its affiliates. It does not replace official updates, warranties, or support.
+1.1 HyperChanger is an independent third-party open-source project with no official authorization, partnership, or affiliation with Xiaomi or its affiliates. It does not replace official system updates, warranties, or technical support.
 
-1.2 The module targets specific HyperOS 4 builds. System patches, app versions, other modules, and scopes can affect results. Other environments are unsupported; do not force activation.
+1.2 This module is primarily developed and tested for specific HyperOS 4 (Android 17) builds. Differences in security patches, target app versions, other modules, or scope configurations may affect behavior. Do not force-enable the module on unsupported systems.
 
-## 2. Possible risks
+## 2. Potential Risks
 
-2.1 Stability and boot: System UI, the launcher, or target apps may crash. Notifications, Control Center, lockscreen, media, and other features may fail. Severe failures may cause bootloops or prevent the system from starting.
+2.1 System and App Stability: Enabling certain hooks may cause System UI, the launcher, Settings, or target apps to lag or crash, or cause notifications, Control Center, the lockscreen, media, or navigation bars to malfunction. In severe cases, the device may fail to boot or enter a bootloop.
 
-2.2 Data and recovery: Failures and subsequent recovery, flashing, or formatting may cause data loss. Keep backups in a reliable separate location. Maintainers cannot guarantee recovery of unbacked-up data.
+2.2 Data and Device Recovery: System failures and subsequent recovery, flashing, or wiping operations may result in data loss. Always keep backups in a reliable location outside the device; maintainers cannot recover unbacked-up data.
 
-2.3 Performance and hardware: Blur, animations, always-on display, and continuous rendering may increase heat and battery use. Prolonged static content may increase burn-in risk. Effects depend on the device, settings, and usage.
+2.3 Power, Heat, and Display Impact: Advanced blur, continuous animations, always-on displays, and high-frequency rendering may increase heat and battery consumption. Displaying static elements in a fixed area for extended periods may also increase the risk of screen burn-in. Actual impact varies by device, settings, and usage habits.
 
-2.4 Security and services: Unlocking and root may affect security, integrity checks, payment services, and warranty conditions. Actual consequences depend on provider policies and applicable law; loss of all warranty rights is not automatic.
+2.4 Security and Official Services: Unlocking the bootloader and granting root access may affect device security, system integrity checks, banking or payment apps, and official warranty policies. Specific consequences depend on the device manufacturer, service providers, and applicable laws.
 
-## 3. As-is provision and liability limits
+## 3. As-Is Provision and Limitation of Liability
 
-3.1 Software and documentation are provided AS IS and AS AVAILABLE. To the extent permitted by law, error-free operation, continuous availability, fitness for a particular purpose, and compatibility with future versions are not guaranteed.
+3.1 The software and related documentation are provided "AS IS" and "AS AVAILABLE." To the extent permitted by applicable law, the author and contributors make no express or implied warranties regarding error-free operation, uninterrupted availability, fitness for a particular purpose, or compatibility with future system versions.
 
-3.2 To the extent permitted by law, maintainers and contributors are not liable for device damage, data loss, business interruption, or other losses arising from use, misuse, or inability to use the software. This does not exclude non-excludable liability or limit mandatory consumer protections or open-source license rights.
+3.2 To the extent permitted by applicable law, the author and contributors are not liable for any device damage, data loss, downtime, or other direct or indirect losses resulting from the use, misuse, or inability to use this software. This Disclaimer does not limit rights granted to you under open-source licenses or mandatory laws.
 
-## 4. Third-party content and services
+## 4. Third-Party Services and External Content
 
-4.1 Lyrics, artwork, transit images, cloud rules, updates, and other resources come from external platforms. Maintainers cannot control their availability, accuracy, copyright status, or privacy practices. Outages, rate limits, or interface changes may disable features.
+4.1 Online lyrics, album artwork, transit images, cloud rules, shutter sounds, device presets, and update metadata are provided by external platforms or hosted repositories. Maintainers have no control over their availability, accuracy, copyright status, or privacy practices; API changes, rate limits, or service shutdowns may render related features unavailable.
 
-4.2 Third-party resources are not warranties or endorsements by maintainers. Verify download sources and content permissions. External links, public submissions, and network services are also subject to the relevant platform's rules.
+4.2 Displaying or accessing third-party resources does not constitute a warranty or endorsement by the developers. Please verify download sources and content permissions yourself and comply with the rules of the respective platforms.
 
-## 5. Reports and support
+## 5. Issue Reporting and Redaction
 
-5.1 Include the device model, exact system version, module version, scopes, reproduction steps, and necessary logs in reports. Missing information may prevent diagnosis. No repair deadline, remote recovery, or per-device adaptation is promised.
+5.1 When reporting an issue on GitHub, please include your device model, exact system version, module version, enabled scopes, reproduction steps, and exported logs (environment.txt and diagnostic logs in the exported ZIP help pinpoint issues). Due to limited resources, fixed repair timelines or per-device adaptations are not promised.
 
-5.2 Logs and screenshots may contain notifications, accounts, phone numbers, locations, and credentials. Share only what is necessary and redact it before publication. Do not publish complete personal datasets to report a problem.
+5.2 Logs and screenshots may contain notification text, app package names, account details, phone numbers, or location records. Always review and redact sensitive personal information before submitting issues publicly or sharing them with others.

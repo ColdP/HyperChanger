@@ -1,58 +1,56 @@
 HyperChanger Privacy Policy
 
 Effective date: November 1, 2026
-Last revised: November 1, 2026
+Last revised: November 13, 2026
 
-This policy explains data use, local storage, network access, and available controls. HyperChanger requires no account and does not build user profiles for advertising or commercial behavioral analytics. Network features still send requests and necessary parameters to their providers.
+This Privacy Policy explains how HyperChanger handles local storage, runtime data, network requests, and system permissions. HyperChanger requires no account, contains no commercial advertising or behavioral analytics SDKs, and does not build user profiles. When you enable or trigger online features, the app sends necessary network requests to the corresponding service providers.
 
-## 1. Settings and local files
+## 1. Local Storage and Inter-Process Sync
 
-1.1 Interface settings, scope-related configuration, images, videos, lyrics, presets, downloaded resources, and caches are mainly stored on the device. Necessary settings and assets are shared with enabled target processes through framework remote preferences or local interfaces to run selected features. Remote preferences here mean communication between local processes, not cloud synchronization.
+1.1 Your interface settings, scope configurations, imported images/videos/lyrics/sounds, presets, and runtime caches are stored locally on your device. To make active hooks work within the system or target apps, required settings and assets are passed to target processes via local inter-process mechanisms such as framework Remote Preferences or in-app ContentProviders. This synchronization happens strictly between local processes on your device and is never uploaded to cloud servers.
 
-1.2 Imports, exports, and sharing use files, QR codes, or system sharing channels you select. The software does not automatically upload local settings or personal assets as cloud backups. Recipient apps and cloud storage services you choose may have separate data policies.
+1.2 When you import or export configurations via files, QR codes, or system sharing, you choose the storage location or recipient yourself. The software does not automatically back up your settings or personal media to the cloud. External storage services or sharing apps you choose are governed by their own privacy policies.
 
-## 2. Data used by features
+## 2. Data Accessed During Feature Operation
 
-2.1 Enabled notification, island, lockscreen, and media features may read notification content, app information, media titles, artists, albums, duration, artwork, playback state, and transit or pickup card information within target processes for display, matching, and interaction. Content may appear on the lockscreen or other visible surfaces; control visibility as needed.
+2.1 Only when corresponding features are enabled and the target process is in scope will the module read notification content, app info, media title, artist, album, duration, artwork, playback state, or transit/pickup card info locally within target processes for display, matching, and interaction. Note that some content may appear on visible surfaces such as the lockscreen; adjust privacy visibility options in settings as needed.
 
-2.2 With calendar permission and the corresponding schedule display enabled, the software reads necessary event information such as titles, start times, and all-day status for local display. App lists support scopes, app selection, and related configuration; they are not uploaded for advertising profiles.
+2.2 When you grant calendar permission and enable lockscreen schedule display, the app reads necessary event details (such as title, start time, and all-day status) for local display. Reading the installed app list is used solely for scope hints, app pickers, and the bottom navigation adaptation list.
 
-2.3 Enhanced OCR passes images through a local interface to the software's local recognition engine and returns results to Portal. Downloading models does not require uploading recognition images. The target app's original recognition flow and services you subsequently use remain subject to their own policies.
+2.3 When Enhanced OCR is enabled, images to be recognized are passed via a local interface to the built-in local recognition engine and results are returned to Portal without uploading images to the cloud (network access is only needed when downloading OCR model files). The target app's native recognition flow and subsequent services remain subject to their own policies.
 
-## 3. Network: music and dynamic content
+## 3. Network Access: Online Music and Dynamic Content
 
-3.1 Enabled online music features send matching parameters such as title, artist, album, duration, song identifier, or resource URL to selected lyric, track information, or artwork providers. Providers may include NetEase Cloud Music, QQ Music, Kugou, Kuwo, LRCLIB, AMLL/TTML repositories, Apple Music/iTunes, MusicBrainz, and their CDNs or mirrors. Actual requests depend on enabled features and sources.
+3.1 When online lyrics, track metadata, or artwork features are enabled, the module sends necessary matching parameters (such as title, artist, album, duration, track ID, or resource URL) to the music sources you choose. These may include NetEase Cloud Music, QQ Music, Kugou, Kuwo, LRCLIB, AMLL/TTML repositories, Apple Music / iTunes, MusicBrainz, and their CDNs or mirrors, depending on your enabled features and source settings.
 
-3.2 Transit card images and optional cloud pickup rules may access HeyTap/ColorOS resource services. Transit asset paths may contain the selected city or landmark name, potentially revealing an area associated with a journey. Cloud rule requests may include client information such as the Android API version. These requests should not be considered fully anonymous.
+3.2 Using transit card assets or optional cloud pickup rules may send requests to HeyTap / ColorOS resource endpoints. Transit asset request paths may include your selected city or landmark name, and cloud rule requests may include client parameters such as the Android API version. Please decide whether to enable these features based on your privacy preferences.
 
-## 4. Network: updates, resources, and links
+## 4. Network Access: Updates, Resources, and External Links
 
-4.1 Update checks, update package downloads, contributor lists and avatars, online device presets, and OCR model downloads access GitHub Pages, GitHub/GitHub Raw, Gitee, or the service hosting the resource URL.
+4.1 Checking for updates, downloading packages, loading contributor lists and avatars, browsing online device presets, fetching online shutter sounds, and downloading local OCR models connect to GitHub, GitHub Pages, GitHub Raw, Gitee, or the host serving the resource URL.
 
-4.2 App startup refreshes the BOSE device support list, trying GitHub Pages first and Gitee on failure. This downloads a public device list without needing to upload the local device codename. Disabling lyrics or update checks does not disable all app network activity.
+4.2 At app startup, HyperChanger refreshes the public BOSE tuning supported-device list from GitHub Pages (falling back to Gitee on failure). This only downloads a static public list and does not upload your device codename or hardware identifiers.
 
-4.3 Repository, website, group, and support links open a browser or another app whose service governs its network and data processing. Preset contributions, Issues, and shared logs may make the content you choose to send public.
+4.3 Tapping external links such as the website, repository, community groups, or donation pages opens them in your browser or third-party app, whose network and data handling are governed by that platform. If you choose to submit device presets, open Issues, or share logs publicly, the content you submit will be visible to the public.
 
-## 5. Connection information and third parties
+## 5. Network Connection Information
 
-5.1 Services, intermediary CDNs, and mirrors can observe the source IP, access time, request path, query parameters, and User-Agent. Some requests include the module or Android API version. IP is connection information rather than an identity field added by this software. Providers may retain logs or process data in different regions under their policies.
+5.1 When sending requests to external services, hosting platforms, or CDNs, the receiving servers can observe standard connection metadata such as your source IP address, access time, request path, query parameters, and User-Agent (some requests include the module version or Android API version). This software does not attach unrelated identifiers such as IMEI, Android ID, contacts, or account passwords, though third-party services may log requests under their own policies.
 
-5.2 Resource requests are not intended to collect IMEI, Android ID, contacts, or account passwords. The software includes no commercial advertising or behavioral analytics SDK and does not sell personal data. This does not mean third parties do not log access and does not cover files or feedback you actively submit.
+## 6. Permissions and Root Capabilities
 
-## 6. Permissions and system capabilities
+6.1 Root and framework capabilities are used for environment checks, writing and syncing settings, managing target processes (such as restarting scoped apps), reading diagnostic logs, and performing user-initiated silent update installations. Enabling the module allows hooks to run inside the scopes you select; manage root access and scopes carefully.
 
-6.1 Root and framework capabilities support environment checks, applying settings, target process operations, log access, and user-selected installation, among other functions; they are not limited to restarting scopes. Enabling the module allows hooks in selected target processes. Grant scopes and superuser access carefully.
+6.2 System permissions are used as follows: file and media access for importing/exporting images, videos, lyrics, and presets; wallpaper permission for live raster wallpapers and related features; query-all-packages for building target app and navigation adaptation lists; notifications for status alerts; calendar access for lockscreen schedules; install-packages for updates you trigger in-app; and boot-completed events for post-reboot initialization. You can manage or revoke these permissions anytime in system settings.
 
-6.2 File selection supports selected images, videos, lyrics, and preset import/export. Wallpaper permission supports wallpaper features; app queries support app selection; notifications support relevant status messages; calendar access supports schedules; package installation supports updates you initiate; boot events support relevant initialization. The system controls availability and revocation of permissions.
+## 7. Logs, Retention, and Deletion
 
-## 7. Logs, retention, and deletion
+7.1 Diagnostic logs are generated locally only. Exported log archives may contain system environment details (environment.txt), notification content, app package names, or media metadata; always inspect and remove sensitive personal information before sharing logs or posting them publicly.
 
-7.1 Diagnostic logs may be generated locally. Logs you access, export, or share may contain notifications, package names, media information, and other sensitive data. Review and remove credentials, accounts, contact details, and journeys before choosing recipients. Public Issues may be indexed or copied; do not submit secrets there.
+7.2 Local settings and imported files remain until you delete them, clear app data, or uninstall the software, while caches may also be cleared by the system. Files you manually exported to public directories, caches inside other target apps, configuration copies kept by the framework, and access records held by third-party servers are not removed automatically upon uninstallation and must be managed separately.
 
-7.2 Settings and imported files generally remain until changed, deleted, cleared, or uninstalled; the system may also clear caches. Clearing app data or uninstalling usually removes private app data but does not guarantee physical unrecoverability. Exported public files, other target apps' caches, framework copies, and third-party records are not automatically deleted and must be managed separately.
+## 8. Your Controls and Policy Updates
 
-## 8. Choices and policy updates
+8.1 You can turn off unwanted features, revoke system permissions, disable scopes in your module manager, or uninstall the software at any time. To block all network activity completely, restrict network access in system settings or use the app offline (online resources and update checks will be unavailable).
 
-8.1 Disable unwanted features, revoke permissions, disable scopes, or uninstall the software. To block all connections, use system network controls or work offline, accepting that network features will be unavailable. A single feature switch does not immediately stop other features or requests already sent.
-
-8.2 This policy is updated as features change, with a revision date on this page. Raise privacy questions through Issues at https://github.com/ColdP/HyperChanger. This channel is normally public; do not include sensitive personal information.
+8.2 This policy is updated alongside feature changes, with the revision date shown at the top of the page. If you have questions about privacy handling, please open an Issue at https://github.com/ColdP/HyperChanger (avoid including sensitive personal data in public posts).
