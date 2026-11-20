@@ -61,6 +61,7 @@ internal class OthersHooks(
     private val sidebarHooks = SidebarHooks(module, hookDeoptimized, logTag)
     private val sidebarAppearanceHooks = SidebarAppearanceHooks(module, hookDeoptimized, logTag)
     private val sidebarIconCountHooks = SidebarIconCountHooks(module, hookDeoptimized, logTag)
+    private val widgetCapabilityHooks = WidgetCapabilityHooks(module, hookDeoptimized, logTag)
     private val widgetGlassHooks = WidgetGlassHooks(module, hookDeoptimized, logTag)
     private val personalAssistantWallpaperHooks = PersonalAssistantWallpaperHooks(module, hookDeoptimized)
     private val videoToolboxHooks = VideoToolboxHooks(module)
@@ -99,6 +100,9 @@ internal class OthersHooks(
 
     fun installSidebarIconCountHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
         sidebarIconCountHooks.install(classLoader, preferences)
+
+    fun installWidgetCapabilityHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
+        widgetCapabilityHooks.install(classLoader, preferences)
 
     fun installWidgetGlassHooks(classLoader: ClassLoader, preferences: SharedPreferences) =
         widgetGlassHooks.install(classLoader, preferences)
@@ -342,6 +346,7 @@ internal class OthersHooks(
             && packageName != "com.github.android" && packageName != "com.pinterest"
             && packageName != "com.ss.android.ugc.lifeservices"
             && packageName != "com.sankuai.meituan" && packageName != "com.sankuai.meituan.takeoutnew"
+            && packageName != "com.jingdong.app.mall" && packageName != "com.eg.android.AlipayGphone"
         ) return
         if (!runCatching { android.app.Application.getProcessName() == packageName }.getOrDefault(false)) return
         runCatching {
@@ -397,6 +402,8 @@ internal class OthersHooks(
                 "com.pinterest" -> AppBottomNavHooks.installPinterest(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 "com.twitter.android" -> AppBottomNavHooks.installX(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
                 "com.github.android" -> AppBottomNavHooks.installGitHub(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)
+                "com.jingdong.app.mall" -> AppBottomNavHooks.installJd(module, param.defaultClassLoader, blur, label, style, advanced, color, accent, showBadges)
+                "com.eg.android.AlipayGphone" -> AppBottomNavHooks.installAlipay(module, param.defaultClassLoader, blur, label, style, advanced, color, accent, showBadges)
                 "com.lucky.luckyclient" -> {
                     LuckinAntiDetectionHooks.install(module)
                     AppBottomNavHooks.installLuckinCoffee(module, param.defaultClassLoader, blur, label, style, advanced, color, accent)

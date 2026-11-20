@@ -107,7 +107,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.luminance
@@ -121,6 +123,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
@@ -148,6 +151,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.Constraints
 import java.util.UUID
@@ -330,7 +334,7 @@ private enum class PageId {
     DEVICE_PROFILE_PRESETS, DEVICE_PROFILE_CLOUD_PRESETS, CUSTOM_DEPTH_WALLPAPER,
     SETTINGS_FLOATING_SEARCH_PARAMETERS, SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, SETTINGS_ENTRY_ICONS, SETTINGS_ENTRY_APPEARANCE, THEME_AND_COLOR, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
-    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, SIDEBAR, SIDEBAR_GLASS, PERSONAL_ASSISTANT, ASSISTANT_WIDGET_GLASS, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, PORTAL_MATERIAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND, MODULE_PRESET_IMPORT_PREVIEW,
+    SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, SIDEBAR, SIDEBAR_GLASS, PERSONAL_ASSISTANT, ASSISTANT_WIDGET_GLASS, WIDGETS, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, PORTAL_MATERIAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND, MODULE_PRESET_IMPORT_PREVIEW,
     STATUS_MOBILE_NETWORK_TYPE_TUNING,
     CLOUD_CONTROL,
     PRIVACY_GUARD,
@@ -352,6 +356,12 @@ private data class CategoryPageEntry(
     val title: String,
     val page: PageId,
     val icon: Int,
+)
+
+private data class ClosingSeamlessPage(
+    val page: PageId,
+    val stackIndex: Int,
+    val entry: SeamlessEntry,
 )
 
 private fun categoryIconResource(page: PageId?): Int? = when (page) {
@@ -420,6 +430,7 @@ private fun categoryIconResource(page: PageId?): Int? = when (page) {
     PageId.SIDEBAR_GLASS,
     PageId.PERSONAL_ASSISTANT,
     PageId.ASSISTANT_WIDGET_GLASS,
+    PageId.WIDGETS,
     PageId.CONTACTS_DIALER,
     PageId.CONTACTS_DIALER_BACKGROUND,
     PageId.PORTAL,
@@ -520,6 +531,12 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
         tr("柔光玻璃参数调整", "柔光玻璃参数调整"),
         setOf(ScopeApplication.PERSONAL_ASSISTANT),
         PageId.ASSISTANT_WIDGET_GLASS,
+    ),
+    CategorySearchItem(
+        tr("小部件", "小部件"),
+        tr("允许安卓小部件参与堆叠", "允许安卓小部件参与堆叠"),
+        setOf(ScopeApplication.PERSONAL_ASSISTANT, ScopeApplication.DESKTOP),
+        PageId.WIDGETS,
     ),
     CategorySearchItem(
         tr("拨号与通话", "拨号与通话"),
@@ -628,6 +645,9 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
             ScopeApplication.INSTAGRAM,
             ScopeApplication.PINTEREST,
         ScopeApplication.X,
+            ScopeApplication.GITHUB,
+            ScopeApplication.JD,
+            ScopeApplication.ALIPAY,
         ),
         PageId.APP_NAVIGATION,
     ),
@@ -729,6 +749,7 @@ private fun moduleSettingsSearchItems(): List<CategorySearchItem> {
         entry("预测性返回动画", "预测性返回动画", appearance, keywords = "预测 返回 手势 predictive back gesture animation"),
         entry("预测性返回动画最大进度", "预测性返回动画最大进度", appearance, keywords = "预测 返回 进度 predictive back maximum progress"),
         entry("sharedViewAnimation", "一镜到底的无缝动画", appearance, keywords = "一镜到底 无缝 共享 元素 动画 seamless shared view animation"),
+        entry("appNavigationLayoutMode", "应用底部导航视图", appearance, keywords = "应用 底部导航 视图 列表 网格 app navigation layout list grid"),
         entry("关于", "关于", information, PageId.ABOUT, "关于 版本 about version"),
         entry("软件更新", "软件更新", information, PageId.SOFTWARE_UPDATE, "软件 应用 更新 update software upgrade"),
         entry("更新日志", "更新日志", information, PageId.UPDATE_LOG, "更新 日志 changelog release notes"),
@@ -782,6 +803,7 @@ private fun categorySearchKeywords(page: PageId?): String = when (page) {
     PageId.REAR_MUSIC_APPS -> "背屏 音乐 白名单 rear music whitelist"
     PageId.REAR_MINI_PLAYER -> "背屏 迷你 播放器 rear mini player"
     PageId.SIDEBAR -> "侧边栏 游戏 视频 工具箱 sidebar game video toolbox"
+    PageId.WIDGETS -> "小部件 白名单 安卓 堆叠 柔光玻璃 widgets whitelist android stack glass"
     PageId.PERSONAL_ASSISTANT, PageId.ASSISTANT_WIDGET_GLASS -> "负一屏 小部件 壁纸 模糊 app vault assistant widget wallpaper blur"
     PageId.CONTACTS_DIALER -> "拨号 通话 联系人 背景 contacts dialer call background"
     PageId.APP_NAVIGATION -> "应用 底部导航 底栏 标签栏 liquid glass bottom navigation tab bar"
@@ -1284,6 +1306,7 @@ private fun Root(
                 SidebarFeatureSettingsStore(context).syncRemote(it)
                 PersonalAssistantSettingsStore(context).syncRemote(it)
                 WidgetGlassSettingsStore(context).syncRemote(it)
+                WidgetSettingsStore(context).syncRemote(it)
                 PowerBatterySettingsStore(context).syncRemote(it)
                 PortalSettings.syncRemote(context, it)
                 globalSoftGlassStore.syncRemote(it)
@@ -1807,7 +1830,8 @@ private fun Shell(
     val seamless = remember { SeamlessNavigationState() }
     val seamlessScope = rememberCoroutineScope()
     val seamlessEnabled = (context as MainActivity).sharedViewAnimations.enabled
-    var seamlessClosing by remember { mutableStateOf(false) }
+    val closingOverlays = remember { mutableStateListOf<ClosingSeamlessPage>() }
+    var rootSize by remember { mutableStateOf(IntSize.Zero) }
     var ordinaryClosingIndex by remember { mutableIntStateOf(-1) }
     val page = pageStack.lastOrNull()
     var suppressPageBack by remember { mutableStateOf(false) }
@@ -1815,20 +1839,53 @@ private fun Shell(
     var navigatingForward by remember { mutableStateOf(true) }
     if (page != null) retainedPage = page
     val openRootPage: (PageId) -> Unit = { target ->
-        if (!seamlessClosing) {
-            seamless.entries.clear()
-            seamless.open(0, seamlessEnabled)
-            navigatingForward = true
-            pageStack.clear()
-            pageStack += target
+        if (ordinaryClosingIndex == -1) {
+            val reopen = if (pageStack.isEmpty()) {
+                closingOverlays.lastOrNull { it.stackIndex == 0 && it.page == target }
+            } else null
+            if (reopen != null) {
+                closingOverlays.remove(reopen)
+                seamless.pendingSource?.let { reopen.entry.source = it }
+                seamless.entries.clear()
+                seamless.entries[0] = reopen.entry
+                navigatingForward = true
+                pageStack.clear()
+                pageStack += target
+                reopen.entry.launch(seamlessScope)
+            } else {
+                seamless.entries.clear()
+                val created = seamless.createEntry(seamlessEnabled)
+                if (created != null) {
+                    seamless.entries[0] = created
+                    created.launch(seamlessScope)
+                }
+                navigatingForward = true
+                pageStack.clear()
+                pageStack += target
+            }
             if (target == PageId.DISCLAIMER) disclaimerRead = true
         }
     }
     val openNestedPage: (PageId) -> Unit = { target ->
-        if (!seamlessClosing && pageStack.lastOrNull() != target) {
-            seamless.open(pageStack.size, seamlessEnabled)
-            navigatingForward = true
-            pageStack += target
+        if (ordinaryClosingIndex == -1 && pageStack.lastOrNull() != target) {
+            val nextIndex = pageStack.size
+            val reopen = closingOverlays.lastOrNull { it.stackIndex == nextIndex && it.page == target }
+            if (reopen != null) {
+                closingOverlays.remove(reopen)
+                seamless.pendingSource?.let { reopen.entry.source = it }
+                seamless.entries[nextIndex] = reopen.entry
+                navigatingForward = true
+                pageStack += target
+                reopen.entry.launch(seamlessScope)
+            } else {
+                val created = seamless.createEntry(seamlessEnabled)
+                if (created != null) {
+                    seamless.entries[nextIndex] = created
+                    created.launch(seamlessScope)
+                }
+                navigatingForward = true
+                pageStack += target
+            }
             if (target == PageId.DISCLAIMER) disclaimerRead = true
         }
     }
@@ -1838,37 +1895,41 @@ private fun Shell(
         }
     }
     val dismissPage: () -> Unit = {
-        if (!seamlessClosing) {
-            val leavingDisclaimer = pageStack.lastOrNull() == PageId.DISCLAIMER
-            val entry = seamless.entries[pageStack.lastIndex]
-            val pop: () -> Unit = {
-                navigatingForward = false
-                seamless.entries.remove(pageStack.lastIndex)
-                if (pageStack.isNotEmpty()) pageStack.removeAt(pageStack.lastIndex)
-                if (leavingDisclaimer && osCode.isNotBlank() && osCode != "4") showOsWarning = true
-            }
+        if (ordinaryClosingIndex == -1 && pageStack.isNotEmpty()) {
+            val topIndex = pageStack.lastIndex
+            val topPage = pageStack[topIndex]
+            val leavingDisclaimer = topPage == PageId.DISCLAIMER
+            val entry = seamless.entries.remove(topIndex)
             if (entry != null) {
-                seamlessClosing = true
+                navigatingForward = false
+                pageStack.removeAt(topIndex)
+                val closingItem = ClosingSeamlessPage(topPage, topIndex, entry)
+                closingOverlays.add(closingItem)
                 val velocity = if (entry.gesturing) entry.releaseVelocity else 0f
-                val effectOrigin = if (entry.gesturing) entry.progress.value else null
-                seamlessScope.launch {
-                    try { entry.close(velocity, effectOrigin); pop() }
-                    finally { seamlessClosing = false }
+                entry.close(seamlessScope, initialVelocity = velocity) { finished ->
+                    closingOverlays.removeAll { it.entry === finished }
+                    if (leavingDisclaimer && osCode.isNotBlank() && osCode != "4") showOsWarning = true
                 }
-            } else if (pageStack.isNotEmpty()) {
+            } else {
                 // Keep the outgoing page composed until its fade/blur has finished.
-                seamlessClosing = true
-                ordinaryClosingIndex = pageStack.lastIndex
+                ordinaryClosingIndex = topIndex
                 seamlessScope.launch {
-                    try { delay(207); pop() }
-                    finally { ordinaryClosingIndex = -1; seamlessClosing = false }
+                    try {
+                        delay(207)
+                        navigatingForward = false
+                        if (pageStack.isNotEmpty()) pageStack.removeAt(pageStack.lastIndex)
+                        if (leavingDisclaimer && osCode.isNotBlank() && osCode != "4") showOsWarning = true
+                    } finally {
+                        ordinaryClosingIndex = -1
+                    }
                 }
             }
         }
     }
+    val topSeamlessEntry = seamless.entries[pageStack.lastIndex]
     val backState = rememberMomentumPredictiveBack(
         enabled = page != null && settings.predictiveBackEnabled && !suppressPageBack &&
-            seamless.entries[pageStack.lastIndex] == null && !seamlessClosing,
+            topSeamlessEntry == null && ordinaryClosingIndex == -1,
         maxProgress = settings.predictiveBackProgress.coerceIn(10, 100) / 100f,
         onBack = dismissPage
     )
@@ -1882,16 +1943,15 @@ private fun Shell(
         if (pageStack.isNotEmpty()) backState.reset()
     }
     BackHandler(
-        enabled = page != null && (seamlessClosing || !settings.predictiveBackEnabled) && !suppressPageBack,
+        enabled = page != null && (ordinaryClosingIndex != -1 || !settings.predictiveBackEnabled) && !suppressPageBack,
         onBack = dismissPage,
     )
     SeamlessPredictiveBack(
-        entry = seamless.entries[pageStack.lastIndex],
-        enabled = page != null && settings.predictiveBackEnabled && !suppressPageBack && !seamlessClosing,
+        entry = topSeamlessEntry,
+        enabled = page != null && settings.predictiveBackEnabled && !suppressPageBack && ordinaryClosingIndex == -1,
         maxProgress = settings.predictiveBackProgress.coerceIn(10, 100) / 100f,
         onBack = dismissPage,
     )
-    val seamlessEntry = seamless.entries[pageStack.lastIndex]
     val backdrop = rememberLayerBackdrop()
     var homeSearchActive by remember { mutableStateOf(false) }
     var homeSearchExpanded by remember { mutableStateOf(false) }
@@ -1902,24 +1962,40 @@ private fun Shell(
     val searchNavigationScope = rememberCoroutineScope()
     var homeSearchAnchor by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     val maxBackProgress = settings.predictiveBackProgress.coerceIn(10, 100) / 100f
-    val gestureBlur = if (seamlessEntry != null) 12f * seamlessEntry.progress.value
-        else 12f - 8f * (backState.gestureProgress / maxBackProgress).coerceIn(0f, 1f)
+    val rootSeamlessProgress = maxOf(
+        seamless.entries[0]?.progress?.value ?: 0f,
+        closingOverlays.filter { it.stackIndex == 0 }.maxOfOrNull { it.entry.progress.value } ?: 0f,
+    ).coerceIn(0f, 1f)
+    val hasRootSeamless = seamless.entries[0] != null || closingOverlays.any { it.stackIndex == 0 }
+    var lastRootWasSeamless by remember { mutableStateOf(false) }
+    if (hasRootSeamless) lastRootWasSeamless = true
+    else if (page == null && closingOverlays.isEmpty()) lastRootWasSeamless = false
+
+    val gestureBlur = 12f - 8f * (backState.gestureProgress / maxBackProgress).coerceIn(0f, 1f)
     // Start revealing the page while the outgoing one exits, not after the
     // delayed stack pop. Match AppNavigationPage's concurrent 252ms unblur.
     val revealingBase = page == null || ordinaryClosingIndex == 0
-    val baseCoveredBlur by animateFloatAsState(
+    val ordinaryBaseCoveredBlur by animateFloatAsState(
         targetValue = when {
             revealingBase -> 0f
-            (backState.isSwiping || seamlessEntry != null) && pageStack.size == 1 -> gestureBlur
+            backState.isSwiping && pageStack.size == 1 -> gestureBlur
             else -> 12f
         },
         animationSpec = when {
             revealingBase -> tween(252, easing = FastOutSlowInEasing)
-            (backState.isSwiping || seamlessEntry != null) && pageStack.size == 1 -> snap()
+            backState.isSwiping && pageStack.size == 1 -> snap()
             else -> tween(252, easing = FastOutSlowInEasing)
         },
         label = "basePageCoveredBlur",
     )
+    val isDarkSurface = MiuixTheme.colorScheme.surface.luminance() < 0.5f
+    val baseCoveredBlur = if (hasRootSeamless) 18f * rootSeamlessProgress else ordinaryBaseCoveredBlur
+    val baseScale = if (hasRootSeamless) 1f - 0.09f * rootSeamlessProgress else 1f
+    val baseCorner = if (hasRootSeamless) (26f * rootSeamlessProgress).dp else 0.dp
+    val baseDimAlpha = if (hasRootSeamless) (if (isDarkSurface) 0.36f else 0.14f) * rootSeamlessProgress else 0f
+    seamless.setLevelScale(0, baseScale)
+    val rootBackdropColor = if (isDarkSurface) ComposeColor.Black else ComposeColor(0xFFE8E8ED)
+    val hitSlopPx = with(LocalDensity.current) { 8.dp.toPx() }
 
     // Keep the page immediately below the top page composed. Predictive back moves the
     // top page away before the stack is popped, so the underlying page must already be
@@ -1964,104 +2040,124 @@ private fun Shell(
 
     CompositionLocalProvider(LocalDialogBackdrop provides backdrop, LocalSeamlessNavigation provides seamless) {
     Scaffold(containerColor = ComposeColor.Transparent) {
-    Box(Modifier.fillMaxSize()) {
-        // The backdrop must only record page content. Recording the navigation that consumes it
-        // creates a RenderNode cycle and crashes HyperOS's RenderThread.
-        Box(Modifier.fillMaxSize().blur(baseCoveredBlur.dp).layerBackdrop(backdrop)) {
-            AnimatedContent(
-                targetState = tab,
-                transitionSpec = {
-                    if (moduleSearchTabSwitch) {
-                        EnterTransition.None togetherWith ExitTransition.None
-                    } else {
-                        val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
-                        (slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { direction * it / 7 } + fadeIn(tween(210)) + scaleIn(tween(280), initialScale = .985f)) togetherWith
-                            (slideOutHorizontally(tween(230, easing = FastOutSlowInEasing)) { -direction * it / 3 } + fadeOut(tween(180)) + scaleOut(tween(230), targetScale = .975f))
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(if (hasRootSeamless && rootSeamlessProgress > 0.005f) rootBackdropColor else MiuixTheme.colorScheme.surface)
+            .onSizeChanged { rootSize = it }
+            .onGloballyPositioned { seamless.rootCoordinates = it },
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = baseScale
+                    scaleY = baseScale
+                }
+                .then(if (baseCorner > 0.5.dp) Modifier.clip(RoundedCornerShape(baseCorner)) else Modifier)
+                .then(if (baseCoveredBlur > 0.05f) Modifier.blur(baseCoveredBlur.dp) else Modifier),
+        ) {
+            // The backdrop must only record page content. Recording the navigation that consumes it
+            // creates a RenderNode cycle and crashes HyperOS's RenderThread.
+            Box(Modifier.fillMaxSize().layerBackdrop(backdrop)) {
+                AnimatedContent(
+                    targetState = tab,
+                    transitionSpec = {
+                        if (moduleSearchTabSwitch) {
+                            EnterTransition.None togetherWith ExitTransition.None
+                        } else {
+                            val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
+                            (slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { direction * it / 7 } + fadeIn(tween(210)) + scaleIn(tween(280), initialScale = .985f)) togetherWith
+                                (slideOutHorizontally(tween(230, easing = FastOutSlowInEasing)) { -direction * it / 3 } + fadeOut(tween(180)) + scaleOut(tween(230), targetScale = .975f))
+                        }
+                    },
+                    label = "mainTabNavigation",
+                    modifier = Modifier.fillMaxSize().background(MiuixTheme.colorScheme.surface),
+                ) { currentTab ->
+                val tabBlurRadius by transition.animateFloat(
+                    transitionSpec = { if (moduleSearchTabSwitch) snap() else tween(280, easing = FastOutSlowInEasing) },
+                    label = "mainTabBlur",
+                ) { state -> if (state == EnterExitState.Visible) 0f else 12f }
+                Box(Modifier.fillMaxSize().blur((tabBlurRadius + if (currentTab == Tab.SETTINGS) moduleSearchReveal.value else 0f).dp)) {
+                    when (currentTab) {
+                        Tab.CATEGORY -> CategoryHome(
+                            connected = service != null,
+                            open = openRootPage,
+                            searchMounted = homeSearchActive,
+                            searchExpanded = homeSearchExpanded,
+                            searchAnchor = homeSearchAnchor,
+                            onSearchExpandedChange = { homeSearchExpanded = it },
+                            onSearchClosed = { homeSearchActive = false; homeSearchProgress = 0f },
+                            onSearchProgress = { homeSearchProgress = it },
+                            searchNavigationStyle = navigationSettings.style,
+                            onOpenModuleSettings = { section, destination ->
+                                searchNavigationScope.launch {
+                                    moduleSearchReveal.snapTo(3f)
+                                    moduleSearchTabSwitch = true
+                                    moduleSearchSection = section
+                                    tab = Tab.SETTINGS
+                                    homeSearchActive = false
+                                    homeSearchExpanded = false
+                                    homeSearchProgress = 0f
+                                    withFrameNanos { }
+                                    destination?.let(openRootPage)
+                                    moduleSearchReveal.animateTo(0f, tween(140, easing = FastOutSlowInEasing))
+                                    moduleSearchTabSwitch = false
+                                }
+                            },
+                        )
+                        Tab.SETTINGS -> SettingsHome(
+                            settings,
+                            navigationSettings,
+                            settingsApp,
+                            appThemeStore,
+                            service,
+                            service != null,
+                            update,
+                            updateNavigation,
+                            updateSettingsApp,
+                            openRootPage,
+                            onImportModulePreset,
+                            onExportModulePreset,
+                            onResetModulePreset,
+                            searchSection = moduleSearchSection,
+                            onSearchSectionConsumed = { moduleSearchSection = null },
+                        )
                     }
-                },
-                label = "mainTabNavigation",
-                modifier = Modifier.fillMaxSize().background(MiuixTheme.colorScheme.surface),
-            ) { currentTab ->
-            val tabBlurRadius by transition.animateFloat(
-                transitionSpec = { if (moduleSearchTabSwitch) snap() else tween(280, easing = FastOutSlowInEasing) },
-                label = "mainTabBlur",
-            ) { state -> if (state == EnterExitState.Visible) 0f else 12f }
-            Box(Modifier.fillMaxSize().blur((tabBlurRadius + if (currentTab == Tab.SETTINGS) moduleSearchReveal.value else 0f).dp)) {
-                when (currentTab) {
-                    Tab.CATEGORY -> CategoryHome(
-                        connected = service != null,
-                        open = openRootPage,
-                        searchMounted = homeSearchActive,
-                        searchExpanded = homeSearchExpanded,
-                        searchAnchor = homeSearchAnchor,
-                        onSearchExpandedChange = { homeSearchExpanded = it },
-                        onSearchClosed = { homeSearchActive = false; homeSearchProgress = 0f },
-                        onSearchProgress = { homeSearchProgress = it },
-                        searchNavigationStyle = navigationSettings.style,
-                        onOpenModuleSettings = { section, destination ->
-                            searchNavigationScope.launch {
-                                moduleSearchReveal.snapTo(3f)
-                                moduleSearchTabSwitch = true
-                                moduleSearchSection = section
-                                tab = Tab.SETTINGS
-                                homeSearchActive = false
-                                homeSearchExpanded = false
-                                homeSearchProgress = 0f
-                                withFrameNanos { }
-                                destination?.let(openRootPage)
-                                moduleSearchReveal.animateTo(0f, tween(140, easing = FastOutSlowInEasing))
-                                moduleSearchTabSwitch = false
-                            }
-                        },
-                    )
-                    Tab.SETTINGS -> SettingsHome(
-                        settings,
-                        navigationSettings,
-                        settingsApp,
-                        appThemeStore,
-                        service,
-                        service != null,
-                        update,
-                        updateNavigation,
-                        updateSettingsApp,
-                        openRootPage,
-                        onImportModulePreset,
-                        onExportModulePreset,
-                        onResetModulePreset,
-                        searchSection = moduleSearchSection,
-                        onSearchSectionConsumed = { moduleSearchSection = null },
-                    )
                 }
             }
+            }
+            BottomBar(
+                tab,
+                { tab = it },
+                settings,
+                navigationSettings,
+                backdrop,
+                Modifier.align(Alignment.BottomCenter),
+                onSearch = {
+                    if (homeSearchAnchor.width > 0f) {
+                        homeSearchActive = true
+                        homeSearchExpanded = true
+                    }
+                },
+                onSearchPositioned = { if (!homeSearchActive) homeSearchAnchor = it },
+                searchMounted = homeSearchActive,
+                searchProgress = homeSearchProgress,
+            )
+            if (baseDimAlpha > 0.002f) {
+                Box(Modifier.fillMaxSize().background(ComposeColor.Black.copy(alpha = baseDimAlpha)))
+            }
         }
-        }
-        BottomBar(
-            tab,
-            { tab = it },
-            settings,
-            navigationSettings,
-            backdrop,
-            Modifier.align(Alignment.BottomCenter).blur(baseCoveredBlur.dp),
-            onSearch = {
-                if (homeSearchAnchor.width > 0f) {
-                    homeSearchActive = true
-                    homeSearchExpanded = true
-                }
-            },
-            onSearchPositioned = { if (!homeSearchActive) homeSearchAnchor = it },
-            searchMounted = homeSearchActive,
-            searchProgress = homeSearchProgress,
-        )
         AnimatedVisibility(
-            visible = page != null,
-            enter = if (seamless.entries[0] != null) EnterTransition.None else slideInHorizontally(
+            visible = page != null || closingOverlays.isNotEmpty(),
+            enter = if (seamless.entries[0] != null || lastRootWasSeamless) EnterTransition.None else slideInHorizontally(
                 animationSpec = tween(252, easing = FastOutSlowInEasing),
                 initialOffsetX = { it / 7 },
             ) + fadeIn(tween(189)) + scaleIn(
                 animationSpec = tween(252, easing = FastOutSlowInEasing),
                 initialScale = .985f,
             ),
-            exit = if (seamless.rootWasSeamless) ExitTransition.None else slideOutHorizontally(
+            exit = if (lastRootWasSeamless) ExitTransition.None else slideOutHorizontally(
                 animationSpec = tween(207, easing = FastOutSlowInEasing),
                 targetOffsetX = { ordinaryExitDirection * it / 3 },
             ) + fadeOut(tween(162)) + scaleOut(
@@ -2073,33 +2169,52 @@ private fun Shell(
                 transitionSpec = { tween(252, easing = FastOutSlowInEasing) },
                 label = "detailRootTransitionBlur",
             ) { state ->
-                if (seamless.rootWasSeamless || state == EnterExitState.Visible) 0f else 12f
+                if (lastRootWasSeamless || state == EnterExitState.Visible) 0f else 12f
             }
-            Box(Modifier.fillMaxSize().blur(pageTransitionBlur.dp)) {
+            Box(Modifier.fillMaxSize().then(if (pageTransitionBlur > 0.05f) Modifier.blur(pageTransitionBlur.dp) else Modifier)) {
                 // Keep every page in the stack composed. The top page is an overlay,
                 // while the page below remains the exact instance revealed by the
                 // predictive-back gesture, preserving its scroll position.
                 pageStack.forEachIndexed { index, stackPage ->
-                    key(index, stackPage) {
-                        // AnimatedVisibility may keep outgoing content alive after pop.
-                        // Retain its transition until disposal instead of switching to the
-                        // fallback when its entry is removed from the navigation map.
-                        val stackEntry = remember { seamless.entries[index] }
+                    closingOverlays.filter { it.stackIndex == index }.forEach { closing ->
+                        key("closing", closing.entry.id) {
+                            CompositionLocalProvider(LocalSeamlessLevel provides (closing.stackIndex + 1)) {
+                                SeamlessPageFrame(
+                                    entry = closing.entry,
+                                    rootSize = rootSize,
+                                ) { renderDetail(closing.page, false) }
+                            }
+                        }
+                    }
+                    key(seamless.entries[index]?.id ?: (index to stackPage)) {
+                        val stackEntry = seamless.entries[index]
                         val isTop = index == pageStack.lastIndex
+                        val childSeamlessProgress = maxOf(
+                            seamless.entries[index + 1]?.progress?.value ?: 0f,
+                            closingOverlays.filter { it.stackIndex == index + 1 }.maxOfOrNull { it.entry.progress.value } ?: 0f,
+                        ).coerceIn(0f, 1f)
+                        val hasChildSeamless = seamless.entries[index + 1] != null ||
+                            closingOverlays.any { it.stackIndex == index + 1 }
                         val revealingPage = isTop || ordinaryClosingIndex == index + 1
-                        val coveredPageBlur by animateFloatAsState(
+                        val ordinaryCoveredPageBlur by animateFloatAsState(
                             targetValue = when {
                                 revealingPage -> 0f
-                                index == pageStack.lastIndex - 1 && (backState.isSwiping || seamlessEntry != null) -> gestureBlur
+                                index == pageStack.lastIndex - 1 && backState.isSwiping -> gestureBlur
                                 else -> 12f
                             },
                             animationSpec = when {
                                 revealingPage -> tween(252, easing = FastOutSlowInEasing)
-                                index == pageStack.lastIndex - 1 && (backState.isSwiping || seamlessEntry != null) -> snap()
+                                index == pageStack.lastIndex - 1 && backState.isSwiping -> snap()
                                 else -> tween(252, easing = FastOutSlowInEasing)
                             },
                             label = "coveredPageBlur:$stackPage",
                         )
+                        val coveredScale = if (hasChildSeamless) 1f - 0.09f * childSeamlessProgress else 1f
+                        val coveredCornerDp = if (hasChildSeamless) 26f * childSeamlessProgress else 0f
+                        val coveredDimAlpha = if (hasChildSeamless) (if (isDarkSurface) 0.36f else 0.14f) * childSeamlessProgress else 0f
+                        val coveredBlur = if (hasChildSeamless) 18f * childSeamlessProgress else ordinaryCoveredPageBlur
+                        seamless.setLevelScale(index + 1, coveredScale)
+
                         val pageVisibility = remember(stackPage) {
                             MutableTransitionState(false).apply { targetState = true }
                         }
@@ -2129,19 +2244,72 @@ private fun Shell(
                             ) { state ->
                                 if (stackEntry != null || state == EnterExitState.Visible) 0f else 12f
                             }
-                            Box(
-                                Modifier
-                                    .fillMaxSize()
-                                    .blur((coveredPageBlur + detailTransitionBlur).dp)
-                                    .then(if (isTop && stackEntry == null && momentumBackOwner == (index to stackPage))
-                                        Modifier.momentumBackTransform(backState) else Modifier),
-                            ) {
-                                SeamlessPageFrame(
-                                    entry = stackEntry,
-                                ) { renderDetail(stackPage, isTop) }
+                            CompositionLocalProvider(LocalSeamlessLevel provides (index + 1)) {
+                                if (stackEntry != null) {
+                                    SeamlessPageFrame(
+                                        entry = stackEntry,
+                                        rootSize = rootSize,
+                                        coveredBlurDp = coveredBlur + detailTransitionBlur,
+                                        coveredScale = coveredScale,
+                                        coveredCornerDp = coveredCornerDp,
+                                        coveredDimAlpha = coveredDimAlpha,
+                                    ) { renderDetail(stackPage, isTop) }
+                                } else {
+                                    Box(
+                                        Modifier
+                                            .fillMaxSize()
+                                            .graphicsLayer {
+                                                scaleX = coveredScale
+                                                scaleY = coveredScale
+                                            }
+                                            .then(if (coveredCornerDp > 0.5f) Modifier.clip(RoundedCornerShape(coveredCornerDp.dp)) else Modifier)
+                                            .then(if (coveredBlur + detailTransitionBlur > 0.05f) Modifier.blur((coveredBlur + detailTransitionBlur).dp) else Modifier)
+                                            .then(if (isTop && momentumBackOwner == (index to stackPage))
+                                                Modifier.momentumBackTransform(backState) else Modifier),
+                                    ) {
+                                        renderDetail(stackPage, isTop)
+                                        if (coveredDimAlpha > 0.002f) {
+                                            Box(Modifier.fillMaxSize().background(ComposeColor.Black.copy(alpha = coveredDimAlpha)))
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
+                }
+                closingOverlays.filter { it.stackIndex >= pageStack.size }.forEach { closing ->
+                    key("closing", closing.entry.id) {
+                        CompositionLocalProvider(LocalSeamlessLevel provides (closing.stackIndex + 1)) {
+                            SeamlessPageFrame(
+                                entry = closing.entry,
+                                rootSize = rootSize,
+                            ) { renderDetail(closing.page, false) }
+                        }
+                    }
+                }
+                if (closingOverlays.any { it.stackIndex >= pageStack.size }) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .pointerInput(pageStack.size) {
+                                detectTapGestures { offset ->
+                                    val targetLevel = pageStack.size
+                                    val center = Offset(rootSize.width * 0.5f, rootSize.height * 0.5f)
+                                    val hit = seamless.targets.values.firstOrNull { target ->
+                                        if (target.level != targetLevel) return@firstOrNull false
+                                        val bounds = target.source.unscaledBounds() ?: return@firstOrNull false
+                                        val scaled = scaleRectAroundCenter(bounds, center, target.source.backgroundScale())
+                                        Rect(
+                                            scaled.left - hitSlopPx,
+                                            scaled.top - hitSlopPx,
+                                            scaled.right + hitSlopPx,
+                                            scaled.bottom + hitSlopPx,
+                                        ).contains(offset)
+                                    }
+                                    hit?.onClick?.invoke()
+                                }
+                            },
+                    )
                 }
             }
         }
@@ -2497,7 +2665,7 @@ private fun OtherPage(
     AppPage(
     tr("其他", "其他"),
     back,
-    restartScopes = setOf(ScopeApplication.SCREEN_RECORDER, ScopeApplication.XIAOMI_HEALTH, ScopeApplication.AIRDROP, ScopeApplication.JOYOSE, ScopeApplication.SETTINGS, ScopeApplication.PERSONAL_ASSISTANT),
+    restartScopes = setOf(ScopeApplication.SCREEN_RECORDER, ScopeApplication.XIAOMI_HEALTH, ScopeApplication.AIRDROP, ScopeApplication.JOYOSE, ScopeApplication.SETTINGS, ScopeApplication.PERSONAL_ASSISTANT, ScopeApplication.DESKTOP),
 ) { padding, scroll ->
     val joyoseStore = remember(context) { JoyoseSettingsStore(context) }
     var joyoseSettings by remember { mutableStateOf(joyoseStore.settings) }
@@ -2563,6 +2731,10 @@ private fun OtherPage(
                 SharedViewArrowPreference(
                     title = tr("负一屏", "负一屏"),
                     onClick = { open(PageId.PERSONAL_ASSISTANT) },
+                )
+                SharedViewArrowPreference(
+                    title = tr("小部件", "小部件"),
+                    onClick = { open(PageId.WIDGETS) },
                 )
                 SharedViewArrowPreference(
                     title = tr("环境检测", "环境检测"),
@@ -3647,6 +3819,22 @@ private fun SettingsHome(
                     checked = (context as MainActivity).sharedViewAnimations.enabled,
                     onCheckedChange = { (context as MainActivity).sharedViewAnimations.update(service, it) },
                 )
+                val appNavigationLayoutStore = remember(context) { AppNavigationLayoutSettingsStore(context) }
+                DisposableEffect(appNavigationLayoutStore) {
+                    val dispose = appNavigationLayoutStore.observe()
+                    onDispose { dispose() }
+                }
+                OverlayDropdownPreference(
+                    title = tr("appNavigationLayoutMode", "应用底部导航视图"),
+                    items = listOf(
+                        tr("appNavigationLayoutList", "列表"),
+                        tr("appNavigationLayoutGrid", "网格"),
+                    ),
+                    selectedIndex = if (appNavigationLayoutStore.gridMode) 1 else 0,
+                    onSelectedIndexChange = { index ->
+                        appNavigationLayoutStore.update(service, index == 1)
+                    },
+                )
             }
         }
         item {
@@ -3883,6 +4071,9 @@ private fun RestartScopesPage(
         ScopeApplication.INSTAGRAM,
         ScopeApplication.PINTEREST,
         ScopeApplication.X,
+        ScopeApplication.GITHUB,
+        ScopeApplication.JD,
+        ScopeApplication.ALIPAY,
     )
     val toggleTarget: (ScopeApplication) -> Unit = { target ->
         selectedTargets = if (target in selectedTargets) selectedTargets - target else selectedTargets + target
@@ -6149,6 +6340,7 @@ private fun Detail(
         PageId.SIDEBAR_GLASS -> SidebarGlassPage(back)
         PageId.PERSONAL_ASSISTANT -> PersonalAssistantPage({ openPage(PageId.ASSISTANT_WIDGET_GLASS) }, back)
         PageId.ASSISTANT_WIDGET_GLASS -> AssistantWidgetGlassPage(back)
+        PageId.WIDGETS -> WidgetsPage(back)
         PageId.PORTAL -> PortalPage({ openPage(PageId.PORTAL_MATERIAL) }, back)
         PageId.PORTAL_MATERIAL -> PortalMaterialPage(back)
         PageId.APP_NAVIGATION -> AppNavigationPage(back)

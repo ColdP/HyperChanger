@@ -91,13 +91,15 @@ internal fun syncHomeRecentsNativeConfig(
     nativeDock: HomeNativeDockSettings = HomeNativeDockSettings(),
     multiSplitSettings: HomeMultiSplitSettings = HomeMultiSplitSettings(),
     fullGlass: HomeGlassNativeSettings = HomeGlassNativeSettings(),
+    widgets: WidgetSettings = WidgetSettings(),
 ) {
     val dataDir = param.applicationInfo.dataDir ?: return
     val target = File(dataDir, "files/hyperpatch.bin")
     val glassAllowed = ModuleSafetyRuntime.allows(SafetySection.GLASS)
     val blob = buildHomeLauncherBlob(settings.clearMode.value, folderSettings.effectiveColumns, folderSettings.rowSpacing, folderSettings.rowSpacingEnabled,
         if (glassAllowed) materialSettings else HomeMaterialSettings(), nativeDock, multiSplitSettings.enabled,
-        if (glassAllowed) fullGlass else HomeGlassNativeSettings())
+        if (glassAllowed) fullGlass else HomeGlassNativeSettings(),
+        widgets.copy(androidGlass = glassAllowed && widgets.androidGlass))
     runCatching {
         target.parentFile?.mkdirs()
         val temp = File(target.parentFile, "${target.name}.tmp")
@@ -134,7 +136,8 @@ internal fun stageHomeRecentsNativeConfig(
     val blob = if (!desktopAllowed) buildHomeLauncherBlob(0, 0, fullGlass = HomeGlassNativeSettings())
     else buildHomeLauncherBlob(settings.clearMode.value, folderSettings.effectiveColumns, folderSettings.rowSpacing, folderSettings.rowSpacingEnabled,
         if (glassAllowed) materialSettings else HomeMaterialSettings(), nativeDock, multiSplitSettings.enabled,
-        if (glassAllowed) resolveHomeGlassNativeSettings(local) else HomeGlassNativeSettings())
+        if (glassAllowed) resolveHomeGlassNativeSettings(local) else HomeGlassNativeSettings(),
+        readWidgetSettings(local).let { it.copy(androidGlass = glassAllowed && it.androidGlass) })
     // The Rust launcher cannot reliably read /data/adb, and its native startup
     // can precede Java package callbacks. Stage the complete config directly in
     // its own data directory with the launcher's UID and SELinux file context.

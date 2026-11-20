@@ -106,3 +106,11 @@ installation; independent opt-in preference, remote synchronization and module
 presets; host hook API/DexKit integration; 114% blur height and failure recovery.
 Button materials, bottom gradients and other application scopes are excluded.
 Full copyright and permission notice: app/src/main/assets/licenses/HyperBackground-MIT.txt.
+
+HyperModifier widget compatibility implementation (user-supplied HyperModifier-master source)
+Copyright (c) HyperModifier contributors.
+Licensed under GNU GPL version 3; full text: licenses/HyperModifier-GPL-3.0.txt.
+Adapted on 2026-11-17 for HyperChanger: Assistant local-provider catalogue merging,
+native schema ABI verification and provider capability lifetime tracking. Host package
+dispatch, independent preferences, native configuration transport and Dart patch ownership
+remain HyperChanger-owned. No upstream reference APKs or system ELF files are included.

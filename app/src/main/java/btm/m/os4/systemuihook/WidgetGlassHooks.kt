@@ -28,12 +28,14 @@ internal class WidgetGlassHooks(
     private val reflectedWrite = ThreadLocal<View>()
     private var global: SoftGlassRuntimeSettings? = null
     @Volatile private var settings = WidgetGlassSettings()
+    @Volatile private var androidGlass = false
     private var listener: SharedPreferences.OnSharedPreferenceChangeListener? = null
 
     fun install(loader: ClassLoader, preferences: SharedPreferences) {
         if (installed || !ModuleSafetyRuntime.allows(SafetySection.GLASS)) return
         val initial = readWidgetGlassSettings(preferences)
-        if (!initial.glass.enabled) return
+        androidGlass = readWidgetSettings(preferences).androidGlass
+        if (!initial.glass.enabled && !androidGlass) return
         widgetTypes = listOf(
             "com.miui.personalassistant.core.view.WidgetHostView",
             "com.miui.personalassistant.core.view.MaMlHostView",
@@ -48,6 +50,7 @@ internal class WidgetGlassHooks(
         global = SoftGlassRuntimeSettings(preferences)
         listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key == null || key.startsWith(ASSISTANT_WIDGET_GLASS_PREFIX)) settings = readWidgetGlassSettings(preferences)
+            if (key == null || key == KEY_WIDGET_GLASS) androidGlass = readWidgetSettings(preferences).androidGlass
         }.also(preferences::registerOnSharedPreferenceChangeListener)
         installMamlWriter(loader)
         installWidgetSampling(loader)
@@ -104,7 +107,8 @@ internal class WidgetGlassHooks(
             hookDeoptimized(helper).setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("widget-glass:assistant:sampling").intercept { chain ->
                     val view = chain.getArg(0) as? View
-                    if (settings.glass.enabled && view != null && widgetTypes.any { it.isInstance(view) } && observer.isInstance(view)) {
+                    val androidHost = view != null && view.javaClass.name == "com.miui.personalassistant.core.view.WidgetHostView"
+                    if ((settings.glass.enabled || (androidGlass && androidHost)) && view != null && widgetTypes.any { it.isInstance(view) } && observer.isInstance(view)) {
                         // MAML can own GlassConfig while supportBackgroundBlur is
                         // false. Its native helper only forwards to existing configs.
                         val eligible = runCatching {

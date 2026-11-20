@@ -2554,6 +2554,13 @@
   "抖省省": "抖省省",
   "美团": "美団",
   "美团外卖": "美団デリバリー",
+  "京东": "JD",
+  "支付宝": "Alipay",
+  "逛": "さがす",
+  "购物车": "カート",
+  "理财": "資産運用",
+  "生活": "生活",
+  "国际": "グローバル",
   "推荐": "おすすめ",
   "订单": "注文",
   "神券": "クーポン",
@@ -2622,5 +2629,11 @@
     "compactLyricsKeepOn": "簡略歌詞の表示中は画面を点灯したままにする",
     "compactLyricsScale": "簡略歌詞の文字サイズ",
     "compactLyricsOffset": "簡略歌詞の垂直位置",
-    "compactLyricsSpacing": "簡略歌詞の行間"
+    "compactLyricsSpacing": "簡略歌詞の行間",
+  "解锁 HyperOS 小部件白名单限制": "HyperOS ウィジェットのホワイトリスト制限を解除",
+  "允许安卓小部件参与堆叠": "Android ウィジェットのスタックを許可",
+  "解锁安卓小部件柔光玻璃背景": "Android ウィジェットのソフトガラス背景を解除",
+  "appNavigationLayoutMode": "アプリ下部ナビゲーションの表示",
+  "appNavigationLayoutList": "リスト",
+  "appNavigationLayoutGrid": "グリッド"
 }

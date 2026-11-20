@@ -45,7 +45,9 @@ object ScopedSettings {
         ScopeApp("Instagram", "com.instagram.android"),
         ScopeApp("Pinterest", "com.pinterest"),
         ScopeApp("X", "com.twitter.android"),
-        ScopeApp("GitHub", "com.github.android")
+        ScopeApp("GitHub", "com.github.android"),
+        ScopeApp("京东", "com.jingdong.app.mall"),
+        ScopeApp("支付宝", "com.eg.android.AlipayGphone")
     )
 
     @JvmStatic

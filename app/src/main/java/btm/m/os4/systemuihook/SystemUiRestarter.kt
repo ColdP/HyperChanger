@@ -157,6 +157,8 @@ enum class ScopeApplication(val title: String, val packageName: String) {
     PINTEREST("Pinterest", "com.pinterest"),
     X("X", "com.twitter.android"),
     GITHUB("GitHub", "com.github.android"),
+    JD("京东", "com.jingdong.app.mall"),
+    ALIPAY("支付宝", "com.eg.android.AlipayGphone"),
     CONTACTS_DIALER("拨号与通话", "com.android.contacts"),
     SECURITY_CENTER("安全服务", "com.miui.securitycenter"),
     PORTAL("传送门", "com.miui.contentextension"),

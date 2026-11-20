@@ -27,6 +27,8 @@ object NavigationAccentSettings {
         "com.pinterest" to 0xFFE60023.toInt(),
         "com.twitter.android" to 0xFF1D9BF0.toInt(),
         "com.github.android" to 0xFF0969DA.toInt(),
+        "com.jingdong.app.mall" to 0xFFE1251B.toInt(),
+        "com.eg.android.AlipayGphone" to 0xFF1677FF.toInt(),
     )
 
     @JvmStatic

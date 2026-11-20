@@ -70,3 +70,11 @@ It contains the unmodified `eng.traineddata`, `chi_sim.traineddata`, and
 `jpn.traineddata` files from tesseract-ocr/tessdata_fast revision
 87416418657359cb625c412a48b6e1d6d41c29bd, licensed under Apache-2.0.
 The archive is not bundled in the application APK.
+
+HyperModifier widget compatibility implementation (user-supplied HyperModifier-master source)
+Copyright (c) HyperModifier contributors.
+Licensed under GNU GPL version 3; full text: licenses/HyperModifier-GPL-3.0.txt.
+Adapted on 2026-11-17 for HyperChanger: Assistant local-provider catalogue merging,
+native schema ABI verification and provider capability lifetime tracking. Host package
+dispatch, independent preferences, native configuration transport and Dart patch ownership
+remain HyperChanger-owned. No upstream reference APKs or system ELF files are included.

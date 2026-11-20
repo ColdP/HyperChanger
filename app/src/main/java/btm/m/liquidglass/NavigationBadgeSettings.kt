@@ -9,7 +9,15 @@ import io.github.libxposed.service.XposedService
 object NavigationBadgeSettings {
     const val KEY_SHOW_BADGES = "show_navigation_badges"
     const val DEFAULT = true
-    private val packages = listOf("com.tencent.mobileqq", "com.tencent.mm")
+    private val packages = listOf(
+        "com.tencent.mobileqq",
+        "com.tencent.mm",
+        "com.jingdong.app.mall",
+        "com.eg.android.AlipayGphone",
+    )
+
+    @JvmStatic
+    fun supports(packageName: String): Boolean = packageName in packages
 
     @JvmStatic
     fun getShowBadges(preferences: SharedPreferences?, packageName: String): Boolean =

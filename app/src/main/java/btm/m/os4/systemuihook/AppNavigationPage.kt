@@ -1,34 +1,56 @@
 package btm.m.os4.systemuihook
 
-import android.graphics.drawable.Drawable
 import android.content.SharedPreferences
 import androidx.compose.animation.*
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color as ComposeColor
-import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
+import com.kyant.shapes.RoundedCornerStyle
+import com.kyant.shapes.RoundedRectangle
 import io.github.libxposed.service.XposedService
 import btm.m.os4.systemuihook.SeamlessCard as Card
 import top.yukonga.miuix.kmp.basic.BasicComponent
@@ -39,6 +61,7 @@ import top.yukonga.miuix.kmp.basic.rememberPullToRefreshState
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.squircle.isSquircleEnabled
 import btm.m.os4.systemuihook.InterfaceArrowPreference as ArrowPreference
 import btm.m.os4.systemuihook.InterfaceSwitchPreference as SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -63,6 +86,14 @@ import btm.m.liquidglass.momentumBackTransform
 import kotlin.math.roundToInt
 
 private data class AppNavItem(val name: String, val packageName: String)
+
+private data class AppNavMeta(val icon: ImageBitmap?, val versionName: String)
+
+private data class RegisteredLaunchItem(
+    val item: AppNavItem,
+    val source: AppLaunchSource,
+    val hitBounds: () -> Rect?,
+)
 
 private enum class NavigationAppListPage { DISABLED, UNINSTALLED }
 
@@ -90,6 +121,8 @@ private val appNavItems = listOf(
     AppNavItem("Pinterest", "com.pinterest"),
     AppNavItem("X", "com.twitter.android"),
     AppNavItem("GitHub", "com.github.android"),
+    AppNavItem("京东", "com.jingdong.app.mall"),
+    AppNavItem("支付宝", "com.eg.android.AlipayGphone"),
 )
 
 @Composable
@@ -97,10 +130,16 @@ internal fun AppNavigationPage(back: () -> Unit) {
     val context = LocalContext.current
     val service by HookApplication.service.collectAsState()
     val store = remember(context) { AppNavigationSettingsStore(context) }
+    val layoutStore = remember(context) { AppNavigationLayoutSettingsStore(context) }
+    DisposableEffect(layoutStore) {
+        val dispose = layoutStore.observe()
+        onDispose { dispose() }
+    }
+    LaunchedEffect(service) { service?.let(layoutStore::syncRemote) }
+    val gridMode = layoutStore.gridMode
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     var searchQuery by remember { mutableStateOf("") }
-    var selected by remember { mutableStateOf<String?>(null) }
     var appListPage by remember { mutableStateOf<NavigationAppListPage?>(null) }
     var lastAppListPage by remember { mutableStateOf(NavigationAppListPage.DISABLED) }
     var materialOpen by remember { mutableStateOf(false) }
@@ -110,6 +149,14 @@ internal fun AppNavigationPage(back: () -> Unit) {
     val (installedApps, uninstalledApps) = remember(context, installationRevision) {
         appNavItems.partition { item ->
             runCatching { context.packageManager.getApplicationInfo(item.packageName, 0) }.isSuccess
+        }
+    }
+    val appMetaMap = remember(context, installedApps, installationRevision) {
+        installedApps.associate { item ->
+            val info = runCatching { context.packageManager.getApplicationInfo(item.packageName, 0) }.getOrNull()
+            val pkgInfo = runCatching { context.packageManager.getPackageInfo(item.packageName, 0) }.getOrNull()
+            val icon = info?.loadIcon(context.packageManager)?.toBitmap(160, 160)?.asImageBitmap()
+            item.packageName to AppNavMeta(icon, pkgInfo?.versionName ?: "?")
         }
     }
     // Membership changes only on entry/refresh; preference notifications still update switches.
@@ -130,13 +177,31 @@ internal fun AppNavigationPage(back: () -> Unit) {
         revision++
         installationRevision++
     }
-    LaunchedEffect(appListPage, selected, materialOpen) {
-        if (selected == null && !materialOpen) refreshApps()
-        if (appListPage != null || selected != null || materialOpen) {
+
+    var rootCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var rootSize by remember { mutableStateOf(IntSize.Zero) }
+    val sessions = remember { mutableStateListOf<IosAppLaunchSession>() }
+    val sessionScope = rememberCoroutineScope()
+    var nextSessionId by remember { mutableLongStateOf(1L) }
+    val activeSession = sessions.lastOrNull { !it.closing }
+    val mainSources = remember { mutableStateMapOf<String, RegisteredLaunchItem>() }
+    val disabledSources = remember { mutableStateMapOf<String, RegisteredLaunchItem>() }
+
+    var hadOverlay by remember { mutableStateOf(false) }
+    LaunchedEffect(appListPage, sessions.isEmpty(), activeSession != null, materialOpen) {
+        val overlayOpen = appListPage != null || !sessions.isEmpty() || materialOpen
+        if (overlayOpen) {
+            hadOverlay = true
+        } else if (hadOverlay) {
+            hadOverlay = false
+            refreshApps()
+        }
+        if (appListPage != null || activeSession != null || materialOpen) {
             focusManager.clearFocus()
             keyboard?.hide()
         }
     }
+
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(store, lifecycleOwner) {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -155,30 +220,111 @@ internal fun AppNavigationPage(back: () -> Unit) {
             lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
-    var lastSelected by remember { mutableStateOf<AppNavItem?>(null) }
-    val settingsBack = rememberMomentumPredictiveBack(
-        enabled = selected != null && !materialOpen,
-        onBack = { selected = null },
-    )
-    // Capture before AnimatedVisibility disposes the page or the gesture resets.
-    val settingsExitDirection = remember(selected) { settingsBack.exitDirection }
-    LaunchedEffect(selected) {
-        if (selected != null) settingsBack.reset()
+
+    val dismissSession: (IosAppLaunchSession) -> Unit = { target ->
+        if (!target.closing) {
+            val velocity = if (target.gesturing) target.releaseVelocity else 0f
+            target.close(sessionScope, initialVelocity = velocity) { finished ->
+                sessions.remove(finished)
+            }
+        }
     }
+
+    val launchApp: (AppNavItem, AppLaunchOrigin, AppLaunchSource) -> Unit = { item, origin, source ->
+        focusManager.clearFocus()
+        keyboard?.hide()
+        val existing = sessions.lastOrNull { it.packageName == item.packageName && it.origin == origin }
+        if (existing != null) {
+            if (existing.closing) {
+                existing.source = source
+                sessions.remove(existing)
+                sessions.add(existing)
+                existing.launch(sessionScope)
+            }
+        } else {
+            activeSession?.let(dismissSession)
+            val w = rootSize.width.toFloat().coerceAtLeast(1f)
+            val h = rootSize.height.toFloat().coerceAtLeast(1f)
+            val fallback = source.unscaledBounds() ?: Rect(w * 0.42f, h * 0.45f, w * 0.58f, h * 0.55f)
+            val created = IosAppLaunchSession(
+                id = nextSessionId++,
+                packageName = item.packageName,
+                origin = origin,
+                source = source,
+                fallbackUnscaledBounds = fallback,
+            )
+            sessions.add(created)
+            created.launch(sessionScope)
+        }
+    }
+
+    IosAppLaunchPredictiveBack(
+        activeSession = activeSession,
+        enabled = activeSession != null && !materialOpen,
+        onCommitDismiss = dismissSession,
+    )
+
     val materialBack = rememberMomentumPredictiveBack(enabled = materialOpen, onBack = { materialOpen = false })
     val materialExitDirection = remember(materialOpen) { materialBack.exitDirection }
     LaunchedEffect(materialOpen) { if (materialOpen) materialBack.reset() }
     val materialCoveredBlur by animateFloatAsState(if (materialOpen) 12f else 0f, tween(252), label = "navigationMaterialCoveredBlur")
+
     val appListBack = rememberMomentumPredictiveBack(
-        enabled = appListPage != null && selected == null && !materialOpen,
+        enabled = appListPage != null && activeSession == null && sessions.isEmpty() && !materialOpen,
         onBack = { appListPage = null },
     )
     val appListExitDirection = remember(appListPage) { appListBack.exitDirection }
     LaunchedEffect(appListPage) { if (appListPage != null) appListBack.reset() }
-    val detailCoveredBlur by animateFloatAsState(if (selected != null || materialOpen) 12f else 0f, tween(252), label = "navigationAppListCoveredBlur")
-    val overviewBlur by animateFloatAsState(if (appListPage != null || selected != null || materialOpen) 12f else 0f, tween(252), label = "appNavigationOverviewBlur")
-    Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize().blur(overviewBlur.dp)) {
+
+    val mainLaunchProgress = sessions
+        .filter { it.origin == AppLaunchOrigin.MAIN }
+        .maxOfOrNull { it.progress.value.coerceIn(0f, 1f) } ?: 0f
+    val disabledLaunchProgress = sessions
+        .filter { it.origin == AppLaunchOrigin.DISABLED }
+        .maxOfOrNull { it.progress.value.coerceIn(0f, 1f) } ?: 0f
+
+    val secondaryOverviewBlur by animateFloatAsState(
+        targetValue = if (appListPage != null || materialOpen) 12f else 0f,
+        animationSpec = tween(252),
+        label = "appNavigationSecondaryBlur",
+    )
+    val overviewBlur = maxOf(secondaryOverviewBlur, 18f * mainLaunchProgress)
+    val overviewScale = 1f - 0.09f * mainLaunchProgress
+    val overviewCorner = (26f * mainLaunchProgress).dp
+    val isDark = MiuixTheme.colorScheme.surface.luminance() < 0.5f
+    val overviewDimAlpha = (if (isDark) 0.36f else 0.14f) * mainLaunchProgress
+
+    val secondaryDisabledBlur by animateFloatAsState(
+        targetValue = if (materialOpen) 12f else 0f,
+        animationSpec = tween(252),
+        label = "navigationAppListCoveredBlur",
+    )
+    val disabledPageBlur = maxOf(secondaryDisabledBlur, 18f * disabledLaunchProgress)
+    val disabledPageScale = 1f - 0.09f * disabledLaunchProgress
+    val disabledPageCorner = (26f * disabledLaunchProgress).dp
+    val disabledDimAlpha = (if (isDark) 0.36f else 0.14f) * disabledLaunchProgress
+
+    val density = LocalDensity.current
+    val hitSlopPx = with(density) { 8.dp.toPx() }
+    val rootBackdropColor = if (isDark) ComposeColor.Black else ComposeColor(0xFFE8E8ED)
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(if (mainLaunchProgress > 0.005f) rootBackdropColor else MiuixTheme.colorScheme.surface)
+            .onSizeChanged { rootSize = it }
+            .onGloballyPositioned { rootCoords = it },
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = overviewScale
+                    scaleY = overviewScale
+                }
+                .then(if (overviewCorner > 0.5.dp) Modifier.clip(RoundedCornerShape(overviewCorner)) else Modifier)
+                .then(if (overviewBlur > 0.05f) Modifier.blur(overviewBlur.dp) else Modifier),
+        ) {
             AppPage(
                 tr("应用底部导航", "应用底部导航"), back,
                 restartScopes = appNavItems.mapNotNull { item ->
@@ -210,16 +356,18 @@ internal fun AppNavigationPage(back: () -> Unit) {
                     refreshTexts = navigationRefreshTexts(),
                 ) {
                     AppList(listPadding, scroll, 112) {
-                        item {
-                            Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
-                                AppNavigationOffsetPreferences(store.preferences, service)
-                                SharedViewArrowPreference(
-                                    title = tr("navMaterialTitle", "底部导航栏材质参数调整"),
-                                    onClick = { materialPackage = null; materialOpen = true },
-                                )
+                        if (!gridMode) {
+                            item {
+                                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                                    AppNavigationOffsetPreferences(store.preferences, service)
+                                    SharedViewArrowPreference(
+                                        title = tr("navMaterialTitle", "底部导航栏材质参数调整"),
+                                        onClick = { materialPackage = null; materialOpen = true },
+                                    )
+                                }
                             }
+                            item { SmallTitle(tr("支持的应用", "支持的应用"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp)) }
                         }
-                        item { SmallTitle(tr("支持的应用", "支持的应用"), insideMargin = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp)) }
                         if (query.isNotEmpty() && visibleApps.isEmpty()) {
                             item {
                                 Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
@@ -227,11 +375,106 @@ internal fun AppNavigationPage(back: () -> Unit) {
                                         else tr("appNavigationSearchEmpty", "没有找到匹配的应用"))
                                 }
                             }
+                        } else if (visibleApps.isNotEmpty()) {
+                            item(key = "supported_apps_section") {
+                                AnimatedContent(
+                                    targetState = gridMode,
+                                    transitionSpec = {
+                                        (fadeIn(tween(220, easing = FastOutSlowInEasing)) +
+                                            scaleIn(tween(240, easing = FastOutSlowInEasing), initialScale = 0.96f)) togetherWith
+                                            (fadeOut(tween(150)) + scaleOut(tween(180), targetScale = 0.96f))
+                                    },
+                                    label = "appNavigationViewMode",
+                                ) { isGrid ->
+                                    if (isGrid) {
+                                        val rows = visibleApps.chunked(4)
+                                        Column(
+                                            Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+                                            verticalArrangement = Arrangement.spacedBy(18.dp),
+                                        ) {
+                                            rows.forEach { rowItems ->
+                                                Row(
+                                                    Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                                ) {
+                                                    for (col in 0 until 4) {
+                                                        val item = rowItems.getOrNull(col)
+                                                        if (item != null) {
+                                                            val sessionForItem = sessions.lastOrNull {
+                                                                it.origin == AppLaunchOrigin.MAIN && it.packageName == item.packageName
+                                                            }
+                                                            val launchProgress = sessionForItem?.progress?.value?.coerceIn(0f, 1f) ?: 0f
+                                                            AppNavigationGridItem(
+                                                                item = item,
+                                                                meta = appMetaMap[item.packageName],
+                                                                modifier = Modifier.weight(1f),
+                                                                rootCoordsProvider = { rootCoords },
+                                                                backgroundScaleProvider = { overviewScale },
+                                                                hideIconVisual = launchProgress > 0.005f,
+                                                                labelAlpha = 1f - (launchProgress * 3.2f).coerceIn(0f, 1f),
+                                                                onRegister = { registered ->
+                                                                    mainSources[item.packageName] = registered
+                                                                },
+                                                                onUnregister = {
+                                                                    mainSources.remove(item.packageName)
+                                                                },
+                                                                onOpen = { source ->
+                                                                    launchApp(item, AppLaunchOrigin.MAIN, source)
+                                                                },
+                                                            )
+                                                        } else {
+                                                            Spacer(Modifier.weight(1f))
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        Column(
+                                            Modifier.fillMaxWidth(),
+                                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                                        ) {
+                                            visibleApps.forEach { item ->
+                                                key(item.packageName) {
+                                                    val sessionForItem = sessions.lastOrNull {
+                                                        it.origin == AppLaunchOrigin.MAIN && it.packageName == item.packageName
+                                                    }
+                                                    val hideCard = (sessionForItem?.progress?.value ?: 0f) > 0.005f
+                                                    AppNavigationCard(
+                                                        item = item,
+                                                        meta = appMetaMap[item.packageName],
+                                                        store = store,
+                                                        service = service,
+                                                        revision = revision,
+                                                        rootCoordsProvider = { rootCoords },
+                                                        backgroundScaleProvider = { overviewScale },
+                                                        hideVisual = hideCard,
+                                                        onRegister = { registered ->
+                                                            mainSources[item.packageName] = registered
+                                                        },
+                                                        onUnregister = {
+                                                            mainSources.remove(item.packageName)
+                                                        },
+                                                        onOpen = { source ->
+                                                            launchApp(item, AppLaunchOrigin.MAIN, source)
+                                                        },
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
-                        items(visibleApps, key = { it.packageName }) { item ->
-                            AppNavigationCard(item, store, service, revision) {
-                                lastSelected = item
-                                selected = item.packageName
+                        if (gridMode) {
+                            item {
+                                Card(Modifier.fillMaxWidth(), cornerRadius = 22.5.dp) {
+                                    AppNavigationOffsetPreferences(store.preferences, service)
+                                    SharedViewArrowPreference(
+                                        title = tr("navMaterialTitle", "底部导航栏材质参数调整"),
+                                        onClick = { materialPackage = null; materialOpen = true },
+                                    )
+                                }
                             }
                         }
                         item {
@@ -259,10 +502,12 @@ internal fun AppNavigationPage(back: () -> Unit) {
                     }
                 }
             }
+            if (overviewDimAlpha > 0.002f) {
+                Box(Modifier.fillMaxSize().background(ComposeColor.Black.copy(alpha = overviewDimAlpha)))
+            }
         }
         AnimatedVisibility(
             visible = appListPage != null,
-            modifier = Modifier.blur(detailCoveredBlur.dp),
             enter = slideInHorizontally(tween(252, easing = FastOutSlowInEasing)) { it / 7 } +
                 fadeIn(tween(189)) + scaleIn(tween(252, easing = FastOutSlowInEasing), initialScale = .985f),
             exit = slideOutHorizontally(tween(207, easing = FastOutSlowInEasing)) { appListExitDirection * it / 3 } +
@@ -271,35 +516,93 @@ internal fun AppNavigationPage(back: () -> Unit) {
             val transitionBlur by transition.animateFloat(
                 transitionSpec = { tween(207, easing = FastOutSlowInEasing) }, label = "navigationAppListTransitionBlur",
             ) { if (it == EnterExitState.Visible) 0f else 12f }
-            Box(Modifier.fillMaxSize().blur(transitionBlur.dp).momentumBackTransform(appListBack)) {
+            val totalBlur = maxOf(transitionBlur, disabledPageBlur)
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = disabledPageScale
+                        scaleY = disabledPageScale
+                    }
+                    .then(if (disabledPageCorner > 0.5.dp) Modifier.clip(RoundedCornerShape(disabledPageCorner)) else Modifier)
+                    .then(if (totalBlur > 0.05f) Modifier.blur(totalBlur.dp) else Modifier)
+                    .momentumBackTransform(appListBack),
+            ) {
                 when (lastAppListPage) {
                     NavigationAppListPage.UNINSTALLED -> UninstalledNavigationAppsPage(uninstalledApps) { appListPage = null }
                     NavigationAppListPage.DISABLED -> DisabledNavigationAppsPage(
-                        disabledApps, store, service, revision, refreshApps,
-                        onOpen = { item -> lastSelected = item; selected = item.packageName },
+                        apps = disabledApps,
+                        metaMap = appMetaMap,
+                        store = store,
+                        service = service,
+                        revision = revision,
+                        rootCoordsProvider = { rootCoords },
+                        backgroundScaleProvider = { disabledPageScale },
+                        sessions = sessions,
+                        onRegister = { pkg, registered -> disabledSources[pkg] = registered },
+                        onUnregister = { pkg -> disabledSources.remove(pkg) },
+                        onRefresh = refreshApps,
+                        onOpen = { item, source -> launchApp(item, AppLaunchOrigin.DISABLED, source) },
                         back = { appListPage = null },
+                    )
+                }
+                if (disabledDimAlpha > 0.002f) {
+                    Box(Modifier.fillMaxSize().background(ComposeColor.Black.copy(alpha = disabledDimAlpha)))
+                }
+            }
+        }
+        sessions.forEach { session ->
+            key(session.id) {
+                val item = remember(session.packageName) {
+                    appNavItems.firstOrNull { it.packageName == session.packageName }
+                        ?: AppNavItem(session.packageName, session.packageName)
+                }
+                IosAppLaunchOverlay(
+                    session = session,
+                    rootSize = rootSize,
+                    coveredBlurDp = materialCoveredBlur,
+                ) {
+                    AppNavigationSettings(
+                        appItem = item,
+                        store = store,
+                        service = service,
+                        onChanged = { revision++ },
+                        openMaterial = {
+                            materialPackage = item.packageName
+                            materialOpen = true
+                        },
+                        back = { dismissSession(session) },
                     )
                 }
             }
         }
-        AnimatedVisibility(
-            visible = selected != null,
-            modifier = Modifier.blur(materialCoveredBlur.dp),
-            enter = slideInHorizontally(tween(252, easing = FastOutSlowInEasing)) { it / 7 } +
-                fadeIn(tween(189)) + scaleIn(tween(252, easing = FastOutSlowInEasing), initialScale = .985f),
-            exit = slideOutHorizontally(tween(207, easing = FastOutSlowInEasing)) { settingsExitDirection * it / 3 } +
-                fadeOut(tween(162)) + scaleOut(tween(207, easing = FastOutSlowInEasing), targetScale = .975f),
-        ) {
-            val selectedItem = lastSelected ?: return@AnimatedVisibility
-            val transitionBlur by transition.animateFloat(
-                transitionSpec = { tween(207, easing = FastOutSlowInEasing) }, label = "appNavigationDetailBlur",
-            ) { if (it == EnterExitState.Visible) 0f else 12f }
-            Box(Modifier.fillMaxSize().blur(transitionBlur.dp).momentumBackTransform(settingsBack)) {
-                key(selectedItem.packageName) {
-                    AppNavigationSettings(selectedItem, store, service, { revision++ },
-                        openMaterial = { materialPackage = selectedItem.packageName; materialOpen = true }) { selected = null }
-                }
-            }
+        // While all open sessions are flying back to their icons, let taps on any grid/list item
+        // interrupt or launch in parallel immediately without waiting for the flight to finish.
+        if (activeSession == null && sessions.isNotEmpty() && !materialOpen) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(appListPage) {
+                        detectTapGestures { offset ->
+                            val isDisabled = appListPage == NavigationAppListPage.DISABLED
+                            val targetMap = if (isDisabled) disabledSources else mainSources
+                            val origin = if (isDisabled) AppLaunchOrigin.DISABLED else AppLaunchOrigin.MAIN
+                            val center = Offset(rootSize.width * 0.5f, rootSize.height * 0.5f)
+                            val hit = targetMap.values.firstOrNull { entry ->
+                                val bounds = entry.hitBounds() ?: return@firstOrNull false
+                                val scaled = scaleRectAroundCenter(bounds, center, entry.source.backgroundScale())
+                                val expanded = Rect(
+                                    scaled.left - hitSlopPx,
+                                    scaled.top - hitSlopPx,
+                                    scaled.right + hitSlopPx,
+                                    scaled.bottom + hitSlopPx,
+                                )
+                                expanded.contains(offset)
+                            }
+                            if (hit != null) launchApp(hit.item, origin, hit.source)
+                        }
+                    },
+            )
         }
         AnimatedVisibility(
             visible = materialOpen,
@@ -322,8 +625,19 @@ internal fun navigationRefreshTexts() = listOf(
 
 @Composable
 private fun DisabledNavigationAppsPage(
-    apps: List<AppNavItem>, store: AppNavigationSettingsStore, service: XposedService?, revision: Int,
-    onRefresh: () -> Unit, onOpen: (AppNavItem) -> Unit, back: () -> Unit,
+    apps: List<AppNavItem>,
+    metaMap: Map<String, AppNavMeta>,
+    store: AppNavigationSettingsStore,
+    service: XposedService?,
+    revision: Int,
+    rootCoordsProvider: () -> LayoutCoordinates?,
+    backgroundScaleProvider: () -> Float,
+    sessions: List<IosAppLaunchSession>,
+    onRegister: (String, RegisteredLaunchItem) -> Unit,
+    onUnregister: (String) -> Unit,
+    onRefresh: () -> Unit,
+    onOpen: (AppNavItem, AppLaunchSource) -> Unit,
+    back: () -> Unit,
 ) {
     AppPage(tr("appNavigationDisabledApps", "未启用的应用"), back) { padding, scroll ->
         PullToRefresh(
@@ -338,7 +652,23 @@ private fun DisabledNavigationAppsPage(
         ) {
             AppList(padding, scroll, 28) {
                 items(apps, key = { it.packageName }) { item ->
-                    AppNavigationCard(item, store, service, revision) { onOpen(item) }
+                    val sessionForItem = sessions.lastOrNull {
+                        it.origin == AppLaunchOrigin.DISABLED && it.packageName == item.packageName
+                    }
+                    val hideCard = (sessionForItem?.progress?.value ?: 0f) > 0.005f
+                    AppNavigationCard(
+                        item = item,
+                        meta = metaMap[item.packageName],
+                        store = store,
+                        service = service,
+                        revision = revision,
+                        rootCoordsProvider = rootCoordsProvider,
+                        backgroundScaleProvider = backgroundScaleProvider,
+                        hideVisual = hideCard,
+                        onRegister = { onRegister(item.packageName, it) },
+                        onUnregister = { onUnregister(item.packageName) },
+                        onOpen = { source -> onOpen(item, source) },
+                    )
                 }
             }
         }
@@ -362,35 +692,216 @@ private fun UninstalledNavigationAppsPage(apps: List<AppNavItem>, back: () -> Un
 }
 
 @Composable
-private fun AppNavigationCard(item: AppNavItem, store: AppNavigationSettingsStore, service: XposedService?, revision: Int, onOpen: () -> Unit) {
-    val prefs = store.preferences
-    val context = LocalContext.current
-    val info = remember(item.packageName, revision) { runCatching { context.packageManager.getApplicationInfo(item.packageName, 0) }.getOrNull() }
-    val packageInfo = remember(item.packageName, revision) { runCatching { context.packageManager.getPackageInfo(item.packageName, 0) }.getOrNull() }
-    var enabled by remember(item.packageName, revision, service) { mutableStateOf(ScopedSettings.getBoolean(prefs, item.packageName, ScopedSettings.KEY_ENABLED, true)) }
-    val icon = remember(info) { info?.loadIcon(context.packageManager)?.toBitmap(96, 96)?.asImageBitmap() }
-    Card(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.5.dp)).clickable(onClick = onOpen), cornerRadius = 22.5.dp, insideMargin = PaddingValues(14.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            icon?.let { Image(it, tr("应用图标", "应用图标"), Modifier.size(54.dp).clip(RoundedCornerShape(14.dp)), contentScale = ContentScale.Crop) }
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text(tr(item.name, item.name), style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(item.packageName, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(packageInfo?.versionName ?: "?", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-            }
-            Box(Modifier.padding(horizontal = 12.dp).width(1.dp).height(28.dp).background(MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = .35f)))
-            Switch(
-                checked = enabled,
-                onCheckedChange = {
-                    enabled = it
-                    store.edit(service) {
-                        putBoolean(
-                            ScopedSettings.key(item.packageName, ScopedSettings.KEY_ENABLED),
-                            it
-                        )
+private fun AppNavigationGridItem(
+    item: AppNavItem,
+    meta: AppNavMeta?,
+    modifier: Modifier = Modifier,
+    rootCoordsProvider: () -> LayoutCoordinates?,
+    backgroundScaleProvider: () -> Float,
+    hideIconVisual: Boolean,
+    labelAlpha: Float,
+    onRegister: (RegisteredLaunchItem) -> Unit,
+    onUnregister: () -> Unit,
+    onOpen: (AppLaunchSource) -> Unit,
+) {
+    val density = LocalDensity.current
+    val squircle = isSquircleEnabled()
+    val iconShape = remember { RoundedRectangle(14.dp, RoundedCornerStyle.Continuous) }
+    val iconRadiusPx = with(density) { 14.dp.toPx() }
+    val layer = rememberGraphicsLayer()
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) 0.90f else 1f,
+        animationSpec = spring(dampingRatio = 0.72f, stiffness = 520f),
+        label = "appGridIconPress",
+    )
+    var iconCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var cellCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+
+    fun unscaledBoundsOf(coords: LayoutCoordinates?): Rect? {
+        val root = rootCoordsProvider()?.takeIf { it.isAttached }?.boundsInWindow() ?: return null
+        val target = coords?.takeIf { it.isAttached }?.boundsInWindow(clipBounds = false) ?: return null
+        if (target.width <= 0f || target.height <= 0f) return null
+        val local = target.translate(Offset(-root.left, -root.top))
+        val center = Offset(root.width * 0.5f, root.height * 0.5f)
+        return unscaleRectAroundCenter(local, center, backgroundScaleProvider())
+    }
+
+    val source = remember(layer, iconRadiusPx, squircle) {
+        AppLaunchSource(
+            unscaledBounds = { unscaledBoundsOf(iconCoords) },
+            backgroundScale = backgroundScaleProvider,
+            layer = layer,
+            cornerRadiusPx = iconRadiusPx,
+            isGridIcon = true,
+            isSquircle = squircle,
+        )
+    }
+
+    DisposableEffect(item.packageName, source) {
+        onRegister(RegisteredLaunchItem(item, source) { unscaledBoundsOf(cellCoords) })
+        onDispose { onUnregister() }
+    }
+
+    val borderColor = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+    val fallbackBg = MiuixTheme.colorScheme.surfaceContainer
+
+    Column(
+        modifier = modifier
+            .onGloballyPositioned { cellCoords = it }
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = { onOpen(source) },
+            )
+            .padding(vertical = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(58.dp)
+                .onGloballyPositioned { iconCoords = it }
+                .graphicsLayer {
+                    scaleX = pressScale
+                    scaleY = pressScale
+                }
+                .drawWithContent {
+                    layer.record {
+                        this@drawWithContent.drawContent()
+                    }
+                    if (!hideIconVisual) {
+                        drawLayer(layer)
                     }
                 }
-            )
+                .clip(iconShape)
+                .background(fallbackBg)
+                .border(0.5.dp, borderColor, iconShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            meta?.icon?.let {
+                Image(
+                    bitmap = it,
+                    contentDescription = tr("应用图标", "应用图标"),
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = tr(item.name, item.name),
+            style = MiuixTheme.textStyles.footnote1,
+            color = MiuixTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer { alpha = labelAlpha },
+        )
+    }
+}
+
+@Composable
+private fun AppNavigationCard(
+    item: AppNavItem,
+    meta: AppNavMeta?,
+    store: AppNavigationSettingsStore,
+    service: XposedService?,
+    revision: Int,
+    rootCoordsProvider: () -> LayoutCoordinates?,
+    backgroundScaleProvider: () -> Float,
+    hideVisual: Boolean,
+    onRegister: (RegisteredLaunchItem) -> Unit,
+    onUnregister: () -> Unit,
+    onOpen: (AppLaunchSource) -> Unit,
+) {
+    val prefs = store.preferences
+    val density = LocalDensity.current
+    val squircle = isSquircleEnabled()
+    val cornerPx = with(density) { 22.5.dp.toPx() }
+    val layer = rememberGraphicsLayer()
+    var cardCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var enabled by remember(item.packageName, revision, service) {
+        mutableStateOf(ScopedSettings.getBoolean(prefs, item.packageName, ScopedSettings.KEY_ENABLED, true))
+    }
+
+    fun unscaledBoundsOf(coords: LayoutCoordinates?): Rect? {
+        val root = rootCoordsProvider()?.takeIf { it.isAttached }?.boundsInWindow() ?: return null
+        val target = coords?.takeIf { it.isAttached }?.boundsInWindow(clipBounds = false) ?: return null
+        if (target.width <= 0f || target.height <= 0f) return null
+        val local = target.translate(Offset(-root.left, -root.top))
+        val center = Offset(root.width * 0.5f, root.height * 0.5f)
+        return unscaleRectAroundCenter(local, center, backgroundScaleProvider())
+    }
+
+    val source = remember(layer, cornerPx, squircle) {
+        AppLaunchSource(
+            unscaledBounds = { unscaledBoundsOf(cardCoords) },
+            backgroundScale = backgroundScaleProvider,
+            layer = layer,
+            cornerRadiusPx = cornerPx,
+            isGridIcon = false,
+            isSquircle = squircle,
+        )
+    }
+
+    DisposableEffect(item.packageName, source) {
+        onRegister(RegisteredLaunchItem(item, source) { unscaledBoundsOf(cardCoords) })
+        onDispose { onUnregister() }
+    }
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .onGloballyPositioned { cardCoords = it }
+            .drawWithContent {
+                layer.record {
+                    this@drawWithContent.drawContent()
+                }
+                if (!hideVisual) {
+                    drawLayer(layer)
+                }
+            },
+    ) {
+        Card(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(22.5.dp))
+                .clickable { onOpen(source) },
+            cornerRadius = 22.5.dp,
+            insideMargin = PaddingValues(14.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                meta?.icon?.let {
+                    Image(
+                        it,
+                        tr("应用图标", "应用图标"),
+                        Modifier.size(54.dp).clip(RoundedCornerShape(14.dp)),
+                        contentScale = ContentScale.Crop,
+                    )
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(tr(item.name, item.name), style = MiuixTheme.textStyles.body1, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(item.packageName, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(meta?.versionName ?: "?", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                }
+                Box(Modifier.padding(horizontal = 12.dp).width(1.dp).height(28.dp).background(MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = .35f)))
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = {
+                        enabled = it
+                        store.edit(service) {
+                            putBoolean(
+                                ScopedSettings.key(item.packageName, ScopedSettings.KEY_ENABLED),
+                                it
+                            )
+                        }
+                    }
+                )
+            }
         }
     }
 }
@@ -489,7 +1000,7 @@ private fun AppNavigationSettings(appItem: AppNavItem, store: AppNavigationSetti
                         if (appItem.packageName == "com.reddit.frontpage") {
                             RedditCreatePreferences(prefs, service, onChanged)
                         }
-                        if (appItem.packageName == "com.tencent.mobileqq" || appItem.packageName == "com.tencent.mm") {
+                        if (NavigationBadgeSettings.supports(appItem.packageName)) {
                             Group(tr("appNavigationUnreadHints", "未读提示")) {
                                 SwitchPreference(
                                     title = tr("显示小红点", "显示小红点"),

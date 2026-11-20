@@ -1,0 +1,33 @@
+{
+  "apk": "支付宝_12.12.56.8000.apk",
+  "package": "com.eg.android.AlipayGphone",
+  "version": "12.12.56.8000 (212470)",
+  "runtime": "Host TabWidgetItemView (mImageView AUIconDrawable / StateListDrawable / BitmapDrawable, and mCdpImageView promotional drawable) drawn into clean ARGB_8888 ImageBitmap snapshots without mBadgeView overlay.",
+  "files": [
+    {
+      "apk_entry": "assets/antui_res/AlipayNumber.ttf",
+      "module_copy": "app/src/main/assets/navigation/alipay/assets/antui_res/AlipayNumber.ttf",
+      "sha256": "26bb8c8e67910d47466de1155241148cdd4f50ea4a1e4f15d89772f1d31eb5a6"
+    },
+    {
+      "apk_entry": "assets/h5iconfont/h5titlebar.ttf",
+      "module_copy": "app/src/main/assets/navigation/alipay/assets/h5iconfont/h5titlebar.ttf",
+      "sha256": "1a0a0fb4d4ffd079db2e8f19c0e96d1d23267c46108578cb12e5c2d7332a8671"
+    },
+    {
+      "apk_entry": "assets/h5iconfont/titlebar.ttf",
+      "module_copy": "app/src/main/assets/navigation/alipay/assets/h5iconfont/titlebar.ttf",
+      "sha256": "1a0a0fb4d4ffd079db2e8f19c0e96d1d23267c46108578cb12e5c2d7332a8671"
+    },
+    {
+      "apk_entry": "assets/iconfont/com.alipay.android.phone.wallet.advertisement/arrow.ttf",
+      "module_copy": "app/src/main/assets/navigation/alipay/assets/iconfont/com.alipay.android.phone.wallet.advertisement/arrow.ttf",
+      "sha256": "494a8e42d90b35338f63a3b22d3ce5d7f5e8e9b6b5aae54da45fc6b22567975a"
+    },
+    {
+      "apk_entry": "assets/iconfont/com.alipay.android.phone.wallet.advertisement/x.ttf",
+      "module_copy": "app/src/main/assets/navigation/alipay/assets/iconfont/com.alipay.android.phone.wallet.advertisement/x.ttf",
+      "sha256": "bc5adb466d37b03318d03401943645594ca17dc258ee2c74bb6fb91ee449265d"
+    }
+  ]
+}

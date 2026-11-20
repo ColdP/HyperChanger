@@ -73,7 +73,7 @@ internal fun restartScopesForPreference(group: String, key: String): Set<ScopeAp
     if (group != REMOTE_PREFERENCE_GROUP) return emptySet()
 
     // Module UI and saved preset libraries do not change any hooked application.
-    if (key == KEY_SHARED_VIEW_ANIMATION || key == KEY_APP_MONET_PALETTE || key == KEY_APP_MONET_COLOR_SPEC ||
+    if (key == KEY_SHARED_VIEW_ANIMATION || key == KEY_APP_NAVIGATION_GRID_MODE || key == KEY_APP_MONET_PALETTE || key == KEY_APP_MONET_COLOR_SPEC ||
         key == KEY_APP_MONET_NOTICE_DISMISSED || key == KEY_APP_MONET_NOTICE_DISMISS_COUNT
     ) return emptySet()
     if (key in setOf(
@@ -109,6 +109,7 @@ internal fun restartScopesForPreference(group: String, key: String): Set<ScopeAp
         key == KEY_REMOVE_VIDEO_TEMP_LIMIT -> setOf(ScopeApplication.SECURITY_CENTER)
         PowerBatteryFeature.entries.any { it.key == key } -> setOf(ScopeApplication.SECURITY_CENTER)
         key == KEY_REMOVE_HOTSPOT_TEMP_LIMIT -> setOf(ScopeApplication.SETTINGS)
+        key.startsWith(WIDGET_SETTINGS_PREFIX) -> setOf(ScopeApplication.PERSONAL_ASSISTANT, ScopeApplication.DESKTOP)
         key.startsWith(ASSISTANT_WIDGET_GLASS_PREFIX) -> setOf(ScopeApplication.PERSONAL_ASSISTANT)
         key.startsWith(SIDEBAR_PREFIX) -> setOf(ScopeApplication.SECURITY_CENTER)
         key.startsWith(SIDEBAR_COLUMN_SPACING_PREFIX) -> setOf(ScopeApplication.SECURITY_CENTER)

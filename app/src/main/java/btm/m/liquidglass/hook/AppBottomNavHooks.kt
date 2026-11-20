@@ -286,6 +286,26 @@ object AppBottomNavHooks {
         navigationLayerResourceNames = setOf("indicator_bg_container")
     )
 
+    private val jd = AppConfig(
+        displayName = "JD",
+        packageName = JdNavigation.PACKAGE,
+        activityName = JdNavigation.ACTIVITY,
+        barResourceName = null,
+        anchorResourceName = null,
+        requiredTabs = emptySet(),
+        targetVersion = "16.1.50 (102918)"
+    )
+
+    private val alipay = AppConfig(
+        displayName = "Alipay",
+        packageName = AlipayNavigation.PACKAGE,
+        activityName = AlipayNavigation.ACTIVITY,
+        barResourceName = null,
+        anchorResourceName = null,
+        requiredTabs = emptySet(),
+        targetVersion = "12.12.56.8000 (212470)"
+    )
+
     private val wechat = AppConfig(
         displayName = "WeChat",
         packageName = WeChatNavigation.PACKAGE,
@@ -700,6 +720,104 @@ object AppBottomNavHooks {
     }
 
     @JvmStatic
+    fun installJd(
+        module: XposedModule,
+        loader: ClassLoader,
+        blurRadius: Int,
+        labelMode: String,
+        navigationStyle: String,
+        advancedMaterial: Boolean,
+        colorMode: String,
+        accentColor: Int = 0,
+        showBadges: Boolean = true
+    ) {
+        ImmersiveNavigationHooks.install(module)
+        for (name in listOf("callActivityOnResume", "callActivityOnPause", "callActivityOnDestroy")) {
+            val method = Instrumentation::class.java.getDeclaredMethod(name, Activity::class.java)
+            module.hook(method)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .setId("jd-navigation:instrumentation:$name")
+                .intercept { chain ->
+                    val activity = chain.getArg(0) as? Activity
+                    val matches = activity?.packageName == jd.packageName &&
+                        activity.javaClass.name == jd.activityName
+                    if (matches && name == "callActivityOnDestroy") {
+                        synchronized(sessions) { sessions.remove(activity) }?.destroy()
+                    }
+                    val result = chain.proceed()
+                    if (matches) {
+                        when (name) {
+                            "callActivityOnResume" -> synchronized(sessions) {
+                                sessions.getOrPut(activity) {
+                                    Session(
+                                        module, activity, jd, blurRadius.coerceIn(0, 40),
+                                        labelMode, navigationStyle, advancedMaterial, colorMode,
+                                        accentColor, null, showBadges
+                                    )
+                                }
+                            }.resume()
+                            "callActivityOnPause" -> synchronized(sessions) { sessions[activity] }?.pause()
+                        }
+                    }
+                    result
+                }
+        }
+        btm.m.os4.systemuihook.HookModuleLogger.log(
+            module, Log.INFO, TAG, "Hooks installed for ${jd.displayName} ${jd.targetVersion}"
+        )
+    }
+
+    @JvmStatic
+    fun installAlipay(
+        module: XposedModule,
+        loader: ClassLoader,
+        blurRadius: Int,
+        labelMode: String,
+        navigationStyle: String,
+        advancedMaterial: Boolean,
+        colorMode: String,
+        accentColor: Int = 0,
+        showBadges: Boolean = true
+    ) {
+        ImmersiveNavigationHooks.install(module)
+        // Alipay's AlipayLogin delegates through Quinox LauncherActivity & DexAOP stubs;
+        // Instrumentation receives the actual resumed Activity instance reliably.
+        for (name in listOf("callActivityOnResume", "callActivityOnPause", "callActivityOnDestroy")) {
+            val method = Instrumentation::class.java.getDeclaredMethod(name, Activity::class.java)
+            module.hook(method)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .setId("alipay-navigation:instrumentation:$name")
+                .intercept { chain ->
+                    val activity = chain.getArg(0) as? Activity
+                    val matches = activity?.packageName == alipay.packageName &&
+                        activity.javaClass.name == alipay.activityName
+                    if (matches && name == "callActivityOnDestroy") {
+                        synchronized(sessions) { sessions.remove(activity) }?.destroy()
+                    }
+                    val result = chain.proceed()
+                    if (matches) {
+                        when (name) {
+                            "callActivityOnResume" -> synchronized(sessions) {
+                                sessions.getOrPut(activity) {
+                                    Session(
+                                        module, activity, alipay, blurRadius.coerceIn(0, 40),
+                                        labelMode, navigationStyle, advancedMaterial, colorMode,
+                                        accentColor, null, showBadges
+                                    )
+                                }
+                            }.resume()
+                            "callActivityOnPause" -> synchronized(sessions) { sessions[activity] }?.pause()
+                        }
+                    }
+                    result
+                }
+        }
+        btm.m.os4.systemuihook.HookModuleLogger.log(
+            module, Log.INFO, TAG, "Hooks installed for ${alipay.displayName} ${alipay.targetVersion}"
+        )
+    }
+
+    @JvmStatic
     @Throws(ReflectiveOperationException::class)
     fun installWeChat(
         module: XposedModule,
@@ -1011,14 +1129,26 @@ object AppBottomNavHooks {
         )
         private val selectedIndex = mutableIntStateOf(0)
         private val isMeituan = config === meituan || config === meituanTakeout
+        private val isJd = config === jd
+        private val isAlipay = config === alipay
         // These adapters provide authoritative host state and share the existing restore/rebind path.
         private val isNativeViewNavigation = isMeituan || config === douShengSheng ||
-            config === reddit
+            config === reddit || isJd || isAlipay
         private val redditNavigation = if (config === reddit) RedditNavigation.Detector(activity) else null
         private val douShengShengNavigation = if (config === douShengSheng) DouShengShengNavigation() else null
         private val douShengShengIcons = if (config === douShengSheng) DouShengShengNavIcons(activity) else null
         private var douShengShengBackdropSource by mutableStateOf<View?>(null)
         private val meituanNavigation = if (isMeituan) MeituanNavigation(activity, config === meituanTakeout) else null
+        private val jdNavigation = if (isJd) JdNavigation(activity) else null
+        private val alipayNavigation = if (isAlipay) AlipayNavigation() else null
+        private var jdBackdropSource by mutableStateOf<View?>(null)
+        private var alipayBackdropSource by mutableStateOf<View?>(null)
+        private var jdMainContent: ViewGroup? = null
+        private var jdBlurTarget: ViewGroup? = null
+        private var jdIsAiMode = false
+        private var jdHiddenLayers: List<View> = emptyList()
+        private var alipayTabContent: ViewGroup? = null
+        private var alipayHiddenLayers: List<View> = emptyList()
         private var nativeViewLastInsetMaintenanceAt = 0L
         private var meituanTakeoutBackdropSource by mutableStateOf<View?>(null)
         private val meituanTakeoutOrderLayout = if (config === meituanTakeout) MeituanTakeoutOrderLayout() else null
@@ -1219,6 +1349,16 @@ object AppBottomNavHooks {
             }
             nav = null
             meituanNavigation?.clear()
+            jdNavigation?.clear()
+            alipayNavigation?.clear()
+            jdBackdropSource = null
+            alipayBackdropSource = null
+            jdMainContent = null
+            jdBlurTarget = null
+            jdIsAiMode = false
+            jdHiddenLayers = emptyList()
+            alipayTabContent = null
+            alipayHiddenLayers = emptyList()
             douShengShengNavigation?.clear()
             douShengShengIcons?.clear()
             douShengShengBackdropSource = null
@@ -1283,6 +1423,8 @@ object AppBottomNavHooks {
 
                 rememberOriginalNavigationLayers(content, detected.container)
                 config.navigationLayerResourceNames.forEach { rememberResourceView(content, it) }
+                if (isJd) jdHiddenLayers.forEach(::rememberOriginalView)
+                if (isAlipay) alipayHiddenLayers.forEach(::rememberOriginalView)
                 if (config === meituanTakeout) maintainMeituanTakeoutSurface()
                 if (config === cmbBank) cmbBankBackground?.let(::rememberOriginalView)
                 config.miniPlayerResourceName?.let { resourceName ->
@@ -1368,6 +1510,8 @@ object AppBottomNavHooks {
                         val nativeBackdropSource = if (config === meituanTakeout) {
                             meituanTakeoutBackdropSource ?: originalBar ?: navigationBackdropSource
                         } else if (config === douShengSheng) douShengShengBackdropSource ?: navigationBackdropSource
+                        else if (isJd) jdBackdropSource ?: navigationBackdropSource
+                        else if (isAlipay) alipayBackdropSource ?: navigationBackdropSource
                         else navigationBackdropSource
                         val bitmapBackdrop = if (config === xiaomiHealthWatchFaceMarket || config === meituanTakeout) {
                             rememberBitmapNativeViewBackdrop(
@@ -1716,6 +1860,13 @@ object AppBottomNavHooks {
                 if (config === reddit) RedditNavigation.setActive(activity, false)
                 meituanTakeoutBackdropSource = null
                 douShengShengBackdropSource = null
+                jdBackdropSource = null
+                alipayBackdropSource = null
+                jdMainContent = null
+                jdBlurTarget = null
+                jdHiddenLayers = emptyList()
+                alipayTabContent = null
+                alipayHiddenLayers = emptyList()
                 nav?.visibility = View.GONE
                 detectedTabs = emptyList()
                 restoreHostContentSpace()
@@ -1739,6 +1890,8 @@ object AppBottomNavHooks {
                 douShengShengBackdropSource = DouShengShengNavigation.page(detected.container)
                 DouShengShengNavigation.divider(detected.container)?.let(::rememberOriginalView)
             }
+            if (isJd) jdHiddenLayers.forEach(::rememberOriginalView)
+            if (isAlipay) alipayHiddenLayers.forEach(::rememberOriginalView)
             if (config === meituanTakeout) maintainMeituanTakeoutSurface()
             val now = android.os.SystemClock.uptimeMillis()
             if (changed || before != selectedIndex.intValue || now - nativeViewLastInsetMaintenanceAt >= 500L) {
@@ -2094,6 +2247,8 @@ object AppBottomNavHooks {
                 val dispatched = when (config) {
                     reddit -> redditNavigation?.open(content, tab.identity) == true
                     douShengSheng -> douShengShengNavigation?.open(content, tab.identity) == true
+                    jd -> jdNavigation?.open(content, tab.identity) == true
+                    alipay -> alipayNavigation?.open(content, tab.identity) == true
                     else -> meituanNavigation?.open(content, tab.identity) == true
                 }
                 btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.INFO, TAG,
@@ -2355,6 +2510,10 @@ object AppBottomNavHooks {
                 releaseDouShengShengPageNavigationInset()
             } else if (isMeituan) {
                 releaseMeituanPageNavigationInset(content)
+            } else if (isJd) {
+                releaseJdPageNavigationInset(content)
+            } else if (isAlipay) {
+                releaseAlipayPageNavigationInset()
             } else if (config === appleMusic) {
                 releaseAppleMusicPageNavigationInset(content)
             } else if (config === reddit) {
@@ -2833,6 +2992,76 @@ object AppBottomNavHooks {
                 originalContentPaddings.putIfAbsent(page, intArrayOf(
                     page.paddingLeft, page.paddingTop, page.paddingRight, page.paddingBottom))
                 page.setPadding(page.paddingLeft, page.paddingTop, page.paddingRight, 0)
+            }
+        }
+
+        private fun releaseJdPageNavigationInset(content: ViewGroup) {
+            val inset = navigationBarInset()
+            val target = jdBlurTarget ?: jdMainContent ?: return
+            if (!jdIsAiMode) {
+                (target.layoutParams as? android.widget.RelativeLayout.LayoutParams)?.let { params ->
+                    if (!originalRelativeBottomRules.containsKey(target)) {
+                        originalRelativeBottomRules[target] = RelativeBottomRules(
+                            above = params.rules[android.widget.RelativeLayout.ABOVE],
+                            alignParentBottom = params.rules[android.widget.RelativeLayout.ALIGN_PARENT_BOTTOM]
+                        )
+                    }
+                    originalContentBottomMargins.putIfAbsent(target, params.bottomMargin)
+                    var changed = false
+                    if (params.rules[android.widget.RelativeLayout.ABOVE] != 0) {
+                        params.removeRule(android.widget.RelativeLayout.ABOVE)
+                        changed = true
+                    }
+                    if (params.rules[android.widget.RelativeLayout.ALIGN_PARENT_BOTTOM] == 0) {
+                        params.addRule(android.widget.RelativeLayout.ALIGN_PARENT_BOTTOM)
+                        changed = true
+                    }
+                    if (params.bottomMargin != 0) {
+                        params.bottomMargin = 0
+                        changed = true
+                    }
+                    if (changed) target.layoutParams = params
+                }
+            } else {
+                (target.layoutParams as? ViewGroup.MarginLayoutParams)?.let { params ->
+                    if (params.bottomMargin > 0 && (inset <= 0 || params.bottomMargin == inset)) {
+                        originalContentBottomMargins.putIfAbsent(target, params.bottomMargin)
+                        params.bottomMargin = 0
+                        target.layoutParams = params
+                    }
+                }
+            }
+            val inner = jdMainContent ?: target
+            if (inset > 0 && inner.paddingBottom == inset) {
+                originalContentPaddings.putIfAbsent(
+                    inner,
+                    intArrayOf(inner.paddingLeft, inner.paddingTop, inner.paddingRight, inner.paddingBottom)
+                )
+                inner.setPadding(inner.paddingLeft, inner.paddingTop, inner.paddingRight, 0)
+            }
+        }
+
+        private fun releaseAlipayPageNavigationInset() {
+            val tabContent = alipayTabContent ?: return
+            val inset = navigationBarInset()
+            (tabContent.layoutParams as? ViewGroup.MarginLayoutParams)?.let { params ->
+                if (params.bottomMargin > 0) {
+                    originalContentBottomMargins.putIfAbsent(tabContent, params.bottomMargin)
+                    params.bottomMargin = 0
+                    tabContent.layoutParams = params
+                }
+            }
+            if (inset > 0 && tabContent.paddingBottom == inset) {
+                originalContentPaddings.putIfAbsent(
+                    tabContent,
+                    intArrayOf(
+                        tabContent.paddingLeft,
+                        tabContent.paddingTop,
+                        tabContent.paddingRight,
+                        tabContent.paddingBottom
+                    )
+                )
+                tabContent.setPadding(tabContent.paddingLeft, tabContent.paddingTop, tabContent.paddingRight, 0)
             }
         }
 
@@ -4360,6 +4589,46 @@ object AppBottomNavHooks {
                 return DetectedBar(native.container, native.items.map { item ->
                     DetectedTab(TabKey.NATIVE, tr(item.label, item.label), item.view, item.clickTarget,
                         identity = item.identity, nativeIcon = item.icon, preserveIconColor = item.preserveColor)
+                })
+            }
+            if (isJd) {
+                val native = jdNavigation?.detect(content) ?: return null
+                selectedIndex.intValue = native.selectedIndex
+                jdMainContent = native.mainContent
+                jdBlurTarget = native.blurTarget
+                jdIsAiMode = native.isAiMode
+                jdBackdropSource = native.blurTarget ?: native.mainContent
+                jdHiddenLayers = native.hiddenLayers
+                return DetectedBar(native.container, native.items.map { item ->
+                    DetectedTab(
+                        TabKey.NATIVE,
+                        tr(item.label, item.label),
+                        item.view,
+                        item.clickTarget,
+                        identity = item.identity,
+                        nativeIcon = item.icon,
+                        preserveIconColor = item.preserveColor,
+                        badge = item.badge,
+                    )
+                })
+            }
+            if (isAlipay) {
+                val native = alipayNavigation?.detect(content) ?: return null
+                selectedIndex.intValue = native.selectedIndex
+                alipayTabContent = native.tabContent
+                alipayBackdropSource = native.tabContent
+                alipayHiddenLayers = native.hiddenLayers
+                return DetectedBar(native.container, native.items.map { item ->
+                    DetectedTab(
+                        TabKey.NATIVE,
+                        tr(item.label, item.label),
+                        item.view,
+                        item.clickTarget,
+                        identity = item.identity,
+                        nativeIcon = item.icon,
+                        preserveIconColor = item.preserveColor,
+                        badge = item.badge,
+                    )
                 })
             }
             if (config === github) {

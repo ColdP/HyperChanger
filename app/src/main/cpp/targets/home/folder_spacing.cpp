@@ -3,6 +3,8 @@
 #include "home_effects.h"
 #include "home_full_glass.h"
 #include "home_native_dock.h"
+#include "widgets/dart_profiles.h"
+#include "widgets/widget_capabilities.h"
 #include "nativehook/memory_io.h"
 #include "nativehook/native_image.h"
 
@@ -28,6 +30,7 @@ extern "C" {
 alignas(4) std::atomic<int32_t> folder_spacing_value{folder_spacing::kDisabledValue};
 void folder_spacing_return();
 void multi_split_support_return();
+void widget_support_return();
 }
 static_assert(sizeof(folder_spacing_value) == sizeof(int32_t));
 static_assert(std::atomic<int32_t>::is_always_lock_free);
@@ -63,8 +66,11 @@ struct NativeGate {
     uint32_t reported_failures = 0;
     const char *label = "Native Dock";
     bool multi_split = false;
+    uint32_t widget_mask = 0;
 };
 std::vector<NativeGate> native_gates;
+std::vector<NativeGate> widget_gates;
+std::vector<std::vector<nhk::ExecutableMapping>> widget_rejected_generations;
 std::mutex observer_mutex;
 std::map<std::string, std::optional<std::pair<uint64_t, uint64_t>>> zip_cache;
 
@@ -85,6 +91,7 @@ struct ConfigSnapshot {
     folder_spacing::Settings spacing;
     folder_spacing::MaterialSettings material;
     folder_spacing::MultiSplitSettings multi_split;
+    uint32_t widgets = 0;
 };
 
 ConfigSnapshot read_config() {
@@ -92,8 +99,16 @@ ConfigSnapshot read_config() {
     std::streamsize size = 0;
     const auto blob = read_blob(buffer, size);
     if (!blob) return {};
+    uint32_t widgets = 0;
+    // WIDG is always the final fixed-size extension. Old payloads remain off.
+    if (blob->size() >= 28 && folder_spacing::word(*blob, 0) == 0x46435048
+        && folder_spacing::word(*blob, 4) == 18) {
+        const size_t p = blob->size() - 12;
+        if (folder_spacing::word(*blob, p) == 0x47444957 && folder_spacing::word(*blob, p + 4) == 1
+            && folder_spacing::word(*blob, p + 8) <= 7) widgets = folder_spacing::word(*blob, p + 8);
+    }
     return {folder_spacing::read_settings(*blob), folder_spacing::read_material_settings(*blob),
-        folder_spacing::read_multi_split_settings(*blob)};
+        folder_spacing::read_multi_split_settings(*blob), widgets};
 }
 
 std::vector<nhk::ExecutableMapping> inventory() {
@@ -334,6 +349,94 @@ bool write_native_gate(NativeGate &gate, bool enabled) {
     __android_log_print(ANDROID_LOG_INFO, kTag, "%s gate %s at %p %08x -> %08x",
         gate.label, enabled ? "enabled" : "restored", reinterpret_cast<void *>(gate.address), current, desired);
     return true;
+}
+
+
+// Resolve reviewed Dart functions as complete preimages. Normalize only patches
+// owned by this implementation with the same backing file identity.
+void update_widgets(const std::vector<nhk::ExecutableMapping> &mappings, uint32_t flags, unsigned tick) {
+    bool picker_ready = false;
+    // Do not transiently disable metadata on every observer pass. The previous
+    // picker patch remains valid only while its mapping and live word still match.
+    for (const auto &gate : widget_gates) {
+        uint32_t live = 0;
+        if (gate.widget_mask == 6 && (flags & 6) && source_at(mappings, gate.address) == gate.source
+            && nhk::safe_read(gate.address, std::as_writable_bytes(std::span(&live, 1)))
+            && live == gate.replacement) picker_ready = true;
+    }
+    const bool bridge_ready = update_widget_capabilities(flags, picker_ready);
+    picker_ready = false;
+    for (auto &gate : widget_gates) {
+        if (source_at(mappings, gate.address) != gate.source) continue;
+        const bool requested = (flags & gate.widget_mask) && (gate.widget_mask == 1 || bridge_ready);
+        const bool applied = write_native_gate(gate, requested);
+        if (gate.widget_mask == 6 && requested && applied) picker_ready = true;
+    }
+    update_widget_capabilities(flags, picker_ready);
+    if (!flags || (tick >= 40 && tick % 10 != 0)) return;
+    for (const auto &generation : nhk::runtime_generations(mappings)) {
+        if (std::ranges::find(widget_rejected_generations, generation) != widget_rejected_generations.end()) continue;
+        if (std::ranges::count_if(widget_gates, [&](const NativeGate &g) {
+            return source_at(generation, g.address) == g.source;
+        }) == 3) continue;
+        size_t total = 0;
+        for (const auto &m : generation) total += m.end - m.begin;
+        if (total > nhk::kMaxExecutableCodeBytes) continue;
+        struct Match { uintptr_t base; const home_widgets::Profile *profile; };
+        std::vector<Match> matches;
+        const auto preimage = [&](uintptr_t address, size_t size, uint64_t hash) {
+            std::vector<uint32_t> words(size / 4);
+            if (!source_at(generation, address) || !source_at(generation, address + size - 4)
+                || !nhk::safe_read(address, std::as_writable_bytes(std::span(words)))) return false;
+            for (const auto &gate : widget_gates)
+                if (gate.address >= address && gate.address < address + size
+                    && source_at(generation, gate.address) == gate.source
+                    && words[(gate.address - address) / 4] == gate.replacement)
+                    words[(gate.address - address) / 4] = gate.original;
+            uint64_t h = 14695981039346656037ULL;
+            for (const auto byte : std::as_bytes(std::span(words))) h = (h ^ std::to_integer<uint8_t>(byte)) * 1099511628211ULL;
+            return h == hash;
+        };
+        for (const auto &m : generation) {
+            std::vector<uint32_t> code((m.end - m.begin) / 4);
+            if (!nhk::safe_read(m.begin, std::as_writable_bytes(std::span(code)))) continue;
+            for (size_t i = 0; i + 8 <= code.size(); ++i) {
+                if (code[i] != 0xa9bf79fd) continue;
+                for (const auto &p : home_widgets::profiles) {
+                    if (!std::equal(p.anchor.begin(), p.anchor.end(), code.begin() + i)) continue;
+                    const uintptr_t address = m.begin + i * 4;
+                    if (address < p.support) continue;
+                    const uintptr_t base = address - p.support;
+                    if (preimage(address, p.support_size, p.support_hash)
+                        && preimage(base + p.picker, p.picker_size, p.picker_hash)) matches.push_back({base, &p});
+                }
+            }
+        }
+        if (matches.size() != 1) {
+            // Unknown images are scanned once per mapping generation, rather
+            // than allocating/scanning their complete code every five seconds.
+            if (widget_rejected_generations.size() < nhk::kMaxExecutableMappings)
+                widget_rejected_generations.push_back(generation);
+            __android_log_print(ANDROID_LOG_WARN, kTag, "Widget Dart profile rejected: matches=%zu", matches.size());
+            continue;
+        }
+        const auto &[base, profile] = matches[0];
+        const auto add = [&](uintptr_t address, uint32_t original, uint32_t replacement, uint32_t mask) {
+            const auto source = source_at(generation, address);
+            if (!source || source_at(inventory(), address) != source
+                || std::ranges::any_of(widget_gates, [&](const NativeGate &g) { return g.address == address && g.source == *source; })) return;
+            widget_gates.push_back({address, *source, original, replacement, 0, "Widgets", false, mask});
+        };
+        for (const auto offset : profile->returns) {
+            const uintptr_t address = base + profile->support + offset;
+            if (std::ranges::any_of(widget_gates, [&](const NativeGate &g) { return g.address == address && source_at(generation,address) == g.source; })) continue;
+            if (auto branch = allocate_branch(address, reinterpret_cast<uintptr_t>(widget_support_return)))
+                add(address, 0xaa1d03ef, *branch, 1);
+        }
+        // TBNZ false -> Android inclusion. NOP falls through into the MIUI
+        // exclusion path and hides providers. Preserve the false successor.
+        add(base + profile->picker + profile->picker_gate, 0x37200a00, 0x14000050, 6);
+    }
 }
 
 bool multi_split_entry_matches(std::span<const uint32_t> code) {
@@ -925,6 +1028,7 @@ void *worker(void *) {
         }
         if (settings.enabled || !slots.empty() || material.enabled || material.dock_enabled
             || material.native_dock_enabled || snapshot.multi_split.enabled
+            || snapshot.widgets || !widget_gates.empty()
             || !effect_slots.empty() || !native_gates.empty()) {
             const std::lock_guard lock(observer_mutex);
             const auto mappings = inventory();
@@ -939,6 +1043,7 @@ void *worker(void *) {
             if (settings.enabled && slots.empty() && tick % 120 == 0)
                 __android_log_print(ANDROID_LOG_WARN, kTag,
                     "Folder resolver pending: mappings=%zu value=%d", mappings.size(), settings.value);
+            update_widgets(mappings, snapshot.widgets, tick);
             update_effects(mappings, material, snapshot.multi_split, tick);
         }
         ++tick;
@@ -953,8 +1058,11 @@ void refresh_home_effects_on_load() {
     const std::lock_guard lock(observer_mutex);
     const auto snapshot = read_config();
     if (snapshot.material.enabled || snapshot.material.dock_enabled || snapshot.material.native_dock_enabled
-        || snapshot.multi_split.enabled)
-        update_effects(inventory(), snapshot.material, snapshot.multi_split, 0);
+        || snapshot.multi_split.enabled || snapshot.widgets) {
+        const auto mappings = inventory();
+        update_widgets(mappings, snapshot.widgets, 0);
+        update_effects(mappings, snapshot.material, snapshot.multi_split, 0);
+    }
 }
 
 void start_folder_spacing() {

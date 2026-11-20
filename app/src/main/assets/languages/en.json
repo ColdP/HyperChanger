@@ -2554,6 +2554,13 @@
   "抖省省": "DouShengSheng",
   "美团": "Meituan",
   "美团外卖": "Meituan Waimai",
+  "京东": "JD",
+  "支付宝": "Alipay",
+  "逛": "Explore",
+  "购物车": "Cart",
+  "理财": "Wealth",
+  "生活": "Life",
+  "国际": "Global",
   "推荐": "Recommended",
   "订单": "Orders",
   "神券": "Coupons",
@@ -2622,5 +2629,11 @@
     "compactLyricsKeepOn": "Keep screen on while compact lyrics are visible",
     "compactLyricsScale": "Compact lyric text scale",
     "compactLyricsOffset": "Compact lyric vertical offset",
-    "compactLyricsSpacing": "Compact lyric line spacing"
+    "compactLyricsSpacing": "Compact lyric line spacing",
+  "解锁 HyperOS 小部件白名单限制": "Unlock HyperOS widget whitelist restrictions",
+  "允许安卓小部件参与堆叠": "Allow Android widgets in stacks",
+  "解锁安卓小部件柔光玻璃背景": "Unlock soft glass backgrounds for Android widgets",
+  "appNavigationLayoutMode": "App bottom navigation layout",
+  "appNavigationLayoutList": "List",
+  "appNavigationLayoutGrid": "Grid"
 }

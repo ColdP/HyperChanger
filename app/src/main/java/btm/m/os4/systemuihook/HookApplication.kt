@@ -37,6 +37,8 @@ class HookApplication : Application(), XposedServiceHelper.OnServiceListener {
             .onFailure { ModuleLog.w("PowerBattery", "Could not sync battery settings", it) }
         runCatching { SidebarFeatureSettingsStore(this).syncRemote(service) }
             .onFailure { ModuleLog.w("SidebarFeatures", "Could not sync temperature settings", it) }
+        runCatching { WidgetSettingsStore(this).syncRemote(service) }
+            .onFailure { ModuleLog.w("Widgets", "Could not sync widget settings", it) }
         runCatching { WidgetGlassSettingsStore(this).syncRemote(service) }
             .onFailure { ModuleLog.w("WidgetGlass", "Could not sync widget settings", it) }
         runCatching { SidebarSettingsStore(this).syncRemote(service) }
@@ -55,6 +57,8 @@ class HookApplication : Application(), XposedServiceHelper.OnServiceListener {
             .onFailure { ModuleLog.w("ContactsDialer", "Could not sync dialer setting", it) }
         runCatching { AppNavigationSettingsStore(this).syncRemote(service) }
             .onFailure { ModuleLog.w("AppNavigation", "Could not sync app navigation settings", it) }
+        runCatching { AppNavigationLayoutSettingsStore(this).syncRemote(service) }
+            .onFailure { ModuleLog.w("AppNavigation", "Could not sync app navigation layout settings", it) }
         runCatching { btm.m.liquidglass.NavigationBadgeSettings.syncRemote(this, service) }
             .onFailure { ModuleLog.w("NavigationBadges", "Could not sync navigation badge setting", it) }
         runCatching { ModuleHotReloadSettingsStore(this).syncRemote(service) }

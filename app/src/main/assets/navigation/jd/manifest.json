@@ -1,0 +1,152 @@
+{
+  "apk": "京东_16.1.50.apk",
+  "package": "com.jingdong.app.mall",
+  "version": "16.1.50 (102918)",
+  "runtime": "Host NavigationButton NavigationIconView Drawable (unwrapping RadioStateDrawable.bitmap to omit red-dot canvas overlays) first; host packaged j30.c drawable resources as fallback.",
+  "files": [
+    {
+      "role": "home_selected",
+      "decoded_resource": "res/drawable-xhdpi/cux.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/cux.png",
+      "sha256": "8dbf1009763dc63ae606a2d622e26c942eabe2a02003e39a99f676746640c8ab"
+    },
+    {
+      "role": "home_unselected",
+      "decoded_resource": "res/drawable-xhdpi/cuy.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/cuy.png",
+      "sha256": "55a6c06dab740c7d0ef3e48afed53c81f177a0905662bcc3de02a680e5aa3190"
+    },
+    {
+      "role": "ai_home_unselected",
+      "decoded_resource": "res/drawable-xhdpi/czd.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/czd.png",
+      "sha256": "22e1c277c3e0a64019c25f7f6621b2d4a140f8cb1cf784bc09a7ebf21ffd2502"
+    },
+    {
+      "role": "ai_home_selected",
+      "decoded_resource": "res/drawable-xhdpi/cze.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/cze.png",
+      "sha256": "ff6ee7546870eec564ff0f43e35a19a8fd7bf26f4153d669813f711ba46c41cb"
+    },
+    {
+      "role": "category_selected",
+      "decoded_resource": "res/drawable-xhdpi/cvh.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/cvh.png",
+      "sha256": "e2cfb61db42cb224683d735a3161bd45ac71f22be1b5b7679fd9e9739893320e"
+    },
+    {
+      "role": "category_unselected",
+      "decoded_resource": "res/drawable-xhdpi/cvg.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/cvg.png",
+      "sha256": "a4270f57c343f66cbfa02eb4d43fa4fbe51e6ab2e7a5968d46c71fc5a6763b57"
+    },
+    {
+      "role": "ai_category_selected",
+      "decoded_resource": "res/drawable-xhdpi/cz9.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/cz9.png",
+      "sha256": "be31f097346a0cc574169c2d6f779ae9a80f28aa14eb99590401f1c0c64994c4"
+    },
+    {
+      "role": "ai_category_unselected",
+      "decoded_resource": "res/drawable-xhdpi/cz8.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/cz8.png",
+      "sha256": "b6a40f9aba108cf1a92449c0533072f933bc7b6a2b0c4849d9017536f2b548a8"
+    },
+    {
+      "role": "discover_selected",
+      "decoded_resource": "res/drawable-xhdpi/cuu.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/cuu.png",
+      "sha256": "b4e32438d76cff19e5b2895316ab13cd01682a2f7f8ce18d9abcaf251275869d"
+    },
+    {
+      "role": "discover_unselected",
+      "decoded_resource": "res/drawable-xhdpi/cuv.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/cuv.png",
+      "sha256": "dcf6a625b212ec6c75f64726af13a0a6340d793a2fd101fd942ea8fe17bc2ddf"
+    },
+    {
+      "role": "ai_discover_selected",
+      "decoded_resource": "res/drawable-xhdpi/czb.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/czb.png",
+      "sha256": "92c9b3f3f859ed9e7dff0ce9edf9a0cecbb172d9e669ced45bcc26c7c0221d83"
+    },
+    {
+      "role": "ai_discover_unselected",
+      "decoded_resource": "res/drawable-xhdpi/cza.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/cza.png",
+      "sha256": "b619a37182ddc60eef383a40ab45183bd387389d7309304fa9f9f22b05b7207b"
+    },
+    {
+      "role": "messages_selected",
+      "decoded_resource": "res/drawable-xhdpi/cv1.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/cv1.png",
+      "sha256": "0306a44b65da7d30062024d515c99e75727bac58114a43c3f67611561d332ed9"
+    },
+    {
+      "role": "messages_unselected",
+      "decoded_resource": "res/drawable-xhdpi/cv0.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/cv0.png",
+      "sha256": "c633824fa90fcd0673da807a2fe752a0417a16fb7f945efbdd6ba816f5fe961c"
+    },
+    {
+      "role": "ai_messages_selected",
+      "decoded_resource": "res/drawable-xhdpi/czh.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/czh.png",
+      "sha256": "a62dc60f63a1f341ce6a79e59b0194768787153018f1499b9d24ee172b6fbb6b"
+    },
+    {
+      "role": "ai_messages_unselected",
+      "decoded_resource": "res/drawable-xhdpi/czg.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/czg.png",
+      "sha256": "72aa054a5ddb15ef0ba98b75ae3dc5e30faee3fd10bcbdfa09165f080849f8fa"
+    },
+    {
+      "role": "cart_selected",
+      "decoded_resource": "res/drawable-xhdpi/cur.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/cur.png",
+      "sha256": "16c987353470ea87529829b5f13d8235e89aab443770e22e1b1cdf1d39ad1713"
+    },
+    {
+      "role": "cart_unselected",
+      "decoded_resource": "res/drawable-xhdpi/cus.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/cus.png",
+      "sha256": "548d9a8234d5471449d2a0b3bb082b5969d02760fba3e56d0473fbb8ee5c0af8"
+    },
+    {
+      "role": "ai_cart_selected",
+      "decoded_resource": "res/drawable-xhdpi/cz6.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/cz6.png",
+      "sha256": "a4f2a5533066e945f9462a913073f0fade154f296add9e23790f61ebc8e49d50"
+    },
+    {
+      "role": "ai_cart_unselected",
+      "decoded_resource": "res/drawable-xhdpi/cz5.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/cz5.png",
+      "sha256": "dc48a84ddf77049df987678fa5cd59904ceed1d57b26a7e49142fef90d553e39"
+    },
+    {
+      "role": "mine_selected",
+      "decoded_resource": "res/drawable-xhdpi/cv3.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/cv3.png",
+      "sha256": "4802893cb43eebc5f33077c71297619ac751664551402d4e0a7b607fdebe79a8"
+    },
+    {
+      "role": "mine_unselected",
+      "decoded_resource": "res/drawable-xhdpi/cv4.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/cv4.png",
+      "sha256": "72f7063d138b100459f60b6bcca9cc72c66a829ec8bd6c137bf379f59adf6194"
+    },
+    {
+      "role": "ai_mine_selected",
+      "decoded_resource": "res/drawable-xhdpi/czk.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/czk.png",
+      "sha256": "daa721ab5e939f9bc880510e33bde75dd3b3ecd407ff5ed6cd37d00df1465528"
+    },
+    {
+      "role": "ai_mine_unselected",
+      "decoded_resource": "res/drawable-xhdpi/czj.png",
+      "module_copy": "app/src/main/assets/navigation/jd/res/drawable-xhdpi/czj.png",
+      "sha256": "3505ab012b40c8dad97616e8832b8e6576c364c65365457051886afb7fc667c8"
+    }
+  ]
+}

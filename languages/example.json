@@ -2503,6 +2503,13 @@
   "抖省省": "抖省省",
   "美团": "美团",
   "美团外卖": "美团外卖",
+  "京东": "京东",
+  "支付宝": "支付宝",
+  "逛": "逛",
+  "购物车": "购物车",
+  "理财": "理财",
+  "生活": "生活",
+  "国际": "国际",
   "推荐": "推荐",
   "订单": "订单",
   "神券": "神券",
@@ -2571,5 +2578,11 @@
     "compactLyricsKeepOn": "Keep screen on while compact lyrics are visible",
     "compactLyricsScale": "Compact lyric text scale",
     "compactLyricsOffset": "Compact lyric vertical offset",
-    "compactLyricsSpacing": "Compact lyric line spacing"
+    "compactLyricsSpacing": "Compact lyric line spacing",
+  "解锁 HyperOS 小部件白名单限制": "解锁 HyperOS 小部件白名单限制",
+  "允许安卓小部件参与堆叠": "允许安卓小部件参与堆叠",
+  "解锁安卓小部件柔光玻璃背景": "解锁安卓小部件柔光玻璃背景",
+  "appNavigationLayoutMode": "应用底部导航视图",
+  "appNavigationLayoutList": "列表",
+  "appNavigationLayoutGrid": "网格"
 }

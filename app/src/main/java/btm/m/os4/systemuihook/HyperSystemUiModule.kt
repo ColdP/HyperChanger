@@ -1132,7 +1132,7 @@ class HyperSystemUiModule : XposedModule() {
             runCatching {
                 val preferences = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
                 syncHomeRecentsNativeConfig(
-                    param, readHomeRecentsSettings(preferences), readHomeFolderSettings(preferences), readHomeMaterialSettings(preferences), readHomeNativeDockSettings(preferences), readHomeMultiSplitSettings(preferences), resolveHomeGlassNativeSettings(preferences),
+                    param, readHomeRecentsSettings(preferences), readHomeFolderSettings(preferences), readHomeMaterialSettings(preferences), readHomeNativeDockSettings(preferences), readHomeMultiSplitSettings(preferences), resolveHomeGlassNativeSettings(preferences), readWidgetSettings(preferences),
                 )
             }.onFailure { error ->
                 btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.ERROR, TAG, "Could not sync native desktop recents config", error)
@@ -1148,7 +1148,8 @@ class HyperSystemUiModule : XposedModule() {
             param.packageName == "com.tencent.mobileqq" ||
             param.packageName == "com.ss.android.ugc.lifeservices" ||
             param.packageName == "com.sankuai.meituan" || param.packageName == "com.sankuai.meituan.takeoutnew" ||
-            param.packageName == "com.xunmeng.pinduoduo" || param.packageName == "com.instagram.android" || param.packageName == "com.pinterest" || param.packageName == "com.twitter.android" || param.packageName == "com.github.android"
+            param.packageName == "com.xunmeng.pinduoduo" || param.packageName == "com.instagram.android" || param.packageName == "com.pinterest" || param.packageName == "com.twitter.android" || param.packageName == "com.github.android" ||
+            param.packageName == "com.jingdong.app.mall" || param.packageName == "com.eg.android.AlipayGphone"
         ) {
             othersHooks.installAppNavigation(param)
             return
@@ -1487,6 +1488,7 @@ class HyperSystemUiModule : XposedModule() {
                 PERSONAL_ASSISTANT -> {
                     if (runCatching { android.app.Application.getProcessName() == PERSONAL_ASSISTANT }.getOrDefault(false)) {
                         othersHooks.installPersonalAssistantWallpaperHooks(param.defaultClassLoader, preferences)
+                        othersHooks.installWidgetCapabilityHooks(param.defaultClassLoader, preferences)
                         othersHooks.installWidgetGlassHooks(param.defaultClassLoader, preferences)
                     }
                     // The app-card store and its catalog filters are process-local data

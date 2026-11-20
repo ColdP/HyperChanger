@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <string_view>
 #include "module_safety.h"
+#include "targets/home/widgets/widget_capabilities.h"
 
 using Hook = int (*)(void *, void *, void **);
 using Unhook = int (*)(void *);
@@ -54,7 +55,8 @@ int property_get(const char *name, char *value) {
     start_in_child();
     return original_property != nullptr ? original_property(name, value) : 0;
 }
-void loaded(const char *name, void *) {
+void loaded(const char *name, void *handle) {
+    if (launcher() && getuid() >= 10000) note_widget_library(name, handle);
     start_in_child();
     // Rust launchers can report the linker callback before setprogname has been
     // called. Starting here makes the configuration observer independent of the
@@ -73,6 +75,7 @@ Loaded native_init(const NativeApiEntries *api) {
     if (api == nullptr || api->hook_func == nullptr) return nullptr;
     entry_pid = getpid();
     reveal_hook = api->hook_func;
+    initialize_widget_backend(api->hook_func);
     __android_log_print(ANDROID_LOG_INFO, "HyperChangerFolder",
         "Native entry pid=%d uid=%d spawner=%d launcher=%d", entry_pid, getuid(), spawner(), launcher());
     if (spawner() || launcher()) {

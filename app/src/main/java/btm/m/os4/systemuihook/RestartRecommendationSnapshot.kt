@@ -31,6 +31,7 @@ internal fun restartRecommendationSnapshot(group: String, preferences: SharedPre
     ContactsDialerSettings.read(p)
     PortalSettings.read(p)
     readWidgetGlassSettings(p)
+    readWidgetSettings(p)
     btm.m.liquidglass.hook.XiaohongshuPublishSettings.load(p)
     btm.m.liquidglass.hook.RedditCreateSettings.load(p)
     btm.m.liquidglass.ScopedSettings.apps.forEach {

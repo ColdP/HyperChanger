@@ -14,6 +14,7 @@ internal fun buildHomeLauncherBlob(
     nativeDock: HomeNativeDockSettings = HomeNativeDockSettings(),
     multiSplitEnabled: Boolean = false,
     fullGlass: HomeGlassNativeSettings? = null,
+    widgets: WidgetSettings = WidgetSettings(),
 ): ByteArray {
     require(clearMode in 0..2)
     require(folderColumns in 0..15)
@@ -81,5 +82,8 @@ internal fun buildHomeLauncherBlob(
             record.values.forEach(::u32)
         }
     }
+    u32(0x47444957) // WIDG: independent widget capabilities.
+    u32(1)
+    u32((if (widgets.unlockHyperOs) 1 else 0) or (if (widgets.androidStack) 2 else 0) or (if (widgets.androidGlass) 4 else 0))
     return output.toByteArray()
 }
