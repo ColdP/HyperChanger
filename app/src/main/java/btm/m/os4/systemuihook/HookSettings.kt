@@ -1327,6 +1327,26 @@ private fun SharedPreferences.write(value: HookSettings) {
         .putInt(KEY_SHORTCUT_SOFT_GLASS_BACKDROP_BLUR_RADIUS, value.shortcutSoftGlassBackdropBlurRadius)
         .putInt(KEY_SHORTCUT_SOFT_GLASS_BLUR_RADIUS, value.shortcutSoftGlassBlurRadius)
         .putFloat(KEY_SHORTCUT_SOFT_GLASS_LUMINANCE, value.shortcutSoftGlassLuminance)
+        // Read by toSettings() since these switches existed, and never written until now: the
+        // settings page updated the in-memory copy and the UI redrew, the features worked
+        // (SystemUI is driven over the probe bridge, not through this file), and the switch was
+        // back to its default the moment the settings process restarted.
+        .putBoolean(
+            KEY_LOCKSCREEN_MUSIC_LOCKSCREEN_ENABLED,
+            value.lockscreenMusicLockscreenEnabled,
+        )
+        .putBoolean(
+            KEY_LOCKSCREEN_MUSIC_LYRICS_ENABLED,
+            value.lockscreenMusicLyricsEnabled,
+        )
+        .putBoolean(
+            KEY_LOCKSCREEN_MUSIC_LYRICS_HDR_ENABLED,
+            value.lockscreenMusicLyricsHdrEnabled,
+        )
+        .putBoolean(
+            KEY_LOCKSCREEN_MUSIC_LYRICS_KEEP_SCREEN_ON,
+            value.lockscreenMusicLyricsKeepScreenOn,
+        )
         .putBoolean(KEY_LOCKSCREEN_WIDGET_ENABLED, value.lockscreenWidgetEnabled)
         .putBoolean(KEY_LOCKSCREEN_WIDGET_HIDE_ON_AOD, value.lockscreenWidgetHideOnAod)
         .putString(KEY_LOCKSCREEN_WIDGET_DEVICE_NAME, value.lockscreenWidgetDeviceName.take(64))
