@@ -4,7 +4,10 @@ package btm.m.os4.systemuihook
 
 import android.app.KeyguardManager
 import android.app.WallpaperManager
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -17,8 +20,10 @@ import android.net.Uri
 import android.graphics.Rect
 import android.graphics.drawable.Drawable
 import android.os.BatteryManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
@@ -1144,8 +1149,28 @@ internal class LockscreenWidgetController(
     // contribution per root so their own AOD and gesture translations remain untouched.
     private val appliedClockAvoidanceOffsets = WeakHashMap<View, ClockTranslationTransform>()
     private val appliedClockAvoidanceScales = WeakHashMap<View, ClockScaleTransform>()
+    private var screenReceiverRegistered = false
+    private fun isScreenInteractive(): Boolean =
+        context.getSystemService(PowerManager::class.java)?.isInteractive != false
+
+    private val screenStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_SCREEN_OFF -> {
+                    handler.removeCallbacks(refreshRunnable)
+                    host.removeCallbacks(animationFollower)
+                    followerPosted = false
+                }
+                Intent.ACTION_SCREEN_ON -> {
+                    handler.removeCallbacks(refreshRunnable)
+                    handler.post(refreshRunnable)
+                }
+            }
+        }
+    }
     private val refreshRunnable = object : Runnable {
         override fun run() {
+            if (!isScreenInteractive()) return
             refresh()
             handler.postDelayed(this, 30_000L)
         }
@@ -1160,7 +1185,7 @@ internal class LockscreenWidgetController(
     }
     private val clockAvoidancePreDrawListener = ViewTreeObserver.OnPreDrawListener {
         val widget = view
-        if (targetVisible && widget?.isAttachedToWindow == true && widget.visibility == View.VISIBLE) {
+        if (targetVisible && widget?.isAttachedToWindow == true && widget.isShown) {
             adjustClockForWidget(widget)
         }
         true
@@ -1168,7 +1193,9 @@ internal class LockscreenWidgetController(
     private val animationFollower = object : Runnable {
         override fun run() {
             val widget = view
-            if (targetVisible && widget?.visibility == View.VISIBLE) {
+            val keyguard = context.getSystemService(KeyguardManager::class.java)
+            val locked = keyguard?.let { it.isKeyguardLocked || it.isDeviceLocked } ?: false
+            if (targetVisible && locked && isScreenInteractive() && widget != null && widget.isShown) {
                 position()
                 host.postOnAnimation(this)
             } else {
@@ -1187,10 +1214,30 @@ internal class LockscreenWidgetController(
         host.rootView.viewTreeObserver.addOnPreDrawListener(clockAvoidancePreDrawListener)
         leftShortcut.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> schedulePosition() }
         rightShortcut.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> schedulePosition() }
-        handler.post(refreshRunnable)
+        val screenFilter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+        }
+        runCatching {
+            val app = context.applicationContext ?: context
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                app.registerReceiver(screenStateReceiver, screenFilter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("DEPRECATION")
+                app.registerReceiver(screenStateReceiver, screenFilter)
+            }
+            screenReceiverRegistered = true
+        }
+        if (isScreenInteractive()) {
+            handler.post(refreshRunnable)
+        }
     }
 
     fun destroy() {
+        if (screenReceiverRegistered) {
+            runCatching { (context.applicationContext ?: context).unregisterReceiver(screenStateReceiver) }
+            screenReceiverRegistered = false
+        }
         LockscreenWidgetSceneState.unregister(this)
         LockscreenMediaPresentationBridge.unregister(this)
         runCatching { preferences.unregisterOnSharedPreferenceChangeListener(preferenceListener) }
@@ -1663,9 +1710,13 @@ internal class LockscreenWidgetController(
         return null
     }
 
-    private fun viewIdName(view: View): String = runCatching {
-        view.resources.getResourceEntryName(view.id)
-    }.getOrDefault("")
+    private fun viewIdName(view: View): String {
+        val id = view.id
+        if (id == View.NO_ID || id == 0) return ""
+        return runCatching {
+            view.resources.getResourceEntryName(id)
+        }.getOrDefault("")
+    }
 
     private fun schedulePosition() {
         if (positionPosted) return

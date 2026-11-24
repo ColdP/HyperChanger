@@ -15,6 +15,7 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.view.Choreographer
 import android.view.MotionEvent
@@ -224,6 +225,7 @@ internal class LockscreenCapsuleImmersiveHost(
     fun destroy() {
         if (registered) runCatching { context.unregisterReceiver(receiver) }
         registered = false
+        layer.stopAnimation()
         handler.removeCallbacksAndMessages(null)
         runCatching { host.removeView(layer) }
     }
@@ -264,17 +266,65 @@ private class MapImmersiveLayer(context: Context) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val route = Path()
     private var phase = 0f
+    private var animating = false
+    private val tick = object : Runnable {
+        override fun run() {
+            if (!shouldAnimate()) {
+                animating = false
+                return
+            }
+            phase = (phase + .035f) % 1f
+            invalidate()
+            postDelayed(this, 16L)
+        }
+    }
 
     init {
         setBackgroundColor(Color.argb(235, 8, 18, 26))
         isClickable = true
-        post(object : Runnable {
-            override fun run() {
-                phase = (phase + .035f) % 1f
-                invalidate()
-                postDelayed(this, 16L)
+    }
+
+    private fun isScreenInteractive(): Boolean =
+        context.getSystemService(PowerManager::class.java)?.isInteractive != false
+
+    private fun shouldAnimate(): Boolean =
+        isAttachedToWindow && windowVisibility == VISIBLE && visibility == VISIBLE && isScreenInteractive()
+
+    private fun syncAnimationState() {
+        if (shouldAnimate()) {
+            if (!animating) {
+                animating = true
+                removeCallbacks(tick)
+                postDelayed(tick, 16L)
             }
-        })
+        } else {
+            stopAnimation()
+        }
+    }
+
+    fun stopAnimation() {
+        animating = false
+        removeCallbacks(tick)
+    }
+
+    override fun setVisibility(visibility: Int) {
+        super.setVisibility(visibility)
+        syncAnimationState()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        syncAnimationState()
+    }
+
+    override fun onDetachedFromWindow() {
+        stopAnimation()
+        super.onDetachedFromWindow()
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        syncAnimationState()
     }
 
     override fun onDraw(canvas: Canvas) {

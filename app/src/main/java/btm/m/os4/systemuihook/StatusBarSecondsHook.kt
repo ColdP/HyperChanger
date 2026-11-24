@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 package btm.m.os4.systemuihook
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.os.Build
+import android.os.PowerManager
 import android.os.SystemClock
 import android.widget.TextView
 import btm.m.os4.systemuihook.ModuleLog as Log
@@ -19,6 +25,43 @@ internal class StatusBarSecondsHook(
     private val clocks = WeakHashMap<TextView, ClockState>()
     private var settings = StatusBarSecondsSettings()
     private var preferenceListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
+    @Volatile private var screenReceiverRegistered = false
+
+    private fun isScreenInteractive(context: Context): Boolean =
+        context.getSystemService(PowerManager::class.java)?.isInteractive != false
+
+    private fun ensureScreenReceiver(context: Context) {
+        if (screenReceiverRegistered) return
+        val app = context.applicationContext ?: return
+        synchronized(this) {
+            if (screenReceiverRegistered) return
+            val receiver = object : BroadcastReceiver() {
+                override fun onReceive(ctx: Context?, intent: Intent?) {
+                    when (intent?.action) {
+                        Intent.ACTION_SCREEN_OFF -> {
+                            synchronized(clocks) { clocks.values.toList() }.forEach { it.stopTicker() }
+                        }
+                        Intent.ACTION_SCREEN_ON -> {
+                            synchronized(clocks) { clocks.values.toList() }.forEach { it.renderAfterOemUpdate() }
+                        }
+                    }
+                }
+            }
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_SCREEN_ON)
+            }
+            runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    app.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+                } else {
+                    @Suppress("DEPRECATION")
+                    app.registerReceiver(receiver, filter)
+                }
+                screenReceiverRegistered = true
+            }
+        }
+    }
 
     fun install(classLoader: ClassLoader, preferences: SharedPreferences) {
         runCatching {
@@ -75,13 +118,18 @@ internal class StatusBarSecondsHook(
             }
         }
 
+        fun stopTicker() {
+            tickerOn = false
+            view.removeCallbacks(tick)
+        }
+
         fun renderAfterOemUpdate() {
+            ensureScreenReceiver(view.context)
             val enabled = settings.mode == STATUS_BAR_SECONDS_MODE_ALWAYS ||
                 (settings.mode == STATUS_BAR_SECONDS_MODE_LONG_PRESS &&
                     activeUntil > SystemClock.elapsedRealtime())
-            if (!enabled || !view.isAttachedToWindow || !view.isShown) {
-                tickerOn = false
-                view.removeCallbacks(tick)
+            if (!enabled || !view.isAttachedToWindow || !view.isShown || !isScreenInteractive(view.context)) {
+                stopTicker()
                 return
             }
             val base = view.text?.toString().orEmpty()
