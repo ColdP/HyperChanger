@@ -30,16 +30,30 @@ internal const val MAX_SETTINGS_APP_ENTRY_TITLE_LENGTH = 24
  * Dashboard entry labels, keyed by the header id's **resource entry name** (for example
  * `my_device`). Names survive Settings upgrades; the numeric `R.id` values do not.
  */
-internal fun readSettingsEntryLabels(p: SharedPreferences): Map<String, String> = runCatching {
+@Volatile private var cachedEntryLabelsRaw: String? = null
+@Volatile private var cachedEntryLabelsMap: Map<String, String> = emptyMap()
+
+internal fun readSettingsEntryLabels(p: SharedPreferences): Map<String, String> {
     val raw = p.getString(KEY_SETTINGS_APP_ENTRY_LABELS, "{}") ?: "{}"
-    val json = JSONObject(raw)
-    json.keys().asSequence()
-        .mapNotNull { key ->
-            val value = json.optString(key).trim().take(MAX_SETTINGS_APP_ENTRY_TITLE_LENGTH)
-            key.takeIf { value.isNotEmpty() }?.let { it to value }
-        }
-        .toMap()
-}.getOrDefault(emptyMap())
+    if (raw == cachedEntryLabelsRaw) return cachedEntryLabelsMap
+    if (raw.isEmpty() || raw == "{}") {
+        cachedEntryLabelsRaw = raw
+        cachedEntryLabelsMap = emptyMap()
+        return emptyMap()
+    }
+    val parsed = runCatching {
+        val json = JSONObject(raw)
+        json.keys().asSequence()
+            .mapNotNull { key ->
+                val value = json.optString(key).trim().take(MAX_SETTINGS_APP_ENTRY_TITLE_LENGTH)
+                key.takeIf { value.isNotEmpty() }?.let { it to value }
+            }
+            .toMap()
+    }.getOrDefault(emptyMap())
+    cachedEntryLabelsRaw = raw
+    cachedEntryLabelsMap = parsed
+    return parsed
+}
 
 internal data class SettingsAppPreferences(
     val unlockNeverScreenTimeout: Boolean = false,

@@ -3,6 +3,7 @@
 package btm.m.os4.systemuihook
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.net.Uri
 import android.os.SystemClock
 import java.util.concurrent.ConcurrentHashMap
@@ -97,6 +98,36 @@ object SettingsAppearanceSources {
     // visible shortly after the module settings are changed.
     private const val CACHE_TTL_MS = 750L
     private val cache = ConcurrentHashMap<String, CacheEntry>()
+    @Volatile private var remoteAppearance: SharedPreferences? = null
+    @Volatile private var remoteProfile: SharedPreferences? = null
+
+    fun attachRemotePreferences(appearance: SharedPreferences, profile: SharedPreferences) {
+        remoteAppearance = appearance
+        remoteProfile = profile
+    }
+
+    private fun populatedRemoteAppearance(): SharedPreferences? =
+        remoteAppearance?.takeIf { runCatching { it.all.isNotEmpty() }.getOrDefault(false) }
+
+    /** Fast in-memory read from remote preferences; avoids waking the module ContentProvider. */
+    fun deviceInterfaceStyle(context: Context): Int {
+        val prefs = populatedRemoteAppearance()
+        if (prefs != null) {
+            val fallback = if (prefs.getBoolean("tutorial_card_enabled", false)) DEVICE_INTERFACE_STYLE_ONE else DEVICE_INTERFACE_STYLE_SYSTEM
+            return prefs.getInt("device_interface_style", fallback)
+                .coerceIn(DEVICE_INTERFACE_STYLE_SYSTEM, DEVICE_INTERFACE_STYLE_FOUR)
+        }
+        return query(context, APPEARANCE_SLOT_DEVICE_IMAGE).deviceInterfaceStyle
+    }
+
+    /** Fast in-memory read from remote preferences; avoids waking the module ContentProvider. */
+    fun lightCardOpacity(context: Context): Int {
+        val prefs = populatedRemoteAppearance()
+        if (prefs != null) {
+            return prefs.getInt("light_card_opacity", 100).coerceIn(0, 100)
+        }
+        return query(context, APPEARANCE_SLOT_HOME).lightCardOpacity.coerceIn(0, 100)
+    }
 
     fun uri(slot: String) = Uri.Builder()
         .scheme("content")
@@ -113,6 +144,13 @@ object SettingsAppearanceSources {
             if (now - entry.loadedAt < CACHE_TTL_MS) return entry.source
         }
         val uri = uri(slot)
+        populatedRemoteAppearance()?.let { prefs ->
+            if (isDisabledSlotInRemote(prefs, slot)) {
+                val localSource = fromDisabledRemote(prefs, slot, uri)
+                cache[key] = CacheEntry(localSource, now)
+                return localSource
+            }
+        }
         val source = runCatching {
             context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                 if (!cursor.moveToFirst()) return@use null
@@ -192,6 +230,39 @@ object SettingsAppearanceSources {
             context != null -> cache.keys.removeIf { it.startsWith("${context.packageName}:") }
             slot != null -> cache.keys.removeIf { it.endsWith(":$slot") }
         }
+    }
+
+    private fun isDisabledSlotInRemote(prefs: SharedPreferences, slot: String): Boolean = when (slot) {
+        APPEARANCE_SLOT_HOME -> !prefs.getBoolean("home_enabled", false)
+        APPEARANCE_SLOT_DEVICE -> !prefs.getBoolean("device_enabled", false)
+        APPEARANCE_SLOT_LOGO -> prefs.getInt("logo_mode", LOGO_MODE_SYSTEM) == LOGO_MODE_SYSTEM
+        else -> false
+    }
+
+    private fun fromDisabledRemote(prefs: SharedPreferences, slot: String, uri: Uri): SettingsAppearanceSource {
+        val font = when (slot) {
+            APPEARANCE_SLOT_HOME -> prefs.getInt("home_font", 0)
+            APPEARANCE_SLOT_DEVICE -> prefs.getInt("device_font", 0)
+            else -> 0
+        }.coerceIn(0, 2)
+        val fallbackStyle = if (prefs.getBoolean("tutorial_card_enabled", false)) DEVICE_INTERFACE_STYLE_ONE else DEVICE_INTERFACE_STYLE_SYSTEM
+        val processorIcon = remoteProfile?.let { profilePrefs ->
+            runCatching {
+                val p = profilePrefs.toDeviceProfileSettings()
+                if (p.enabled) p.processorIcon else PROCESSOR_ICON_SYSTEM
+            }.getOrDefault(PROCESSOR_ICON_SYSTEM)
+        } ?: PROCESSOR_ICON_SYSTEM
+        return missing(slot, uri).copy(
+            fontMode = font,
+            scale = prefs.getInt("logo_scale", 100).coerceIn(50, 200),
+            logoMode = prefs.getInt("logo_mode", LOGO_MODE_SYSTEM).coerceIn(LOGO_MODE_SYSTEM, LOGO_MODE_KEEP_ADVANCED_MATERIAL),
+            lightCardOpacity = prefs.getInt("light_card_opacity", 100).coerceIn(0, 100),
+            tutorialCardEnabled = prefs.getBoolean("tutorial_card_enabled", false),
+            deviceInterfaceStyle = prefs.getInt("device_interface_style", fallbackStyle)
+                .coerceIn(DEVICE_INTERFACE_STYLE_SYSTEM, DEVICE_INTERFACE_STYLE_FOUR),
+            style3UpdateStatusVisible = prefs.getBoolean("style3_update_status_visible", true),
+            processorIconReplacement = processorIcon.coerceIn(0, PROCESSOR_ICON_MAX),
+        )
     }
 
     private fun missing(slot: String, uri: Uri) = SettingsAppearanceSource(

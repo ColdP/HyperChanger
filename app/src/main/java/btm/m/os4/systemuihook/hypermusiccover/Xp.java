@@ -165,11 +165,35 @@ public final class Xp {
                 }
             };
 
-    private static Field field(Object obj, String name) {
-        for (Class<?> c = obj.getClass(); c != null; c = c.getSuperclass()) {
+    private static final Object MISSING_MEMBER = new Object();
+    private static final ClassValue<java.util.concurrent.ConcurrentHashMap<String, Object>>
+            RESOLVED_FIELDS =
+            new ClassValue<java.util.concurrent.ConcurrentHashMap<String, Object>>() {
+                @Override
+                protected java.util.concurrent.ConcurrentHashMap<String, Object> computeValue(
+                        Class<?> type) {
+                    return new java.util.concurrent.ConcurrentHashMap<>();
+                }
+            };
+
+    private static Field findFieldOrNull(Class<?> cls, String name) {
+        java.util.concurrent.ConcurrentHashMap<String, Object> cache = RESOLVED_FIELDS.get(cls);
+        Object cached = cache.get(name);
+        if (cached != null) return cached == MISSING_MEMBER ? null : (Field) cached;
+        for (Class<?> c = cls; c != null; c = c.getSuperclass()) {
             Field f = DECLARED_FIELDS.get(c).get(name);
-            if (f != null) return f;
+            if (f != null) {
+                cache.put(name, f);
+                return f;
+            }
         }
+        cache.put(name, MISSING_MEMBER);
+        return null;
+    }
+
+    private static Field field(Object obj, String name) {
+        Field f = findFieldOrNull(obj.getClass(), name);
+        if (f != null) return f;
         throw new IllegalArgumentException("no field " + obj.getClass().getName() + "." + name);
     }
 
@@ -178,6 +202,18 @@ public final class Xp {
             return field(obj, name).get(obj);
         } catch (IllegalAccessException e) {
             throw new IllegalStateException(e);
+        }
+    }
+
+    /** Non-throwing optional field lookup; caches misses to avoid hot-path stack walks. */
+    public static Object tryGetObjectField(Object obj, String name) {
+        if (obj == null) return null;
+        Field f = findFieldOrNull(obj.getClass(), name);
+        if (f == null) return null;
+        try {
+            return f.get(obj);
+        } catch (Throwable ignored) {
+            return null;
         }
     }
 
@@ -205,12 +241,28 @@ public final class Xp {
      * calls is: the OEM setters it drives take one argument of one type.
      */
     public static Object callMethod(Object obj, String name, Object... args) {
-        Method m = findMethod(obj.getClass(), name, args);
+        Method m = findMethodOrNull(obj.getClass(), name, args);
+        if (m == null) {
+            throw new IllegalArgumentException("no method " + obj.getClass().getName() + "." + name
+                    + "/" + args.length);
+        }
         try {
             return m.invoke(obj, args);
         } catch (ReflectiveOperationException e) {
             Throwable cause = e.getCause() != null ? e.getCause() : e;
             throw new IllegalStateException(obj.getClass().getName() + "." + name + " threw", cause);
+        }
+    }
+
+    /** Non-throwing optional method call; returns null if missing or if invocation fails. */
+    public static Object tryCallMethod(Object obj, String name, Object... args) {
+        if (obj == null) return null;
+        Method m = findMethodOrNull(obj.getClass(), name, args);
+        if (m == null) return null;
+        try {
+            return m.invoke(obj, args);
+        } catch (Throwable ignored) {
+            return null;
         }
     }
 
@@ -283,7 +335,7 @@ public final class Xp {
      * The order is the one the scan had: nearest class first, and within a class the order
      * getDeclaredMethods() reported, so a name with several overloads still picks the same one.
      */
-    private static Method findMethod(Class<?> cls, String name, Object[] args) {
+    private static Method findMethodOrNull(Class<?> cls, String name, Object[] args) {
         for (Class<?> c = cls; c != null; c = c.getSuperclass()) {
             Overload[] cands = DECLARED_METHODS.get(c).get(name);
             if (cands == null) continue;
@@ -297,8 +349,7 @@ public final class Xp {
                 if (fits) return o.method;
             }
         }
-        throw new IllegalArgumentException("no method " + cls.getName() + "." + name
-                + "/" + args.length);
+        return null;
     }
 
     /** Reflection hands us boxed values for primitive parameters; treat the pairs as equal. */

@@ -17,16 +17,26 @@ import btm.m.os4.systemuihook.hypermusiccover.Xp;
 
 /** Distance-field liquid optics, over refreshed hardware frames in screen coordinates. */
 final class IosShadeLiquidLens {
+    /**
+     * Half-resolution capture and optics pass: 4x fewer SurfaceFlinger capture pixels, 4x smaller
+     * Vulkan blur/shader render targets, and 0.5x blur sigma. The outer rounded corner clip and
+     * 1dp glass border remain at native display resolution in IosShadeGlassView.
+     */
+    private static final float CAPTURE_SCALE = 0.5f;
+    private static final long REFRESH_INTERVAL_MS = 100L;
+    private static final int STRIP_HEIGHT_BUCKET = 256;
+
     private static final String OPTICS =
             "uniform shader content;\n"
             + "uniform float2 size; uniform float2 sceneSize;\n"
+            + "uniform float2 contentScale; uniform float2 invContentScale;\n"
             + "uniform float offsetY; uniform float sourceTop; uniform float radius; uniform float density;\n"
             + "uniform float outputTop;\n"
             + "float2 safeNormal(float2 v) { return v / max(length(v), 0.0001); }\n"
             + "half4 sampleScene(float2 p) {\n"
-            + " return content.eval(clamp(p + float2(0.0, offsetY - sourceTop), float2(0.5), sceneSize - 0.5)); }\n"
+            + " return content.eval(clamp((p + float2(0.0, offsetY - sourceTop)) * contentScale, float2(0.5), sceneSize - 0.5)); }\n"
             + "half4 main(float2 local) {\n"
-            + " float2 p = local + float2(0.0, outputTop);\n"
+            + " float2 p = local * invContentScale + float2(0.0, outputTop);\n"
             + " float2 hs = size * 0.5; float2 cc = p - hs;\n"
             + " float2 q = abs(cc) - (hs - radius);\n"
             + " float sd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;\n"
@@ -72,8 +82,9 @@ final class IosShadeLiquidLens {
     private RenderEffect sourceEffect, blurredSource;
     private int appliedBlur = -1, renderWidth, renderHeight;
     private float outputTop = Float.NaN, appliedDensity = Float.NaN;
+    private float appliedScaleX = Float.NaN, appliedScaleY = Float.NaN;
     private boolean effectDirty;
-    private int sourceTop;
+    private int sourceTop, sourceCropWidth, sourceCropHeight;
     private boolean running, pending, unavailable;
     private int generation, failures, width, height, sheetWidth, sheetHeight;
     private float offsetY, radius;
@@ -128,17 +139,30 @@ final class IosShadeLiquidLens {
 
     private void prepareEffect() {
         float density = host.getResources().getDisplayMetrics().density;
-        int blur = IosShadeBackdropBlur.currentRadius(root);
         float corner = Math.max(0f, Math.min(radius, Math.min(sheetWidth, sheetHeight) * .5f));
+        float scaleX = (float) frame.getWidth() / Math.max(1, sourceCropWidth);
+        float scaleY = (float) frame.getHeight() / Math.max(1, sourceCropHeight);
+        float invScaleX = 1f / Math.max(0.001f, scaleX);
+        float invScaleY = 1f / Math.max(0.001f, scaleY);
+        int blur = IosShadeBlurEffects.quantize(IosShadeBackdropBlur.currentRadius(root) * scaleY);
         // Keep all padded source pixels inside the effect input bounds. A tight
         // output-band node clips displaced samples before the shader can read them.
         float top = sourceTop - offsetY;
         if (renderWidth != frame.getWidth() || renderHeight != frame.getHeight()) {
             renderWidth = frame.getWidth(); renderHeight = frame.getHeight();
             optics.setPosition(0, 0, renderWidth, renderHeight);
+            optics.setPivotX(0f);
+            optics.setPivotY(0f);
             RecordingCanvas recording = optics.beginRecording(renderWidth, renderHeight);
             recording.drawRect(0f, 0f, renderWidth, renderHeight, filtered);
             optics.endRecording();
+            effectDirty = true;
+        }
+        if (appliedScaleX != scaleX || appliedScaleY != scaleY) {
+            appliedScaleX = scaleX;
+            appliedScaleY = scaleY;
+            optics.setScaleX(invScaleX);
+            optics.setScaleY(invScaleY);
             effectDirty = true;
         }
         if (top != outputTop || appliedDensity != density) {
@@ -148,15 +172,16 @@ final class IosShadeLiquidLens {
             appliedDensity = density;
         }
         if (blurredSource == null || appliedBlur != blur) {
-            // Blur the source pixels first, so every displaced/chromatic sample is blurred.
+            // Blur the scaled source pixels first, so every displaced/chromatic sample is blurred.
             blurredSource = blur > 0 ? RenderEffect.createBlurEffect(blur, blur, sourceEffect, Shader.TileMode.CLAMP) : sourceEffect;
             appliedBlur = blur;
             effectDirty = true;
         }
         if (!effectDirty) return;
         shader.setFloatUniform("size", (float) sheetWidth, (float) sheetHeight);
-        shader.setFloatUniform("sceneSize", frame == null ? (float) width : (float) frame.getWidth(),
-                frame == null ? (float) height : (float) frame.getHeight());
+        shader.setFloatUniform("sceneSize", (float) frame.getWidth(), (float) frame.getHeight());
+        shader.setFloatUniform("contentScale", scaleX, scaleY);
+        shader.setFloatUniform("invContentScale", invScaleX, invScaleY);
         shader.setFloatUniform("offsetY", offsetY);
         shader.setFloatUniform("sourceTop", (float) sourceTop);
         shader.setFloatUniform("radius", corner);
@@ -176,10 +201,20 @@ final class IosShadeLiquidLens {
         int request = generation;
         float density = host.getResources().getDisplayMetrics().density;
         float bottom = offsetY + sheetHeight;
-        float support = 3f * IosShadeBackdropBlur.currentRadius(root);
-        int top = Math.min(height - 1, Math.max(0, (int) Math.floor(bottom - radius - 96f * density - support)));
-        int end = Math.min(height, Math.max(top + 1, (int) Math.ceil(bottom + 64f * density + support)));
-        IosShadeBackdropCapture.request(root, top, end, bitmap -> {
+        float support = Math.min(180f * density, 2.5f * IosShadeBackdropBlur.currentRadius(root));
+        int neededTop = (int) Math.floor(bottom - radius - 96f * density - support);
+        int neededEnd = (int) Math.ceil(bottom + 64f * density + support);
+        // Quantize the strip height to fixed buckets so Skia Vulkan reuses scratch render targets
+        // instead of allocating new multi-megabyte GrVkTextureRenderTargets on every capture.
+        int neededHeight = Math.max(1, neededEnd - neededTop);
+        int stripHeight = Math.min(height,
+                Math.max(STRIP_HEIGHT_BUCKET, ((neededHeight + STRIP_HEIGHT_BUCKET - 1) / STRIP_HEIGHT_BUCKET) * STRIP_HEIGHT_BUCKET));
+        int center = (neededTop + neededEnd) / 2;
+        int top = Math.max(0, Math.min(height - stripHeight, center - stripHeight / 2));
+        int end = Math.min(height, top + stripHeight);
+        int cropWidth = width;
+        int cropHeight = Math.max(1, end - top);
+        IosShadeBackdropCapture.request(root, top, end, CAPTURE_SCALE, bitmap -> {
             if (!running || request != generation) {
                 // Only unpublished frames are safe to recycle explicitly.
                 if (bitmap != null) bitmap.recycle();
@@ -191,6 +226,8 @@ final class IosShadeLiquidLens {
                 failures = 0;
                 frame = bitmap;
                 sourceTop = top;
+                sourceCropWidth = cropWidth;
+                sourceCropHeight = cropHeight;
                 try {
                     texture = new BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
                     texture.setFilterMode(BitmapShader.FILTER_MODE_LINEAR);
@@ -202,7 +239,7 @@ final class IosShadeLiquidLens {
                 } catch (Throwable error) { fail(error); return; }
             } else failures++;
             if (running && request == generation && failures < 4) {
-                long delay = failures == 0 ? Math.max(1L, 50L - (SystemClock.uptimeMillis() - requestedAt))
+                long delay = failures == 0 ? Math.max(1L, REFRESH_INTERVAL_MS - (SystemClock.uptimeMillis() - requestedAt))
                         : 80L << (failures - 1);
                 host.postDelayed(refresh, delay);
             }
@@ -254,7 +291,8 @@ final class IosShadeLiquidLens {
         sourceEffect = blurredSource = null;
         appliedBlur = -1;
         renderWidth = renderHeight = 0;
-        outputTop = appliedDensity = Float.NaN;
+        outputTop = appliedDensity = appliedScaleX = appliedScaleY = Float.NaN;
+        sourceCropWidth = sourceCropHeight = 0;
         effectDirty = true;
     }
 }

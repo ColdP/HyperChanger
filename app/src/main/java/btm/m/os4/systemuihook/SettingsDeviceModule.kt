@@ -51,6 +51,7 @@ class SettingsDeviceModule : XposedModule() {
         val preferences = getRemotePreferences(DEVICE_PROFILE_PREFERENCES)
         val hookPreferences = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
         val appearance = getRemotePreferences(SETTINGS_APPEARANCE_PREFERENCES)
+        SettingsAppearanceSources.attachRemotePreferences(appearance, preferences)
         runCatching {
             if (hookPreferences.getBoolean(KEY_UNLOCK_NEVER_SCREEN_TIMEOUT, false)) {
                 installNeverScreenTimeoutHooks(param.defaultClassLoader)
@@ -83,7 +84,7 @@ class SettingsDeviceModule : XposedModule() {
             if (homeAppearance || deviceAppearance) {
                 installAppearanceHooks(param.defaultClassLoader, homeAppearance, deviceAppearance, preferences)
             }
-            if (logoAppearance) {
+            if (logoAppearance && !customDeviceInterface) {
                 installPersistentLogoHooks()
                 installLogoResourceHooks()
             }
@@ -1110,7 +1111,7 @@ class SettingsDeviceModule : XposedModule() {
             })
         }.onFailure { error -> btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not hook Settings home appearance", error) }
 
-        if (deviceEnabled) runCatching {
+        if (homeEnabled) runCatching {
             val settingsFragment = classLoader.loadClass("com.android.settings.SettingsFragment")
             settingsFragment.declaredMethods.firstOrNull {
                 it.name == "onViewCreated" && it.parameterCount == 2
@@ -1321,7 +1322,7 @@ class SettingsDeviceModule : XposedModule() {
                     val result = chain.proceed()
                     val child = chain.getArg(1) as? View
                     val header = child?.findViewWithTag<View>("hyperchanger_model_build_header")
-                    if (header?.visibility == View.VISIBLE && SettingsAppearanceSources.query(header.context, APPEARANCE_SLOT_DEVICE_IMAGE).deviceInterfaceStyle == DEVICE_INTERFACE_STYLE_THREE) {
+                    if (header?.visibility == View.VISIBLE && SettingsAppearanceSources.deviceInterfaceStyle(header.context) == DEVICE_INTERFACE_STYLE_THREE) {
                         // The stock header contributes another 20dp below our divider block.
                         // Keep the native processor row intact; tighten only the header's trailing gap.
                         (chain.getArg(0) as? android.graphics.Rect)?.let { it.bottom = (it.bottom * .60f).roundToInt() }
@@ -1439,14 +1440,15 @@ class SettingsDeviceModule : XposedModule() {
     private fun installProcessorIconHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
         runCatching {
             val presenter = classLoader.loadClass(DEVICE_BASIC_INFO_PRESENTER)
+            var cachedCpuIcon: Int? = null
             hook(ImageView::class.java.getMethod("setImageResource", Int::class.javaPrimitiveType))
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .setId("settings-device-profile:processor-icon")
                 .intercept { chain ->
                     val view = chain.thisObject as? ImageView
                     val resId = chain.getArg(0) as? Int
-                    val drawable = if (view != null && resId != null) {
-                        processorIconDrawable(view, presenter, resId, preferences)
+                    val drawable = if (view != null && resId != null && (cachedCpuIcon == null || resId == cachedCpuIcon)) {
+                        processorIconDrawable(view, presenter, resId, cachedCpuIcon, { cachedCpuIcon = it }, preferences)
                     } else null
                     if (drawable == null || view == null) {
                         chain.proceed()
@@ -1463,10 +1465,13 @@ class SettingsDeviceModule : XposedModule() {
         view: ImageView,
         presenter: Class<*>,
         resId: Int,
+        cachedCpuIcon: Int?,
+        onCpuIconResolved: (Int) -> Unit,
         preferences: SharedPreferences,
     ): Drawable? {
         val profile = preferences.toDeviceProfileSettings()
         if (!profile.enabled) return null
+        val isCustom = profile.processorIcon == PROCESSOR_ICON_CUSTOM
         val moduleRes = when (profile.processorIcon) {
             PROCESSOR_ICON_XRING -> R.drawable.ic_cpu_vendor_xring
             PROCESSOR_ICON_DIMENSITY -> R.drawable.ic_cpu_vendor_mediatek
@@ -1474,27 +1479,30 @@ class SettingsDeviceModule : XposedModule() {
             PROCESSOR_ICON_INTEL -> R.drawable.ic_cpu_vendor_intel
             PROCESSOR_ICON_NVIDIA -> R.drawable.ic_cpu_vendor_nvidia
             PROCESSOR_ICON_AMD -> R.drawable.ic_cpu_vendor_amd
-            PROCESSOR_ICON_CUSTOM -> {
-                // Imported through the picker into its own appearance slot. The provider hands the
-                // file over by slot, and LogoDrawableLoader already knows how to turn a PNG/JPEG or
-                // XML/SVG payload into a Drawable.
-                val source = SettingsAppearanceSources.query(view.context, APPEARANCE_SLOT_CPU_ICON)
-                if (!source.exists) return null
-                val custom = LogoDrawableLoader.load(view.context, source) ?: return null
-                val night = view.resources.configuration.uiMode and
-                    android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES
-                return custom.mutate().apply {
-                    if (!source.deviceStyleCustomization.logoKeepsColors(source.slot)) setTint(if (night) 0x99FFFFFF.toInt() else 0x99000000.toInt())
-                }
-            }
+            PROCESSOR_ICON_CUSTOM -> 0
             else -> return null
         }
         // Only rows currently showing the processor icon may be retinted.
-        val cpuIcon = runCatching {
+        // Resolve ICON_MAP lazily after Application initialization so we never trigger
+        // DeviceBasicInfoPresenter.<clinit> during onPackageLoaded.
+        val cpuIcon = cachedCpuIcon ?: runCatching {
             @Suppress("UNCHECKED_CAST")
             (presenter.getField("ICON_MAP").get(null) as Map<Any, Any>)[0] as? Int
-        }.getOrNull() ?: return null
+        }.getOrNull()?.also(onCpuIconResolved) ?: return null
         if (resId != cpuIcon) return null
+        if (isCustom) {
+            // Imported through the picker into its own appearance slot. The provider hands the
+            // file over by slot, and LogoDrawableLoader already knows how to turn a PNG/JPEG or
+            // XML/SVG payload into a Drawable.
+            val source = SettingsAppearanceSources.query(view.context, APPEARANCE_SLOT_CPU_ICON)
+            if (!source.exists) return null
+            val custom = LogoDrawableLoader.load(view.context, source) ?: return null
+            val night = view.resources.configuration.uiMode and
+                android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES
+            return custom.mutate().apply {
+                if (!source.deviceStyleCustomization.logoKeepsColors(source.slot)) setTint(if (night) 0x99FFFFFF.toInt() else 0x99000000.toInt())
+            }
+        }
         val moduleContext = runCatching {
             view.context.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY)
         }.getOrNull() ?: return null

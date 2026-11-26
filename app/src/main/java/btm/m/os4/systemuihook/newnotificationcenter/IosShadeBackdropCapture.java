@@ -35,7 +35,7 @@ final class IosShadeBackdropCapture {
 
     private IosShadeBackdropCapture() {}
 
-    static void request(ViewGroup root, int top, int bottom, Consumer<Bitmap> callback) {
+    static void request(ViewGroup root, int top, int bottom, float scale, Consumer<Bitmap> callback) {
         try {
             int width = root.getWidth(), height = root.getHeight();
             if (width <= 0 || height <= 0 || root.getDisplay() == null) {
@@ -52,8 +52,8 @@ final class IosShadeBackdropCapture {
             int[] location = new int[2];
             root.getLocationOnScreen(location);
             Rect crop = new Rect(location[0], location[1] + top, location[0] + width, location[1] + bottom);
-            float scale = 1f; // Only the narrow optical strip is captured, at native pixel density.
-            WORKER.execute(new CaptureTask(() -> capture(displayId, crop, scale, surface), callback));
+            float boundedScale = Float.isFinite(scale) && scale > 0f ? Math.min(1f, scale) : 1f;
+            WORKER.execute(new CaptureTask(() -> capture(displayId, crop, boundedScale, surface), callback));
         } catch (Throwable error) {
             warn(error);
             callback.accept(null);

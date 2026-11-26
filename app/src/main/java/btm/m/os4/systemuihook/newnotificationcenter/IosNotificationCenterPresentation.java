@@ -96,13 +96,23 @@ public final class IosNotificationCenterPresentation {
         return true;
     };
     private static final ViewTreeObserver.OnGlobalLayoutListener CLEAR_LAYOUT = () -> {
-        clearButtonScanNeeded = true;
+        if (IosNotificationCenterPresentation.hideClearButton) clearButtonScanNeeded = true;
+        depthSourceSearched = false;
         // Clock plugins may populate or replace their minute subtree after initial inflation.
         hostedClockMinuteViews = null;
     };
     private static boolean clearButtonScanNeeded = true;
     private static long lastClearButtonScanUptime;
     private static Drawable lastDepthDrawable;
+    private static WeakReference<ImageView> depthSourceRef = new WeakReference<>(null);
+    private static boolean depthSourceSearched;
+    private static boolean headerChromeSearched;
+    private static boolean parked;
+    private static String cachedHeaderIconData;
+    private static Bitmap cachedHeaderIconBitmap;
+    private static Class<?> cachedClockViewType;
+    private static Object[] cachedClockMetadataTypes;
+    private static boolean clockMetadataTypesResolved;
     private static ViewTreeObserver observer;
     private static ViewTreeObserver clearObserver;
     private static boolean clockUnavailable;
@@ -193,13 +203,13 @@ public final class IosNotificationCenterPresentation {
         wallpaperSheet = sheet;
         if (progress <= 0f) {
             IosNotificationShortcutHost.restore();
-            if (host != null) host.setAlpha(0f);
+            if (host != null && !parked && host.getAlpha() != 0f) host.setAlpha(0f);
             // The native window hide is deferred until this endpoint. Restoring alpha here
             // would expose the list for a frame before that hide reaches the view pipeline.
             // Ownership lasts until restoreStackTransform(), including progress == 0.
             // The live panel predicate is already false at this endpoint.
             if (transformedStack != null) {
-                transformedStack.setAlpha(0f);
+                if (transformedStack.getAlpha() != 0f) transformedStack.setAlpha(0f);
             } else {
                 restoreStackTransform();
             }
@@ -207,7 +217,7 @@ public final class IosNotificationCenterPresentation {
             if (previousProgress > 0f) IosNotificationStackHooks.restoreExpandedRows(stack);
             // Only retain an already-owned header at the exit endpoint. A reset before
             // the first presentation must not acquire and hide the native header.
-            if (host != null) {
+            if (host != null && !parked) {
                 if (notificationHeader == null || oldHeader == null) findHeader();
                 hideNativeHeader();
             }
@@ -219,6 +229,9 @@ public final class IosNotificationCenterPresentation {
             headerExitAnimator = null;
             previousExit.cancel();
         }
+        if (parked && !unparkPresentation()) {
+            releasePresentation();
+        }
         if (host == null && (clockUnavailable || !create())) return;
         // The shade material owner is deliberately released as soon as the previous
         // notification panel closes. A fast re-open can reuse this hosted clock before the
@@ -226,8 +239,9 @@ public final class IosNotificationCenterPresentation {
         // relying on create() having run again. Without this, its containment flag remains
         // native and the MiGlass sampler sees the notification panel's contents.
         if (clock != null) IosShadeMaterial.registerClock(clock);
-        host.setAlpha(progress);
-        if (status != null) status.setAlpha(progress * progress * (3f - 2f * progress));
+        if (host.getAlpha() != progress) host.setAlpha(progress);
+        float statusAlpha = progress * progress * (3f - 2f * progress);
+        if (status != null && status.getAlpha() != statusAlpha) status.setAlpha(statusAlpha);
         sync();
         if (!IosNotificationExitState.isHolding()
                 && (layoutProgress != previousLayout || wasHoldingRows)) {
@@ -298,9 +312,12 @@ public final class IosNotificationCenterPresentation {
             lastDepthRevealBlur = -1;
         }
         if (depth.getAlpha() != wallpaperReveal) depth.setAlpha(wallpaperReveal);
-        if (lastDepthRevealBlur != wallpaperRevealBlur) {
-            depth.setRenderEffect(IosShadeBlurEffects.blur(wallpaperRevealBlur));
-            lastDepthRevealBlur = wallpaperRevealBlur;
+        // Skip full-screen depth blur when hidden, invisible, or while host already blurs the subtree.
+        int effectiveBlur = (depth.getVisibility() != View.VISIBLE || wallpaperReveal <= 0.001f || lastBlur > 0)
+                ? 0 : IosShadeBlurEffects.quantize(wallpaperRevealBlur);
+        if (lastDepthRevealBlur != effectiveBlur) {
+            depth.setRenderEffect(IosShadeBlurEffects.blur(effectiveBlur));
+            lastDepthRevealBlur = effectiveBlur;
         }
     }
 
@@ -321,7 +338,7 @@ public final class IosNotificationCenterPresentation {
     }
 
     public static boolean isActive() {
-        return host != null && progress > 0f;
+        return host != null && !parked && progress > 0f;
     }
 
     static boolean ownsStack(View view) {
@@ -355,7 +372,7 @@ public final class IosNotificationCenterPresentation {
         switching = false;
         gestureActive = false;
         if (oldHeader == null && notificationHeader == null) {
-            releasePresentation();
+            parkPresentation();
             return;
         }
         if (headerExitAnimator != null) {
@@ -375,7 +392,7 @@ public final class IosNotificationCenterPresentation {
         final float customBarTarget = customBar == null ? 0f : customBar.getAlpha();
         restoreHeaderChromeVisibility();
         if (views == null && container == null && customBar == null) {
-            releasePresentation();
+            parkPresentation();
             return;
         }
         final float radius = panel == null ? 18f
@@ -403,7 +420,7 @@ public final class IosNotificationCenterPresentation {
             @Override public void onAnimationEnd(android.animation.Animator animation) {
                 if (headerExitAnimator != animation) return;
                 headerExitAnimator = null;
-                releasePresentation();
+                parkPresentation();
             }
         });
         headerExitAnimator.start();
@@ -449,7 +466,7 @@ public final class IosNotificationCenterPresentation {
             if (!enabled) removeNotificationHeader();
             else {
                 notificationHeaderBar.applySettings();
-                syncNotificationHeader();
+                if (!parked && progress > 0f) syncNotificationHeader();
             }
         }
         syncClearButton();
@@ -763,23 +780,21 @@ public final class IosNotificationCenterPresentation {
         // same smooth-step curve as the sheet alpha avoids a sharp focus jump near the end of
         // an upward swipe when native expansion reports uneven frame deltas.
         float clockVisual = progress * progress * (3f - 2f * progress);
-        int blur = Math.round(28f * panel.getResources().getDisplayMetrics().density
-                * (1f - clockVisual));
-        // RenderEffect changes rebuild a RenderNode. Two-pixel buckets avoid doing that for
-        // subpixel finger deltas while keeping the transition visually smooth.
-        blur = (blur + 1) / 2 * 2;
+        int blur = clockVisual <= 0.02f ? 0
+                : IosShadeBlurEffects.quantize(28f * panel.getResources().getDisplayMetrics().density
+                        * (1f - clockVisual));
         if (blur != lastBlur) {
-            host.setRenderEffect(blur == 0 ? null : IosShadeBlurEffects.blur(blur));
+            host.setRenderEffect(IosShadeBlurEffects.blur(blur));
             lastBlur = blur;
         }
         if (stack != null && blur != lastStackBlur) {
-            stack.setRenderEffect(blur == 0 ? null : IosShadeBlurEffects.blur(blur));
+            stack.setRenderEffect(IosShadeBlurEffects.blur(blur));
             lastStackBlur = blur;
         }
-        int statusBlur = Math.round(12f * panel.getResources().getDisplayMetrics().density * (1f - progress));
-        statusBlur = (statusBlur + 1) / 2 * 2;
+        int statusBlur = progress <= 0.02f ? 0
+                : IosShadeBlurEffects.quantize(12f * panel.getResources().getDisplayMetrics().density * (1f - progress));
         if (status != null && statusBlur != lastStatusBlur) {
-            status.setRenderEffect(statusBlur == 0 ? null : IosShadeBlurEffects.blur(statusBlur));
+            status.setRenderEffect(IosShadeBlurEffects.blur(statusBlur));
             lastStatusBlur = statusBlur;
         }
         syncNotificationHeader();
@@ -818,10 +833,11 @@ public final class IosNotificationCenterPresentation {
         if (notificationHeader != header) {
             notificationHeader = header;
             notificationHeaderAlpha = header.getAlpha();
+            headerChromeSearched = false;
         }
         // The native header carries a gradient blur layer which sits above the
         // mirrored status bar. The hosted lockscreen clock replaces its content.
-        header.setAlpha(0f);
+        if (header.getAlpha() != 0f) header.setAlpha(0f);
         if (wallpaperEnabled) hideHeaderGradient();
         else restoreHeaderChromeVisibility();
         // Hide the notification header's own date. The separately hosted OEM
@@ -841,24 +857,33 @@ public final class IosNotificationCenterPresentation {
 
     private static void hideHeaderGradient() {
         if (window == null) return;
-        if (headerGradient == null) {
-            headerGradient = byId(window, "header_clip");
-            if (headerGradient == null) headerGradient = byId(window, "header_gradient_blur");
-            if (headerGradient != null) headerGradientVisibility = headerGradient.getVisibility();
+        if (!headerChromeSearched) {
+            headerChromeSearched = true;
+            if (headerGradient == null) {
+                headerGradient = byId(window, "header_clip");
+                if (headerGradient == null) headerGradient = byId(window, "header_gradient_blur");
+                if (headerGradient != null) headerGradientVisibility = headerGradient.getVisibility();
+            }
+            if (headerForeground == null) {
+                headerForeground = byId(window, "header_foreground");
+                if (headerForeground != null) headerForegroundVisibility = headerForeground.getVisibility();
+            }
+            if (headerShadow == null) {
+                View headerContainer = byId(window, "shade_header_container");
+                headerShadow = byId(headerContainer, "shadow");
+                if (headerShadow == null) headerShadow = byId(notificationHeader, "shadow");
+                if (headerShadow != null) headerShadowVisibility = headerShadow.getVisibility();
+            }
         }
-        if (headerGradient != null) headerGradient.setVisibility(View.GONE);
-        if (headerForeground == null) {
-            headerForeground = byId(window, "header_foreground");
-            if (headerForeground != null) headerForegroundVisibility = headerForeground.getVisibility();
+        if (headerGradient != null && headerGradient.getVisibility() != View.GONE) {
+            headerGradient.setVisibility(View.GONE);
         }
-        if (headerForeground != null) headerForeground.setVisibility(View.GONE);
-        if (headerShadow == null) {
-            View headerContainer = byId(window, "shade_header_container");
-            headerShadow = byId(headerContainer, "shadow");
-            if (headerShadow == null) headerShadow = byId(notificationHeader, "shadow");
-            if (headerShadow != null) headerShadowVisibility = headerShadow.getVisibility();
+        if (headerForeground != null && headerForeground.getVisibility() != View.GONE) {
+            headerForeground.setVisibility(View.GONE);
         }
-        if (headerShadow != null) headerShadow.setVisibility(View.GONE);
+        if (headerShadow != null && headerShadow.getVisibility() != View.GONE) {
+            headerShadow.setVisibility(View.GONE);
+        }
     }
 
     private static void syncDepth() {
@@ -870,19 +895,39 @@ public final class IosNotificationCenterPresentation {
             lastDepthDrawable = null;
             return;
         }
-        View source = byId(window, "deducted_image_view");
-        if (!(source instanceof ImageView)) return;
-        Drawable drawable = ((ImageView) source).getDrawable();
+        ImageView source = depthSourceRef.get();
+        if (source == null || !source.isAttachedToWindow()) {
+            source = null;
+            if (!depthSourceSearched) {
+                depthSourceSearched = true;
+                View found = byId(window, "deducted_image_view");
+                if (found instanceof ImageView) {
+                    source = (ImageView) found;
+                    depthSourceRef = new WeakReference<>(source);
+                } else {
+                    depthSourceRef = new WeakReference<>(null);
+                }
+            }
+        }
+        if (source == null) return;
+        Drawable drawable = source.getDrawable();
         if (drawable == lastDepthDrawable) return;
         lastDepthDrawable = drawable;
         Drawable copy = drawable == null || drawable.getConstantState() == null
                 ? null : drawable.getConstantState().newDrawable().mutate();
-        depth.setScaleType(((ImageView) source).getScaleType());
+        depth.setScaleType(source.getScaleType());
         depth.setImageDrawable(copy);
-        depth.setVisibility(copy == null ? View.GONE : View.VISIBLE);
+        int desired = copy == null ? View.GONE : View.VISIBLE;
+        if (depth.getVisibility() != desired) depth.setVisibility(desired);
     }
 
     private static void syncStatus() {
+        if (status == null) return;
+        View existing = status.source;
+        if (existing != null && existing.isAttachedToWindow()
+                && existing.getWidth() > 0 && existing.getHeight() > 0) {
+            return;
+        }
         View source = byId(window, "keyguard_status_bar");
         if (source != null && source != status && source.getWidth() > 0 && source.getHeight() > 0) {
             if (status.source != source) {
@@ -904,9 +949,18 @@ public final class IosNotificationCenterPresentation {
         }
         if (notificationHeaderBar != null) notificationHeaderBar.setClearEnabled(true);
         long now = SystemClock.uptimeMillis();
-        boolean retryMissing = clearButtonStates.isEmpty()
-                && now - lastClearButtonScanUptime >= 1000L;
-        if ((clearButtonScanNeeded || retryMissing) && IosShadeClearAction.allowClearScan(window, now)) {
+        boolean hasAttachedCandidate = false;
+        for (View candidate : clearButtonStates.keySet()) {
+            if (candidate != null && candidate.isAttachedToWindow()
+                    && candidate.getRootView() == window.getRootView()) {
+                hasAttachedCandidate = true;
+                break;
+            }
+        }
+        boolean allowRescan = !hasAttachedCandidate
+                ? (clearButtonScanNeeded || now - lastClearButtonScanUptime >= 1000L)
+                : (clearButtonScanNeeded && now - lastClearButtonScanUptime >= 1000L);
+        if (allowRescan && IosShadeClearAction.allowClearScan(window, now)) {
             lastClearButtonScanUptime = now;
             ArrayList<View> candidates = new ArrayList<>();
             collectClearButtons(window, candidates);
@@ -929,8 +983,9 @@ public final class IosNotificationCenterPresentation {
             View candidate = entry.getKey();
             int[] state = entry.getValue();
             if (candidate == null || state == null || candidate.getRootView() != window.getRootView()) continue;
-            candidate.setVisibility(View.GONE);
-            candidate.setAlpha(Float.intBitsToFloat(state[1]));
+            if (candidate.getVisibility() != View.GONE) candidate.setVisibility(View.GONE);
+            float savedAlpha = Float.intBitsToFloat(state[1]);
+            if (candidate.getAlpha() != savedAlpha) candidate.setAlpha(savedAlpha);
         }
     }
 
@@ -1042,6 +1097,9 @@ public final class IosNotificationCenterPresentation {
         }
         ensureNotificationHeader();
         if (notificationHeaderBar == null || stack.getHeight() == 0) return;
+        if (notificationHeaderBar.getVisibility() != View.VISIBLE) {
+            notificationHeaderBar.setVisibility(View.VISIBLE);
+        }
         IosShadeClearAction.raiseHeader(notificationHeaderBar);
         int[] panelPoint = PANEL_POINT;
         panel.getLocationInWindow(panelPoint);
@@ -1067,11 +1125,11 @@ public final class IosNotificationCenterPresentation {
             return;
         }
         float y = firstTop - dp(60 + notificationHeaderGapDp);
-        notificationHeaderBar.setTranslationY(y);
-        animateNotificationHeader(true, progress * progress * (3f - 2f * progress));
+        if (notificationHeaderBar.getTranslationY() != y) notificationHeaderBar.setTranslationY(y);
         float visual = progress * progress * (3f - 2f * progress);
-        int blur = Math.round(28f * panel.getResources().getDisplayMetrics().density * (1f - visual));
-        blur = (blur + 1) / 2 * 2;
+        animateNotificationHeader(true, visual);
+        int blur = visual <= 0.02f ? 0
+                : IosShadeBlurEffects.quantize(28f * panel.getResources().getDisplayMetrics().density * (1f - visual));
         if (blur != lastHeaderBlur) {
             notificationHeaderBar.setRenderEffect(IosShadeBlurEffects.blur(blur));
             lastHeaderBlur = blur;
@@ -1372,42 +1430,52 @@ public final class IosNotificationCenterPresentation {
 
     /** Keep all lockscreen date/lunar/weather/health slots supplied by the OEM clock. */
     private static void syncClockMetadata() {
-        try {
-            Object controller = Xp.getObjectField(clock, "mMiuiClockController");
-            Object face = Xp.getObjectField(controller, "mClockView");
-            Class<?> type = Class.forName("com.miui.clock.module.ClockViewType", false,
-                    clock.getClass().getClassLoader());
-            Method getter = face.getClass().getMethod("getIClockView", type);
-            String[] names = {"NOTIFICATION_DATE", "NOTIFICATION_DATA_INFO", "FULL_DATE_WEEK",
-                    "DATE", "WEEK", "WEATHER", "MAGAZINE_INFO", "TEXT_AREA", "TEXT_AREA2"};
-            for (String name : names) {
-                try {
-                    Object view = getter.invoke(face, type.getField(name).get(null));
-                    if (view instanceof View && isClockInfo((View) view)) {
-                        View candidate = (View) view;
-                        if (candidate.getVisibility() != View.VISIBLE
-                                && (!(candidate instanceof TextView)
-                                || ((TextView) candidate).length() > 0)) {
-                            candidate.setVisibility(View.VISIBLE);
-                        }
+        Object controller = Xp.tryGetObjectField(clock, "mMiuiClockController");
+        Object face = controller == null ? null : Xp.tryGetObjectField(controller, "mClockView");
+        if (face == null) return;
+        if (!clockMetadataTypesResolved) {
+            clockMetadataTypesResolved = true;
+            try {
+                Class<?> type = Class.forName("com.miui.clock.module.ClockViewType", false,
+                        clock.getClass().getClassLoader());
+                cachedClockViewType = type;
+                String[] names = {"NOTIFICATION_DATE", "NOTIFICATION_DATA_INFO", "FULL_DATE_WEEK",
+                        "DATE", "WEEK", "WEATHER", "MAGAZINE_INFO", "TEXT_AREA", "TEXT_AREA2"};
+                ArrayList<Object> resolved = new ArrayList<>(names.length);
+                for (String name : names) {
+                    try {
+                        Object constant = type.getField(name).get(null);
+                        if (constant != null) resolved.add(constant);
+                    } catch (Throwable ignored) {}
+                }
+                cachedClockMetadataTypes = resolved.toArray();
+            } catch (Throwable ignored) {
+                cachedClockViewType = null;
+                cachedClockMetadataTypes = null;
+            }
+        }
+        if (cachedClockMetadataTypes != null) {
+            for (Object kind : cachedClockMetadataTypes) {
+                Object view = Xp.tryCallMethod(face, "getIClockView", kind);
+                if (view instanceof View && isClockInfo((View) view)) {
+                    View candidate = (View) view;
+                    if (candidate.getVisibility() != View.VISIBLE
+                            && (!(candidate instanceof TextView)
+                            || ((TextView) candidate).length() > 0)) {
+                        candidate.setVisibility(View.VISIBLE);
                     }
-                } catch (Throwable ignored) {
-                    // Clock templates do not expose every slot.
                 }
             }
-            // Classic clocks keep these lockscreen-only fields outside the enum
-            // slots. Reuse them as well when the selected template provides them.
-            for (String field : new String[]{"mCurrentDate", "mLunarCalendarInfo", "mOwnerInfo"}) {
-                try {
-                    Object value = Xp.getObjectField(face, field);
-                    if (value instanceof View && isClockInfo((View) value)
-                            && (!(value instanceof TextView) || ((TextView) value).length() > 0)) {
-                        ((View) value).setVisibility(View.VISIBLE);
-                    }
-                } catch (Throwable ignored) {}
+        }
+        // Classic clocks keep these lockscreen-only fields outside the enum
+        // slots. Reuse them as well when the selected template provides them.
+        for (String field : new String[]{"mCurrentDate", "mLunarCalendarInfo", "mOwnerInfo"}) {
+            Object value = Xp.tryGetObjectField(face, field);
+            if (value instanceof View && isClockInfo((View) value)
+                    && ((View) value).getVisibility() != View.VISIBLE
+                    && (!(value instanceof TextView) || ((TextView) value).length() > 0)) {
+                ((View) value).setVisibility(View.VISIBLE);
             }
-        } catch (Throwable ignored) {
-            // Older clock modules expose only getNotificationClockTopView().
         }
     }
 
@@ -1776,7 +1844,74 @@ public final class IosNotificationCenterPresentation {
         return top;
     }
 
-    private static void releasePresentation() {
+    /**
+     * Parks the hosted clock, status mirror, and custom header in GONE state on normal close so
+     * subsequent shade pulls reuse them immediately without re-inflating KeyguardClockContainer
+     * on the first input/traversal frame. Full teardown happens in releasePresentation().
+     */
+    private static void parkPresentation() {
+        restoreTransientPresentationState();
+        if (host == null || panel == null || host.getParent() != panel || !panel.isAttachedToWindow()) {
+            releasePresentation();
+            return;
+        }
+        parked = true;
+        if (host.getAlpha() != 0f) host.setAlpha(0f);
+        host.setRenderEffect(null);
+        if (host.getVisibility() != View.GONE) host.setVisibility(View.GONE);
+        if (depth != null) {
+            depth.setRenderEffect(null);
+            if (depth.getVisibility() != View.GONE) depth.setVisibility(View.GONE);
+        }
+        if (status != null) {
+            if (status.getAlpha() != 0f) status.setAlpha(0f);
+            status.setRenderEffect(null);
+            if (status.getVisibility() != View.GONE) status.setVisibility(View.GONE);
+        }
+        if (notificationHeaderBar != null) {
+            if (notificationHeaderBar.getAlpha() != 0f) notificationHeaderBar.setAlpha(0f);
+            notificationHeaderBar.setRenderEffect(null);
+            if (notificationHeaderBar.getVisibility() != View.GONE) notificationHeaderBar.setVisibility(View.GONE);
+        }
+        notificationHeaderHasContent = false;
+        lastBlur = -1;
+        lastStatusBlur = -1;
+        lastHeaderBlur = -1;
+        lastDepthRevealBlur = -1;
+        lastDepthDrawable = null;
+        wallpaperSheet = null;
+        progress = 0f;
+    }
+
+    private static boolean unparkPresentation() {
+        if (!parked) return host != null;
+        if (host == null || panel == null || window == null
+                || host.getParent() != panel || !panel.isAttachedToWindow()
+                || (status != null && status.getParent() != panel)) {
+            parked = false;
+            return false;
+        }
+        parked = false;
+        if (host.getVisibility() != View.VISIBLE) host.setVisibility(View.VISIBLE);
+        if (status != null && status.getVisibility() != View.VISIBLE) status.setVisibility(View.VISIBLE);
+        if (clock != null) Xp.tryCallMethod(clock, "updateTime");
+        if (stack == null || !stack.isAttachedToWindow()) {
+            stack = byId(panel, "notification_stack_scroller");
+            if (stack == null) stack = byId(window, "notification_stack_scroller");
+            if (stack == null && capturedStack != null
+                    && capturedStack.getRootView() == panel.getRootView()) stack = capturedStack;
+        }
+        ensureNotificationHeader();
+        if (notificationHeaderBar != null && notificationHeaderBar.getVisibility() != View.VISIBLE) {
+            notificationHeaderBar.setVisibility(View.VISIBLE);
+        }
+        findHeader();
+        observer = panel.getViewTreeObserver();
+        observer.addOnPreDrawListener(FRAME);
+        return true;
+    }
+
+    private static void restoreTransientPresentationState() {
         IosNotificationEntryState.clear();
         IosNotificationShortcutHost.restore();
         IosNotificationExitState.clear();
@@ -1784,6 +1919,7 @@ public final class IosNotificationCenterPresentation {
         restoreLandscapeStackLayout();
         IosNotificationStackHooks.restoreStackedRows();
         IosNotificationStackHooks.restoreExpandedRows(stack);
+        IosNotificationStackHooks.invalidateRestingCache();
         if (observer != null && observer.isAlive()) observer.removeOnPreDrawListener(FRAME);
         observer = null;
         if (oldHeader != null) {
@@ -1804,19 +1940,14 @@ public final class IosNotificationCenterPresentation {
         headerForeground = null;
         if (headerShadow != null) headerShadow.setVisibility(headerShadowVisibility);
         headerShadow = null;
+        headerChromeSearched = false;
         if (emptyText != null) emptyText.setAlpha(emptyTextAlpha);
         emptyText = null;
         if (clockInfo != null && clockInfoOffset != 0f) {
             clockInfo.setTranslationY(clockInfoBaseTranslation);
         }
-        clockInfo = null;
-        clockAnimation = null;
         clockInfoOffset = 0f;
-        clockInfoBaseTranslation = 0f;
-        clockInfoRefreshMinute = -1L;
         clockMetadataSyncUptime = 0L;
-        hostedClockMinuteViews = null;
-        stack = null;
         stackOriginalLayoutParams = null;
         landscapeLayout = false;
         layoutProgress = 0f;
@@ -1824,16 +1955,27 @@ public final class IosNotificationCenterPresentation {
         restingNotificationY = Float.NaN;
         lastNotificationAnimation = null;
         clockNotificationFailureLogged = false;
+        clearButton = null;
+    }
+
+    private static void releasePresentation() {
+        parked = false;
+        restoreTransientPresentationState();
+        clockInfo = null;
+        clockAnimation = null;
+        clockInfoBaseTranslation = 0f;
+        clockInfoRefreshMinute = -1L;
+        hostedClockMinuteViews = null;
+        stack = null;
         lastDepthDrawable = null;
+        depthSourceRef = new WeakReference<>(null);
+        depthSourceSearched = false;
         if (host != null && host.getParent() instanceof ViewGroup) {
             ((ViewGroup) host.getParent()).removeView(host);
         }
         if (status != null && status.getParent() instanceof ViewGroup) {
             ((ViewGroup) status.getParent()).removeView(status);
         }
-        // The clear control belongs to the native controller across panel switches.
-        // Leaving this presentation must never reveal it or overwrite its animation.
-        clearButton = null;
         removeNotificationHeader();
         host = null;
         panel = null;
@@ -1914,9 +2056,10 @@ public final class IosNotificationCenterPresentation {
         @Override protected void onDraw(Canvas canvas) {
             if (source == null || source.getWidth() <= 0 || source.getHeight() <= 0) return;
             source.draw(canvas);
-            // Status bar data changes slowly. A one-second self-redraw kept SystemUI busy even
-            // when the shade was idle; two seconds keeps the mirror current at a much lower cost.
-            if (isAttachedToWindow()) postInvalidateDelayed(2000L);
+            // Status bar data changes slowly. Only refresh while visibly active.
+            if (isAttachedToWindow() && getVisibility() == View.VISIBLE && getAlpha() > 0f) {
+                postInvalidateDelayed(2000L);
+            }
         }
     }
 
@@ -1989,8 +2132,9 @@ public final class IosNotificationCenterPresentation {
         }
 
         void setClearEnabled(boolean enabled) {
-            clear.setEnabled(enabled);
-            clear.setAlpha(enabled ? 1f : .45f);
+            if (clear.isEnabled() != enabled) clear.setEnabled(enabled);
+            float alpha = enabled ? 1f : .45f;
+            if (clear.getAlpha() != alpha) clear.setAlpha(alpha);
         }
 
         void applySettings() {
@@ -2057,8 +2201,20 @@ public final class IosNotificationCenterPresentation {
                     String iconData = !customIcon
                             ? notificationHeaderBuiltinIcon : notificationHeaderContentIcon;
                     if (iconData.isEmpty()) iconData = notificationHeaderBuiltinIcon;
-                    byte[] bytes = Base64.decode(iconData, Base64.DEFAULT);
-                    Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                    Bitmap bitmap = null;
+                    if (!iconData.isEmpty()) {
+                        if (iconData.equals(cachedHeaderIconData) && cachedHeaderIconBitmap != null
+                                && !cachedHeaderIconBitmap.isRecycled()) {
+                            bitmap = cachedHeaderIconBitmap;
+                        } else {
+                            byte[] bytes = Base64.decode(iconData, Base64.DEFAULT);
+                            bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                            if (bitmap != null) {
+                                cachedHeaderIconData = iconData;
+                                cachedHeaderIconBitmap = bitmap;
+                            }
+                        }
+                    }
                     if (bitmap != null) {
                         leftIcon.setImageBitmap(bitmap);
                         leftIcon.setVisibility(View.VISIBLE);
@@ -2157,11 +2313,7 @@ public final class IosNotificationCenterPresentation {
         }
 
         private void optional(View view, String method, Object... args) {
-            try {
-                Xp.callMethod(view, method, args);
-            } catch (Throwable ignored) {
-                // HyperOS blur APIs vary by build; keep the drawable fallback for missing calls.
-            }
+            Xp.tryCallMethod(view, method, args);
         }
 
         private int withOpacity(int color, int opacity) {

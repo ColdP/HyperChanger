@@ -51,6 +51,9 @@ public final class IosShadeMaterial {
     };
     private static final WeakHashMap<Resources, HashMap<Integer, Boolean>> GROUP_RESOURCE_IDS =
             new WeakHashMap<>();
+    private static final WeakHashMap<Resources, HashMap<String, Integer>> DIMENSION_CACHE =
+            new WeakHashMap<>();
+    private static final WeakHashMap<View, Integer> SCANNED_GROUP_OWNERS = new WeakHashMap<>();
     private static final WeakHashMap<View, int[]> GLASS_REQUESTS = new WeakHashMap<>();
     private static final WeakHashMap<View, int[]> SAVED_GLASS = new WeakHashMap<>();
     private static Method glassRadius;
@@ -63,8 +66,15 @@ public final class IosShadeMaterial {
     private static boolean clockRegistered;
     private static ViewTreeObserver observer;
     private static boolean loggedFailure;
-    private static final ViewTreeObserver.OnGlobalLayoutListener LAYOUT = () -> {
+    private static boolean scanPending;
+    private static final Runnable SCAN_TASK = () -> {
+        scanPending = false;
         if (active && root != null) scan(root);
+    };
+    private static final ViewTreeObserver.OnGlobalLayoutListener LAYOUT = () -> {
+        if (!active || root == null || scanPending) return;
+        scanPending = true;
+        root.post(SCAN_TASK);
     };
 
     public static void install() {
@@ -169,8 +179,18 @@ public final class IosShadeMaterial {
 
     private static int dimension(View view, String name, int fallback) {
         try {
-            int id = view.getResources().getIdentifier(name, "dimen", "com.android.systemui");
-            return id == 0 ? fallback : view.getResources().getDimensionPixelSize(id);
+            Resources resources = view.getResources();
+            HashMap<String, Integer> cachedMap = DIMENSION_CACHE.get(resources);
+            Integer cached = cachedMap == null ? null : cachedMap.get(name);
+            if (cached != null) return cached;
+            int id = resources.getIdentifier(name, "dimen", "com.android.systemui");
+            int value = id == 0 ? fallback : resources.getDimensionPixelSize(id);
+            if (cachedMap == null) {
+                cachedMap = new HashMap<>();
+                DIMENSION_CACHE.put(resources, cachedMap);
+            }
+            cachedMap.put(name, value);
+            return value;
         } catch (Throwable ignored) {
             return fallback;
         }
@@ -271,16 +291,13 @@ public final class IosShadeMaterial {
     }
 
     public static void registerMedia(View header) {
-        try {
-            Object holder = Xp.callMethod(header, "getMediaViewHolder");
-            if (holder == null) return;
-            Object background = Xp.getObjectField(holder, "mediaBg");
-            if (!(background instanceof View)) return;
-            View view = (View) background;
-            MEDIA.put(view, true);
-            if (active && view.getRootView() == root && !SAVED.containsKey(view)) apply(view);
-        } catch (Throwable ignored) {
-        }
+        Object holder = Xp.tryCallMethod(header, "getMediaViewHolder");
+        if (holder == null) return;
+        Object background = Xp.tryGetObjectField(holder, "mediaBg");
+        if (!(background instanceof View)) return;
+        View view = (View) background;
+        MEDIA.put(view, true);
+        if (active && view.getRootView() == root && !SAVED.containsKey(view)) apply(view);
     }
 
     private static void registerGroupControl(View view) {
@@ -299,20 +316,21 @@ public final class IosShadeMaterial {
     private static void captureGroupFields(Object owner, int depth) {
         if (owner == null || depth < 0) return;
         for (String field : GROUP_CONTROL_FIELDS) {
-            try {
-                Object candidate = Xp.getObjectField(owner, field);
-                if (candidate instanceof View) {
-                    registerGroupControl((View) candidate);
-                } else if (candidate != null && depth > 0) {
-                    captureGroupFields(candidate, depth - 1);
-                }
-            } catch (Throwable ignored) {
+            Object candidate = Xp.tryGetObjectField(owner, field);
+            if (candidate instanceof View) {
+                registerGroupControl((View) candidate);
+            } else if (candidate != null && depth > 0) {
+                captureGroupFields(candidate, depth - 1);
             }
         }
     }
 
     private static void captureGroupControls(View owner) {
         if (!GROUP_TYPES.get(owner.getClass()).owner) return;
+        int stamp = owner instanceof ViewGroup ? ((ViewGroup) owner).getChildCount() : 1;
+        Integer previous = SCANNED_GROUP_OWNERS.get(owner);
+        if (previous != null && previous == stamp) return;
+        SCANNED_GROUP_OWNERS.put(owner, stamp);
         // The MIUI group header keeps the actual collapse ImageView inside its injector.
         // Walk only the named notification-group fields, with a bounded depth, so ordinary
         // child notification rows are never reclassified as wallpaper surfaces.
@@ -320,11 +338,14 @@ public final class IosShadeMaterial {
     }
 
     private static void scan(View view) {
-        captureGroupControls(view);
         if (view == clockRoot) {
-            scanClock(view);
+            if (!clockRegistered) {
+                scanClock(view);
+                clockRegistered = true;
+            }
             return;
         }
+        captureGroupControls(view);
         if (view.getClass().getName().equals(
                 "com.android.systemui.statusbar.notification.mediacontrol.MiuiMediaHeaderView")) registerMedia(view);
         if (target(view) && view.isShown() && !SAVED.containsKey(view)) apply(view);
@@ -407,10 +428,13 @@ public final class IosShadeMaterial {
 
     private static void restore() {
         active = false;
+        scanPending = false;
+        if (root != null) root.removeCallbacks(SCAN_TASK);
         clockRoot = null;
         clockRegistered = false;
         if (observer != null && observer.isAlive()) observer.removeOnGlobalLayoutListener(LAYOUT);
         observer = null;
+        SCANNED_GROUP_OWNERS.clear();
         WRITING.set(true);
         try {
             for (Map.Entry<View, int[]> entry : new ArrayList<>(SAVED_GLASS.entrySet())) {

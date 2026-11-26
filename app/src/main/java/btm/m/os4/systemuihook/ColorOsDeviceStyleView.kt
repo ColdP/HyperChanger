@@ -8,7 +8,6 @@ import android.graphics.drawable.GradientDrawable
 import android.text.TextUtils
 import android.view.*
 import android.widget.*
-import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /** Style 3 shares style 2's native host and lifecycle. */
@@ -19,10 +18,6 @@ internal class ColorOsUpdateCardView(
     private val updateSource: View?,
     private val clickSource: View,
 ) : FrameLayout(context) {
-    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
-    private var touchDownX = 0f
-    private var touchDownY = 0f
-    private var scrollingTouch = false
     private val image = ImageView(context)
     private val logo = ImageView(context)
     private val version = TextView(context)
@@ -96,43 +91,23 @@ internal class ColorOsUpdateCardView(
         update.setPadding(dp(20), dp(10), dp(20), dp(10))
         updateCard.addView(update, LayoutParams(-2, -2, Gravity.CENTER))
         addView(updateCard, LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(30) })
-        // Only the explicit update-status button navigates to the native update page.
-        // The rest of the replacement card must consume touches without forwarding
-        // them, especially after the scroll fade makes the card visually transparent;
-        // forwarding the outer card click lets the native update target underneath win.
-        updateCard.setOnClickListener { clickSource.performClick() }
-        setOnClickListener { /* consume blank-card taps */ }
+        isClickable = false
+        isLongClickable = false
         refresh(backgroundSource, logoSource)
     }
 
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                touchDownX = event.x
-                touchDownY = event.y
-                scrollingTouch = false
-                // Keep a tap on the replacement card from reaching the native update view.
-                parent?.requestDisallowInterceptTouchEvent(true)
-            }
-            MotionEvent.ACTION_MOVE -> {
-                val dx = abs(event.x - touchDownX)
-                val dy = abs(event.y - touchDownY)
-                if (!scrollingTouch && dy > touchSlop && dy > dx) {
-                    scrollingTouch = true
-                    // The card consumed the down event only to block click passthrough.
-                    // Once this is a vertical gesture, return interception to the page scroll.
-                    parent?.requestDisallowInterceptTouchEvent(false)
-                }
-            }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                parent?.requestDisallowInterceptTouchEvent(false)
-                if (scrollingTouch) {
-                    scrollingTouch = false
-                    return true
-                }
-            }
-        }
-        return super.onTouchEvent(event)
+    // MiuiVersionCard floats above SpringBackLayout/NestedScrollView as a sibling.
+    // Never consume touches here; ColorOsCardSession gates taps on version_card_click_view
+    // inside NestedScrollView so vertical scrolling and lower-card touches work everywhere.
+    override fun dispatchTouchEvent(ev: MotionEvent?): Boolean = false
+
+    fun isUpdateButtonHit(rawX: Float, rawY: Float): Boolean {
+        if (!isShown || alpha < 0.05f || updateCard.visibility != View.VISIBLE || updateCard.width <= 0 || updateCard.height <= 0) return false
+        val loc = IntArray(2)
+        updateCard.getLocationOnScreen(loc)
+        val w = updateCard.width * updateCard.scaleX * scaleX
+        val h = updateCard.height * updateCard.scaleY * scaleY
+        return rawX >= loc[0] && rawX <= loc[0] + w && rawY >= loc[1] && rawY <= loc[1] + h
     }
 
     override fun onAttachedToWindow() {
@@ -374,12 +349,26 @@ internal class ColorOsCardSession(private val host: FrameLayout, private val spa
     private val originalHostHeight = host.layoutParams?.height
     private val originals = List(host.childCount) { host.getChildAt(it) }.filter { it !== view }.map { it to it.visibility }
     private var attached = false
+    private var downRawX = Float.NaN
+    private var downRawY = Float.NaN
     private val animationListener = ViewTreeObserver.OnPreDrawListener { resize(host.context); syncAnimation(); true }
     fun matches(host: FrameLayout, spacer: View?) = this.host === host && this.spacer === spacer && view.parent === host
     fun enforce(context: Context) {
         host.background = null
         originals.forEach { (child, _) -> child.visibility = View.INVISIBLE }
         view.visibility = View.VISIBLE
+        spacer?.setOnTouchListener { _, event ->
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                downRawX = event.rawX
+                downRawY = event.rawY
+            }
+            false
+        }
+        spacer?.setOnClickListener { targetSpacer ->
+            if (view.isUpdateButtonHit(downRawX, downRawY)) {
+                (host as? View.OnClickListener)?.onClick(targetSpacer)
+            }
+        }
         if (!attached) {
             host.viewTreeObserver.addOnPreDrawListener(animationListener)
             attached = true
@@ -413,6 +402,8 @@ internal class ColorOsCardSession(private val host: FrameLayout, private val spa
         host.background = background
         originalHostHeight?.let { height -> host.layoutParams?.let { host.layoutParams = it.apply { this.height = height } } }
         originals.forEach { (child, visibility) -> child.visibility = visibility }
+        spacer?.setOnTouchListener(null)
+        spacer?.setOnClickListener(host as? View.OnClickListener)
         originalParams?.let { spacer?.layoutParams = it }
     }
 }

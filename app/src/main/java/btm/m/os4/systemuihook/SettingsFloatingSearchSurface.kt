@@ -133,11 +133,3 @@ internal fun SettingsFloatingSearchSurface(
         }
     }
 }
-
-/** Percentages use the same linear convention as navigation sizing, bounded to the window. */
-internal fun settingsSearchWidth(available: Float, density: Float, scale: Int): Float =
-    (minOf((available - 48f * density).coerceAtLeast(1f), 560f * density) *
-        (1f + scale.coerceIn(-100, 100) / 100f)).coerceIn(1f, (available - 16f * density).coerceAtLeast(1f))
-
-internal fun settingsSearchHeight(density: Float, scale: Int): Float =
-    (56f * density * (1f + scale.coerceIn(-100, 100) / 100f)).coerceAtLeast(1f)

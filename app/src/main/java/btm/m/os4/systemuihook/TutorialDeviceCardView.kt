@@ -10,6 +10,7 @@ import android.graphics.Shader
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewOutlineProvider
 import android.widget.FrameLayout
@@ -38,7 +39,8 @@ class TutorialDeviceCardView(
     private var backgroundHiddenByLongPress = false
 
     init {
-        isClickable = true
+        isClickable = false
+        isLongClickable = false
         clipChildren = true
         clipToPadding = true
         outlineProvider = ViewOutlineProvider.BACKGROUND
@@ -74,16 +76,17 @@ class TutorialDeviceCardView(
         bottom.addView(separator, LinearLayout.LayoutParams(-2, -2))
         bottom.addView(version, LinearLayout.LayoutParams(-2, -2))
         addView(bottom, LayoutParams(-1, dp(40f)).apply { gravity = Gravity.BOTTOM })
-        setOnLongClickListener {
-            if (backgroundImage.drawable == null) return@setOnLongClickListener false
-            backgroundHiddenByLongPress = !backgroundHiddenByLongPress
-            backgroundImage.visibility = if (backgroundHiddenByLongPress) GONE else VISIBLE
-            true
-        }
-        // The replacement card sits above MiuiVersionCard's original click
-        // target. Forward taps so the stock system-update navigation remains
-        // available while keeping the custom card's visuals independent.
-        setOnClickListener { clickSource?.performClick() }
+    }
+
+    // MiuiVersionCard floats above SpringBackLayout/NestedScrollView as a sibling.
+    // Never consume touches here so vertical scrolling and lower-card touches pass straight through.
+    override fun dispatchTouchEvent(ev: MotionEvent?): Boolean = false
+
+    fun toggleBackgroundByLongPress(): Boolean {
+        if (backgroundImage.drawable == null) return false
+        backgroundHiddenByLongPress = !backgroundHiddenByLongPress
+        backgroundImage.visibility = if (backgroundHiddenByLongPress) GONE else VISIBLE
+        return true
     }
 
     fun refresh(context: Context, imageScale: Int, cardAuthor: String, logoScale: Int, logoVerticalOffset: Int, imageLogoSpacing: Int, logoTextSpacing: Int, backgroundBlur: Float, backgroundHorizontalOffset: Int, backgroundVerticalOffset: Int, backgroundScale: Int) {

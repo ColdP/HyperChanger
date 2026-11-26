@@ -91,6 +91,9 @@
 - **No Temporary Files on Drive C**:
   - Do NOT create, store, or output temporary files, caches, intermediate build artifacts, or test scripts on the `C:` drive (including `%TEMP%` or `C:\Users\...`).
 
+- **Decompiled Sources Lookup**:
+  - When decompiled results are needed, search `D:\ReverseProject\HyperChanger\.reverse-tmp` first and avoid redundant decompilation whenever possible.
+
 ## Commit Message Style
 
 - Write commit messages in English.

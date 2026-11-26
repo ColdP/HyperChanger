@@ -2624,7 +2624,7 @@ public class Main extends XposedModule {
             if (Math.abs(loc[1] - target) > 1.5f) return true;
         }
         for (View root : clockRoots()) {
-            View g = sClockTargets.get(root);
+            View g = clockTargetCached(root);
             // Nothing resolved for this tree yet, so there is nothing to compare - and one
             // repair is what resolves it.
             if (g == null) return true;
@@ -2652,7 +2652,7 @@ public class Main extends XposedModule {
             sb.append(" date=MISSING");
         }
         for (View root : clockRoots()) {
-            View g = sClockTargets.get(root);
+            View g = clockTargetCached(root);
             sb.append(" | ").append(g == null ? "unresolved"
                     : g == root ? "no clock here" : idOf(g) + " scale=" + r2(g.getScaleX()));
         }
@@ -3241,10 +3241,10 @@ public class Main extends XposedModule {
             // first frame of a transition, and this is a WeakHashMap keyed on the view - a put
             // per root per frame, each one re-hashing the key and walking the table, for a value
             // that was already there.
-            if (sClockTargets.get(root) != g) sClockTargets.put(root, g);
+            if (clockTargetCached(root) != g) putClockTarget(root, g);
             return g;
         }
-        View cached = sClockTargets.get(root);
+        View cached = clockTargetCached(root);
         if (cached != null && cached != root && usable(cached) && cached.getParent() != null) {
             return cached;
         }
@@ -3262,7 +3262,7 @@ public class Main extends XposedModule {
             if (was != null && was == clockSize(root)) return null;
         }
         View found = resolveTimeTarget(root);
-        sClockTargets.put(root, found == null ? root : found);
+        putClockTarget(root, found == null ? root : found);
         if (found == null) sNoClockAt.put(root, clockSize(root));
         else sNoClockAt.remove(root);
         return found;
@@ -3490,8 +3490,17 @@ public class Main extends XposedModule {
      * Dropped when the keyguard is rebuilt, which is also when the clock style can have changed
      * underneath us - see the onAttachedToWindow hook.
      */
-    private static final java.util.WeakHashMap<View, View> sClockTargets =
+    private static final java.util.WeakHashMap<View, java.lang.ref.WeakReference<View>> sClockTargets =
             new java.util.WeakHashMap<>();
+
+    private static View clockTargetCached(View root) {
+        java.lang.ref.WeakReference<View> ref = sClockTargets.get(root);
+        return ref != null ? ref.get() : null;
+    }
+
+    private static void putClockTarget(View root, View target) {
+        sClockTargets.put(root, target != null ? new java.lang.ref.WeakReference<View>(target) : null);
+    }
     /** The clock size a tree was answered "no clock here" at. See clockTarget(). */
     private static final java.util.WeakHashMap<View, Integer> sNoClockAt =
             new java.util.WeakHashMap<>();
@@ -8090,16 +8099,22 @@ public class Main extends XposedModule {
      * "is this the notification centre" has an answer: the finished tree with the shade open.
      * See setCardBlurActive().
      */
-    private static final java.util.Map<View, View> sCandidates =
-            java.util.Collections.synchronizedMap(new java.util.IdentityHashMap<View, View>());
+    private static final java.util.Map<View, java.lang.ref.WeakReference<View>> sCandidates =
+            java.util.Collections.synchronizedMap(
+                    new java.util.WeakHashMap<View, java.lang.ref.WeakReference<View>>());
 
     private static void noteCandidate(View v, View row) {
+        if (v == null) return;
         synchronized (sCandidates) {
             if (sCandidates.size() > 512) {
                 sCandidates.clear();
                 Xp.log(TAG + "card elements: candidate set overflowed, cleared");
             }
-            if (!sCandidates.containsKey(v)) sCandidates.put(v, row);
+            final java.lang.ref.WeakReference<View> existing = sCandidates.get(v);
+            if (!sCandidates.containsKey(v)
+                    || (row != null && (existing == null || existing.get() == null))) {
+                sCandidates.put(v, row != null ? new java.lang.ref.WeakReference<View>(row) : null);
+            }
         }
         // A row prepared while the notification centre is ALREADY up never sees the rising edge,
         // and would sit there sampling the app behind the shade until the next pull-down. The
@@ -8151,13 +8166,22 @@ public class Main extends XposedModule {
                         Xp.log(TAG + "card blur on: switch is off, nothing written");
                         return;
                     }
-                    final java.util.List<View> vs;
+                    final java.util.List<java.util.Map.Entry<View, View>> vs;
                     synchronized (sCandidates) {
-                        vs = new java.util.ArrayList<>(sCandidates.keySet());
+                        vs = new java.util.ArrayList<>(sCandidates.size());
+                        for (java.util.Map.Entry<View, java.lang.ref.WeakReference<View>> e
+                                : sCandidates.entrySet()) {
+                            final View v = e.getKey();
+                            if (v == null) continue;
+                            final java.lang.ref.WeakReference<View> rr = e.getValue();
+                            vs.add(new java.util.AbstractMap.SimpleImmutableEntry<View, View>(
+                                    v, rr != null ? rr.get() : null));
+                        }
                     }
                     int applied = 0, gone = 0, other = 0;
                     for (int i = 0; i < vs.size(); i++) {
-                        final View v = vs.get(i);
+                        final java.util.Map.Entry<View, View> entry = vs.get(i);
+                        final View v = entry.getKey();
                         // No position test here, and its absence is a measurement, not a
                         // simplification. It was "under NotificationPanelView", it rejected EVERY
                         // card on this build, and the ancestry probe says why: the notification
@@ -8186,7 +8210,12 @@ public class Main extends XposedModule {
                             continue;
                         }
                         if (sWritten.containsKey(v)) continue;
-                        final View row = sCandidates.get(v);
+                        View row = entry.getValue();
+                        if (row == null) row = rowOf(v);
+                        if (row != null && isHeadsUp(row)) {
+                            other++;
+                            continue;
+                        }
                         // A row-less element is only ours if it belongs to the media card - the
                         // one card that is not a notification row, and the one the utility hands
                         // over as a bare ImageView. Everything else without a row is something
@@ -8490,16 +8519,21 @@ public class Main extends XposedModule {
 
     /** Takes the local blur back off every view it was written to. Returns how many. */
     private static int restoreCards() {
-        final java.util.List<View> vs;
+        final java.util.List<java.util.Map.Entry<View, int[]>> vs;
         synchronized (sWritten) {
-            vs = new java.util.ArrayList<>(sWritten.keySet());
+            vs = new java.util.ArrayList<>(sWritten.size());
+            for (java.util.Map.Entry<View, int[]> e : sWritten.entrySet()) {
+                final View v = e.getKey();
+                if (v != null) {
+                    vs.add(new java.util.AbstractMap.SimpleImmutableEntry<View, int[]>(
+                            v, e.getValue()));
+                }
+            }
+            sWritten.clear();
         }
         for (int i = 0; i < vs.size(); i++) {
-            final View v = vs.get(i);
-            MiBlur.restore(v, sWritten.get(v));
-        }
-        synchronized (sWritten) {
-            sWritten.clear();
+            final java.util.Map.Entry<View, int[]> e = vs.get(i);
+            MiBlur.restore(e.getKey(), e.getValue());
         }
         return vs.size();
     }
@@ -8524,14 +8558,13 @@ public class Main extends XposedModule {
     }
 
     /**
-     * Views the local blur has been written to, by identity, with the state each had before it.
+     * Views the local blur has been written to, with the state each had before it.
      *
-     * Strong references, which is normally the wrong thing to hold in a system process - but
-     * this is the only record of what the system's own material was, and a view that has been
-     * forgotten is a view that cannot be put back. The rows come from a bounded recycled pool.
+     * Weak keys keep every live view restorable while allowing discarded notification views to be
+     * garbage-collected without waiting for a shade close edge.
      */
     private static final java.util.Map<View, int[]> sWritten =
-            java.util.Collections.synchronizedMap(new java.util.IdentityHashMap<View, int[]>());
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View, int[]>());
     private static final java.util.Set<String> sBlurAppliedKinds =
             java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
 
@@ -8756,19 +8789,28 @@ public class Main extends XposedModule {
 
     /** Every element the system has offered us, whether we wrote to it, and what it is. */
     private static void dumpCandidates() {
-        final java.util.List<View> vs;
-        synchronized (sCandidates) {
-            vs = new java.util.ArrayList<>(sCandidates.keySet());
-        }
         main().post(new Runnable() {
             @Override
             public void run() {
                 try {
+                    final java.util.List<java.util.Map.Entry<View, View>> vs;
+                    synchronized (sCandidates) {
+                        vs = new java.util.ArrayList<>(sCandidates.size());
+                        for (java.util.Map.Entry<View, java.lang.ref.WeakReference<View>> e
+                                : sCandidates.entrySet()) {
+                            final View v = e.getKey();
+                            if (v == null) continue;
+                            final java.lang.ref.WeakReference<View> rr = e.getValue();
+                            vs.add(new java.util.AbstractMap.SimpleImmutableEntry<View, View>(
+                                    v, rr != null ? rr.get() : null));
+                        }
+                    }
                     Xp.log(TAG + "cand: " + vs.size() + " elements, written=" + sWritten.size()
                             + ", cardBlurOn=" + ShadeLayer.cardBlurOn());
                     for (int i = 0; i < vs.size(); i++) {
-                        final View v = vs.get(i);
-                        final View row = sCandidates.get(v);
+                        final java.util.Map.Entry<View, View> entry = vs.get(i);
+                        final View v = entry.getKey();
+                        final View row = entry.getValue();
                         final int[] loc = new int[2];
                         v.getLocationOnScreen(loc);
                         Xp.log(TAG + "cand " + (sWritten.containsKey(v) ? "*" : " ")
@@ -8784,7 +8826,7 @@ public class Main extends XposedModule {
                                 + " " + MiBlur.describe(v));
                         Xp.log(TAG + "  anc=" + ancestry(v));
                     }
-                    if (!vs.isEmpty()) dumpMediaCard(vs.get(0).getRootView());
+                    if (!vs.isEmpty()) dumpMediaCard(vs.get(0).getKey().getRootView());
                 } catch (Throwable t) {
                     Xp.log(TAG + "cand probe failed: " + t);
                 }

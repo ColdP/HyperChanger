@@ -156,14 +156,11 @@ final class IosNotificationEntryState {
         // Real removal and heads-up transitions keep their own animation lifecycle.
         if (flag(row, "isRemoved") || flag(row, "isHeadsUpState") || flag(row, "isHeadsUp")
                 || flag(row, "isPinned") || flag(row, "isHeadsUpAnimatingAway$1")) return false;
-        try {
-            if (Boolean.TRUE.equals(Xp.getObjectField(row, "mDismissed"))) return false;
-        } catch (Throwable ignored) {}
+        if (Boolean.TRUE.equals(Xp.tryGetObjectField(row, "mDismissed"))) return false;
         return true;
     }
 
     private static boolean flag(View row, String method) {
-        try { return Boolean.TRUE.equals(Xp.callMethod(row, method)); }
-        catch (Throwable ignored) { return false; }
+        return Boolean.TRUE.equals(Xp.tryCallMethod(row, method));
     }
 }

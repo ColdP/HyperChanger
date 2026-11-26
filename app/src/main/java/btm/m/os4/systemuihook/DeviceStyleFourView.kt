@@ -11,6 +11,7 @@ import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
@@ -45,6 +46,7 @@ internal class DeviceStyleFourSession(
     private val hostChildren = List(host.childCount) { host.getChildAt(it) }.map { it to it.visibility }
     private val infoChildren = List(info.childCount) { info.getChildAt(it) }.map { it to it.visibility }
     private var failed = false
+    private val suppressBannerClick = View.OnClickListener { }
     private val listener = ViewTreeObserver.OnPreDrawListener { enforce(); true }
 
     init {
@@ -88,6 +90,8 @@ internal class DeviceStyleFourSession(
         val height = cardHeight + margins.topMargin
         host.layoutParams.takeIf { it.height != height }?.let { host.layoutParams = it.apply { this.height = height } }
         spacer?.layoutParams?.takeIf { it.height != height }?.let { spacer.layoutParams = it.apply { this.height = height } }
+        // Keep vertical scrolling native on NestedScrollView while suppressing the stock update click on the banner.
+        spacer?.setOnClickListener(suppressBannerClick)
         scrollTransition.apply(animation)
         banner.refreshVersion()
         runCatching { body.refresh() }.onFailure {
@@ -103,6 +107,7 @@ internal class DeviceStyleFourSession(
         host.clipChildren = originalClipChildren
         host.clipToPadding = originalClipToPadding
         host.layoutParams = host.layoutParams.apply { height = originalHostHeight }
+        spacer?.setOnClickListener(host as? View.OnClickListener)
         originalSpacerHeight?.let { h -> spacer?.layoutParams?.let { spacer.layoutParams = it.apply { height = h } } }
         info.background = originalInfoBackground
         info.setPadding(originalInfoPadding[0], originalInfoPadding[1], originalInfoPadding[2], originalInfoPadding[3])
@@ -128,7 +133,8 @@ private class StyleFourBannerView(
         outlineProvider = ViewOutlineProvider.BACKGROUND
         clipToOutline = true
         elevation = dp(s.shadow).toFloat()
-        isClickable = true // The reference banner has no inherited invisible update click target.
+        isClickable = false
+        isLongClickable = false
         val artwork = backgroundSource.takeIf { it.exists }?.let { LogoDrawableLoader.load(context, it) }
         if (artwork != null) addView(ImageView(context).apply {
             setImageDrawable(artwork); scaleType = ImageView.ScaleType.CENTER_CROP
@@ -163,6 +169,9 @@ private class StyleFourBannerView(
         addView(group, LayoutParams(-1, -2, Gravity.CENTER_VERTICAL))
         refreshVersion()
     }
+    // MiuiVersionCard floats above SpringBackLayout/NestedScrollView as a sibling.
+    // Never consume touches here so vertical scrolling and lower-card touches pass straight through.
+    override fun dispatchTouchEvent(ev: MotionEvent?): Boolean = false
     fun refreshVersion() {
         val value = s.versionText.ifBlank { (versionSource as? TextView)?.text?.toString().orEmpty() }
         if (version.text.toString() != value) version.text = value

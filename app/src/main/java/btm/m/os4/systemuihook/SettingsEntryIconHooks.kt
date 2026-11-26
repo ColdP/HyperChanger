@@ -28,6 +28,8 @@ internal class SettingsEntryIconHooks {
     private var icons: Map<String, Bitmap> = emptyMap()
     private var moduleRevision = Long.MIN_VALUE
     private var moduleIcon: Bitmap? = null
+    private var defaultModuleIconSize = -1
+    private var defaultModuleIcon: Bitmap? = null
     private val originalRowSpacing = WeakHashMap<View, RowSpacing>()
 
     private data class RowSpacing(
@@ -79,16 +81,20 @@ internal class SettingsEntryIconHooks {
                             icon.setImageBitmap(customIcon)
                         } else {
                             runCatching {
-                                val drawable = icon.context.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY)
-                                    .getDrawable(R.drawable.ic_hyperchanger_settings_entry)
-                                    ?: return@runCatching null
                                 val sizeId = icon.resources.getIdentifier("header_icon_size", "dimen", "com.android.settings")
                                 if (sizeId == 0) return@runCatching null
                                 val size = icon.resources.getDimensionPixelSize(sizeId)
                                 if (size <= 0) return@runCatching null
-                                Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888).also { bitmap ->
-                                    drawable.setBounds(0, 0, size, size)
-                                    drawable.draw(Canvas(bitmap))
+                                defaultModuleIcon?.takeIf { defaultModuleIconSize == size } ?: run {
+                                    val drawable = icon.context.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY)
+                                        .getDrawable(R.drawable.ic_hyperchanger_settings_entry)
+                                        ?: return@runCatching null
+                                    Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888).also { bitmap ->
+                                        drawable.setBounds(0, 0, size, size)
+                                        drawable.draw(Canvas(bitmap))
+                                        defaultModuleIcon = bitmap
+                                        defaultModuleIconSize = size
+                                    }
                                 }
                             }.getOrNull()?.let { icon.setImageBitmap(it) }
                         }

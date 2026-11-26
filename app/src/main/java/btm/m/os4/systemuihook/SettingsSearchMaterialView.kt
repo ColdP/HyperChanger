@@ -10,10 +10,21 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.view.View
 import android.view.ViewOutlineProvider
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.asAndroidPath
-import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.LayoutDirection
+
+internal fun settingsSearchAndroidPath(width: Float, height: Float): Path = Path().apply {
+    if (width > 0f && height > 0f) {
+        val radius = minOf(width, height) * 0.5f
+        addRoundRect(0f, 0f, width, height, radius, radius, Path.Direction.CW)
+    }
+}
+
+/** Percentages use the same linear convention as navigation sizing, bounded to the window. */
+internal fun settingsSearchWidth(available: Float, density: Float, scale: Int): Float =
+    (minOf((available - 48f * density).coerceAtLeast(1f), 560f * density) *
+        (1f + scale.coerceIn(-100, 100) / 100f)).coerceIn(1f, (available - 16f * density).coerceAtLeast(1f))
+
+internal fun settingsSearchHeight(density: Float, scale: Int): Float =
+    (56f * density * (1f + scale.coerceIn(-100, 100) / 100f)).coerceAtLeast(1f)
 
 /** Settings-only compositor surface, kept outside Compose's offscreen effect layers. */
 internal class SettingsSearchMaterialView(
@@ -91,8 +102,7 @@ internal class SettingsSearchMaterialView(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        materialPath.set(settingsSearchPath(Size(w.toFloat(), h.toFloat()),
-            Density(resources.displayMetrics.density), LayoutDirection.Ltr).asAndroidPath())
+        materialPath.set(settingsSearchAndroidPath(w.toFloat(), h.toFloat()))
         invalidateOutline()
         applied = null
         applyMaterial()

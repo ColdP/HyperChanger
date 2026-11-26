@@ -53,35 +53,36 @@ internal class OthersHooks(
     private var rearScreenLeftSwipeInstalled = false
     private var islandSimulationRearScreenInstalled = false
     private var googleQuickShareIslandInstalled = false
-    private val rearMiniPlayerHooks = RearMiniPlayerHooks(module)
-    private val rearMusicWhitelistHooks = RearMusicWhitelistHooks(module, hookDeoptimized, logTag)
-    private val screenshotHooks = ScreenshotHooks(module, hookDeoptimized, logTag)
-    private val contactsDialerHooks = ContactsDialerHooks(module, hookDeoptimized, logTag)
-    private val portalHooks = PortalHooks(module, hookDeoptimized, logTag)
-    private val sidebarHooks = SidebarHooks(module, hookDeoptimized, logTag)
-    private val sidebarAppearanceHooks = SidebarAppearanceHooks(module, hookDeoptimized, logTag)
-    private val sidebarIconCountHooks = SidebarIconCountHooks(module, hookDeoptimized, logTag)
-    private val widgetCapabilityHooks = WidgetCapabilityHooks(module, hookDeoptimized, logTag)
-    private val widgetGlassHooks = WidgetGlassHooks(module, hookDeoptimized, logTag)
-    private val personalAssistantWallpaperHooks = PersonalAssistantWallpaperHooks(module, hookDeoptimized)
-    private val videoToolboxHooks = VideoToolboxHooks(module)
-    private val powerBatteryHooks = PowerBatteryHooks(module, hookDeoptimized)
-    private val powerBatteryInfoHooks = PowerBatteryInfoHooks(module, hookDeoptimized)
-    private val hotspotTemperatureHooks = HotspotTemperatureHooks(module)
-    private val htmlViewerHooks = HtmlViewerHooks(module)
-    private val joyoseHooks = JoyoseHooks(module)
-    private val preinstalledPrivacyHooks = PreinstalledPrivacyHooks(module)
-    private val settingsFloatingSearchHooks = SettingsFloatingSearchHooks(module, hookDeoptimized)
+    @Volatile private var cachedModuleLabel: String? = null
+    private val rearMiniPlayerHooks by lazy { RearMiniPlayerHooks(module) }
+    private val rearMusicWhitelistHooks by lazy { RearMusicWhitelistHooks(module, hookDeoptimized, logTag) }
+    private val screenshotHooks by lazy { ScreenshotHooks(module, hookDeoptimized, logTag) }
+    private val contactsDialerHooks by lazy { ContactsDialerHooks(module, hookDeoptimized, logTag) }
+    private val portalHooks by lazy { PortalHooks(module, hookDeoptimized, logTag) }
+    private val sidebarHooks by lazy { SidebarHooks(module, hookDeoptimized, logTag) }
+    private val sidebarAppearanceHooks by lazy { SidebarAppearanceHooks(module, hookDeoptimized, logTag) }
+    private val sidebarIconCountHooks by lazy { SidebarIconCountHooks(module, hookDeoptimized, logTag) }
+    private val widgetCapabilityHooks by lazy { WidgetCapabilityHooks(module, hookDeoptimized, logTag) }
+    private val widgetGlassHooks by lazy { WidgetGlassHooks(module, hookDeoptimized, logTag) }
+    private val personalAssistantWallpaperHooks by lazy { PersonalAssistantWallpaperHooks(module, hookDeoptimized) }
+    private val videoToolboxHooks by lazy { VideoToolboxHooks(module) }
+    private val powerBatteryHooks by lazy { PowerBatteryHooks(module, hookDeoptimized) }
+    private val powerBatteryInfoHooks by lazy { PowerBatteryInfoHooks(module, hookDeoptimized) }
+    private val hotspotTemperatureHooks by lazy { HotspotTemperatureHooks(module) }
+    private val htmlViewerHooks by lazy { HtmlViewerHooks(module) }
+    private val joyoseHooks by lazy { JoyoseHooks(module) }
+    private val preinstalledPrivacyHooks by lazy { PreinstalledPrivacyHooks(module) }
+    private val settingsFloatingSearchHooks by lazy { SettingsFloatingSearchHooks(module, hookDeoptimized) }
 
     fun installSettingsFloatingSearchHooks(param: PackageLoadedParam, preferences: SharedPreferences) =
         settingsFloatingSearchHooks.install(param, preferences)
 
-    private val settingsTitleBarBlurHooks = SettingsTitleBarBlurHooks(module, hookDeoptimized)
+    private val settingsTitleBarBlurHooks by lazy { SettingsTitleBarBlurHooks(module, hookDeoptimized) }
 
     fun installSettingsTitleBarBlurHooks(param: PackageLoadedParam, preferences: SharedPreferences) =
         settingsTitleBarBlurHooks.install(param, preferences)
 
-    private val settingsLayoutHooks = SettingsLayoutHooks(module, hookDeoptimized)
+    private val settingsLayoutHooks by lazy { SettingsLayoutHooks(module, hookDeoptimized) }
 
     fun installSettingsDualPaneHooks(param: PackageLoadedParam, preferences: SharedPreferences) =
         settingsLayoutHooks.installDualPane(param, preferences)
@@ -672,9 +673,6 @@ internal class OthersHooks(
             val header = runCatching { headerClass.getDeclaredConstructor().apply { isAccessible = true }.newInstance() }.getOrNull()
                 ?: return@intercept result
             setLongField(header, "id", SETTINGS_HEADER_ID)
-            val moduleContext = runCatching {
-                settingsContext.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY)
-            }.getOrNull()
             // Never add the module APK as a ResourcesLoader to Settings. Resource IDs are
             // package-local; merging the full module table makes Settings resolve its own
             // integer IDs to unrelated module XML/string entries and crash in MIUIX.
@@ -687,9 +685,10 @@ internal class OthersHooks(
             val label = if (customTitle.isNotBlank()) {
                 customTitle
             } else {
-                runCatching {
-                    (moduleContext ?: settingsContext).applicationInfo.loadLabel(settingsContext.packageManager).toString()
-                }.getOrDefault("HyperChanger")
+                cachedModuleLabel ?: runCatching {
+                    val info = settingsContext.packageManager.getApplicationInfo(BuildConfig.APPLICATION_ID, 0)
+                    info.loadLabel(settingsContext.packageManager).toString()
+                }.getOrDefault("HyperChanger").also { cachedModuleLabel = it }
             }
             setObjectField(header, "title", label)
             setObjectField(header, "intent", Intent().setClassName(BuildConfig.APPLICATION_ID, "${BuildConfig.APPLICATION_ID}.MainActivity").apply {

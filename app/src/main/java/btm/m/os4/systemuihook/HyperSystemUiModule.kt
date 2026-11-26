@@ -181,38 +181,44 @@ class HyperSystemUiModule : XposedModule() {
             applicationContext = { systemUiApplicationContext },
         )
     }
-    private val notificationHooks = NotificationHooks(
-        module = this,
-        readInstanceField = ::readInstanceField,
-        findDynamicIslandField = ::findDynamicIslandField,
-        systemUiPackageName = SYSTEM_UI,
-        notificationSettingsManagerClassName = SYSTEM_UI_NOTIFICATION_SETTINGS_MANAGER_CLASS,
-        notificationRowInjectorClassName = EXPANDABLE_NOTIFICATION_ROW_INJECTOR_CLASS,
-        hideMiniWindowBarKey = KEY_HIDE_NOTIFICATION_MINI_WINDOW_BAR,
-        logTag = TAG,
-    )
-    private val lockscreenHooks = LockscreenHooks(this, TAG)
-    private val statusBarHooks = StatusBarHooks(
-        module = this,
-        hookDeoptimized = ::hookDeoptimized,
-        readInstanceField = ::readInstanceField,
-        readInheritedField = ::readInheritedField,
-        systemUiPackageName = SYSTEM_UI,
-        keepThemeKey = KEY_KEEP_SOFT_GLASS_AFTER_GLOBAL_THEME,
-        hideClockTextKey = KEY_HIDE_STATUS_BAR_CLOCK_TEXT,
-        mobileNetworkTypeModeKey = KEY_MOBILE_NETWORK_TYPE_MODE,
-        stackedMobileDualContainerId = stackedMobileDualContainerId,
-        logTag = TAG,
-        applicationContext = { systemUiApplicationContext },
-    )
-    private val systemUiHooks = SystemUiHooks(
-        module = this,
-        hookDeoptimized = ::hookDeoptimized,
-        findDynamicIslandField = ::findDynamicIslandField,
-        systemUiPluginPackageName = SYSTEM_UI_PLUGIN,
-        dynamicIslandBaseContentClass = DYNAMIC_ISLAND_BASE_CONTENT_CLASS,
-        logTag = TAG,
-    )
+    private val notificationHooks by lazy {
+        NotificationHooks(
+            module = this,
+            readInstanceField = ::readInstanceField,
+            findDynamicIslandField = ::findDynamicIslandField,
+            systemUiPackageName = SYSTEM_UI,
+            notificationSettingsManagerClassName = SYSTEM_UI_NOTIFICATION_SETTINGS_MANAGER_CLASS,
+            notificationRowInjectorClassName = EXPANDABLE_NOTIFICATION_ROW_INJECTOR_CLASS,
+            hideMiniWindowBarKey = KEY_HIDE_NOTIFICATION_MINI_WINDOW_BAR,
+            logTag = TAG,
+        )
+    }
+    private val lockscreenHooks by lazy { LockscreenHooks(this, TAG) }
+    private val statusBarHooks by lazy {
+        StatusBarHooks(
+            module = this,
+            hookDeoptimized = ::hookDeoptimized,
+            readInstanceField = ::readInstanceField,
+            readInheritedField = ::readInheritedField,
+            systemUiPackageName = SYSTEM_UI,
+            keepThemeKey = KEY_KEEP_SOFT_GLASS_AFTER_GLOBAL_THEME,
+            hideClockTextKey = KEY_HIDE_STATUS_BAR_CLOCK_TEXT,
+            mobileNetworkTypeModeKey = KEY_MOBILE_NETWORK_TYPE_MODE,
+            stackedMobileDualContainerId = stackedMobileDualContainerId,
+            logTag = TAG,
+            applicationContext = { systemUiApplicationContext },
+        )
+    }
+    private val systemUiHooks by lazy {
+        SystemUiHooks(
+            module = this,
+            hookDeoptimized = ::hookDeoptimized,
+            findDynamicIslandField = ::findDynamicIslandField,
+            systemUiPluginPackageName = SYSTEM_UI_PLUGIN,
+            dynamicIslandBaseContentClass = DYNAMIC_ISLAND_BASE_CONTENT_CLASS,
+            logTag = TAG,
+        )
+    }
     private val islandSmoothingHook by lazy { IslandSmoothingHook(this) }
     private val lockscreenFaceUnlockHook by lazy { LockscreenFaceUnlockHook(this) }
     private val unlockFocusAuthHook by lazy { UnlockFocusAuthHook(this) }
@@ -229,12 +235,14 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
-    private val othersHooks = OthersHooks(
-        module = this,
-        hookDeoptimized = ::hookDeoptimized,
-        settingsResourcesLock = HyperSystemUiModule::class.java,
-        logTag = TAG,
-    )
+    private val othersHooks by lazy {
+        OthersHooks(
+            module = this,
+            hookDeoptimized = ::hookDeoptimized,
+            settingsResourcesLock = HyperSystemUiModule::class.java,
+            logTag = TAG,
+        )
+    }
 
 
 
@@ -3222,8 +3230,10 @@ class HyperSystemUiModule : XposedModule() {
                 .intercept { chain ->
                     val view = chain.thisObject as? View
                     val requestedVisibility = chain.getArg(0) as? Int
+                    val resourceName = cachedResourceEntryName(view)
                     if (controlAllowed && preferences.getBoolean(KEY_HIDE_CONTROL_CENTER_EDIT_BUTTON, false) &&
-                        isControlCenterEditButtonView(view) &&
+                        resourceName == "qs_customize_button" &&
+                        !ControlCenterTopButtonsPlacement.isBottomButtonsRow(view) &&
                         requestedVisibility != View.GONE
                     ) {
                         logControlCenterEditButtonHidden(view, "visibility")
@@ -3232,35 +3242,32 @@ class HyperSystemUiModule : XposedModule() {
                             arrayOf(View.GONE),
                         )
                     }
-                    val resourceName = runCatching {
-                        view?.resources?.getResourceEntryName(view.id)
-                    }.getOrNull()
                     // 0 keeps SystemUI's original presentation, 1 replaces it with the
                     // independent label, and 2 hides the network type completely.
-                    val mobileNetworkTypeMode = preferences
-                        .getInt(KEY_MOBILE_NETWORK_TYPE_MODE, 0)
-                        .coerceIn(0, 2)
-                    val hideWifiStandard = preferences.getBoolean(KEY_HIDE_STATUS_BAR_WIFI_STANDARD, false)
-                    val hideClockText = preferences.getBoolean(KEY_HIDE_STATUS_BAR_CLOCK_TEXT, false)
-                    val hideNetworkActivity = preferences.getBoolean(KEY_HIDE_STATUS_BAR_NETWORK_ACTIVITY, false)
-                    val isIndependentMobileType = statusAllowed && statusBarHooks.isIndependentMobileTypeView(view)
                     val hideSecondaryMobileRoot = statusAllowed && statusBarHooks.isStackedSecondaryMobileRoot(view)
-                    val hideOriginalDualSignal =
-                        statusAllowed &&
-                        (resourceName == "mobile_signal" || resourceName == "mobile_signal_container") &&
-                        statusBarHooks.shouldHideSystemMobileSignal(view, preferences.getInt(KEY_MOBILE_SIGNAL_HIDE_MODE, 0))
-                    val forcedHidden =
-                        hideSecondaryMobileRoot || hideOriginalDualSignal ||
-                        (notificationsAllowed && resourceName == "mini_window_bar" &&
-                            preferences.getBoolean(KEY_HIDE_NOTIFICATION_MINI_WINDOW_BAR, false)) ||
-                        (statusAllowed && (((resourceName == "mobile_type" || resourceName == "mobile_type_single" ||
-                            resourceName == "mobile_special_5G") &&
-                            mobileNetworkTypeMode != 0 &&
-                            !(resourceName == "mobile_type_single" &&
-                                isIndependentMobileType && mobileNetworkTypeMode == 1)) ||
-                            (resourceName == "wifi_standard" && hideWifiStandard) ||
-                            (resourceName in setOf("wifi_activity", "mobile_left_mobile_inout") && hideNetworkActivity) ||
-                            (resourceName == "battery_text_digit_view" && hideClockText)))
+                    val forcedHidden = hideSecondaryMobileRoot || when (resourceName) {
+                        null -> false
+                        "mobile_signal", "mobile_signal_container" ->
+                            statusAllowed && statusBarHooks.shouldHideSystemMobileSignal(
+                                view,
+                                preferences.getInt(KEY_MOBILE_SIGNAL_HIDE_MODE, 0),
+                            )
+                        "mini_window_bar" ->
+                            notificationsAllowed && preferences.getBoolean(KEY_HIDE_NOTIFICATION_MINI_WINDOW_BAR, false)
+                        "mobile_type", "mobile_special_5G" ->
+                            statusAllowed && preferences.getInt(KEY_MOBILE_NETWORK_TYPE_MODE, 0).coerceIn(0, 2) != 0
+                        "mobile_type_single" -> {
+                            val mode = if (statusAllowed) preferences.getInt(KEY_MOBILE_NETWORK_TYPE_MODE, 0).coerceIn(0, 2) else 0
+                            statusAllowed && mode != 0 && !(mode == 1 && statusBarHooks.isIndependentMobileTypeView(view))
+                        }
+                        "wifi_standard" ->
+                            statusAllowed && preferences.getBoolean(KEY_HIDE_STATUS_BAR_WIFI_STANDARD, false)
+                        "wifi_activity", "mobile_left_mobile_inout" ->
+                            statusAllowed && preferences.getBoolean(KEY_HIDE_STATUS_BAR_NETWORK_ACTIVITY, false)
+                        "battery_text_digit_view" ->
+                            statusAllowed && preferences.getBoolean(KEY_HIDE_STATUS_BAR_CLOCK_TEXT, false)
+                        else -> false
+                    }
                     if (forcedHidden) {
                         chain.proceedWith(chain.thisObject, arrayOf(View.GONE))
                     } else {
@@ -3298,17 +3305,33 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
+    private val cachedResourceEntryNames = WeakHashMap<android.content.res.Resources, HashMap<Int, String>>()
+
+    private fun cachedResourceEntryName(view: View?): String? {
+        if (view == null) return null
+        val id = view.id
+        if (id == View.NO_ID || id == 0) return null
+        val resources = view.resources ?: return null
+        synchronized(cachedResourceEntryNames) {
+            val map = cachedResourceEntryNames[resources]
+            if (map != null && map.containsKey(id)) {
+                return map[id]?.takeIf { it.isNotEmpty() }
+            }
+        }
+        val resolved = runCatching { resources.getResourceEntryName(id) }.getOrNull() ?: ""
+        synchronized(cachedResourceEntryNames) {
+            cachedResourceEntryNames.getOrPut(resources) { HashMap() }[id] = resolved
+        }
+        return resolved.takeIf { it.isNotEmpty() }
+    }
+
     private fun isControlCenterEditButtonView(view: View?): Boolean {
         if (view == null || view.id == View.NO_ID || ControlCenterTopButtonsPlacement.isBottomButtonsRow(view)) return false
-        return runCatching {
-            view.resources.getResourceEntryName(view.id) == "qs_customize_button"
-        }.getOrDefault(false)
+        return cachedResourceEntryName(view) == "qs_customize_button"
     }
 
     private fun logControlCenterEditButtonHidden(view: View?, source: String) {
-        val resourceName = runCatching {
-            view?.resources?.getResourceEntryName(view.id)
-        }.getOrNull() ?: "unknown"
+        val resourceName = cachedResourceEntryName(view) ?: "unknown"
         btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Hid control-center edit button view ($source, id=$resourceName)")
     }
 
@@ -4133,20 +4156,53 @@ class HyperSystemUiModule : XposedModule() {
         if (lockscreenBackdropContainers.contains(view)) return false
         if (isControlCenterTopButtonBackground(view) || expandedIslandMaterialApplying.get() == true || expandedIslandGlassSurfaces.contains(view)) return false
         if (view.tag == SHORTCUT_GLASS_TAG || view.tag == LOCKSCREEN_CAPSULE_MATERIAL_TAG) return false
-        if (isVolumePanelSurface(view) || stackContainsClass("com.android.systemui.miui.volume.")) {
-            // Some anonymous volume views receive their first recipe before attachment.
+        if (isVolumePanelSurface(view)) {
             volumePanelSurfaceRoots.add(view)
             return volumeGlobalGlassSelected()
         }
-        return softGlassRefreshing.get() == true || isNotificationRowBackground(view) || isShadeBackgroundView(view) ||
-            isControlCenterCall() || isNotificationCenterCall() || isMediaNotificationView(view)
+        if (softGlassRefreshing.get() == true || isNotificationRowBackground(view) ||
+            isShadeBackgroundView(view) || isMediaNotificationView(view)
+        ) {
+            return true
+        }
+        // Inspect the stack trace at most ONCE instead of up to 3 separate times.
+        val stack = Thread.currentThread().stackTrace
+        for (frame in stack) {
+            val name = frame.className
+            if (name.contains("com.android.systemui.miui.volume.", ignoreCase = true)) {
+                volumePanelSurfaceRoots.add(view)
+                return volumeGlobalGlassSelected()
+            }
+            if (name.startsWith("miui.systemui.controlcenter.") ||
+                name.startsWith("com.android.systemui.statusbar.notification.") ||
+                name.startsWith("com.android.systemui.shade.") ||
+                name.startsWith("com.miui.systemui.shade.")
+            ) {
+                return true
+            }
+        }
+        return false
     }
 
-    private fun isSoftGlassPanelLayer(view: View): Boolean =
-        !lockscreenBackdropContainers.contains(view) && !isControlCenterTopButtonBackground(view) && expandedIslandMaterialApplying.get() != true && !expandedIslandGlassSurfaces.contains(view) && view.tag != SHORTCUT_GLASS_TAG && view.tag != LOCKSCREEN_CAPSULE_MATERIAL_TAG && (
-            (volumeGlobalGlassSelected() && (isVolumePanelSurface(view) || stackContainsClass("com.android.systemui.miui.volume."))) ||
-            isShadeBackgroundView(view) || stackContainsClass("ShadeBlendBlurController") ||
-            stackContainsClass("ShadeWindowBlurController") || stackContainsClass("ShadeSolidBackgroundController"))
+    private fun isSoftGlassPanelLayer(view: View): Boolean {
+        if (lockscreenBackdropContainers.contains(view) || isControlCenterTopButtonBackground(view) ||
+            expandedIslandMaterialApplying.get() == true || expandedIslandGlassSurfaces.contains(view) ||
+            view.tag == SHORTCUT_GLASS_TAG || view.tag == LOCKSCREEN_CAPSULE_MATERIAL_TAG
+        ) return false
+        val volumeGlobal = volumeGlobalGlassSelected()
+        if ((volumeGlobal && isVolumePanelSurface(view)) || isShadeBackgroundView(view)) return true
+        // Inspect the stack trace at most ONCE instead of up to 4 separate times.
+        val stack = Thread.currentThread().stackTrace
+        for (frame in stack) {
+            val name = frame.className
+            if (volumeGlobal && name.contains("com.android.systemui.miui.volume.", ignoreCase = true)) return true
+            if (name.contains("ShadeBlendBlurController", ignoreCase = true) ||
+                name.contains("ShadeWindowBlurController", ignoreCase = true) ||
+                name.contains("ShadeSolidBackgroundController", ignoreCase = true)
+            ) return true
+        }
+        return false
+    }
 
     private fun isSoftGlassBlendSurface(view: View): Boolean {
         if (lockscreenBackdropContainers.contains(view)) return false
@@ -4425,9 +4481,9 @@ class HyperSystemUiModule : XposedModule() {
                     val settings = softGlassRuntime?.settings ?: return@intercept chain.proceed()
                     if (!settings.enabled) return@intercept chain.proceed()
                     if (isVolumePanelSurface(view)) return@intercept chain.proceed()
-                    val dim = stackContainsClass("ShadeWindowBlurController")
-                    val solid = stackContainsClass("ShadeSolidBackgroundController")
-                    if (!settings.enabled || (!dim && !solid && softGlassRefreshing.get() != true)) return@intercept chain.proceed()
+                    if (softGlassRefreshing.get() != true &&
+                        !stackContainsAny("ShadeWindowBlurController", "ShadeSolidBackgroundController")
+                    ) return@intercept chain.proceed()
                     rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0)))
                     val percent = settings.backgroundOpacity
                     chain.proceedWith(view, arrayOf(softGlassColorAlpha(chain.getArg(0) as Int, percent)))
@@ -5755,10 +5811,12 @@ class HyperSystemUiModule : XposedModule() {
         view: View?,
         preferences: SharedPreferences,
     ): Boolean {
-        if (view == null || !preferences.getBoolean(KEY_UNIFY_NOTIFICATION_MATERIAL, false) ||
-            isHeadsUpNotificationSurface(view)) return false
-        return isMediaNotificationView(view) ||
-            (isNotificationRowBackground(view) && notificationTypeFor(view) != NotificationMaterialType.NORMAL)
+        if (view == null || !preferences.getBoolean(KEY_UNIFY_NOTIFICATION_MATERIAL, false)) return false
+        val isMedia = isMediaNotificationView(view)
+        val isRowBg = !isMedia && isNotificationRowBackground(view)
+        if (!isMedia && !isRowBg) return false
+        if (isHeadsUpNotificationSurface(view)) return false
+        return isMedia || notificationTypeFor(view) != NotificationMaterialType.NORMAL
     }
 
     private fun normalNotificationGlassParams(view: View): FloatArray? {
@@ -5797,10 +5855,9 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun normalNotificationBlendColors(view: View?, preferences: SharedPreferences): IntArray? {
-        if (view == null || !preferences.getBoolean(KEY_UNIFY_NOTIFICATION_MATERIAL, false) ||
-            isHeadsUpNotificationSurface(view)) return null
+        if (view == null || !preferences.getBoolean(KEY_UNIFY_NOTIFICATION_MATERIAL, false)) return null
         val isNotification = isNotificationRowBackground(view) || isMediaNotificationView(view)
-        if (!isNotification || !isNotificationMaterialCall()) return null
+        if (!isNotification || isHeadsUpNotificationSurface(view) || !isNotificationMaterialCall()) return null
         // The switch makes focus and MEDIA notifications use the normal notification recipe.
         // Ordinary notifications already use that recipe and must keep their original blend
         // points; replacing them here can apply the blend layer a second time and make the row
@@ -6003,13 +6060,15 @@ class HyperSystemUiModule : XposedModule() {
      */
     private fun isShadeBackgroundView(view: View?): Boolean {
         if (view == null || isNotificationRowBackground(view)) return false
-        val idName = runCatching { view.resources.getResourceEntryName(view.id) }.getOrNull()
+        val idName = cachedResourceEntryName(view)
         if (idName in SHADE_BACKGROUND_IDS) return true
         val className = view.javaClass.name
         if (className.contains("mirrorBlurProvider", ignoreCase = true) ||
             className.contains("MirrorBlur", ignoreCase = true) ||
             idName in SLIDER_PART_IDS ||
-            idName in setOf("volume_column_slider", "volume_column_slider_bg_glass", "volume_column_slider_bg_blend")
+            idName == "volume_column_slider" ||
+            idName == "volume_column_slider_bg_glass" ||
+            idName == "volume_column_slider_bg_blend"
         ) return false
         // Never replace the background of the shade window or notification panel itself.
         // Those containers host the notification stack; an opaque wallpaper drawable there
@@ -6025,6 +6084,14 @@ class HyperSystemUiModule : XposedModule() {
 
     private fun stackContainsClass(classNamePart: String): Boolean =
         Thread.currentThread().stackTrace.any { it.className.contains(classNamePart, ignoreCase = true) }
+
+    private fun stackContainsAny(first: String, second: String): Boolean {
+        for (frame in Thread.currentThread().stackTrace) {
+            val name = frame.className
+            if (name.contains(first, ignoreCase = true) || name.contains(second, ignoreCase = true)) return true
+        }
+        return false
+    }
 
     private fun stackContains(classNamePart: String, methodNamePart: String): Boolean =
         Thread.currentThread().stackTrace.any {

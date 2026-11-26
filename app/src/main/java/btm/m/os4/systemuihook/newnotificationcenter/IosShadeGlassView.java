@@ -108,18 +108,29 @@ public final class IosShadeGlassView extends View {
             reset();
             root = window;
         }
+        boolean changed = !active || this.sheetOffset != sheetOffset;
         active = true;
         this.sheetOffset = sheetOffset;
         if (radius != cornerRadius) {
             radius = cornerRadius;
             invalidateOutline();
+            changed = true;
         }
-        backdrop.setVisibility(VISIBLE);
-        setVisibility(VISIBLE);
-        if (!ready && !failed && getWidth() > 0 && getHeight() > 0) initialize();
-        if (ready && (clipWidth != getWidth() || clipHeight != getHeight())) updateClip();
+        if (backdrop.getVisibility() != VISIBLE) backdrop.setVisibility(VISIBLE);
+        if (getVisibility() != VISIBLE) {
+            setVisibility(VISIBLE);
+            changed = true;
+        }
+        if (!ready && !failed && getWidth() > 0 && getHeight() > 0) {
+            initialize();
+            changed = true;
+        }
+        if (ready && (clipWidth != getWidth() || clipHeight != getHeight())) {
+            updateClip();
+            changed = true;
+        }
         updateLiquidLens();
-        invalidate();
+        if (changed && getAlpha() > 0f) invalidate();
     }
 
     private void initialize() {
@@ -213,8 +224,8 @@ public final class IosShadeGlassView extends View {
         active = ready = failed = exiting = false;
         root = null;
         clipWidth = clipHeight = 0;
-        setVisibility(INVISIBLE);
-        backdrop.setVisibility(INVISIBLE);
+        if (getVisibility() != INVISIBLE) setVisibility(INVISIBLE);
+        if (backdrop.getVisibility() != INVISIBLE) backdrop.setVisibility(INVISIBLE);
     }
 
     @Override protected void onDetachedFromWindow() {
@@ -241,7 +252,5 @@ public final class IosShadeGlassView extends View {
     }
 
     private static void call(View view, String name, Object... args) { Xp.callMethod(view, name, args); }
-    private static void optional(View view, String name, Object... args) {
-        try { call(view, name, args); } catch (Throwable ignored) {}
-    }
+    private static void optional(View view, String name, Object... args) { Xp.tryCallMethod(view, name, args); }
 }

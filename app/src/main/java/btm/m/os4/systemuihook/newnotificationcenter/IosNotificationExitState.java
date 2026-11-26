@@ -16,6 +16,7 @@ import btm.m.os4.systemuihook.hypermusiccover.Xp;
 final class IosNotificationExitState {
     private static final WeakHashMap<View, Card> DRAWN = new WeakHashMap<>();
     private static boolean holding;
+    private static int frameStamp;
 
     private IosNotificationExitState() {}
 
@@ -41,32 +42,41 @@ final class IosNotificationExitState {
     static void rememberFrame(View stack) {
         if (holding || !IosNotificationCenterPresentation.ownsStack(stack)
                 || !(stack instanceof ViewGroup)) return;
-        DRAWN.clear();
+        int stamp = ++frameStamp;
         ViewGroup group = (ViewGroup) stack;
-        for (int i = 0; i < group.getChildCount(); i++) rememberRow(group.getChildAt(i));
-    }
-
-    private static void rememberRow(View row) {
-        if (!IosNotificationStackHooks.isNotificationRow(row) || row.getVisibility() == View.GONE) return;
-        remember(row, true);
-        try {
-            Object injector = Xp.callMethod(row, "getInjector");
-            Object background = Xp.callMethod(injector, "getBackgroundNormal");
-            if (background instanceof View) remember((View) background, false);
-        } catch (Throwable ignored) {}
-        try {
-            Object children = Xp.callMethod(row, "getAttachedChildren");
-            if (children instanceof List<?>) {
-                for (Object child : (List<?>) children) {
-                    if (child instanceof View) rememberRow((View) child);
-                }
+        for (int i = 0; i < group.getChildCount(); i++) rememberRow(group.getChildAt(i), stamp);
+        if (!DRAWN.isEmpty()) {
+            java.util.Iterator<Map.Entry<View, Card>> it = DRAWN.entrySet().iterator();
+            while (it.hasNext()) {
+                Card card = it.next().getValue();
+                if (card == null || card.stamp != stamp) it.remove();
             }
-        } catch (Throwable ignored) {}
+        }
     }
 
-    private static void remember(View view, boolean expandable) {
-        try { DRAWN.put(view, new Card(view, expandable)); }
-        catch (Throwable ignored) { /* Older OEM row types keep their native rendering. */ }
+    private static void rememberRow(View row, int stamp) {
+        if (!IosNotificationStackHooks.isNotificationRow(row) || row.getVisibility() == View.GONE) return;
+        remember(row, true, stamp);
+        Object injector = Xp.tryCallMethod(row, "getInjector");
+        Object background = injector == null ? null : Xp.tryCallMethod(injector, "getBackgroundNormal");
+        if (background instanceof View) remember((View) background, false, stamp);
+        Object children = Xp.tryCallMethod(row, "getAttachedChildren");
+        if (children instanceof List<?>) {
+            for (Object child : (List<?>) children) {
+                if (child instanceof View) rememberRow((View) child, stamp);
+            }
+        }
+    }
+
+    private static void remember(View view, boolean expandable, int stamp) {
+        try {
+            Card existing = DRAWN.get(view);
+            if (existing == null) {
+                existing = new Card();
+                DRAWN.put(view, existing);
+            }
+            existing.capture(view, expandable, stamp);
+        } catch (Throwable ignored) { /* Older OEM row types keep their native rendering. */ }
     }
 
     static void apply(View stack) {
@@ -112,13 +122,15 @@ final class IosNotificationExitState {
     }
 
     private static final class Card {
-        final boolean expandable;
-        final int visibility, height, clipTop, clipBottom, extClipBottom, dimAlpha;
-        final float x, y, z, sx, sy, alpha, transitionAlpha, pivotX, pivotY;
-        final Rect bounds;
+        boolean expandable;
+        int stamp, visibility, height, clipTop, clipBottom, extClipBottom, dimAlpha;
+        float x, y, z, sx, sy, alpha, transitionAlpha, pivotX, pivotY;
+        boolean hasBounds;
+        final Rect bounds = new Rect();
 
-        Card(View view, boolean expandable) {
+        void capture(View view, boolean expandable, int stamp) {
             this.expandable = expandable;
+            this.stamp = stamp;
             visibility = view.getVisibility();
             x = value(view, "getSuperTranslationX");
             y = value(view, "getSuperTranslationY");
@@ -130,17 +142,21 @@ final class IosNotificationExitState {
             pivotX = view.getPivotX();
             pivotY = view.getPivotY();
             Rect clip = view.getClipBounds();
-            bounds = clip == null ? null : new Rect(clip);
+            if (clip == null) {
+                hasBounds = false;
+            } else {
+                hasBounds = true;
+                bounds.set(clip);
+            }
             height = expandable ? (int) value(view, "getActualHeight") : 0;
             clipTop = expandable ? (int) value(view, "getClipTopAmount") : 0;
             clipBottom = expandable ? (int) value(view, "getClipBottomAmount") : 0;
             extClipBottom = expandable ? (int) value(view, "getExtClipBottomAmount") : 0;
             int dim = -1;
             if (expandable) {
-                try {
-                    Object drawable = Xp.getObjectField(Xp.callMethod(view, "getInjector"), "dimForeground");
-                    if (drawable instanceof Drawable) dim = ((Drawable) drawable).getAlpha();
-                } catch (Throwable ignored) {}
+                Object injector = Xp.tryCallMethod(view, "getInjector");
+                Object drawable = injector == null ? null : Xp.tryGetObjectField(injector, "dimForeground");
+                if (drawable instanceof Drawable) dim = ((Drawable) drawable).getAlpha();
             }
             dimAlpha = dim;
         }
@@ -163,14 +179,19 @@ final class IosNotificationExitState {
                 clip(view, "ClipBottomAmount", clipBottom);
                 clip(view, "ExtClipBottomAmount", extClipBottom);
                 if (dimAlpha >= 0) {
-                    Object drawable = Xp.getObjectField(Xp.callMethod(view, "getInjector"), "dimForeground");
+                    Object injector = Xp.tryCallMethod(view, "getInjector");
+                    Object drawable = injector == null ? null : Xp.tryGetObjectField(injector, "dimForeground");
                     if (drawable instanceof Drawable && ((Drawable) drawable).getAlpha() != dimAlpha) {
                         ((Drawable) drawable).setAlpha(dimAlpha);
                     }
                 }
             }
             Rect current = view.getClipBounds();
-            if (bounds == null ? current != null : !bounds.equals(current)) view.setClipBounds(bounds);
+            if (!hasBounds) {
+                if (current != null) view.setClipBounds(null);
+            } else if (!bounds.equals(current)) {
+                view.setClipBounds(bounds);
+            }
             if (view.getVisibility() != visibility) view.setVisibility(visibility);
         }
     }

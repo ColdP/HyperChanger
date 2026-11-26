@@ -19,6 +19,7 @@ import android.graphics.drawable.Drawable
 import android.graphics.ImageDecoder
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
@@ -74,6 +75,10 @@ class HarmonyUpdateCardView(
         addView(customText, LayoutParams(-1, dp(36), Gravity.CENTER))
         refresh(backgroundSource)
     }
+
+    // MiuiVersionCard floats above SpringBackLayout/NestedScrollView as a sibling.
+    // Never consume touches here so vertical scrolling and lower-card touches pass straight through.
+    override fun dispatchTouchEvent(ev: MotionEvent?): Boolean = false
 
     fun refresh(style: SettingsAppearanceSource) {
         val night = isNight()

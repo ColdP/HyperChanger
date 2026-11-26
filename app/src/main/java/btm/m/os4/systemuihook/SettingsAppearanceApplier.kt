@@ -42,6 +42,7 @@ object SettingsAppearanceApplier {
     private val deviceCardSpacing = Collections.synchronizedMap(WeakHashMap<Any, DeviceCardSpacingSession>())
     private val cardLikeViews = Collections.synchronizedMap(WeakHashMap<View, Boolean>())
     private val cardColorResources = Collections.synchronizedMap(WeakHashMap<Resources, MutableMap<Int, Boolean>>())
+    private val logoResources = Collections.synchronizedMap(WeakHashMap<Resources, MutableMap<Int, String>>())
     private val internalTextColor = ThreadLocal<Boolean>()
     private val internalLogo = ThreadLocal<Boolean>()
 
@@ -522,10 +523,10 @@ object SettingsAppearanceApplier {
     }
 
     fun logoReplacement(view: ImageView): Drawable? {
-        if (internalLogo.get() == true || view.context.packageName != "com.android.settings") return null
-        if (isCustomDeviceCardEnabled(view.context)) return null
+        if (internalLogo.get() == true || view.id == View.NO_ID || view.context.packageName != "com.android.settings") return null
         val idName = runCatching { view.resources.getResourceEntryName(view.id).lowercase() }.getOrDefault("")
         if (idName != "miui_logo_view" && !idName.contains("logo")) return null
+        if (isCustomDeviceCardEnabled(view.context)) return null
         val source = SettingsAppearanceSources.query(view.context, APPEARANCE_SLOT_LOGO)
         if (!source.exists || source.logoMode == LOGO_MODE_SYSTEM) return null
         return LogoDrawableLoader.load(view.context, source)
@@ -549,10 +550,23 @@ object SettingsAppearanceApplier {
         resources: Resources,
         resourceId: Int,
     ): Drawable? {
-        if (internalLogo.get() == true || context.packageName != "com.android.settings" || isCustomDeviceCardEnabled(context)) return null
-        val packageName = runCatching { resources.getResourcePackageName(resourceId) }.getOrNull()
-        if (packageName != null && packageName != "com.android.settings") return null
-        val name = runCatching { resources.getResourceEntryName(resourceId).lowercase() }.getOrNull() ?: return null
+        if (internalLogo.get() == true || context.packageName != "com.android.settings") return null
+        val cachedName = synchronized(logoResources) { logoResources[resources]?.get(resourceId) }
+        val name = cachedName ?: run {
+            val packageName = runCatching { resources.getResourcePackageName(resourceId) }.getOrNull()
+            val entry = if (packageName == null || packageName == "com.android.settings") {
+                runCatching { resources.getResourceEntryName(resourceId).lowercase() }.getOrNull()
+                    ?.takeIf(::isAnyLogoResource)
+                    .orEmpty()
+            } else {
+                ""
+            }
+            synchronized(logoResources) {
+                logoResources.getOrPut(resources) { HashMap() }[resourceId] = entry
+            }
+            entry
+        }
+        if (name.isEmpty() || isCustomDeviceCardEnabled(context)) return null
         val source = SettingsAppearanceSources.query(context, APPEARANCE_SLOT_LOGO)
         if (!source.exists || source.logoMode == LOGO_MODE_SYSTEM || !isLogoResource(name, source.logoMode)) return null
         val drawable = LogoDrawableLoader.load(context, source) ?: run {
@@ -561,6 +575,11 @@ object SettingsAppearanceApplier {
         }
         return LogoDrawableLoader.forBackground(drawable, source.scale / 100f)
     }
+
+    private fun isAnyLogoResource(name: String): Boolean =
+        name == "xiaomi_os_logo" || name == "xiaomi_os_logo_new" || name == "xiaomi_os_logo_new_lite" ||
+            name == "provision_os_logo" || name == "provision_os_logo_big" ||
+            name == "provision_os_logo_lite" || name == "provision_os_logo_small"
 
     private fun isLogoResource(name: String, mode: Int): Boolean {
         val xiaomi = name == "xiaomi_os_logo" || name == "xiaomi_os_logo_new" || name == "xiaomi_os_logo_new_lite"
@@ -574,7 +593,7 @@ object SettingsAppearanceApplier {
     }
 
     private fun isCustomDeviceCardEnabled(context: android.content.Context): Boolean =
-        SettingsAppearanceSources.query(context, APPEARANCE_SLOT_DEVICE_IMAGE).deviceInterfaceStyle != DEVICE_INTERFACE_STYLE_SYSTEM
+        SettingsAppearanceSources.deviceInterfaceStyle(context) != DEVICE_INTERFACE_STYLE_SYSTEM
 
     fun cardColorResourceReplacement(
         context: android.content.Context,
@@ -583,10 +602,7 @@ object SettingsAppearanceApplier {
         resolvedColor: Int,
     ): Int? {
         if (context.packageName != "com.android.settings" || !isLightMode(resources)) return null
-        val opacity = SettingsAppearanceSources.query(context, APPEARANCE_SLOT_HOME)
-            .lightCardOpacity.coerceIn(0, 100)
-        if (opacity >= 100) return null
-        val matches = cardColorResources[resources]?.get(resourceId) ?: run {
+        val matches = synchronized(cardColorResources) { cardColorResources[resources]?.get(resourceId) } ?: run {
             val packageName = runCatching { resources.getResourcePackageName(resourceId) }.getOrNull()
             val name = runCatching { resources.getResourceEntryName(resourceId).lowercase() }.getOrNull()
             // Fail closed. The previous default treated an unresolvable id as a card colour, so
@@ -594,10 +610,14 @@ object SettingsAppearanceApplier {
             // it belonged to lost its background. Only a positively identified Settings card colour
             // may be replaced.
             val result = packageName == "com.android.settings" && name != null && name in LIGHT_CARD_COLOR_RESOURCES
-            cardColorResources.getOrPut(resources) { HashMap() }[resourceId] = result
+            synchronized(cardColorResources) {
+                cardColorResources.getOrPut(resources) { HashMap() }[resourceId] = result
+            }
             result
         }
         if (!matches) return null
+        val opacity = lightCardOpacity(context)
+        if (opacity >= 100) return null
         val alpha = opacity * 255 / 100
         val replacement = (alpha shl 24) or 0x00FFFFFF
         return replacement
@@ -644,7 +664,7 @@ object SettingsAppearanceApplier {
     }
 
     private fun lightCardOpacity(context: android.content.Context): Int =
-        SettingsAppearanceSources.query(context, APPEARANCE_SLOT_HOME).lightCardOpacity.coerceIn(0, 100)
+        SettingsAppearanceSources.lightCardOpacity(context)
 
     private fun cardColor(opacity: Int): Int = (opacity * 255 / 100 shl 24) or 0x00FFFFFF
 
@@ -710,10 +730,10 @@ object SettingsAppearanceApplier {
     }
 
     fun cardBlurAlpha(view: View): Float? {
-        if (view.context.packageName != "com.android.settings") return null
-        val source = SettingsAppearanceSources.query(view.context, APPEARANCE_SLOT_DEVICE)
-        if (!isLightMode(view) || source.lightCardOpacity >= 100 || !isCardLike(view)) return null
-        return source.lightCardOpacity.coerceIn(0, 100) / 100f
+        if (view.context.packageName != "com.android.settings" || !isLightMode(view) || !isCardLike(view)) return null
+        val opacity = lightCardOpacity(view.context)
+        if (opacity >= 100) return null
+        return opacity / 100f
     }
 
     private fun applyActivity(activity: Activity, slot: String) {
@@ -946,6 +966,7 @@ object SettingsAppearanceApplier {
             host.background = null
             view.visibility = View.VISIBLE
             originalChildVisibility.forEach { (child, _) -> child.visibility = View.INVISIBLE }
+            spacer?.setOnLongClickListener { view.toggleBackgroundByLongPress() }
             attachAnimationSync()
             syncCardAnimation()
             val original = spacerLayoutParams ?: return
@@ -964,7 +985,11 @@ object SettingsAppearanceApplier {
             host.removeView(view)
             host.background = originalHostBackground
             originalChildVisibility.forEach { (child, visibility) -> child.visibility = visibility }
-            spacer?.let { view -> spacerLayoutParams?.let { view.layoutParams = it } }
+            spacer?.let { targetSpacer ->
+                targetSpacer.setOnLongClickListener(null)
+                targetSpacer.isLongClickable = false
+                spacerLayoutParams?.let { targetSpacer.layoutParams = it }
+            }
         }
 
         private fun attachAnimationSync() {

@@ -21,8 +21,19 @@ import btm.m.os4.systemuihook.hypermusiccover.Xp;
 final class IosNotificationStackHooks {
     private static final WeakHashMap<View, ArrayList<Path>> STACK_MASKS = new WeakHashMap<>();
     private static final WeakHashMap<View, Boolean> SYSTEM_EXPANSION = new WeakHashMap<>();
+    private static final ArrayList<RowPosition> REUSED_ROWS = new ArrayList<>();
     private static ViewGroup maskedStack;
     private static Method resetGroupBackground;
+    private static View restingCacheStack;
+    private static int restingCacheChildCount = -1;
+    private static long restingCacheUptime = -1L;
+    private static float restingCacheValue;
+
+    static void invalidateRestingCache() {
+        restingCacheStack = null;
+        restingCacheChildCount = -1;
+        restingCacheUptime = -1L;
+    }
 
     private static final class RowPosition {
         final View view;
@@ -50,41 +61,31 @@ final class IosNotificationStackHooks {
      */
     static boolean isFocusOrMediaNotification(View view) {
         if (view == null) return false;
-        try {
-            Object injector = Xp.callMethod(view, "getInjector");
+        Object injector = Xp.tryCallMethod(view, "getInjector");
+        if (injector != null) {
             if (hasType(injector, ".MiuiMediaHeaderViewInjector")) return true;
-            if (Boolean.TRUE.equals(Xp.callMethod(injector, "isFocusNotification"))) return true;
-        } catch (Throwable ignored) {}
+            if (Boolean.TRUE.equals(Xp.tryCallMethod(injector, "isFocusNotification"))) return true;
+        }
         if (hasType(view, ".MiuiMediaHeaderView")) return true;
         // Use the legacy entry as well: refactored rows can lack getEntry().
-        Object entry = null;
-        try {
-            entry = Xp.callMethod(Xp.callMethod(view, "getInjector"), "getLegacyEntry");
-        } catch (Throwable ignored) {}
-        if (entry == null) {
-            try { entry = Xp.callMethod(view, "getEntry"); } catch (Throwable ignored) {}
-        }
+        Object entry = injector == null ? null : Xp.tryCallMethod(injector, "getLegacyEntry");
+        if (entry == null) entry = Xp.tryCallMethod(view, "getEntry");
         Object sbn = null;
         if (entry != null) {
-            try { sbn = Xp.getObjectField(entry, "mSbn"); } catch (Throwable ignored) {}
-            if (sbn == null) {
-                try { sbn = Xp.callMethod(entry, "getSbn"); } catch (Throwable ignored) {}
-            }
+            sbn = Xp.tryGetObjectField(entry, "mSbn");
+            if (sbn == null) sbn = Xp.tryCallMethod(entry, "getSbn");
         }
         if (sbn == null) return false;
         // Keep these checks independent so a missing vendor field cannot skip media detection.
-        try {
-            if (Boolean.TRUE.equals(Xp.getObjectField(sbn, "mIsFocusNotification"))) return true;
-        } catch (Throwable ignored) {}
-        try {
-            if (Boolean.TRUE.equals(Xp.getObjectField(sbn, "isMediaNotification"))) return true;
-        } catch (Throwable ignored) {}
-        try {
-            android.app.Notification notification = (android.app.Notification) Xp.callMethod(sbn, "getNotification");
-            return Boolean.TRUE.equals(Xp.callMethod(notification, "isMediaNotification"))
-                    || notification.extras.containsKey("android.mediaSession")
+        if (Boolean.TRUE.equals(Xp.tryGetObjectField(sbn, "mIsFocusNotification"))) return true;
+        if (Boolean.TRUE.equals(Xp.tryGetObjectField(sbn, "isMediaNotification"))) return true;
+        Object rawNotification = Xp.tryCallMethod(sbn, "getNotification");
+        if (rawNotification instanceof android.app.Notification) {
+            android.app.Notification notification = (android.app.Notification) rawNotification;
+            if (Boolean.TRUE.equals(Xp.tryCallMethod(notification, "isMediaNotification"))) return true;
+            return (notification.extras != null && notification.extras.containsKey("android.mediaSession"))
                     || android.app.Notification.CATEGORY_TRANSPORT.equals(notification.category);
-        } catch (Throwable ignored) {}
+        }
         return false;
     }
 
@@ -198,45 +199,88 @@ final class IosNotificationStackHooks {
     static float restingRowsExtent(View stack) {
         if (!(stack instanceof ViewGroup)) return 0f;
         ViewGroup group = (ViewGroup) stack;
-        int lastSpecial = -1;
-        for (int i = 0; i < group.getChildCount(); i++) {
-            View row = group.getChildAt(i);
-            if (row.getVisibility() != View.GONE && isFocusOrMediaNotification(row)) lastSpecial = i;
+        int childCount = group.getChildCount();
+        long now = android.os.SystemClock.uptimeMillis();
+        if (restingCacheStack == stack && restingCacheChildCount == childCount
+                && now - restingCacheUptime <= 12L) {
+            return restingCacheValue;
         }
-        float extent = specialRowsExtent(stack);
         float density = stack.getResources().getDisplayMetrics().density;
         float padding = 8f * density;
         float tail = 48f * density;
-        try {
-            Object algorithm = Xp.getObjectField(stack, "mStackScrollAlgorithm");
-            padding = ((Number) Xp.getObjectField(algorithm, "mPaddingBetweenElements")).floatValue();
-            if (lastSpecial < 0) {
-                extent += ((Number) Xp.callMethod(algorithm, "getScrimTopPaddingOrZero",
-                        Xp.getObjectField(stack, "mAmbientState"))).floatValue();
-            }
-        } catch (Throwable ignored) {}
-        int ordinaryCount = 0;
-        for (int i = lastSpecial + 1; i < group.getChildCount(); i++) {
+        float scrimTop = 0f;
+        Object algorithm = Xp.tryGetObjectField(stack, "mStackScrollAlgorithm");
+        if (algorithm != null) {
+            Object padVal = Xp.tryGetObjectField(algorithm, "mPaddingBetweenElements");
+            if (padVal instanceof Number) padding = ((Number) padVal).floatValue();
+            Object ambient = Xp.tryGetObjectField(stack, "mAmbientState");
+            Object scrimVal = ambient == null ? null : Xp.tryCallMethod(algorithm, "getScrimTopPaddingOrZero", ambient);
+            if (scrimVal instanceof Number) scrimTop = ((Number) scrimVal).floatValue();
+        }
+        // Single pass computes the special-card extent and captures the first ordinary row after
+        // the last special card, avoiding 3 full tree passes per frame.
+        float runningExtent = scrimTop;
+        float reservedSpecial = 0f;
+        boolean hasSpecial = false;
+        int ordinaryAfterLastSpecial = 0;
+        View firstOrdinaryAfterSpecial = null;
+        View previous = null;
+        for (int i = 0; i < childCount; i++) {
             View row = group.getChildAt(i);
-            if (row.getVisibility() == View.GONE || !isNotificationRow(row)
-                    || isFocusOrMediaNotification(row)) continue;
-            if (ordinaryCount++ != 0) continue;
-            try {
-                extent += ((Number) Xp.callMethod(row, "getIntrinsicHeight")).floatValue();
-                Object calculator = Xp.getObjectField(Xp.callMethod(row, "getInjector"),
-                        "stackingInfoCalculator");
-                tail = ((Number) Xp.getObjectField(calculator, "stackingHeight1")).floatValue()
-                        + ((Number) Xp.getObjectField(calculator, "stackingHeight2")).floatValue();
-            } catch (Throwable ignored) {
-                if (extent <= 0f) extent = Math.max(row.getHeight(), 96f * density);
+            if (row.getVisibility() == View.GONE || hasType(row, ".NotificationShelf")) continue;
+            boolean special = isFocusOrMediaNotification(row);
+            Object intrinsicObj = Xp.tryCallMethod(row, "getIntrinsicHeight");
+            float height = intrinsicObj instanceof Number ? ((Number) intrinsicObj).floatValue() : row.getHeight();
+            if (height > 0f) {
+                if (algorithm != null) {
+                    Object gapObj = Xp.tryCallMethod(algorithm, "getGapHeightForChild", row, previous);
+                    if (gapObj instanceof Number) runningExtent += ((Number) gapObj).floatValue();
+                }
+                runningExtent += height;
+                if (special) {
+                    reservedSpecial = runningExtent;
+                    hasSpecial = true;
+                    ordinaryAfterLastSpecial = 0;
+                    firstOrdinaryAfterSpecial = null;
+                }
+                runningExtent += padding;
+                previous = row;
+            } else if (special) {
+                hasSpecial = true;
+                ordinaryAfterLastSpecial = 0;
+                firstOrdinaryAfterSpecial = null;
             }
-            if (lastSpecial >= 0) extent += padding;
+            if (!special && isNotificationRow(row)) {
+                if (ordinaryAfterLastSpecial == 0) firstOrdinaryAfterSpecial = row;
+                ordinaryAfterLastSpecial++;
+            }
+        }
+        float extent = hasSpecial ? reservedSpecial : scrimTop;
+        if (firstOrdinaryAfterSpecial != null) {
+            Object intrinsicObj = Xp.tryCallMethod(firstOrdinaryAfterSpecial, "getIntrinsicHeight");
+            if (intrinsicObj instanceof Number) {
+                extent += ((Number) intrinsicObj).floatValue();
+                Object injector = Xp.tryCallMethod(firstOrdinaryAfterSpecial, "getInjector");
+                Object calculator = injector == null ? null : Xp.tryGetObjectField(injector, "stackingInfoCalculator");
+                Object h1 = calculator == null ? null : Xp.tryGetObjectField(calculator, "stackingHeight1");
+                Object h2 = calculator == null ? null : Xp.tryGetObjectField(calculator, "stackingHeight2");
+                if (h1 instanceof Number && h2 instanceof Number) {
+                    tail = ((Number) h1).floatValue() + ((Number) h2).floatValue();
+                }
+            } else if (extent <= 0f) {
+                extent = Math.max(firstOrdinaryAfterSpecial.getHeight(), 96f * density);
+            }
+            if (hasSpecial) extent += padding;
         }
         // The OEM marks the last ordinary notification as isLastNotif.  A lone
         // ordinary card therefore has no collapsed cards below it and must not
         // reserve the two stack-peek heights.  Keep the existing peek envelope
         // when another ordinary card can actually occupy it.
-        if (ordinaryCount > 1) extent += Math.max(0f, tail);
+        if (ordinaryAfterLastSpecial > 1) extent += Math.max(0f, tail);
+        restingCacheStack = stack;
+        restingCacheChildCount = childCount;
+        restingCacheUptime = now;
+        restingCacheValue = extent;
         return extent;
     }
 
@@ -320,7 +364,8 @@ final class IosNotificationStackHooks {
         ViewGroup group = (ViewGroup) stack;
         maskedStack = group;
         STACK_MASKS.clear();
-        ArrayList<RowPosition> rows = new ArrayList<>();
+        ArrayList<RowPosition> rows = REUSED_ROWS;
+        rows.clear();
         for (int i = 0; i < group.getChildCount(); i++) {
             View child = group.getChildAt(i);
             if (!child.isShown() || child.getWidth() <= 0
@@ -356,24 +401,27 @@ final class IosNotificationStackHooks {
                 // Leave unsupported OEM row variants untouched.
             }
         }
-        rows.sort(Comparator.comparingDouble(row -> row.top));
-        for (int i = 1; i < rows.size(); i++) {
-            RowPosition lower = rows.get(i);
-            for (int j = 0; j < i; j++) {
-                RowPosition upper = rows.get(j);
-                if (upper.bottom <= lower.top || upper.left >= lower.right
-                        || upper.right <= lower.left) continue;
-                Path shape = new Path();
-                shape.addRoundRect(upper.left, upper.top, upper.right, upper.bottom,
-                        upper.radius, upper.radius, Path.Direction.CW);
-                ArrayList<Path> masks = STACK_MASKS.get(lower.view);
-                if (masks == null) {
-                    masks = new ArrayList<>();
-                    STACK_MASKS.put(lower.view, masks);
+        if (rows.size() > 1) {
+            rows.sort(Comparator.comparingDouble(row -> row.top));
+            for (int i = 1; i < rows.size(); i++) {
+                RowPosition lower = rows.get(i);
+                for (int j = 0; j < i; j++) {
+                    RowPosition upper = rows.get(j);
+                    if (upper.bottom <= lower.top || upper.left >= lower.right
+                            || upper.right <= lower.left) continue;
+                    Path shape = new Path();
+                    shape.addRoundRect(upper.left, upper.top, upper.right, upper.bottom,
+                            upper.radius, upper.radius, Path.Direction.CW);
+                    ArrayList<Path> masks = STACK_MASKS.get(lower.view);
+                    if (masks == null) {
+                        masks = new ArrayList<>();
+                        STACK_MASKS.put(lower.view, masks);
+                    }
+                    masks.add(shape);
                 }
-                masks.add(shape);
             }
         }
+        rows.clear();
     }
 
     static void restoreStackedRows() {
@@ -599,6 +647,7 @@ final class IosNotificationStackHooks {
                     expandSpecialRows((ViewGroup) host);
                 }
                 if (!own) return chain.proceed();
+                invalidateRestingCache();
                 ViewGroup view = (ViewGroup) host;
                 IosNotificationEntryState.prepareTargets(view);
                 float nativeTop = ((Number) Xp.callMethod(view, "getTopPadding")).floatValue();

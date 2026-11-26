@@ -121,12 +121,11 @@ final class IosNotificationShortcutHost extends FrameLayout {
         // for lifecycle/interaction gating, while this smooth value drives presentation only.
         float visual = progress * progress * (3f - 2f * progress);
         if (current.getAlpha() != visual) current.setAlpha(visual);
-        int blur = Math.round(28f * panel.getResources().getDisplayMetrics().density
-                * (1f - visual));
-        blur = (blur + 1) / 2 * 2;
+        int blur = visual <= 0.02f ? 0
+                : IosShadeBlurEffects.quantize(28f * panel.getResources().getDisplayMetrics().density
+                        * (1f - visual));
         if (blur != current.lastBlur) {
-            current.setRenderEffect(blur == 0 ? null
-                    : RenderEffect.createBlurEffect(blur, blur, Shader.TileMode.CLAMP));
+            current.setRenderEffect(IosShadeBlurEffects.blur(blur));
             current.lastBlur = blur;
         }
         float x = sheet == null ? 0f : sheet.getTranslationX();
@@ -139,9 +138,9 @@ final class IosNotificationShortcutHost extends FrameLayout {
     static float bottomSpace(View panel) {
         if (panel == null || overlay == null || overlay.getParent() != panel
                 || (left == null && right == null)) return 0f;
-        int[] panelPoint = new int[2];
-        panel.getLocationInWindow(panelPoint);
-        float panelBottom = panelPoint[1] + panel.getHeight();
+        int[] point = POINT;
+        panel.getLocationInWindow(point);
+        float panelBottom = point[1] + panel.getHeight();
         float navigationInset = 0f;
         android.view.WindowInsets insets = panel.getRootWindowInsets();
         if (insets != null) {
@@ -151,12 +150,10 @@ final class IosNotificationShortcutHost extends FrameLayout {
         float safeBottom = panelBottom - navigationInset;
         float top = Float.POSITIVE_INFINITY;
         if (left != null && left.isShown() && left.getHeight() > 0) {
-            int[] point = new int[2];
             left.getLocationInWindow(point);
             top = Math.min(top, point[1]);
         }
         if (right != null && right.isShown() && right.getHeight() > 0) {
-            int[] point = new int[2];
             right.getLocationInWindow(point);
             top = Math.min(top, point[1]);
         }

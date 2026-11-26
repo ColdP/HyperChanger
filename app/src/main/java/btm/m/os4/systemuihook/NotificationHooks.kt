@@ -11,6 +11,8 @@ import android.graphics.RenderEffect
 import android.graphics.Outline
 import android.graphics.Shader
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import btm.m.os4.systemuihook.ModuleLog as Log
 import android.view.View
 import android.view.ViewGroup
@@ -22,6 +24,7 @@ import java.lang.reflect.Field
 import java.lang.ref.WeakReference
 import java.util.Collections
 import java.util.WeakHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Owns independent notification restrictions, mini-window bar, text and flashlight hooks.
@@ -265,11 +268,66 @@ internal class NotificationHooks(
 
     private data class TextRoot(val wrapper: WeakReference<Any>, val row: WeakReference<View>)
     private data class TextColors(val original: ColorStateList, val applied: ColorStateList)
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val textRoots = Collections.synchronizedMap(WeakHashMap<View, TextRoot>())
     private val textColors = Collections.synchronizedMap(WeakHashMap<TextView, TextColors>())
+    private val deferredTextRoots = Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap<View, Boolean>()))
+    private val textRefreshPending = AtomicBoolean(false)
+    private val deferredTextRefreshPending = AtomicBoolean(false)
     private var textHooksInstalled = false
+    @Volatile private var textPreferences: SharedPreferences? = null
     private var textPreferenceListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
     @Volatile private var darkIntensity = 0f
+    private val textAttachListener = object : View.OnAttachStateChangeListener {
+        override fun onViewAttachedToWindow(v: View) {
+            val prefs = textPreferences ?: return
+            if (!isNotificationTextOverrideActive(prefs) && textColors.isEmpty()) return
+            applyText(v, prefs)
+            if (isNotificationTextOverrideActive(prefs)) {
+                scheduleDeferredTextApply(v)
+            }
+        }
+
+        override fun onViewDetachedFromWindow(v: View) = Unit
+    }
+    private val textRefreshRunnable = Runnable {
+        textRefreshPending.set(false)
+        val prefs = textPreferences ?: return@Runnable
+        val roots = synchronized(textRoots) {
+            val iterator = textRoots.entries.iterator()
+            val attached = ArrayList<View>()
+            while (iterator.hasNext()) {
+                val entry = iterator.next()
+                val root = entry.key
+                val owner = entry.value
+                if (root == null || (owner.wrapper.get() == null && owner.row.get() == null)) {
+                    iterator.remove()
+                } else if (root.isAttachedToWindow) {
+                    attached.add(root)
+                }
+            }
+            attached
+        }
+        roots.forEach { root ->
+            if (root.isAttachedToWindow) {
+                applyText(root, prefs)
+            }
+        }
+    }
+    private val deferredTextRefreshRunnable = Runnable {
+        deferredTextRefreshPending.set(false)
+        val prefs = textPreferences ?: return@Runnable
+        val roots = synchronized(deferredTextRoots) {
+            val snapshot = deferredTextRoots.toList()
+            deferredTextRoots.clear()
+            snapshot
+        }
+        roots.forEach { root ->
+            if (root.isAttachedToWindow) {
+                applyText(root, prefs)
+            }
+        }
+    }
     private val flashlightClasses = Collections.newSetFromMap(WeakHashMap<Class<*>, Boolean>())
     private data class ViewRenderBaseline(
         val effect: RenderEffect?,
@@ -279,6 +337,19 @@ internal class NotificationHooks(
     private val stackBlurBaselines = Collections.synchronizedMap(WeakHashMap<View, ViewRenderBaseline>())
     private val stackBlurProgress = Collections.synchronizedMap(WeakHashMap<View, Float>())
     private val stackBlurEffects = java.util.concurrent.ConcurrentHashMap<Int, RenderEffect>()
+    private val stackBlurRefreshPending = AtomicBoolean(false)
+    private val stackBlurRefreshRunnable = Runnable {
+        stackBlurRefreshPending.set(false)
+        val prefs = stackBlurPreferences ?: return@Runnable
+        val settings = readNotificationStackBlurSettings(prefs)
+        val tracked = synchronized(stackBlurBaselines) { stackBlurBaselines.keys.toList() }
+        tracked.forEach { view ->
+            if (!settings.enabled || view.isAttachedToWindow) {
+                val progress = stackBlurProgress[view] ?: 0f
+                applyStackBlur(view, progress, settings)
+            }
+        }
+    }
     private data class StackRadiusAccessor(val method: java.lang.reflect.Method?)
     private val stackRadiusAccessors = object : ClassValue<StackRadiusAccessor>() {
         override fun computeValue(type: Class<*>): StackRadiusAccessor = StackRadiusAccessor(
@@ -308,15 +379,27 @@ internal class NotificationHooks(
     private var stackBlurPreferences: SharedPreferences? = null
     private var stackBlurPreferenceListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
 
+    private fun isNotificationTextOverrideActive(preferences: SharedPreferences): Boolean {
+        val settings = readNotificationTextColorSettings(preferences)
+        val headsUpActive =
+            preferences.getBoolean(KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS, false) && settings.headsUp != 0
+        val normalActive =
+            preferences.getBoolean(KEY_UNIFY_NOTIFICATION_MATERIAL, false) && settings.notification != 0
+        return headsUpActive || normalActive
+    }
+
     private fun forEachText(view: View, action: (TextView) -> Unit) {
         if (view is TextView) action(view)
         if (view is ViewGroup) for (index in 0 until view.childCount) forEachText(view.getChildAt(index), action)
     }
 
-    private fun restoreText(root: View) = forEachText(root) { text ->
-        textColors.remove(text)?.let { colors ->
-            // A RemoteViews rebind may already have installed a newer system color.
-            if (text.textColors === colors.applied) text.setTextColor(colors.original)
+    private fun restoreText(root: View) {
+        if (textColors.isEmpty()) return
+        forEachText(root) { text ->
+            textColors.remove(text)?.let { colors ->
+                // A RemoteViews rebind may already have installed a newer system color.
+                if (text.textColors === colors.applied) text.setTextColor(colors.original)
+            }
         }
     }
 
@@ -352,24 +435,44 @@ internal class NotificationHooks(
         }
     }
 
-    private fun trackWrapper(wrapper: Any, rowHint: View?, preferences: SharedPreferences) {
-        val root = (readInstanceField(wrapper, "mView") as? View) ?: (wrapper as? View) ?: return
+    private fun trackWrapper(wrapper: Any, rowHint: View?, preferences: SharedPreferences): View? {
+        val root = (readInstanceField(wrapper, "mView") as? View) ?: (wrapper as? View) ?: return null
         val row = (readInstanceField(wrapper, "mRow") as? View) ?: rowHint ?:
             generateSequence(root.parent as? View) { it.parent as? View }
                 .firstOrNull { it.javaClass.name.endsWith(".ExpandableNotificationRow") }
-        textRoots[root] = TextRoot(WeakReference(wrapper), WeakReference(row))
+        val isNew = synchronized(textRoots) {
+            val existed = textRoots.containsKey(root)
+            textRoots[root] = TextRoot(WeakReference(wrapper), WeakReference(row))
+            !existed
+        }
+        if (isNew) {
+            root.removeOnAttachStateChangeListener(textAttachListener)
+            root.addOnAttachStateChangeListener(textAttachListener)
+        }
         applyText(root, preferences)
+        return root
+    }
+
+    private fun scheduleDeferredTextApply(root: View) {
+        if (!root.isAttachedToWindow) return
+        deferredTextRoots.add(root)
+        if (deferredTextRefreshPending.compareAndSet(false, true)) {
+            mainHandler.post(deferredTextRefreshRunnable)
+        }
     }
 
     private fun refreshText(preferences: SharedPreferences) {
-        val roots = synchronized(textRoots) { textRoots.keys.toList() }
-        roots.forEach { root -> root.post { applyText(root, preferences) } }
+        textPreferences = preferences
+        if (textRefreshPending.compareAndSet(false, true)) {
+            mainHandler.post(textRefreshRunnable)
+        }
     }
 
     fun installNotificationTextHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
         if (!ModuleSafetyRuntime.allows(SafetySection.NOTIFICATIONS)) return
         if (textHooksInstalled) return
         textHooksInstalled = true
+        textPreferences = preferences
         textPreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key == null || key in setOf(KEY_HEADS_UP_TEXT_COLOR, KEY_NOTIFICATION_TEXT_COLOR,
                     KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS, KEY_UNIFY_NOTIFICATION_MATERIAL)) refreshText(preferences)
@@ -397,9 +500,16 @@ internal class NotificationHooks(
                             if (owner != null) {
                                 val row = (0 until method.parameterCount).map { chain.getArg(it) }
                                     .firstOrNull { it is View && it.javaClass.name.endsWith(".ExpandableNotificationRow") } as? View
-                                trackWrapper(owner, row, preferences)
-                                // MIUI also posts template work after onContentUpdated.
-                                root?.post { trackWrapper(owner, row, preferences) }
+                                val trackedRoot = trackWrapper(owner, row, preferences)
+                                // MIUI also posts template work after onContentUpdated. Never queue
+                                // into a detached View's HandlerActionQueue; attached views use one
+                                // coalesced main-thread pass and detached views sync on attach.
+                                if (trackedRoot != null &&
+                                    trackedRoot.isAttachedToWindow &&
+                                    (isNotificationTextOverrideActive(preferences) || !textColors.isEmpty())
+                                ) {
+                                    scheduleDeferredTextApply(trackedRoot)
+                                }
                             }
                             result
                         }
@@ -432,7 +542,12 @@ internal class NotificationHooks(
                     val intensity = chain.getArg(0) as? Float ?: darkIntensity
                     val changed = (intensity >= .5f) != (darkIntensity >= .5f)
                     darkIntensity = intensity
-                    if (changed) refreshText(preferences)
+                    if (changed &&
+                        preferences.getBoolean(KEY_HEADS_UP_NOTIFICATION_SOFT_GLASS, false) &&
+                        readNotificationTextColorSettings(preferences).headsUp == 3
+                    ) {
+                        refreshText(preferences)
+                    }
                     result
                 }
         }.onFailure { btm.m.os4.systemuihook.HookModuleLogger.log(module, Log.WARN, logTag, "Could not observe status-bar text color", it) }
@@ -535,11 +650,8 @@ internal class NotificationHooks(
         stackBlurPreferences = preferences
         stackBlurPreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key == null || key == KEY_NOTIFICATION_STACK_BLUR || key == KEY_NOTIFICATION_STACK_BLUR_OFFSET) {
-                val settings = readNotificationStackBlurSettings(preferences)
-                val tracked = synchronized(stackBlurBaselines) { stackBlurBaselines.keys.toList() }
-                tracked.forEach { view ->
-                    val progress = stackBlurProgress[view] ?: 0f
-                    view.post { applyStackBlur(view, progress, settings) }
+                if (stackBlurRefreshPending.compareAndSet(false, true)) {
+                    mainHandler.post(stackBlurRefreshRunnable)
                 }
             }
         }.also(preferences::registerOnSharedPreferenceChangeListener)

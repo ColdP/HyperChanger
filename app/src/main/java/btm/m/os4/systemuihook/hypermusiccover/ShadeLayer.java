@@ -278,8 +278,8 @@ public final class ShadeLayer {
         // made its entire optical band almost transparent during most of the pull.
         float opacityProgress = staged ? IOS.switchFraction : visual;
         float opacity = opacityProgress * opacityProgress * (3f - 2f * opacityProgress);
-        sFrame.setAlpha(opacity);
-        sFrame.setVisibility(View.VISIBLE);
+        if (sFrame.getAlpha() != opacity) sFrame.setAlpha(opacity);
+        if (sFrame.getVisibility() != View.VISIBLE) sFrame.setVisibility(View.VISIBLE);
         sEffectOn = showWallpaper;
         boolean landscape = isLandscapeFrame();
         // Landscape uses a deliberately quiet background: zoom the wallpaper slightly so the
@@ -300,10 +300,9 @@ public final class ShadeLayer {
         float density = sFrame.getResources().getDisplayMetrics().density;
         // Horizontal switching changes page ownership, not vertical expansion.
         // Keep the wallpaper at its expanded focus while the pages slide across.
-        int blur = landscape
-                ? Math.round((22f + 14f * (1f - IOS.progress)) * density)
-                : Math.round(28f * density * (1f - IOS.progress));
-        blur = (blur + 1) / 2 * 2;
+        int blur = btm.m.os4.systemuihook.newnotificationcenter.IosShadeBlurEffects.quantize(landscape
+                ? (22f + 14f * (1f - IOS.progress)) * density
+                : 28f * density * (1f - IOS.progress));
         if (!staged && sWp != null && sLastWpBlur != blur) {
             sWp.setRenderEffect(btm.m.os4.systemuihook.newnotificationcenter.IosShadeBlurEffects.blur(blur));
             sLastWpBlur = blur;

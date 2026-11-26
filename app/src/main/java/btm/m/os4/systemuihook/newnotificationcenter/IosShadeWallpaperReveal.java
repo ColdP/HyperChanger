@@ -47,6 +47,7 @@ public final class IosShadeWallpaperReveal {
         boolean start = state.update(enabled, progress, full, showWallpaper && switching);
         if (!enabled || !start || animatorTarget != state.targetAlpha) cancel();
         if (!enabled) {
+            if (wallpaper.getVisibility() != View.VISIBLE) wallpaper.setVisibility(View.VISIBLE);
             wallpaper.setAlpha(1f);
             lastBlur = -1; // The ordinary animation owns the effect in this mode.
             IosNotificationCenterPresentation.setWallpaperReveal(1f, 0);
@@ -86,10 +87,24 @@ public final class IosShadeWallpaperReveal {
     private void apply() {
         float alpha = state.alpha;
         IosShadeBackdropBlur.setWallpaperReveal(root, alpha);
+        boolean showWallpaper = alpha > 0.001f;
+        if (!showWallpaper) {
+            // Avoid running a full-screen RenderEffect blur on a completely invisible wallpaper
+            // while the user drags the staged glass sheet down.
+            if (wallpaper.getAlpha() != 0f) wallpaper.setAlpha(0f);
+            if (wallpaper.getVisibility() != View.INVISIBLE) wallpaper.setVisibility(View.INVISIBLE);
+            if (lastBlur != 0) {
+                wallpaper.setRenderEffect(null);
+                lastBlur = 0;
+            }
+            IosNotificationCenterPresentation.setWallpaperReveal(0f, 0);
+            if (glass.getAlpha() != 1f) glass.setAlpha(1f);
+            return;
+        }
+        if (wallpaper.getVisibility() != View.VISIBLE) wallpaper.setVisibility(View.VISIBLE);
         if (wallpaper.getAlpha() != alpha) wallpaper.setAlpha(alpha);
         float density = wallpaper.getResources().getDisplayMetrics().density;
-        int blur = Math.round((landscape ? 22f + 14f * (1f - alpha) : 28f * (1f - alpha)) * density);
-        blur = (blur + 1) / 2 * 2;
+        int blur = IosShadeBlurEffects.quantize((landscape ? 22f + 14f * (1f - alpha) : 28f * (1f - alpha)) * density);
         if (lastBlur != blur) {
             wallpaper.setRenderEffect(IosShadeBlurEffects.blur(blur));
             lastBlur = blur;
@@ -98,7 +113,8 @@ public final class IosShadeWallpaperReveal {
         IosNotificationCenterPresentation.setWallpaperReveal(alpha, landscape ? 0 : blur);
         // The stationary scene below this sheet remains a populated local sampling source.
         // Crossfade the artwork, never retire/recreate a native sampler during the gesture.
-        glass.setAlpha(1f - alpha);
+        float glassAlpha = 1f - alpha;
+        if (glass.getAlpha() != glassAlpha) glass.setAlpha(glassAlpha);
     }
 
     private void cancel() {
@@ -114,6 +130,7 @@ public final class IosShadeWallpaperReveal {
         state.reset();
         previousProgress = 0f;
         exiting = false;
+        if (wallpaper.getVisibility() != View.VISIBLE) wallpaper.setVisibility(View.VISIBLE);
         wallpaper.setAlpha(1f);
         lastBlur = -1;
         glass.reset();
