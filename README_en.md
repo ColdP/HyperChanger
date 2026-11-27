@@ -41,30 +41,31 @@ The project is still in testing and primarily targets **HyperOS 4 (Android 17)**
 ### Notifications, Control Center, and volume panel
 
 - Configure notification-shade and Control Center backgrounds independently, plus materials, blur, opacity, and corners for regular, media, and focus notifications.
+- Clear Frost material parameter tuning: in Classic Clear Frost mode, configure built-in light/dark blend presets or custom 3-layer blends, separate notification and Control Center presets, Control Center light/dark mode, element blend opacity, highlight strokes (multiple sizes, 45° diagonal light, wide light field, and custom parameters), Control Center surface shadows, and backdrop blur/scale/opacity/custom tint without affecting Soft Glass mode.
 - iOS-style notification center with a rounded wallpaper panel, lock-screen clock, and depth effects. Choose lock-screen wallpaper or no wallpaper, hide the clear button, and adjust the bottom notification offset. Live wallpapers are currently unsupported.
 - Improve iOS-style notification center performance to reduce stutter during expansion, collapse, and gestures, with smoother wallpaper blur transitions when switching to and from Control Center.
 - Customize header icons, text, scale, and spacing, plus the clear button's style and material. Add the lock screen's left and right shortcuts to the notification center with their existing actions and drag gestures; shortcut mode saves its notification bottom offset separately.
-- Customize the Control Center large clock, date spacing, red “1”, carrier text, network indicators, and header height.
+- Customize Control Center header content (system default, large clock, or signal status bar), date spacing, red “1”, carrier text, signal icon style, dual-SIM labels, independent battery percentage placement, and header height.
 - Adjust icon scale, landscape visibility, and backgrounds under “Status bar & Control center → Control center top buttons”. Choose solid color, advanced material, or soft glass, with independent or global soft-glass parameters.
-- Customize the Control Center layout for WLAN, mobile data, media, brightness, and volume tiles, with automatic small-tile filling, media-source icon hiding, and layout reset.
+- Customize separate portrait and landscape Control Center layouts for WLAN, mobile data, media, brightness, and volume tiles, with automatic small-tile filling, media-source icon hiding, large-cover media cards (with adaptive color extraction), vertical multi-page paging with a side indicator, Focus Mode control cards, and layout reset.
 - Choose upper-panel items from a tile catalog and retain tile sizes. The editor previews system-style icons and current media artwork and titles. Move top buttons to the bottom and save separate icon scales, corners, and spacing for each position.
 - Adjust volume-panel blur, glass strength, background opacity, corners, and volume-slider width and height.
-- Use built-in or user presets and share notification-shade and Control Center settings through JSON or QR codes.
+- Use built-in or user presets and share notification-shade, Control Center, soft-glass, and clear-frost settings through JSON or QR codes.
 
 ### Super Island, status bar, and gesture handle
 
 - Adjust Super Island width, spacing between large and small islands, collapsed contour smoothing, and background materials.
 - Tune expanded-island soft-glass parameters independently or follow the global soft-glass settings.
-- Remove selected focus-notification and Super Island whitelist restrictions, customize notification backgrounds and media cards, and simulate regular, focus, and media notifications.
-- Customize stacked mobile signal indicators, network-type labels, icon visibility, scale, position, and spacing.
+- Remove selected focus-notification and Super Island whitelist restrictions, customize notification backgrounds and media cards, integrate Quick Share with Xiaomi Super Island, and simulate regular, focus, and media notifications.
+- Customize status-bar seconds, stacked mobile signal indicators, network-type labels, icon visibility, scale, position, and spacing.
 - Adjust the global gesture handle's style and dimensions.
 
 ### Lock screen, music, and wallpapers
 
-- Customize the lock-screen clock, horizontal position, depth effects, charging text, bottom shortcuts, fingerprint icon, and PIN entry appearance.
+- Customize the lock-screen clock, horizontal position, depth effects, charging text, custom bottom text, bottom shortcuts, bottom gesture line (with material, width/height scaling, vertical offset, and unlock hint animation), fingerprint icon, and PIN entry appearance.
 - Configure the lock-screen editor background, template-count limit, lock-screen capsule, and face-unlock island; integrate AMap navigation with the lock-screen capsule.
 - Edit lock-screen widgets with weather, battery, sunrise/sunset, steps, alarms, schedules, and signature images. Reorder widgets and tune their layout, colors, and materials.
-- Use music-cover lock screens, a mini player, and lyrics; manage local lyrics in the lyrics library.
+- Use music-cover lock screens (including vinyl record style with rotation animation, tonearm, custom colors, and kept wallpaper with blur), a mini player, and full or compact lyrics; manage local lyrics in the lyrics library.
 - Configure raster-effect live wallpapers and export the current home and lock-screen wallpapers.
 - Import, manage, preview, and activate HyperChanger depth-wallpaper packs.
 - Preserve soft-glass effects after applying global themes and remove OTA conversion restrictions on glass and overlay AOD clock materials.
@@ -74,12 +75,14 @@ The project is still in testing and primarily targets **HyperOS 4 (Android 17)**
 - Add a Dock to compatible HyperOS 4 Rust launchers, with solid-color, advanced-material, or soft-glass backgrounds and an entrance animation.
 - Adjust Dock height, horizontal and bottom margins, corners, colors, opacity, and blur.
 - Adjust glass blur and optical parameters independently for the launcher and Dock, or use global parameters; Dock also offers system defaults. Folders and recents have their own material settings. Customize folder columns, icon row spacing, and Dock icon vertical offset.
+- Remove HyperOS widget whitelist restrictions, allow Android widgets in widget stacks, and unlock soft-glass backgrounds for Android widgets.
 - Hide the recent-apps clear button while either retaining or disabling its action.
 - The Dock requires both System Framework and launcher scopes, plus a manual device restart on first use.
 
 ### Settings and rear screen
 
-- Customize Settings home and device pages with backgrounds, device cards, logos, device images, and displayed specifications; add a module shortcut.
+- Customize Settings home and My Device pages with backgrounds, device cards (including ColorOS style, Style 4, separated device details, and Monet storage progress bars), logos, device images, and displayed specifications; add a module shortcut.
+- Enable dual-pane mode on the Settings home page (with adjustable split ratio, landscape-only dual pane, and forced landscape unlock), gradient title-bar blur, and an advanced-material floating search bar (with customizable dimensions, icon/text scaling, and material parameters).
 - Browse local and cloud device-profile presets to preview, download, or apply device specifications.
 - Customize Settings entry labels, icons, module entries, and sound-effect badges; adjust home-page entry icon and text scaling and row spacing; add more auto-lock and refresh-rate options and show Google services entries and saved Wi-Fi passwords.
 - Unlock BOSE tuning and customize sound-effect badges on compatible devices. This exposes existing system profiles and does not guarantee improved sound quality.
@@ -91,7 +94,8 @@ The project is still in testing and primarily targets **HyperOS 4 (Android 17)**
 
 ### Camera, Gallery, Super XiaoAi, and input method
 
-- Configure Leica LCC UI, preservation of native focal lengths, and instant modes in compatible Camera versions.
+- Configure Leica LCC UI, Xiaomi 18-series camera feature unlocks, model-restriction removal, instant modes, and native focal lengths (via auto detection, preset catalog, or custom values) in compatible Camera versions (including 6.8).
+- Customize camera watermark brand/model and special suffixes, photo/video watermark libraries (ZIP import/export, unlock all watermarks, and remove front-camera limits), and custom shutter sounds (local audio import and online preset preview/download).
 - Unlock selected Gallery editing watermarks and Xiaomi 18-series editing features, subject to Gallery and media-editor version compatibility.
 - Add soft glass to the Super XiaoAi floating input box and adjust its material parameters independently.
 - Remove selected blacklist, clipboard, AI, and voice safety restrictions in Super XiaoAi input method.
@@ -116,16 +120,17 @@ The project is still in testing and primarily targets **HyperOS 4 (Android 17)**
 
 ### App bottom navigation
 
-- Supports QQ, Apple Music, Weibo, Xiaohongshu, Xiaomi Store, Mi Wallet, Mi Fitness, Luckin Coffee, Tencent Meeting, DouShengSheng, Meituan, Meituan Waimai, China Merchants Bank, WeChat, Pinduoduo, Instagram, Pinterest, Reddit, X, and GitHub. Choose styles, labels, and colors per app; unread indicators and other options depend on each adaptation.
+- Supports QQ, Apple Music, Weibo, Xiaohongshu, Xiaomi Store, Mi Wallet, Mi Fitness, Luckin Coffee, Tencent Meeting, DouShengSheng, Meituan, Meituan Waimai, China Merchants Bank, WeChat, Pinduoduo, JD.com, Alipay, Instagram, Pinterest, Reddit, X, and GitHub. Choose styles, labels, and colors per app; unread indicators and other options depend on each adaptation.
 - Choose Liquid Glass, docked HyperOS, floating HyperOS, or floating HarmonyOS navigation. Liquid glass for docked HyperOS is an experimental option, off by default, that applies to the module and target apps after confirmation.
 - For the three floating styles, adjust width and height independently per app (-100.00% to 100.00%, in 0.01% steps), vertical offset, and corners (-96 to 0; 0 retains the default capsule, -96 gives square corners). Backgrounds and existing selection capsules share the corner adjustment. Docked navigation hides scale and corner controls.
 - Use global or per-app material recipes for blur, opacity, refraction, highlights, and dispersion, with previews and optional global-recipe synchronization to the module's navigation. Set a global vertical offset or per-app overrides. App-specific options include a separate Xiaohongshu publish button, WeChat avatar corners, and Mi Wallet tab filtering.
-- The main list shows installed apps and their version names. Uninstalled apps appear on a separate display-only page with names and package IDs.
+- Switch between list view and an iOS-style app grid view; the main list shows installed apps and their version names, while uninstalled apps appear on a separate display-only page with names and package IDs.
 - Disable navigation adaptation for selected apps and restore it from a separate list. Use a separate Reddit create button and sliding navigation entry and exit animations in Reddit and Pinduoduo.
 - Adaptation baselines include China Merchants Bank 14.4.6, Meituan 12.68.202, and Meituan Waimai 8.85.1. App updates require renewed verification; a successful build does not establish device coverage for every page.
 
 ### Other apps and system updates
 
+- Remove China-region GMS restrictions and expose additional Google services options; requires the Google Play services scope.
 - Remove the 10-minute watch-face trial limit in Mi Fitness.
 - Override MiShare's AirDrop availability checks. Actual transfers still depend on system components, hardware, and the receiving device.
 - Add screen-recording frame-rate and bitrate options and configure a custom output directory.
@@ -135,8 +140,8 @@ The project is still in testing and primarily targets **HyperOS 4 (Android 17)**
 
 ### Module app, languages, and updates
 
-- A MIUIX settings interface with light, dark, and system themes, multiple bottom navigation styles, and predictive back animations. Enable Monet colors and choose system colors, one of 10 built-in themes, or a custom color.
-- Open floating glass search to find specific settings by name, description, keyword, or app package ID and jump directly to their pages. Choose whether results include the module's own settings.
+- A MIUIX-based settings interface (with COUI components) supporting Hyper, Harmony, and ColorOS interface styles, light/dark/system themes, multiple bottom navigation styles, global seamless 3D tilt shared transitions, and predictive back animations. Enable Monet colors and Home Monet icons, and choose system colors, one of 10 built-in themes, or a custom color.
+- Open floating glass search to find specific settings by name, description, keyword, or app package ID (displayed with category icons) and jump directly to their pages. Choose whether results include the module's own settings.
 - Built-in Simplified Chinese, English, and Japanese, with language-pack import, export, and editing.
 - Import and export module settings as JSON or ZIP with supported resources, preview settings and assets before import, and manage scoped app restarts from the app.
 - Check for module updates through GitHub or Gitee, download them, and install manually or silently with root.
@@ -196,6 +201,7 @@ Enable the module in Vector / LSPosed and select the scopes required by your fea
 | Luckin Coffee | `com.lucky.luckyclient` |
 | AMap | `com.autonavi.minimap` |
 | MiShare | `com.miui.mishare.connectivity` |
+| Google Play services | `com.google.android.gms` |
 | Xiaomi interconnect service | `com.xiaomi.xmsf` |
 | XiaoAi voice | `com.miui.voiceassist` |
 | Xiaomi sound | `com.miui.misound` |
@@ -217,6 +223,8 @@ Enable the module in Vector / LSPosed and select the scopes required by your fea
 | Content extension (Portal) | `com.miui.contentextension` |
 | X | `com.twitter.android` |
 | GitHub | `com.github.android` |
+| JD.com | `com.jingdong.app.mall` |
+| Alipay | `com.eg.android.AlipayGphone` |
 | HTML Viewer | `com.android.htmlviewer` |
 | Joyose | `com.xiaomi.joyose` |
 | System Helper | `com.mobiletools.systemhelper` |
@@ -238,6 +246,7 @@ The Process hot reload switch under Settings → Module safety defaults to on an
 
 - **Notification-shade and Control Center presets:** use built-in or user presets. Long-press to export JSON or a QR code; import from a file or QR-code image.
 - **Soft-glass presets:** use built-in or custom parameter presets and share them through JSON or QR codes. Surfaces configured to follow global parameters use the corresponding global soft-glass values.
+- **Clear-frost presets:** use built-in or custom parameter presets and share them through JSON or QR codes to synchronize blend colors, highlight strokes, Control Center shadows, and backdrop parameters together.
 - **Module settings presets:** choose configuration only (JSON) or configuration and resources (ZIP) in Settings. ZIP includes supported local Settings appearance assets, icons, lyrics, screenshot shells, lock-screen assets, App Vault backgrounds, and navigation material preview images. JSON contains no file payloads. Preview groups and resources before confirming an import that overwrites settings. External image references and depth-wallpaper packs are excluded and must be transferred separately. App-navigation fields absent from older presets retain their current values.
 - **Language packs:** choose Chinese, English, Japanese, or the system language. Use [languages/example.json](languages/example.json) as a template and import, edit, or export packs in the app.
 
@@ -316,7 +325,9 @@ This combined distribution is provided under [GNU AGPL version 3](LICENSE). Orig
 - Music lockscreen, lyrics and lockscreen capsules are adapted from the 2026-10-30 source snapshot of [HyperMusicCover](https://github.com/zyl6932/HyperMusicCover) (AGPL-3.0-only, with Apache-2.0 / GPL-3.0 portions). Retained legacy notification-center code keeps its original Apache-2.0 grant. See [NOTICE](NOTICE) for licensing and modification details.
 - Collapsed-island smoothing, large/small island spacing, and face-unlock island implementations are adapted from [HyperIsland 3.1.8](https://github.com/1812z/HyperIsland) (Copyright 2026 1812z, MIT). The full notice is in [HyperIsland-MIT.txt](app/src/main/assets/licenses/HyperIsland-MIT.txt).
 - Power saving and battery features, and video toolbox temperature-limit removal, are adapted with reference to [HyperCeiler](https://github.com/ReChronoRain/HyperCeiler) (multiple versions · AGPL-3.0 / MIT, Copyright 2023–2026 HyperCeiler Contributions). Individual files retain their respective licenses; the battery and video toolbox source files adapted here are AGPL-3.0-or-later. See [NOTICE](NOTICE) and the upstream MIT notice in [HyperCeiler-MIT.txt](app/src/main/assets/licenses/HyperCeiler-MIT.txt).
-- The module's settings interface is built on [MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix) (Apache-2.0), using its HyperOS-style UI components, preferences, icons, and blur effects (`miuix-ui`, `miuix-preference`, `miuix-icons`, and `miuix-blur`). Thanks to the MIUIX authors and contributors for this UI foundation. See the [official documentation](https://compose-miuix-ui.github.io/miuix/) and [NOTICE](NOTICE).
+- Settings title-bar gradient background blur is adapted from [HyperBackground 1.4.5-beta2](https://github.com/Solomonstery/HyperBackground) (MIT); full notice in [HyperBackground-MIT.txt](app/src/main/assets/licenses/HyperBackground-MIT.txt).
+- Widget whitelist, stacking, and glass-background compatibility adaptations are derived from HyperModifier (GPL-3.0); see [HyperModifier-GPL-3.0.txt](app/src/main/assets/licenses/HyperModifier-GPL-3.0.txt) and [NOTICE](NOTICE).
+- The module's settings interface is built on [MIUIX 0.9.4](https://github.com/compose-miuix-ui/miuix) (Apache-2.0), using its HyperOS-style UI components, preferences, icons, and blur effects (`miuix-ui`, `miuix-preference`, `miuix-icons`, and `miuix-blur`), alongside COUI components for the ColorOS interface style. Thanks to the MIUIX authors and contributors for this UI foundation. See the [official documentation](https://compose-miuix-ui.github.io/miuix/) and [NOTICE](NOTICE).
 - Thanks to AndroidLiquidGlass / Backdrop and other dependencies. See the app's open-source notices for more information.
 
 ## Star History
