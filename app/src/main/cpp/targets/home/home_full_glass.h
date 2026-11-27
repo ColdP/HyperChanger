@@ -89,10 +89,39 @@ inline constexpr auto kRelease8593LightCallShape = [] {
     shape[12] = 0xf945b884;
     return shape;
 }();
+inline constexpr auto kRelease9239ConstructorShape = [] {
+    auto shape = kConstructorShape;
+    shape[3] = 0xf962d364;
+    return shape;
+}();
+inline constexpr auto kRelease9239FactoryTailShape = [] {
+    auto shape = kFactoryTailShape;
+    shape[7] = 0xf85d83a2;
+    shape[10] = 0xfc5103a4;
+    return shape;
+}();
+inline constexpr auto kRelease9239DarkCallShape = [] {
+    auto shape = kDarkCallShape;
+    shape[7] = 0x9141fb71;
+    shape[8] = 0xfd440623;
+    shape[11] = 0x9143c364;
+    shape[12] = 0xf941ac84;
+    return shape;
+}();
+inline constexpr auto kRelease9239LightCallShape = [] {
+    auto shape = kLightCallShape;
+    shape[7] = 0x9140a771;
+    shape[8] = 0xfd447623;
+    shape[11] = 0x9143c364;
+    shape[12] = 0xf941ac84;
+    return shape;
+}();
 struct Profile {
     uintptr_t v7, constructor, factory_tail, factory_call;
     uintptr_t dark_call, dark_return, light_call, light_return, factory;
     std::array<uint32_t, 17> dark_shape, light_shape;
+    const std::array<uint32_t, 286> *constructor_shape = &kConstructorShape;
+    const std::array<uint32_t, 22> *factory_tail_shape = &kFactoryTailShape;
 };
 inline constexpr std::array kProfiles{
     Profile{kV7Rva, kConstructorRva, 0x117a1cc, kFactoryCallRva,
@@ -101,6 +130,10 @@ inline constexpr std::array kProfiles{
     Profile{0x17a64a4, 0x11764ac, 0x117637c, 0x11763c0,
         0x1175af8, 0x1175b30, 0x1176e88, 0x1176ec0, 0x1175b40,
         kRelease8593DarkCallShape, kRelease8593LightCallShape},
+    Profile{0x17f9720, 0x10d5630, 0x10d5500, 0x10d5544,
+        0x10d4c7c, 0x10d4cb4, 0x10d600c, 0x10d6044, 0x10d4cc4,
+        kRelease9239DarkCallShape, kRelease9239LightCallShape,
+        &kRelease9239ConstructorShape, &kRelease9239FactoryTailShape},
 };
 // Only PC-relative BL displacements vary; pool offsets and every field write
 // are exact for the supplied 8583 image. Other versions fail closed.

@@ -127,6 +127,7 @@ object ModulePresetCodec {
                 completeSettingsTitleBarBlurPreset(values)
                 completeSettingsFloatingSearchPreset(values)
                 completeSettingsLayoutPreset(values)
+                completeClearFrostPreset(values)
             }
             if (groupName == SETTINGS_APPEARANCE_PREFERENCES) {
                 val legacy = values.optJSONObject("color_mode_assets_enabled")?.optBoolean("value", false) ?: false
@@ -235,6 +236,7 @@ object ModulePresetCodec {
                 completeSettingsTitleBarBlurPreset(values)
                 completeSettingsFloatingSearchPreset(values)
                 completeSettingsLayoutPreset(values)
+                completeClearFrostPreset(values)
             }
             if (groupName == SETTINGS_APPEARANCE_PREFERENCES) {
                 val legacy = values.optJSONObject("color_mode_assets_enabled")?.optBoolean("value", false) ?: false
@@ -350,6 +352,7 @@ object ModulePresetCodec {
                 completeSettingsTitleBarBlurPreset(values)
                 completeSettingsFloatingSearchPreset(values)
                 completeSettingsLayoutPreset(values)
+                completeClearFrostPreset(values)
             }
             if (groupName == SETTINGS_APPEARANCE_PREFERENCES) {
                 val legacy = values.optJSONObject("color_mode_assets_enabled")?.optBoolean("value", false) ?: false

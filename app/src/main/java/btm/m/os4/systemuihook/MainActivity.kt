@@ -326,6 +326,8 @@ private enum class PageId {
     SHADE_PRESETS,
     SOFT_GLASS_PARAMETERS,
     SOFT_GLASS_PRESETS,
+    CLEAR_FROST_PARAMETERS,
+    CLEAR_FROST_PRESETS,
     CAMERA_WATERMARKS,
     CAMERA_SHUTTER_SOUNDS,
     IOS_NOTIFICATION_CLOCK_GLASS, CONTROL_CENTER_TOP_BUTTONS, CONTROL_CENTER_TILE_LAYOUT, CONTROL_CENTER_TILE_LAYOUT_LANDSCAPE, CONTROL_CENTER_MULTI_PAGE, CONTROL_CENTER_FOCUS_MODE, CONTROL_CENTER_FOCUS_MODE_EDITOR,
@@ -369,6 +371,8 @@ private fun categoryIconResource(page: PageId?): Int? = when (page) {
     PageId.SHADE_PRESETS,
     PageId.SOFT_GLASS_PARAMETERS,
     PageId.SOFT_GLASS_PRESETS,
+    PageId.CLEAR_FROST_PARAMETERS,
+    PageId.CLEAR_FROST_PRESETS,
     PageId.GESTURE_HANDLE_STYLE -> R.drawable.hc_home_systemui_material
     PageId.DESKTOP,
     PageId.DESKTOP_MATERIAL -> R.drawable.hc_home_launcher
@@ -703,6 +707,8 @@ private fun categoryDeepSearchItems(): List<CategorySearchItem> {
         entry("歌词库", "歌词库", PageId.LYRIC_LIBRARY, ui),
         entry("softGlassParameters", "柔光玻璃参数", PageId.SOFT_GLASS_PARAMETERS, ui),
         entry("softGlassPresets", "柔光玻璃预设", PageId.SOFT_GLASS_PRESETS, ui),
+        entry("clearFrostTitle", "清透磨砂材质参数调整", PageId.CLEAR_FROST_PARAMETERS, ui),
+        entry("clearFrostPresets", "清透磨砂材质预设", PageId.CLEAR_FROST_PRESETS, ui),
         entry("导航与通知预设", "导航与通知预设", PageId.SHADE_PRESETS, ui),
         entry("联系人与拨号背景", "联系人与拨号背景", PageId.CONTACTS_DIALER_BACKGROUND, ScopeApplication.CONTACTS_DIALER),
         entry("侧边栏玻璃参数", "侧边栏玻璃参数", PageId.SIDEBAR_GLASS, ScopeApplication.SECURITY_CENTER),
@@ -880,7 +886,7 @@ private data class ShadePresetActions(
     val exportQr: (ShadePreset) -> Unit,
 )
 
-private data class QrShareRequest(val name: String, val payload: String)
+internal data class QrShareRequest(val name: String, val payload: String)
 
 private enum class ModulePresetExportMode { JSON, ZIP }
 
@@ -931,6 +937,7 @@ private fun Root(
     var userPresets by remember { mutableStateOf(hooks.userShadePresets()) }
     val context = LocalContext.current
     val globalSoftGlassStore = remember(context) { SoftGlassSettingsStore(context) }
+    val globalClearFrostStore = remember(context) { ClearFrostSettingsStore(context) }
     val oobePreferences = remember { context.getSharedPreferences("oobe", Context.MODE_PRIVATE) }
     var showOobe by remember {
         // OOBE is a one-time acknowledgement. Keep recognizing the legacy
@@ -1350,6 +1357,7 @@ private fun Root(
                 PowerBatterySettingsStore(context).syncRemote(it)
                 PortalSettings.syncRemote(context, it)
                 globalSoftGlassStore.syncRemote(it)
+                globalClearFrostStore.syncRemote(it)
                 VolumePanelGlassSettingsStore(context).syncRemote(it)
                 VolumePanelLayoutSettingsStore(context).syncRemote(it)
                 NotificationTextColorSettingsStore(context).syncRemote(it)
@@ -6310,6 +6318,8 @@ private fun Detail(
         PageId.SHADE_PRESETS -> ShadePresets(settings, update, presetActions, back)
         PageId.SOFT_GLASS_PARAMETERS -> SoftGlassParametersPage(openPage, back)
         PageId.SOFT_GLASS_PRESETS -> SoftGlassPresetsPage(back)
+        PageId.CLEAR_FROST_PARAMETERS -> ClearFrostParametersPage({ openPage(PageId.CLEAR_FROST_PRESETS) }, back)
+        PageId.CLEAR_FROST_PRESETS -> ClearFrostPresetsPage(back)
         PageId.GESTURE_HANDLE_STYLE -> GestureHandleStylePage(back)
         PageId.ISLAND -> Island(openPage, onRequestNotificationPermission, back)
         PageId.ISLAND_COLLAPSED -> IslandCollapsedPage(back)
@@ -7662,11 +7672,16 @@ private fun Shade(
     }
     val softGlassStore = remember(context) { SoftGlassSettingsStore(context) }
     var softGlass by remember { mutableStateOf(softGlassStore.settings) }
+    val clearFrostStore = remember(context) { ClearFrostSettingsStore(context) }
+    var clearFrost by remember { mutableStateOf(clearFrostStore.settings) }
     val glassChanged = LocalNotificationSettingsChanged.current
     LaunchedEffect(service) {
         softGlassStore.reload()
         service?.let(softGlassStore::syncRemote)
         softGlass = softGlassStore.settings
+        clearFrostStore.reload()
+        service?.let(clearFrostStore::syncRemote)
+        clearFrost = clearFrostStore.settings
     }
     AppList(p, scroll, 28) {
         item {
@@ -7689,6 +7704,30 @@ private fun Shade(
                     Column {
                         SharedViewArrowPreference(title = tr("柔光玻璃参数调整", "柔光玻璃参数调整"), onClick = { openPage(PageId.SOFT_GLASS_PARAMETERS) })
                         SharedViewArrowPreference(title = tr("softGlassPresets", "柔光玻璃预设"), onClick = { openPage(PageId.SOFT_GLASS_PRESETS) })
+                    }
+                }
+            }
+        }
+        item {
+            Group(tr("clearFrostTitle", "清透磨砂材质参数调整")) {
+                SwitchPreference(
+                    title = tr("clearFrostTitle", "清透磨砂材质参数调整"),
+                    summary = tr("clearFrostScope", "统一调整通知、控制中心与悬浮通知的清透磨砂材质，支持混色预设、自定义混色、高光描边、阴影与背景调节。"),
+                    checked = clearFrost.enabled,
+                    onCheckedChange = { enabled ->
+                        clearFrostStore.update(service) { it.copy(enabled = enabled) }
+                        clearFrost = clearFrostStore.settings
+                        glassChanged()
+                    },
+                )
+                AnimatedVisibility(
+                    visible = clearFrost.enabled,
+                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                ) {
+                    Column {
+                        SharedViewArrowPreference(title = tr("clearFrostTitle", "清透磨砂材质参数调整"), onClick = { openPage(PageId.CLEAR_FROST_PARAMETERS) })
+                        SharedViewArrowPreference(title = tr("clearFrostPresets", "清透磨砂材质预设"), onClick = { openPage(PageId.CLEAR_FROST_PRESETS) })
                     }
                 }
             }
@@ -8486,7 +8525,7 @@ private fun ShadePresets(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PresetRow(
+internal fun PresetRow(
     preset: ShadePreset,
     applied: Boolean = false,
     modified: Boolean = false,
@@ -8707,7 +8746,7 @@ private fun builtInShadePresets(settings: HookSettings): List<ShadePreset> {
 }
 
 @Composable
-private fun SavePresetDialog(show: Boolean, onDismiss: () -> Unit, titleKey: String = "新建预设", onSave: (String) -> Unit) {
+internal fun SavePresetDialog(show: Boolean, onDismiss: () -> Unit, titleKey: String = "新建预设", onSave: (String) -> Unit) {
     var name by remember(show) { mutableStateOf("") }
     WindowDialog(show = show, onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -8735,7 +8774,7 @@ private fun SavePresetDialog(show: Boolean, onDismiss: () -> Unit, titleKey: Str
 }
 
 @Composable
-private fun ImportPresetDialog(show: Boolean, onDismiss: () -> Unit, onJson: () -> Unit, onQr: () -> Unit) {
+internal fun ImportPresetDialog(show: Boolean, onDismiss: () -> Unit, onJson: () -> Unit, onQr: () -> Unit) {
     WindowDialog(show = show, onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(tr("导入预设", "导入预设"), style = MiuixTheme.textStyles.title3, fontWeight = FontWeight.Bold)
@@ -8944,7 +8983,7 @@ private fun PresetActionDialog(
 }
 
 @Composable
-private fun SoftGlassPresetActionDialog(
+internal fun SoftGlassPresetActionDialog(
     preset: ShadePreset,
     canSave: Boolean,
     editableName: Boolean,
@@ -9004,7 +9043,7 @@ private fun SoftGlassPresetActionDialog(
 }
 
 @Composable
-private fun NewPresetConfirmationDialog(
+internal fun NewPresetConfirmationDialog(
     show: Boolean,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
@@ -9022,7 +9061,7 @@ private fun NewPresetConfirmationDialog(
 }
 
 @Composable
-private fun PresetDeleteConfirmationDialog(
+internal fun PresetDeleteConfirmationDialog(
     name: String,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
@@ -9043,7 +9082,7 @@ private fun PresetDeleteConfirmationDialog(
 }
 
 @Composable
-private fun ExportPresetDialog(
+internal fun ExportPresetDialog(
     show: Boolean,
     preset: ShadePreset,
     onDismiss: () -> Unit,
@@ -9061,7 +9100,7 @@ private fun ExportPresetDialog(
 }
 
 @Composable
-private fun QrShareDialog(request: QrShareRequest, onDismiss: () -> Unit, onSave: () -> Unit) {
+internal fun QrShareDialog(request: QrShareRequest, onDismiss: () -> Unit, onSave: () -> Unit) {
     val bitmap = remember(request.payload) { createPresetQrCode(request.payload) }
     WindowDialog(show = true, onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -14305,7 +14344,7 @@ private fun IntSlide(title: String, value: Int, range: IntRange, defaultValue: I
 }
 
 @Composable
-private fun ParameterIntSlide(
+internal fun ParameterIntSlide(
     title: String,
     value: Int,
     range: IntRange,
@@ -14329,7 +14368,7 @@ private fun ParameterIntSlide(
 }
 
 @Composable
-private fun ParameterDpSlide(
+internal fun ParameterDpSlide(
     title: String,
     value: Float,
     range: ClosedFloatingPointRange<Float>,
@@ -14355,7 +14394,7 @@ private fun ParameterDpSlide(
 }
 
 @Composable
-private fun ParameterFloatSlide(
+internal fun ParameterFloatSlide(
     title: String,
     value: Float,
     range: ClosedFloatingPointRange<Float>,

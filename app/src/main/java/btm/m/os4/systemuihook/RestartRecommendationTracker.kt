@@ -79,6 +79,7 @@ internal fun restartScopesForPreference(group: String, key: String): Set<ScopeAp
     if (key in setOf(
             "navigation_style", "navigation_label_mode", "theme_mode", "predictive_back_enabled",
             "predictive_back_progress", "hide_app_icon", "user_shade_presets_v1", "soft_glass_custom_presets_v1",
+            KEY_CLEAR_FROST_PRESETS, KEY_CLEAR_FROST_APPLIED_PRESET,
         )) return emptySet()
 
     if (btm.m.liquidglass.NavigationOffsetSettings.isGlobalPreference(key)) {

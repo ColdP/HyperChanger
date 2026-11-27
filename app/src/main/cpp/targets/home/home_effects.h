@@ -80,10 +80,22 @@ inline constexpr std::array<uint32_t, 27> kDockShape{
     0xf85f83a1, 0xfc1f03a0, 0x97ff81b4, 0xfc5f03a1, 0x1e602822, 0x4ea21c40,
     0xaa1d03ef, 0xa8c179fd, 0xd65f03c0,
 };
-inline bool matches_dock(std::span<const uint32_t> code) {
-    if (code.size() < kDockShape.size()) return false;
-    for (size_t i = 0; i < kDockShape.size(); ++i) {
-        const uint32_t expected = kDockShape[i];
+// 8.01.02.9239 inlines the lazy singleton guard into hotSeatsMarginBottom,
+// shifting the return-value instruction from index 23 to 40.
+inline constexpr std::array<uint32_t, 44> kRelease9239DockShape{
+    0xa9bf79fd, 0xaa0f03fd, 0xd10061ef, 0xf81f83a1, 0xf9403f40, 0xf9541400,
+    0x6b16001f, 0x540001a1, 0xf9403f40, 0xf94e9800, 0xf9402370, 0x6b10001f,
+    0x54000061, 0xf97c8b62, 0x944b70d6, 0x91402770, 0xf9408210, 0xf90001f0,
+    0xf9402b64, 0x94085267, 0xb842f001, 0x8b1c8021, 0x940edf5c, 0xb843b001,
+    0x8b1c8021, 0xfc41f020, 0x6e211c21, 0x1e612000, 0x54000061, 0x6e201c00,
+    0x14000005, 0x1e602020, 0x5400006d, 0x1e614001, 0x4ea11c20, 0xf85f83a1,
+    0xfc1f03a0, 0x94000007, 0xfc5f03a1, 0x1e602822, 0x4ea21c40, 0xaa1d03ef,
+    0xa8c179fd, 0xd65f03c0,
+};
+inline bool matches_dock_shape(std::span<const uint32_t> code, std::span<const uint32_t> shape) {
+    if (code.size() < shape.size()) return false;
+    for (size_t i = 0; i < shape.size(); ++i) {
+        const uint32_t expected = shape[i];
         // Only direct-call displacements and object-pool addresses may move.
         const uint32_t mask = (expected & 0xfc000000) == 0x94000000 ? 0xfc000000 :
             ((expected & 0xffc003ff) == 0xf9400360 || (expected & 0xffc003ff) == 0xf9400340
@@ -91,6 +103,12 @@ inline bool matches_dock(std::span<const uint32_t> code) {
         if ((code[i] & mask) != (expected & mask)) return false;
     }
     return true;
+}
+inline bool matches_dock(std::span<const uint32_t> code) {
+    return matches_dock_shape(code, kDockShape);
+}
+inline bool matches_dock_9239(std::span<const uint32_t> code) {
+    return matches_dock_shape(code, kRelease9239DockShape);
 }
 struct GlassField { size_t index; size_t parameter; uint32_t reg; bool refractive_index; };
 inline constexpr std::array<GlassField, 7> kGlassFields{{
@@ -103,6 +121,7 @@ inline constexpr std::array<GlassField, 7> kGlassFields{{
     {114, 5, 23, false},
 }};
 inline constexpr size_t kDockReturnIndex = 23;
+inline constexpr size_t kRelease9239DockReturnIndex = 40;
 // Each island has immutable code and a separate writable data page. These
 // straight-line instructions never call C/C++, allocate Dart objects or retain
 // heap pointers. X16 and the full Q30/Q31 values are restored; NZCV is untouched.

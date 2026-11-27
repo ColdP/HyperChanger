@@ -209,7 +209,12 @@ void resolve(const std::vector<nhk::ExecutableMapping> &mappings) {
             return source_at(generation, slot.address) == slot.source;
         });
         if (known == 2) continue;
-        std::vector<uintptr_t> matches;
+        struct Candidate {
+            uintptr_t address;
+            size_t words;
+            std::array<size_t, 2> returns;
+        };
+        std::vector<Candidate> matches;
         size_t total = 0;
         for (const auto &mapping : generation) total += mapping.end - mapping.begin;
         if (total > nhk::kMaxExecutableCodeBytes) continue;
@@ -223,24 +228,34 @@ void resolve(const std::vector<nhk::ExecutableMapping> &mappings) {
                 if (code[at] == slot.branch) code[at] = folder_spacing::kReturnStart;
             }
             for (size_t i = 0; i + folder_spacing::kFunctionWords <= code.size(); ++i) {
-                if (code[i] == 0xa9bf79fd && folder_spacing::matches(std::span(code).subspan(i)))
-                    matches.push_back(mapping.begin + i * sizeof(uint32_t));
+                if (code[i] != 0xa9bf79fd) continue;
+                const auto span = std::span(code).subspan(i);
+                if (folder_spacing::matches(span)) {
+                    matches.push_back({mapping.begin + i * sizeof(uint32_t),
+                        folder_spacing::kFunctionWords, folder_spacing::kReturnIndices});
+                } else if (folder_spacing::matches_9239(span)) {
+                    matches.push_back({mapping.begin + i * sizeof(uint32_t),
+                        folder_spacing::kRelease9239FunctionWords, folder_spacing::kRelease9239ReturnIndices});
+                }
             }
         }
         // One calItemSpacing per generation. Ambiguity never patches any candidate.
         if (matches.size() != 1 || slots.size() + 2 > kMaxSlots) continue;
+        const auto &match = matches[0];
         const auto fresh = inventory();
-        std::array<uint32_t, folder_spacing::kFunctionWords> live{};
-        if (!nhk::safe_read(matches[0], std::as_writable_bytes(std::span(live)))) continue;
+        std::vector<uint32_t> live(match.words);
+        if (!nhk::safe_read(match.address, std::as_writable_bytes(std::span(live)))) continue;
         for (const auto &slot : slots) {
-            if (slot.address < matches[0] || slot.address >= matches[0] + sizeof(live)
+            if (slot.address < match.address || slot.address >= match.address + live.size() * 4
                 || source_at(fresh, slot.address) != slot.source) continue;
-            const size_t at = (slot.address - matches[0]) / 4;
+            const size_t at = (slot.address - match.address) / 4;
             if (live[at] == slot.branch) live[at] = folder_spacing::kReturnStart;
         }
-        if (!folder_spacing::matches(live)) continue;
-        for (const size_t index : folder_spacing::kReturnIndices) {
-            const uintptr_t address = matches[0] + index * 4;
+        const bool verified = match.words == folder_spacing::kRelease9239FunctionWords
+            ? folder_spacing::matches_9239(live) : folder_spacing::matches(live);
+        if (!verified) continue;
+        for (const size_t index : match.returns) {
+            const uintptr_t address = match.address + index * 4;
             const auto source = source_at(generation, address);
             if (!source || source_at(fresh, address) != source) continue;
             if (std::ranges::any_of(slots, [&](const Slot &slot) {
@@ -456,33 +471,98 @@ bool multi_split_entry_matches(std::span<const uint32_t> code) {
 
 void resolve_multi_split(const std::vector<nhk::ExecutableMapping> &mappings) {
     for (const auto &generation : nhk::runtime_generations(mappings)) {
-        std::vector<uintptr_t> supports;
+        std::vector<uintptr_t> supports, release8583_supports;
         for (const auto &mapping : generation) {
             const size_t bytes = mapping.end - mapping.begin;
             if (bytes < home_native_dock::kNewerSupportShape.size() * 4) continue;
             std::vector<uint32_t> code(bytes / sizeof(uint32_t));
             if (!nhk::safe_read(mapping.begin, std::as_writable_bytes(std::span(code)))) continue;
-            for (size_t i = 0; i + home_native_dock::kNewerSupportShape.size() <= code.size(); ++i)
-                if (home_native_dock::matches(std::span(code).subspan(i), home_native_dock::kNewerSupportShape))
+            for (const auto &gate : native_gates) {
+                if (mapping.source_at(gate.address, 4) != gate.source) continue;
+                const size_t at = (gate.address - mapping.begin) / 4;
+                if (code[at] == gate.replacement) code[at] = gate.original;
+            }
+            for (size_t i = 0; i + home_native_dock::kNewerSupportShape.size() <= code.size(); ++i) {
+                const auto span = std::span(code).subspan(i);
+                if (home_native_dock::matches(span, home_native_dock::kNewerSupportShape))
                     supports.push_back(mapping.begin + i * sizeof(uint32_t));
+                if (home_native_dock::matches(span, home_native_dock::kRelease8583SupportShape))
+                    release8583_supports.push_back(mapping.begin + i * sizeof(uint32_t));
+            }
         }
-        // The 8.01.02.7748 support predicate is the unique image anchor used
-        // by the existing Dock resolver. Unknown/rebuilt images are refused.
-        if (supports.size() != 1 || supports[0] < home_native_dock::kNewestSupportRva) continue;
-        const uintptr_t base = supports[0] - home_native_dock::kNewestSupportRva;
-        const uintptr_t target = base + 0x1690b5c;
-        std::array<uint32_t, 12> live{};
-        const auto source = source_at(generation, target);
-        if (!source || !nhk::safe_read(target, std::as_writable_bytes(std::span(live)))
-            || !multi_split_entry_matches(live)) continue;
-        if (std::ranges::any_of(native_gates, [&](const NativeGate &gate) {
-                return gate.address == target && gate.source == *source;
-            })) continue;
-        const auto branch = allocate_branch(target, reinterpret_cast<uintptr_t>(multi_split_support_return));
-        if (!branch || source_at(inventory(), target) != source) continue;
-        native_gates.push_back({target, *source, live[0], *branch, 0, "Multiple split", true});
-        __android_log_print(ANDROID_LOG_INFO, kTag,
-            "Multiple split support resolver matched 8.01.02.7748 at %p", reinterpret_cast<void *>(target));
+        const auto install_target = [&](uintptr_t target, const char *label) {
+            std::array<uint32_t, 12> live{};
+            const auto source = source_at(generation, target);
+            if (!source || !nhk::safe_read(target, std::as_writable_bytes(std::span(live)))
+                || !multi_split_entry_matches(live)) return;
+            if (std::ranges::any_of(native_gates, [&](const NativeGate &gate) {
+                    return gate.address == target && gate.source == *source;
+                })) return;
+            const auto branch = allocate_branch(target, reinterpret_cast<uintptr_t>(multi_split_support_return));
+            if (!branch || source_at(inventory(), target) != source) return;
+            native_gates.push_back({target, *source, live[0], *branch, 0, "Multiple split", true});
+            __android_log_print(ANDROID_LOG_INFO, kTag,
+                "Multiple split support resolver matched %s at %p", label, reinterpret_cast<void *>(target));
+        };
+        if (supports.size() == 1 && supports[0] >= home_native_dock::kNewestSupportRva) {
+            const uintptr_t base = supports[0] - home_native_dock::kNewestSupportRva;
+            install_target(base + 0x1690b5c, "8.01.02.7748");
+        }
+        if (release8583_supports.size() == 1) {
+            struct ReleaseMultiSplit {
+                uintptr_t support, background, layout, offset, position, target;
+                const char *label;
+            };
+            constexpr std::array candidates{
+                ReleaseMultiSplit{home_native_dock::kRelease8583SupportRva,
+                    home_native_dock::kRelease8583BackgroundGateRva,
+                    home_native_dock::kRelease8583NoLabelLayoutGateRva,
+                    home_native_dock::kRelease8583NoLabelOffsetGateRva,
+                    home_native_dock::kRelease8583NoLabelPositionGateRva, 0x16f85ec, "8.01.02.8583"},
+                ReleaseMultiSplit{home_native_dock::kRelease8593SupportRva,
+                    home_native_dock::kRelease8593BackgroundGateRva,
+                    home_native_dock::kRelease8593NoLabelLayoutGateRva,
+                    home_native_dock::kRelease8593NoLabelOffsetGateRva,
+                    home_native_dock::kRelease8593NoLabelPositionGateRva, 0x16fa088, "8.01.02.8593"},
+                ReleaseMultiSplit{home_native_dock::kRelease9239SupportRva,
+                    home_native_dock::kRelease9239BackgroundGateRva,
+                    home_native_dock::kRelease9239NoLabelLayoutGateRva,
+                    home_native_dock::kRelease9239NoLabelOffsetGateRva,
+                    home_native_dock::kRelease9239NoLabelPositionGateRva, 0x16e8398, "8.01.02.9239"},
+            };
+            const ReleaseMultiSplit *selected = nullptr;
+            for (const auto &candidate : candidates) {
+                if (release8583_supports[0] < candidate.support) continue;
+                const uintptr_t base = release8583_supports[0] - candidate.support;
+                const std::array<std::pair<uintptr_t, uint32_t>, 4> checks{{
+                    {base + candidate.background, 0x37200101},
+                    {base + candidate.layout, 0x37200220},
+                    {base + candidate.offset, 0x37200160},
+                    {base + candidate.position, 0x372000a0},
+                }};
+                bool valid = true;
+                for (const auto &[address, expected] : checks) {
+                    uint32_t live = 0;
+                    if (!source_at(generation, address)
+                        || !nhk::safe_read(address, std::as_writable_bytes(std::span(&live, 1)))) {
+                        valid = false;
+                        break;
+                    }
+                    for (const auto &gate : native_gates)
+                        if (gate.address == address && source_at(generation, address) == gate.source
+                            && live == gate.replacement) live = gate.original;
+                    if (live != expected) { valid = false; break; }
+                }
+                if (valid) {
+                    if (selected) { selected = nullptr; break; }
+                    selected = &candidate;
+                }
+            }
+            if (selected) {
+                const uintptr_t base = release8583_supports[0] - selected->support;
+                install_target(base + selected->target, selected->label);
+            }
+        }
     }
 }
 
@@ -540,8 +620,10 @@ void install_full_glass(uintptr_t v7, const std::vector<nhk::ExecutableMapping> 
     for (const auto &candidate : kProfiles) {
         if (v7 < candidate.v7) continue;
         base = v7 - candidate.v7;
-        if (verify(candidate.constructor,kConstructorShape) && verify(candidate.factory_tail,kFactoryTailShape)
-            && verify(candidate.dark_call,candidate.dark_shape) && verify(candidate.light_call,candidate.light_shape)) {
+        if (verify(candidate.constructor, *candidate.constructor_shape)
+            && verify(candidate.factory_tail, *candidate.factory_tail_shape)
+            && verify(candidate.dark_call, candidate.dark_shape)
+            && verify(candidate.light_call, candidate.light_shape)) {
             if (selected) return; // Refuse an ambiguous profile.
             selected = &candidate;
         }
@@ -565,7 +647,7 @@ void install_full_glass(uintptr_t v7, const std::vector<nhk::ExecutableMapping> 
             })) continue;
         uint32_t live=0;
         if (source_at(inventory(),address)!=source || !nhk::safe_read(address,std::as_writable_bytes(std::span(&live,1)))
-            || live!=kConstructorShape[field.index]) continue;
+            || live!=(*profile.constructor_shape)[field.index]) continue;
         auto slot=make_effect(address,*source,live,field.parameter,field.reg,false,false,5);
         if (!slot) continue;
         __atomic_store_n(slot->data+10,uint64_t{base+profile.dark_return},__ATOMIC_RELEASE);
@@ -614,11 +696,14 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
             return s.native_parameter != 0 && source_at(generation,s.address) == s.source;
         }) != 4;
         if (!need_glass && !need_dock && !need_native && !need_full) continue;
-        std::vector<uintptr_t> glass, dock, gates, supports, new_supports, newer_supports, strategies, glass_radii, advanced_radii, paddings;
+        std::vector<uintptr_t> glass, gates, supports, new_supports, newer_supports, strategies, glass_radii, advanced_radii, paddings;
+        std::vector<std::pair<uintptr_t, bool>> dock;
         std::vector<uintptr_t> release8583_supports;
         std::vector<uintptr_t> release8583_strategies, release8583_glass_radii,
             release8583_advanced_radii, release8583_paddings;
         std::vector<uintptr_t> release8593_strategies, release8593_glass_radii, release8593_advanced_radii;
+        std::vector<uintptr_t> release9239_strategies, release9239_glass_radii,
+            release9239_advanced_radii, release9239_paddings;
         for (const auto &mapping : generation) {
             std::vector<uint32_t> code((mapping.end - mapping.begin) / 4);
             if (!nhk::safe_read(mapping.begin, std::as_writable_bytes(std::span(code)))) continue;
@@ -647,7 +732,10 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
                     release8583_supports.push_back(mapping.begin+i*4);
                 if (code[i] != 0xa9bf79fd) continue;
                 if ((need_glass || need_full) && home_effects::matches_glass(candidate)) glass.push_back(mapping.begin + i * 4);
-                if (need_dock && home_effects::matches_dock(candidate)) dock.push_back(mapping.begin + i * 4);
+                if (need_dock) {
+                    if (home_effects::matches_dock(candidate)) dock.push_back({mapping.begin + i * 4, false});
+                    else if (home_effects::matches_dock_9239(candidate)) dock.push_back({mapping.begin + i * 4, true});
+                }
                 if (need_native) {
                     if(home_native_dock::matches(candidate,home_native_dock::kStrategyShape)) strategies.push_back(mapping.begin+i*4);
                     if(home_native_dock::matches(candidate,home_native_dock::kGlassRadiusShape)) glass_radii.push_back(mapping.begin+i*4);
@@ -660,6 +748,10 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
                     if(home_native_dock::matches(candidate,home_native_dock::kRelease8593StrategyShape)) release8593_strategies.push_back(mapping.begin+i*4);
                     if(home_native_dock::matches(candidate,home_native_dock::kRelease8593GlassRadiusShape)) release8593_glass_radii.push_back(mapping.begin+i*4);
                     if(home_native_dock::matches(candidate,home_native_dock::kRelease8593AdvancedRadiusShape)) release8593_advanced_radii.push_back(mapping.begin+i*4);
+                    if(home_native_dock::matches(candidate,home_native_dock::kRelease9239StrategyShape)) release9239_strategies.push_back(mapping.begin+i*4);
+                    if(home_native_dock::matches(candidate,home_native_dock::kRelease9239GlassRadiusShape)) release9239_glass_radii.push_back(mapping.begin+i*4);
+                    if(home_native_dock::matches(candidate,home_native_dock::kRelease9239AdvancedRadiusShape)) release9239_advanced_radii.push_back(mapping.begin+i*4);
+                    if(home_native_dock::matches(candidate,home_native_dock::kRelease9239PaddingShape)) release9239_paddings.push_back(mapping.begin+i*4);
                 }
             }
         }
@@ -671,7 +763,7 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
         // Refuse unsupported/ambiguous bodies; never derive an address from
         // load_bias, which includes the ZIP container offset for APK images.
         const auto install = [&](uintptr_t base, auto shape, size_t index,
-                size_t parameter, uint32_t reg, bool ior, bool is_dock) {
+                size_t parameter, uint32_t reg, bool ior, bool is_dock, bool is_dock_9239 = false) {
             const uintptr_t address = base + index * 4;
             const auto source = source_at(generation, address);
             if (!source || effect_slots.size() >= 64) return;
@@ -688,7 +780,8 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
                     if (live[at] == s.branch) live[at] = s.original;
                 }
             }
-            if (!(is_dock ? home_effects::matches_dock(live) : home_effects::matches_glass(live))) return;
+            if (!(is_dock ? (is_dock_9239 ? home_effects::matches_dock_9239(live) : home_effects::matches_dock(live))
+                          : home_effects::matches_glass(live))) return;
             auto slot = make_effect(address, *source, live[index], parameter, reg, ior, is_dock);
             if (!slot) return;
             publish_effect(*slot, settings);
@@ -700,7 +793,12 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
         if (need_full && glass.size()==1) install_full_glass(glass[0],generation,settings);
         if (need_glass && glass.size() == 1) for (const auto &field : home_effects::kGlassFields)
             install(glass[0], std::span(home_effects::kGlassShape), field.index, field.parameter, field.reg, field.refractive_index, false);
-        if (dock.size() == 1) install(dock[0], std::span(home_effects::kDockShape), home_effects::kDockReturnIndex, 0, 0, false, true);
+        if (dock.size() == 1) {
+            if (dock[0].second)
+                install(dock[0].first, std::span(home_effects::kRelease9239DockShape), home_effects::kRelease9239DockReturnIndex, 0, 0, false, true, true);
+            else
+                install(dock[0].first, std::span(home_effects::kDockShape), home_effects::kDockReturnIndex, 0, 0, false, true, false);
+        }
         // The Dock capability branch is independent from the optional
         // material parameter constructors. Install it as soon as its unique
         // guarded body is found; requiring every secondary body used to make
@@ -852,26 +950,32 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
             add_gate(base + selected->position, 0x372000a0,
                 home_native_dock::kNoLabelFallthrough, "no-label-position", home_native_dock::kNoLabelPositionShape);
         }
-        // 8583 and 8593 share the support bytes. Choose exactly one complete
+        // 8583, 8593 and 9239 share the support bytes. Choose exactly one complete
         // layout; a shared predicate alone must never select another image's RVAs.
-        bool release8593 = false;
+        enum class ReleaseVariant { none, r8583, r8593, r9239 };
+        ReleaseVariant variant = ReleaseVariant::none;
         if (need_native && release8583_supports.size() == 1) {
             struct Layout {
                 uintptr_t support, background, layout, offset, position;
                 const char *name;
-                bool is8593;
+                ReleaseVariant variant;
             };
             const std::array layouts{
                 Layout{home_native_dock::kRelease8583SupportRva,
                     home_native_dock::kRelease8583BackgroundGateRva,
                     home_native_dock::kRelease8583NoLabelLayoutGateRva,
                     home_native_dock::kRelease8583NoLabelOffsetGateRva,
-                    home_native_dock::kRelease8583NoLabelPositionGateRva, "8.01.02.8583", false},
+                    home_native_dock::kRelease8583NoLabelPositionGateRva, "8.01.02.8583", ReleaseVariant::r8583},
                 Layout{home_native_dock::kRelease8593SupportRva,
                     home_native_dock::kRelease8593BackgroundGateRva,
                     home_native_dock::kRelease8593NoLabelLayoutGateRva,
                     home_native_dock::kRelease8593NoLabelOffsetGateRva,
-                    home_native_dock::kRelease8593NoLabelPositionGateRva, "8.01.02.8593", true},
+                    home_native_dock::kRelease8593NoLabelPositionGateRva, "8.01.02.8593", ReleaseVariant::r8593},
+                Layout{home_native_dock::kRelease9239SupportRva,
+                    home_native_dock::kRelease9239BackgroundGateRva,
+                    home_native_dock::kRelease9239NoLabelLayoutGateRva,
+                    home_native_dock::kRelease9239NoLabelOffsetGateRva,
+                    home_native_dock::kRelease9239NoLabelPositionGateRva, "8.01.02.9239", ReleaseVariant::r9239},
             };
             const Layout *selected = nullptr;
             for (const auto &candidate : layouts) {
@@ -907,12 +1011,12 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
             }
             if (!selected) {
                 __android_log_print(ANDROID_LOG_WARN, kTag,
-                    "Native Dock 8583/8593 support matched but layout validation failed at %p",
+                    "Native Dock 8583/8593/9239 support matched but layout validation failed at %p",
                     reinterpret_cast<void *>(release8583_supports[0]));
                 continue;
             }
             const uintptr_t base = release8583_supports[0] - selected->support;
-            release8593 = selected->is8593;
+            variant = selected->variant;
             __android_log_print(ANDROID_LOG_INFO, kTag,
                 "Native Dock layout variant %s validated (base=%p)", selected->name,
                 reinterpret_cast<void *>(base));
@@ -926,22 +1030,37 @@ void update_effects(const std::vector<nhk::ExecutableMapping> &mappings,
             add_gate(base + selected->position, 0x372000a0,
                 home_native_dock::kNoLabelFallthrough, "no-label-position", home_native_dock::kNoLabelPositionShape);
         }
-        const bool release8583 = release8583_supports.size() == 1;
-        if (release8593) {
+        const bool release8583 = variant != ReleaseVariant::none;
+        if (variant == ReleaseVariant::r9239) {
+            strategies = std::move(release9239_strategies);
+            glass_radii = std::move(release9239_glass_radii);
+            advanced_radii = std::move(release9239_advanced_radii);
+            paddings = std::move(release9239_paddings);
+        } else if (variant == ReleaseVariant::r8593) {
             strategies = std::move(release8593_strategies);
             glass_radii = std::move(release8593_glass_radii);
             advanced_radii = std::move(release8593_advanced_radii);
             paddings = std::move(release8583_paddings);
-        } else if (release8583) {
+        } else if (variant == ReleaseVariant::r8583) {
             strategies = std::move(release8583_strategies);
             glass_radii = std::move(release8583_glass_radii);
             advanced_radii = std::move(release8583_advanced_radii);
             paddings = std::move(release8583_paddings);
         }
-        const auto &strategy_shape = release8593 ? home_native_dock::kRelease8593StrategyShape : release8583 ? home_native_dock::kRelease8583StrategyShape : home_native_dock::kStrategyShape;
-        const auto &glass_shape = release8593 ? home_native_dock::kRelease8593GlassRadiusShape : release8583 ? home_native_dock::kRelease8583GlassRadiusShape : home_native_dock::kGlassRadiusShape;
-        const auto &advanced_shape = release8593 ? home_native_dock::kRelease8593AdvancedRadiusShape : release8583 ? home_native_dock::kRelease8583AdvancedRadiusShape : home_native_dock::kAdvancedRadiusShape;
-        const auto &padding_shape = release8583 ? home_native_dock::kRelease8583PaddingShape : home_native_dock::kPaddingShape;
+        const auto &strategy_shape = variant == ReleaseVariant::r9239 ? home_native_dock::kRelease9239StrategyShape
+            : variant == ReleaseVariant::r8593 ? home_native_dock::kRelease8593StrategyShape
+            : variant == ReleaseVariant::r8583 ? home_native_dock::kRelease8583StrategyShape
+            : home_native_dock::kStrategyShape;
+        const auto &glass_shape = variant == ReleaseVariant::r9239 ? home_native_dock::kRelease9239GlassRadiusShape
+            : variant == ReleaseVariant::r8593 ? home_native_dock::kRelease8593GlassRadiusShape
+            : variant == ReleaseVariant::r8583 ? home_native_dock::kRelease8583GlassRadiusShape
+            : home_native_dock::kGlassRadiusShape;
+        const auto &advanced_shape = variant == ReleaseVariant::r9239 ? home_native_dock::kRelease9239AdvancedRadiusShape
+            : variant == ReleaseVariant::r8593 ? home_native_dock::kRelease8593AdvancedRadiusShape
+            : variant == ReleaseVariant::r8583 ? home_native_dock::kRelease8583AdvancedRadiusShape
+            : home_native_dock::kAdvancedRadiusShape;
+        const auto &padding_shape = variant == ReleaseVariant::r9239 ? home_native_dock::kRelease9239PaddingShape
+            : release8583 ? home_native_dock::kRelease8583PaddingShape : home_native_dock::kPaddingShape;
         if (need_native && gates.size()==1 && strategies.size()==1 && glass_radii.size()==1 && advanced_radii.size()==1 && paddings.size()==1) {
             std::array<uint32_t,109> strategy{};
             std::array<uint32_t,14> gate{};

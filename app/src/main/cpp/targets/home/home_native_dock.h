@@ -45,6 +45,13 @@ inline constexpr uintptr_t kRelease8593BackgroundGateRva = 0x1174854;
 inline constexpr uintptr_t kRelease8593NoLabelLayoutGateRva = 0xedaf60;
 inline constexpr uintptr_t kRelease8593NoLabelOffsetGateRva = 0x8d89c0;
 inline constexpr uintptr_t kRelease8593NoLabelPositionGateRva = 0xcb3af4;
+// Independently checked against libapp 5fdb8f90... (9239). The support
+// predicate is shared with 8583/8593; all layout targets must select this profile.
+inline constexpr uintptr_t kRelease9239SupportRva = 0xf53f00;
+inline constexpr uintptr_t kRelease9239BackgroundGateRva = 0x10d3a84;
+inline constexpr uintptr_t kRelease9239NoLabelLayoutGateRva = 0x1772370;
+inline constexpr uintptr_t kRelease9239NoLabelOffsetGateRva = 0xadd4e8;
+inline constexpr uintptr_t kRelease9239NoLabelPositionGateRva = 0xd1913c;
 inline constexpr uint32_t kNoLabelFallthrough = 0xd503201f;
 // Include the predicate call and the first four fallthrough instructions so a
 // single coincidental branch word cannot select a target in an unknown image.
@@ -168,6 +175,37 @@ inline constexpr auto kRelease8593GlassRadiusShape = [] {
 inline constexpr auto kRelease8593AdvancedRadiusShape = [] {
     auto shape = kRelease8583AdvancedRadiusShape;
     shape[25] = 0xf9433210;
+    return shape;
+}();
+inline constexpr auto kRelease9239StrategyShape = [] {
+    auto shape = kStrategyShape;
+    for (size_t i : {48, 56, 80, 93}) shape[i] = 0x91439361;
+    for (size_t i : {49, 57, 94}) shape[i] = 0xf944e021;
+    for (size_t i : {62, 70}) shape[i] = 0x91439364;
+    for (size_t i : {63, 71}) shape[i] = 0xf944e084;
+    shape[81] = 0xf944e421;
+    return shape;
+}();
+inline constexpr auto kRelease9239GlassRadiusShape = [] {
+    auto shape = kGlassRadiusShape;
+    shape[8] = 0xf952ac00;
+    shape[18] = 0x9143ab70;
+    shape[19] = 0xf9466e10;
+    return shape;
+}();
+inline constexpr auto kRelease9239AdvancedRadiusShape = [] {
+    auto shape = kAdvancedRadiusShape;
+    shape[14] = 0xf952ac00;
+    shape[24] = 0x9143ab70;
+    shape[25] = 0xf9465e10;
+    return shape;
+}();
+inline constexpr auto kRelease9239PaddingShape = [] {
+    auto shape = kPaddingShape;
+    shape[4] = 0x91403771;
+    shape[5] = 0xfd458e20;
+    shape[7] = 0x91405771;
+    shape[8] = 0xfd458e20;
     return shape;
 }();
 template<size_t N> inline bool matches(std::span<const uint32_t> code, const std::array<uint32_t,N> &shape) {

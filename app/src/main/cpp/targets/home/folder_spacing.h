@@ -10,6 +10,8 @@ namespace folder_spacing {
 inline constexpr uint32_t kReturnStart = 0xaa1603e0; // mov x0, x22
 inline constexpr size_t kFunctionWords = 75;
 inline constexpr std::array<size_t, 2> kReturnIndices{25, 71};
+inline constexpr size_t kRelease9239FunctionWords = 92;
+inline constexpr std::array<size_t, 2> kRelease9239ReturnIndices{25, 88};
 
 inline uint32_t word(std::span<const std::byte> bytes, size_t offset) {
     uint32_t value = 0;
@@ -150,8 +152,9 @@ inline MaterialSettings read_material_settings(std::span<const std::byte> bytes)
 // The receiver is spilled at FP-8, and both return paths must restore the Dart
 // stack/frame identically. All stores to the vertical gap use tagged offset 0x3b.
 // Unsupported launcher layouts are refused, leaving the stock code intact.
-inline bool matches(std::span<const uint32_t> code) {
-    if (code.size() < kFunctionWords) return false;
+inline bool matches_layout(std::span<const uint32_t> code, size_t function_words,
+        size_t tail_start, const std::array<size_t, 2> &return_indices) {
+    if (code.size() < function_words) return false;
     constexpr std::array<uint32_t, 4> prologue{
         0xa9bf79fd, 0xaa0f03fd, 0xd10041ef, 0xf81f83a1};
     for (size_t i = 0; i < prologue.size(); ++i)
@@ -169,13 +172,21 @@ inline bool matches(std::span<const uint32_t> code) {
         // Call displacement and elderly-mode pool address are image-specific.
         const uint32_t mask = i == 8 ? 0xfc000000 :
             i == 16 ? 0xffc003ff : i == 17 ? 0xffc003ff : 0xffffffff;
-        if ((code[51 + i] & mask) != (tail[i] & mask)) return false;
+        if ((code[tail_start + i] & mask) != (tail[i] & mask)) return false;
     }
-    for (const size_t at : kReturnIndices) {
+    for (const size_t at : return_indices) {
         if (code[at] != kReturnStart || code[at + 1] != 0xaa1d03ef
             || code[at + 2] != 0xa8c179fd || code[at + 3] != 0xd65f03c0)
             return false;
     }
     return true;
+}
+
+inline bool matches(std::span<const uint32_t> code) {
+    return matches_layout(code, kFunctionWords, 51, kReturnIndices);
+}
+
+inline bool matches_9239(std::span<const uint32_t> code) {
+    return matches_layout(code, kRelease9239FunctionWords, 68, kRelease9239ReturnIndices);
 }
 } // namespace folder_spacing

@@ -23,7 +23,8 @@ alignas(8) std::atomic<uint64_t> dock_reveal_native_id{0};
 alignas(8) std::atomic<uint64_t> dock_reveal_icon_y{0}, dock_reveal_icon_alpha{0}, dock_reveal_icon_samples{0};
 uintptr_t dock_reveal_clip_vtable = 0;
 uintptr_t dock_reveal_backdrop_vtable = 0;
-uint32_t dock_reveal_cid_delta = 0;
+uint32_t dock_reveal_cids[dock_reveal::kClassIdCount] = {};
+uint32_t dock_reveal_box_shift = 0;
 void *dock_reveal_capture_original = nullptr;
 void dock_reveal_capture_entry();
 void *dock_reveal_icon_original = nullptr;
@@ -315,7 +316,8 @@ bool install(const Images &image) {
     opacity = reinterpret_cast<StackOpacity>(image.engine + engine->opacity);
     dock_reveal_clip_vtable = image.engine + engine->clip_vtable;
     dock_reveal_backdrop_vtable = image.engine + engine->backdrop_vtable;
-    dock_reveal_cid_delta = profile.cid_delta;
+    std::memcpy(dock_reveal_cids, profile.cids.data(), sizeof(dock_reveal_cids));
+    dock_reveal_box_shift = profile.box_shift;
     struct Target { uintptr_t address; void *replacement; void **continuation; };
     const std::array<Target, 6> targets{{
         {image.engine+engine->paint, reinterpret_cast<void *>(paint), reinterpret_cast<void **>(&original_paint)},
@@ -325,13 +327,13 @@ bool install(const Images &image) {
         {image.dart+profile.capture, reinterpret_cast<void *>(dock_reveal_capture_entry), &dock_reveal_capture_original},
         {image.dart+profile.icon, reinterpret_cast<void *>(dock_reveal_icon_entry), &dock_reveal_icon_original},
     }};
-    constexpr std::array<std::array<uint32_t, 4>, 6> entries{{
+    const std::array<std::array<uint32_t, 4>, 6> entries{{
         {0xd10103ff,0xa90257fe,0xa9034ff4,0xf9400029},
         {0xfc180fea,0x6d0123e9,0xa9027bfd,0xa9036ffc},
         {0xd10143ff,0xfd000be8,0xf9000ffe,0xa9025ff8},
         {0xd10243ff,0xa9047bfd,0xf9002bf9,0xa9065ff8},
         {0xa9bf79fd,0xaa0f03fd,0xd10121ef,0xaa0103e5},
-        {0xa9bf79fd,0xaa0f03fd,0xaa0203e0,0xb849b022},
+        {0xa9bf79fd,0xaa0f03fd,0xaa0203e0,profile.icon_entry_word3},
     }};
     for (size_t i = 0; i < targets.size(); ++i) {
         std::array<uint32_t, 4> live{};
