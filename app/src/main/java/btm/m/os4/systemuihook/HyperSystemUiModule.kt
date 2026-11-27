@@ -1384,6 +1384,7 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     if (param.packageName == SYSTEM_UI) {
                         lockscreenHooks.installBottomTextHooks(param.defaultClassLoader, preferences)
+                        lockscreenHooks.installBottomGestureLineHooks(param.defaultClassLoader, preferences)
                     }
                     if (param.packageName == SYSTEM_UI && !lockscreenWhiteBarHookInstalled) {
                         lockscreenWhiteBarHookInstalled =

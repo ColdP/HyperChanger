@@ -328,7 +328,7 @@ private enum class PageId {
     SOFT_GLASS_PRESETS,
     CAMERA_WATERMARKS,
     CAMERA_SHUTTER_SOUNDS,
-    IOS_NOTIFICATION_CLOCK_GLASS, CONTROL_CENTER_TOP_BUTTONS, CONTROL_CENTER_TILE_LAYOUT,
+    IOS_NOTIFICATION_CLOCK_GLASS, CONTROL_CENTER_TOP_BUTTONS, CONTROL_CENTER_TILE_LAYOUT, CONTROL_CENTER_TILE_LAYOUT_LANDSCAPE, CONTROL_CENTER_MULTI_PAGE, CONTROL_CENTER_FOCUS_MODE, CONTROL_CENTER_FOCUS_MODE_EDITOR,
     GESTURE_HANDLE_STYLE, DESKTOP, DESKTOP_MATERIAL,
     ISLAND, ISLAND_COLLAPSED, ISLAND_EXPANDED, ISLAND_EXPANDED_BACKGROUND, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_HEADER_SETTINGS, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_ADJUSTMENT, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_MUSIC, LOCKSCREEN_CAPSULE, LOCKSCREEN_SHORTCUT_BACKGROUND, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
     DEVICE_PROFILE_PRESETS, DEVICE_PROFILE_CLOUD_PRESETS, CUSTOM_DEPTH_WALLPAPER,
@@ -389,7 +389,11 @@ private fun categoryIconResource(page: PageId?): Int? = when (page) {
     PageId.STATUS_MOBILE_NETWORK_TYPE_TUNING,
     PageId.CONTROL,
     PageId.CONTROL_CENTER_TOP_BUTTONS,
-    PageId.CONTROL_CENTER_TILE_LAYOUT -> R.drawable.hc_home_statusbar
+    PageId.CONTROL_CENTER_TILE_LAYOUT,
+    PageId.CONTROL_CENTER_TILE_LAYOUT_LANDSCAPE,
+    PageId.CONTROL_CENTER_MULTI_PAGE,
+    PageId.CONTROL_CENTER_FOCUS_MODE,
+    PageId.CONTROL_CENTER_FOCUS_MODE_EDITOR -> R.drawable.hc_home_statusbar
     PageId.LOCK,
     PageId.LOCKSCREEN_MUSIC,
     PageId.LOCKSCREEN_CAPSULE,
@@ -569,10 +573,40 @@ private fun categorySearchItems(): List<CategorySearchItem> = listOf(
         PageId.IOS_NOTIFICATION_CENTER,
     ),
     CategorySearchItem(
-        tr("controlCenterBigClock", "在控制中心顶栏日期之上添加大时钟"),
-        tr("category_search_control_center_clock_description", "在控制中心日期上方显示可自定义的大时钟。"),
+        tr("controlCenterTopContent", "控制中心顶部显示内容"),
+        tr("category_search_control_center_clock_description", "切换控制中心顶部显示系统默认、可自定义大时钟或 iOS 风格信号状态。"),
         setOf(ScopeApplication.SYSTEM_UI),
         PageId.STATUS,
+    ),
+    CategorySearchItem(
+        tr("cc_media_big_cover_expand", "音乐控件大封面展开布局"),
+        tr("category_search_cc_media_big_cover_description", "控制中心音乐控件展开时采用类似 iOS 的大封面竖向布局，底部提供播放设备切换入口。"),
+        setOf(ScopeApplication.SYSTEM_UI),
+        PageId.STATUS,
+    ),
+    CategorySearchItem(
+        tr("cc_media_big_cover_immersive", "沉浸式封面"),
+        tr("category_search_cc_media_big_cover_immersive_description", "展开音乐大封面时让正方形封面贴边铺满顶部，底部自然渐隐融入卡片背景。"),
+        setOf(ScopeApplication.SYSTEM_UI),
+        PageId.STATUS,
+    ),
+    CategorySearchItem(
+        tr("cc_media_big_cover_text_shadow", "媒体信息文本阴影"),
+        tr("category_search_cc_media_big_cover_text_shadow_description", "在沉浸式封面下为歌曲标题与歌手文字添加柔和阴影，提升浅色封面上的可读性。"),
+        setOf(ScopeApplication.SYSTEM_UI),
+        PageId.STATUS,
+    ),
+    CategorySearchItem(
+        tr("cc_media_big_cover_text_color_mode", "媒体信息文本取色"),
+        tr("category_search_cc_media_big_cover_text_color_description", "在沉浸式封面下自动从专辑封面提取 Monet 或 Aura-Oklab 颜色并应用于歌曲标题与歌手文本。"),
+        setOf(ScopeApplication.SYSTEM_UI),
+        PageId.STATUS,
+    ),
+    CategorySearchItem(
+        tr("cc_focus_mode_title", "专注模式"),
+        tr("category_search_cc_focus_mode_description", "当勿扰模式磁贴调整为 2×1 或更宽时启用类似 iOS 专注模式胶囊样式与模式选择面板，支持自定义图标与文本。"),
+        setOf(ScopeApplication.SYSTEM_UI),
+        PageId.CONTROL_CENTER_FOCUS_MODE,
     ),
     CategorySearchItem(
         tr("controlCenterCarrierCustom", "自定义运营商文本"),
@@ -779,7 +813,13 @@ private fun categorySearchKeywords(page: PageId?): String = when (page) {
     PageId.STATUS_ADJUSTMENT -> "状态栏 布局 图标 秒数 status bar layout icons seconds"
     PageId.STATUS_SIGNAL_CUSTOMIZATION -> "状态栏 信号 移动网络 双排 网络类型 status bar signal mobile network"
     PageId.CONTROL_CENTER_TOP_BUTTONS -> "控制中心 顶部按钮 玻璃 control center top buttons glass"
-    PageId.CONTROL_CENTER_TILE_LAYOUT -> "控制中心 磁贴 布局 control center tiles layout"
+    PageId.CONTROL_CENTER_TILE_LAYOUT,
+    PageId.CONTROL_CENTER_TILE_LAYOUT_LANDSCAPE -> "控制中心 磁贴 布局 横屏 自适应 control center tiles layout landscape adaptive"
+    PageId.CONTROL_CENTER_MULTI_PAGE -> if (CONTROL_CENTER_MULTI_PAGE_FEATURE_ENABLED) {
+        "控制中心 多页 媒体 连接 快捷控制 指示条 control center multi page media connectivity controls indicator"
+    } else ""
+    PageId.CONTROL_CENTER_FOCUS_MODE,
+    PageId.CONTROL_CENTER_FOCUS_MODE_EDITOR -> "控制中心 专注模式 勿扰 睡眠 驾驶 工作 图标 文本 control center focus mode dnd sleep driving work"
     PageId.LOCK -> "锁屏 时钟 壁纸 小组件 keyguard lockscreen clock wallpaper widgets"
     PageId.LOCKSCREEN_MUSIC -> "锁屏 音乐 专辑 封面 歌词 lockscreen music album cover lyrics"
     PageId.LOCKSCREEN_CAPSULE -> "锁屏 胶囊 通知 媒体 lockscreen capsule notification media"
@@ -1337,15 +1377,21 @@ private fun Root(
                 NotificationStackBlurSettingsStore(context).syncRemote(it)
                 ControlCenterHeaderHeightSettingsStore(context).syncRemote(it)
                 ControlCenterTileLayoutSettingsStore(context).syncRemote(it)
+                ControlCenterTileLayoutLandscapeSettingsStore(context).syncRemote(it)
+                ControlCenterMultiPageSettingsStore(context).syncRemote(it)
+                ControlCenterMediaBigCoverSettingsStore(context).syncRemote(it)
+                ControlCenterFocusModeSettingsStore(context).syncRemote(it)
                 IosNotificationBottomOffsetSettingsStore(context).syncRemote(it)
                 IosNotificationExpansionSettingsStore(context).syncRemote(it)
                 IosNotificationRefractionSettingsStore(context).syncRemote(it)
                 ControlCenterCarrierSettingsStore(context).syncRemote(it)
                 ControlCenterClockSettingsStore(context).syncRemote(it)
+                ControlCenterTopContentSettingsStore(context).syncRemote(it)
                 IslandSmoothingSettingsStore(context).syncRemote(it)
                 IslandSpacingSettingsStore(context).syncRemote(it)
                 DynamicIslandAppearanceSettingsStore(context).syncRemote(it)
                 LockscreenFaceUnlockSettingsStore(context).syncRemote(it)
+                LockscreenBottomSettingsStore(context).syncRemote(it)
                 musicStore.syncRemote(it)
                 HomeGlassSettingsStore(context).syncRemote(it)
                 dockStore.syncRemote(it)
@@ -6276,7 +6322,20 @@ private fun Detail(
         PageId.NOTIFICATION_RESTRICTIONS -> NotificationRestrictions(back)
         PageId.NOTIFICATION_MEDIA_CARD -> NotificationMediaCard(back)
         PageId.CONTROL_CENTER_TOP_BUTTONS -> ControlCenterTopButtonsPage(back)
-        PageId.CONTROL_CENTER_TILE_LAYOUT -> ControlCenterTileLayoutPage(back)
+        PageId.CONTROL_CENTER_TILE_LAYOUT -> ControlCenterTileLayoutPage({ openPage(PageId.CONTROL_CENTER_TILE_LAYOUT_LANDSCAPE) }, back)
+        PageId.CONTROL_CENTER_TILE_LAYOUT_LANDSCAPE -> ControlCenterTileLayoutLandscapePage(back)
+        PageId.CONTROL_CENTER_MULTI_PAGE -> ControlCenterMultiPagePage(back)
+        PageId.CONTROL_CENTER_FOCUS_MODE -> ControlCenterFocusModePage(
+            back = back,
+            openEditor = { modeId ->
+                pendingFocusModeEditId = modeId
+                openPage(PageId.CONTROL_CENTER_FOCUS_MODE_EDITOR)
+            },
+        )
+        PageId.CONTROL_CENTER_FOCUS_MODE_EDITOR -> ControlCenterFocusModeEditorPage(
+            modeId = pendingFocusModeEditId,
+            back = back,
+        )
         PageId.STATUS -> Status(settings, update, openPage, back)
         PageId.STATUS_ADJUSTMENT -> StatusAdjustment(settings, update, back)
         PageId.STATUS_SIGNAL_CUSTOMIZATION -> StatusSignalCustomization(settings, update, openPage, back)
@@ -9649,14 +9708,27 @@ private fun Status(
     var showCarrierTextDialog by remember { mutableStateOf(false) }
     val controlCenterClockStore = remember(context) { ControlCenterClockSettingsStore(context) }
     var controlCenterClockSettings by remember { mutableStateOf(controlCenterClockStore.settings) }
+    val controlCenterTopContentStore = remember(context) { ControlCenterTopContentSettingsStore(context) }
+    var controlCenterTopContentSettings by remember { mutableStateOf(controlCenterTopContentStore.settings) }
+    val mediaBigCoverStore = remember(context) { ControlCenterMediaBigCoverSettingsStore(context) }
+    var mediaBigCoverSettings by remember { mutableStateOf(mediaBigCoverStore.settings) }
     val adjustmentStore = remember(context) { StatusBarAdjustmentSettingsStore(context) }
     var adjustmentSettings by remember { mutableStateOf(adjustmentStore.settings) }
     val secondsStore = remember(context) { StatusBarSecondsSettingsStore(context) }
     var secondsSettings by remember { mutableStateOf(secondsStore.settings) }
     var showControlCenterClockFormatDialog by remember { mutableStateOf(false) }
+    var showDualSimLabelDialog by remember { mutableStateOf(false) }
     fun updateControlCenterClock(transform: (ControlCenterClockSettings) -> ControlCenterClockSettings) {
         controlCenterClockStore.update(service, transform)
         controlCenterClockSettings = controlCenterClockStore.settings
+    }
+    fun updateControlCenterTopContent(transform: (ControlCenterTopContentSettings) -> ControlCenterTopContentSettings) {
+        controlCenterTopContentStore.update(service, transform)
+        controlCenterTopContentSettings = controlCenterTopContentStore.settings
+    }
+    fun updateMediaBigCover(transform: (ControlCenterMediaBigCoverSettings) -> ControlCenterMediaBigCoverSettings) {
+        mediaBigCoverStore.update(service, transform)
+        mediaBigCoverSettings = mediaBigCoverStore.settings
     }
     fun updateCarrier(transform: (ControlCenterCarrierSettings) -> ControlCenterCarrierSettings) {
         carrierStore.update(service, transform)
@@ -9677,6 +9749,10 @@ private fun Status(
         carrierSettings = carrierStore.settings
         service?.let(controlCenterClockStore::syncRemote)
         controlCenterClockSettings = controlCenterClockStore.settings
+        service?.let(controlCenterTopContentStore::syncRemote)
+        controlCenterTopContentSettings = controlCenterTopContentStore.settings
+        service?.let(mediaBigCoverStore::syncRemote)
+        mediaBigCoverSettings = mediaBigCoverStore.settings
         service?.let(adjustmentStore::syncRemote)
         adjustmentSettings = adjustmentStore.settings
         service?.let(secondsStore::syncRemote)
@@ -9747,6 +9823,50 @@ private fun Status(
                     title = tr("cc_layout_title", "控制中心磁贴布局自定义"),
                     onClick = { open(PageId.CONTROL_CENTER_TILE_LAYOUT) },
                 )
+                SharedViewArrowPreference(
+                    title = tr("cc_focus_mode_title", "专注模式"),
+                    onClick = { open(PageId.CONTROL_CENTER_FOCUS_MODE) },
+                )
+                if (CONTROL_CENTER_MULTI_PAGE_FEATURE_ENABLED) {
+                    SharedViewArrowPreference(
+                        title = tr("cc_multi_page_title", "多页控制中心"),
+                        onClick = { open(PageId.CONTROL_CENTER_MULTI_PAGE) },
+                    )
+                }
+                SwitchPreference(
+                    title = tr("cc_media_big_cover_expand", "音乐控件大封面展开布局"),
+                    checked = mediaBigCoverSettings.enabled,
+                    onCheckedChange = { enabled -> updateMediaBigCover { it.copy(enabled = enabled) } },
+                )
+                if (mediaBigCoverSettings.enabled) {
+                    SwitchPreference(
+                        title = tr("cc_media_big_cover_immersive", "沉浸式封面"),
+                        checked = mediaBigCoverSettings.immersiveCover,
+                        onCheckedChange = { immersive -> updateMediaBigCover { it.copy(immersiveCover = immersive) } },
+                    )
+                    if (mediaBigCoverSettings.immersiveCover) {
+                        SwitchPreference(
+                            title = tr("cc_media_big_cover_text_shadow", "媒体信息文本阴影"),
+                            checked = mediaBigCoverSettings.immersiveTextShadow,
+                            onCheckedChange = { shadow -> updateMediaBigCover { it.copy(immersiveTextShadow = shadow) } },
+                        )
+                        OverlayDropdownPreference(
+                            title = tr("cc_media_big_cover_text_color_mode", "媒体信息文本取色"),
+                            items = listOf(
+                                tr("cc_media_big_cover_text_color_off", "关闭"),
+                                tr("cc_media_big_cover_text_color_monet", "Monet 颜色"),
+                                tr("cc_media_big_cover_text_color_oklab", "Aura-Oklab 颜色"),
+                            ),
+                            selectedIndex = mediaBigCoverSettings.immersiveTextColorMode.coerceIn(
+                                CC_MEDIA_TEXT_COLOR_OFF,
+                                CC_MEDIA_TEXT_COLOR_OKLAB,
+                            ),
+                            onSelectedIndexChange = { mode ->
+                                updateMediaBigCover { it.copy(immersiveTextColorMode = mode) }
+                            },
+                        )
+                    }
+                }
                 OverlayDropdownPreference(
                     title = tr("控制中心中电池百分比显示", "控制中心中电池百分比显示"),
                     items = batteryPercentageModeLabels(),
@@ -9772,12 +9892,24 @@ private fun Status(
                         headerHeightOffset = headerHeightStore.offsetDp
                     },
                 )
-                SwitchPreference(
-                    title = tr("controlCenterBigClock", "在控制中心顶栏日期之上添加大时钟"),
-                    checked = controlCenterClockSettings.enabled,
-                    onCheckedChange = { enabled -> updateControlCenterClock { it.copy(enabled = enabled) } },
+                OverlayDropdownPreference(
+                    title = tr("controlCenterTopContent", "控制中心顶部显示内容"),
+                    items = listOf(
+                        tr("controlCenterTopContentDefault", "系统默认"),
+                        tr("controlCenterTopContentClock", "时钟"),
+                        tr("controlCenterTopContentSignal", "信号"),
+                    ),
+                    selectedIndex = controlCenterTopContentSettings.mode,
+                    onSelectedIndexChange = { mode ->
+                        updateControlCenterTopContent { it.copy(mode = mode) }
+                        updateControlCenterClock { it.copy(enabled = mode == CONTROL_CENTER_TOP_CONTENT_CLOCK) }
+                    },
                 )
-                AnimatedVisibility(visible = controlCenterClockSettings.enabled) {
+                AnimatedVisibility(
+                    visible = controlCenterTopContentSettings.mode == CONTROL_CENTER_TOP_CONTENT_CLOCK,
+                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                ) {
                     Column {
                         SharedViewArrowPreference(
                             title = tr("controlCenterClockFormat", "大时钟格式"),
@@ -9803,41 +9935,85 @@ private fun Status(
                         )
                     }
                 }
-                OverlayDropdownPreference(
-                    title = tr("controlCenterCarrierNetworkMarker", "运营商网络标识"),
-                    items = listOf(
-                        tr("不隐藏", "不隐藏"),
-                        tr("controlCenterCarrierHideHd", "隐藏 HD"),
-                        tr("controlCenterCarrierRealNetworkType", "替换为真实数据网络类型"),
-                    ),
-                    selectedIndex = carrierSettings.hdMode,
-                    onSelectedIndexChange = { mode -> updateCarrier { it.copy(hdMode = mode) } },
-                )
-                SwitchPreference(
-                    title = tr("controlCenterCarrierCustom", "自定义运营商文本"),
-                    checked = carrierSettings.customEnabled,
-                    onCheckedChange = { enabled -> updateCarrier { it.copy(customEnabled = enabled) } },
-                )
-                AnimatedVisibility(visible = carrierSettings.customEnabled) {
-                    SharedViewArrowPreference(
-                        title = tr("controlCenterCarrierText", "运营商文本"),
-                        summary = carrierSettings.customText.ifBlank { tr("未设置", "未设置") },
-                        onClick = { showCarrierTextDialog = true },
-                    )
+                AnimatedVisibility(
+                    visible = controlCenterTopContentSettings.mode == CONTROL_CENTER_TOP_CONTENT_SIGNAL,
+                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                ) {
+                    Column {
+                        OverlayDropdownPreference(
+                            title = tr("controlCenterSignalIconStyle", "信号图标样式"),
+                            items = listOf(
+                                tr("controlCenterSignalIconFollowStatusBar", "跟随状态栏"),
+                                tr("controlCenterSignalIconIos", "iOS"),
+                                tr("controlCenterSignalIconDots", "圆点信号"),
+                            ),
+                            selectedIndex = controlCenterTopContentSettings.signalIconStyle,
+                            onSelectedIndexChange = { style ->
+                                updateControlCenterTopContent { it.copy(signalIconStyle = style) }
+                            },
+                        )
+                        SharedViewArrowPreference(
+                            title = tr("controlCenterSignalDualSimLabel", "双卡文本自定义"),
+                            summary = "${controlCenterTopContentSettings.sim1Label.ifBlank { "1" }} / ${controlCenterTopContentSettings.sim2Label.ifBlank { "2" }}",
+                            onClick = { showDualSimLabelDialog = true },
+                        )
+                        SwitchPreference(
+                            title = tr("controlCenterSignalBatteryPercentLeft", "独立电池百分比显示在电池左侧"),
+                            checked = controlCenterTopContentSettings.batteryPercentLeft,
+                            onCheckedChange = { enabled ->
+                                updateControlCenterTopContent { it.copy(batteryPercentLeft = enabled) }
+                            },
+                        )
+                    }
                 }
-                OverlayDropdownPreference(
-                    title = tr("controlCenterCarrierHide", "隐藏运营商"),
-                    items = listOf(
-                        tr("不隐藏", "不隐藏"),
-                        tr("隐藏卡1", "隐藏卡1"),
-                        tr("隐藏卡2", "隐藏卡2"),
-                        tr("controlCenterCarrierHideNonData", "隐藏非上网卡"),
-                        tr("隐藏上网卡", "隐藏上网卡"),
-                        tr("全部隐藏", "全部隐藏"),
-                    ),
-                    selectedIndex = carrierSettings.hideMode,
-                    onSelectedIndexChange = { mode -> updateCarrier { it.copy(hideMode = mode) } },
-                )
+                AnimatedVisibility(
+                    visible = controlCenterTopContentSettings.mode != CONTROL_CENTER_TOP_CONTENT_SIGNAL,
+                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                ) {
+                    Column {
+                        OverlayDropdownPreference(
+                            title = tr("controlCenterCarrierNetworkMarker", "运营商网络标识"),
+                            items = listOf(
+                                tr("不隐藏", "不隐藏"),
+                                tr("controlCenterCarrierHideHd", "隐藏 HD"),
+                                tr("controlCenterCarrierRealNetworkType", "替换为真实数据网络类型"),
+                            ),
+                            selectedIndex = carrierSettings.hdMode,
+                            onSelectedIndexChange = { mode -> updateCarrier { it.copy(hdMode = mode) } },
+                        )
+                        SwitchPreference(
+                            title = tr("controlCenterCarrierCustom", "自定义运营商文本"),
+                            checked = carrierSettings.customEnabled,
+                            onCheckedChange = { enabled -> updateCarrier { it.copy(customEnabled = enabled) } },
+                        )
+                        AnimatedVisibility(
+                            visible = carrierSettings.customEnabled,
+                            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                        ) {
+                            SharedViewArrowPreference(
+                                title = tr("controlCenterCarrierText", "运营商文本"),
+                                summary = carrierSettings.customText.ifBlank { tr("未设置", "未设置") },
+                                onClick = { showCarrierTextDialog = true },
+                            )
+                        }
+                        OverlayDropdownPreference(
+                            title = tr("controlCenterCarrierHide", "隐藏运营商"),
+                            items = listOf(
+                                tr("不隐藏", "不隐藏"),
+                                tr("隐藏卡1", "隐藏卡1"),
+                                tr("隐藏卡2", "隐藏卡2"),
+                                tr("controlCenterCarrierHideNonData", "隐藏非上网卡"),
+                                tr("隐藏上网卡", "隐藏上网卡"),
+                                tr("全部隐藏", "全部隐藏"),
+                            ),
+                            selectedIndex = carrierSettings.hideMode,
+                            onSelectedIndexChange = { mode -> updateCarrier { it.copy(hideMode = mode) } },
+                        )
+                    }
+                }
                 OverlayDropdownPreference(
                     title = tr("控制中心 5G 开关磁贴", "控制中心 5G 开关磁贴"),
                     items = listOf(
@@ -9867,7 +10043,7 @@ private fun Status(
             }
         }
     }
-    if (showControlCenterClockFormatDialog && controlCenterClockSettings.enabled) {
+    if (showControlCenterClockFormatDialog && controlCenterTopContentSettings.mode == CONTROL_CENTER_TOP_CONTENT_CLOCK) {
         val invalidFormatText = tr("controlCenterClockInvalidFormat", "请输入有效的时间格式，例如 HH:mm:ss")
         DeviceProfileFieldDialog(
             title = tr("controlCenterClockFormat", "大时钟格式"),
@@ -9881,7 +10057,18 @@ private fun Status(
             },
         )
     }
-    if (showCarrierTextDialog) {
+    if (showDualSimLabelDialog && controlCenterTopContentSettings.mode == CONTROL_CENTER_TOP_CONTENT_SIGNAL) {
+        ControlCenterDualSimLabelDialog(
+            sim1Current = controlCenterTopContentSettings.sim1Label,
+            sim2Current = controlCenterTopContentSettings.sim2Label,
+            onDismiss = { showDualSimLabelDialog = false },
+            onSave = { sim1, sim2 ->
+                updateControlCenterTopContent { it.copy(sim1Label = sim1, sim2Label = sim2) }
+                showDualSimLabelDialog = false
+            },
+        )
+    }
+    if (showCarrierTextDialog && controlCenterTopContentSettings.mode != CONTROL_CENTER_TOP_CONTENT_SIGNAL) {
         DeviceProfileFieldDialog(
             title = tr("controlCenterCarrierCustom", "自定义运营商文本"),
             current = carrierSettings.customText,
@@ -9892,6 +10079,52 @@ private fun Status(
                 showCarrierTextDialog = false
             },
         )
+    }
+}
+
+@Composable
+private fun ControlCenterDualSimLabelDialog(
+    sim1Current: String,
+    sim2Current: String,
+    onDismiss: () -> Unit,
+    onSave: (String, String) -> Unit,
+) {
+    var sim1 by remember(sim1Current) { mutableStateOf(sim1Current) }
+    var sim2 by remember(sim2Current) { mutableStateOf(sim2Current) }
+    WindowDialog(show = true, onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                tr("controlCenterSignalDualSimLabel", "双卡文本自定义"),
+                style = MiuixTheme.textStyles.title3,
+                fontWeight = FontWeight.Bold,
+            )
+            TextField(
+                value = sim1,
+                onValueChange = { sim1 = it.take(8) },
+                label = tr("controlCenterSignalSim1Label", "卡 1 文本（留空显示 1）"),
+                useLabelAsPlaceholder = true,
+                singleLine = true,
+                cornerRadius = 999.dp,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            TextField(
+                value = sim2,
+                onValueChange = { sim2 = it.take(8) },
+                label = tr("controlCenterSignalSim2Label", "卡 2 文本（留空显示 2）"),
+                useLabelAsPlaceholder = true,
+                singleLine = true,
+                cornerRadius = 999.dp,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GlassDialogButton(onDismiss, Modifier.weight(1f)) { Text(tr("取消", "取消")) }
+                GlassDialogButton(
+                    onClick = { onSave(sim1.trim(), sim2.trim()) },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColorsPrimary(),
+                ) { Text(tr("保存", "保存")) }
+            }
+        }
     }
 }
 
@@ -10555,12 +10788,24 @@ private fun Lock(
     var lockscreenNotificationOffsetSettings by remember {
         mutableStateOf(lockscreenNotificationOffsetStore.settings)
     }
+    val lockscreenBottomStore = remember(context) {
+        LockscreenBottomSettingsStore(context)
+    }
+    var lockscreenBottomSettings by remember {
+        mutableStateOf(lockscreenBottomStore.settings)
+    }
+    val updateLockscreenBottom: ((LockscreenBottomSettings) -> LockscreenBottomSettings) -> Unit = { transform ->
+        lockscreenBottomStore.update(clockHorizontalService, transform)
+        lockscreenBottomSettings = lockscreenBottomStore.settings
+    }
     LaunchedEffect(clockHorizontalService) {
         clockHorizontalService?.let {
             clockHorizontalStore.syncRemote(it)
             clockHorizontalEnabled = clockHorizontalStore.enabled
             lockscreenNotificationOffsetStore.syncRemote(it)
             lockscreenNotificationOffsetSettings = lockscreenNotificationOffsetStore.settings
+            lockscreenBottomStore.syncRemote(it)
+            lockscreenBottomSettings = lockscreenBottomStore.settings
         }
     }
 
@@ -10582,6 +10827,7 @@ private fun Lock(
         }
     }
     var showBottomTextDialog by remember { mutableStateOf(false) }
+    var showCustomBottomTextDialog by remember { mutableStateOf(false) }
     var showWidgetDeviceNameDialog by remember { mutableStateOf(false) }
     var showLockscreenTemplateLimitDialog by remember { mutableStateOf(false) }
     AppList(p, scroll, 28) {
@@ -10884,6 +11130,73 @@ OverlayDropdownPreference(
                     summary = lockscreenBottomTextSummary(s.lockscreenBottomTextMask),
                     onClick = { showBottomTextDialog = true },
                 )
+                SharedViewArrowPreference(
+                    title = tr("lockscreenBottomCustomText", "自定义锁屏底部文本"),
+                    summary = lockscreenBottomSettings.customText.ifBlank {
+                        tr("lockscreenBottomCustomTextEmpty", "留空则不显示")
+                    },
+                    onClick = { showCustomBottomTextDialog = true },
+                )
+                SwitchPreference(
+                    title = tr("lockscreenGestureLineEnable", "添加锁屏手势提示线"),
+                    checked = lockscreenBottomSettings.gestureLineEnabled,
+                    onCheckedChange = { enabled ->
+                        updateLockscreenBottom { it.copy(gestureLineEnabled = enabled) }
+                    },
+                )
+                AnimatedVisibility(
+                    visible = lockscreenBottomSettings.gestureLineEnabled,
+                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                ) {
+                    Column {
+                        OverlayDropdownPreference(
+                            title = tr("lockscreenGestureLineMaterial", "锁屏手势提示线材质"),
+                            items = listOf(
+                                tr("纯色", "纯色"),
+                                tr("lockscreenGestureLineMaterialBlur", "模糊"),
+                            ),
+                            selectedIndex = lockscreenBottomSettings.gestureLineMaterial,
+                            onSelectedIndexChange = { value ->
+                                updateLockscreenBottom { it.copy(gestureLineMaterial = value) }
+                            },
+                        )
+                        ParameterIntSlide(
+                            title = tr("lockscreenGestureLineHeightScale", "锁屏手势提示线高度缩放"),
+                            value = lockscreenBottomSettings.gestureLineHeightScale,
+                            range = LOCKSCREEN_GESTURE_LINE_PERCENT_MIN..LOCKSCREEN_GESTURE_LINE_PERCENT_MAX,
+                            suffix = "%",
+                            defaultValue = 0,
+                        ) { value ->
+                            updateLockscreenBottom { it.copy(gestureLineHeightScale = value) }
+                        }
+                        ParameterIntSlide(
+                            title = tr("lockscreenGestureLineWidthScale", "锁屏手势提示线宽度缩放"),
+                            value = lockscreenBottomSettings.gestureLineWidthScale,
+                            range = LOCKSCREEN_GESTURE_LINE_PERCENT_MIN..LOCKSCREEN_GESTURE_LINE_PERCENT_MAX,
+                            suffix = "%",
+                            defaultValue = 0,
+                        ) { value ->
+                            updateLockscreenBottom { it.copy(gestureLineWidthScale = value) }
+                        }
+                        ParameterIntSlide(
+                            title = tr("lockscreenGestureLineVerticalOffset", "锁屏手势提示线垂直偏移"),
+                            value = lockscreenBottomSettings.gestureLineVerticalOffset,
+                            range = LOCKSCREEN_GESTURE_LINE_PERCENT_MIN..LOCKSCREEN_GESTURE_LINE_PERCENT_MAX,
+                            suffix = "%",
+                            defaultValue = 0,
+                        ) { value ->
+                            updateLockscreenBottom { it.copy(gestureLineVerticalOffset = value) }
+                        }
+                        SwitchPreference(
+                            title = tr("lockscreenGestureLineUnlockHintAnim", "锁屏手势提示线解锁提示动画"),
+                            checked = lockscreenBottomSettings.gestureLineUnlockHintAnim,
+                            onCheckedChange = { enabled ->
+                                updateLockscreenBottom { it.copy(gestureLineUnlockHintAnim = enabled) }
+                            },
+                        )
+                    }
+                }
             }
         }
         item {
@@ -10930,6 +11243,15 @@ OverlayDropdownPreference(
                 showBottomTextDialog = false
             },
         )
+    LockscreenCustomBottomTextDialog(
+        show = showCustomBottomTextDialog,
+        current = lockscreenBottomSettings.customText,
+        onDismiss = { showCustomBottomTextDialog = false },
+        onSave = { value ->
+            updateLockscreenBottom { it.copy(customText = value) }
+            showCustomBottomTextDialog = false
+        },
+    )
     LockscreenTemplateLimitDialog(
         show = showLockscreenTemplateLimitDialog,
         current = s.lockscreenTemplateLimitCustom,
@@ -11900,6 +12222,42 @@ private fun RearScreenWallpaperLimitDialog(
 private const val LOCKSCREEN_TEXT_CHARGING = 1
 private const val LOCKSCREEN_TEXT_DND = 2
 private const val LOCKSCREEN_TEXT_NOTIFICATIONS = 4
+
+@Composable
+private fun LockscreenCustomBottomTextDialog(
+    show: Boolean,
+    current: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var value by remember(show, current) { mutableStateOf(current) }
+    WindowDialog(show = show, onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                tr("lockscreenBottomCustomText", "自定义锁屏底部文本"),
+                style = MiuixTheme.textStyles.title3,
+                fontWeight = FontWeight.Bold,
+            )
+            TextField(
+                value = value,
+                onValueChange = { value = it.take(LOCKSCREEN_BOTTOM_CUSTOM_TEXT_MAX_LEN) },
+                label = tr("lockscreenBottomCustomTextPlaceholder", "输入锁屏底部文本（留空则不显示）"),
+                useLabelAsPlaceholder = true,
+                singleLine = true,
+                cornerRadius = 999.dp,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GlassDialogButton(onDismiss, Modifier.weight(1f)) { Text(tr("取消", "取消")) }
+                GlassDialogButton(
+                    onClick = { onSave(value) },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColorsPrimary(),
+                ) { Text(tr("保存", "保存")) }
+            }
+        }
+    }
+}
 
 @Composable
 private fun LockscreenWidgetDeviceNameDialog(

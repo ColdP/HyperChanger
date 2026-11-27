@@ -55,12 +55,18 @@ internal fun rememberSettingsSearchCatalog(language: Map<String, String>): Map<S
             val json = JSONObject(context.assets.open("settings-search.json").bufferedReader().use { it.readText() })
             val pages = buildMap {
                 json.keys().forEach { page ->
+                    if (!CONTROL_CENTER_MULTI_PAGE_FEATURE_ENABLED && page == "CONTROL_CENTER_MULTI_PAGE") {
+                        return@forEach
+                    }
                     val entries = json.getJSONArray(page)
                     val texts = mutableListOf<String>()
                     val titles = mutableListOf<SettingsSearchPreferenceTitle>()
                     for (i in 0 until entries.length()) {
                         val entry = entries.getJSONArray(i)
                         val key = entry.getString(0)
+                        if (!CONTROL_CENTER_MULTI_PAGE_FEATURE_ENABLED && key.startsWith("cc_multi_page_")) {
+                            continue
+                        }
                         val fallback = entry.getString(1)
                         val translated = language[key] ?: language[fallback] ?: fallback
                         texts += translated

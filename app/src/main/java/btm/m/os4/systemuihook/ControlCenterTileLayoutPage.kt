@@ -36,13 +36,15 @@ internal fun ccTileTitle(id: String) = CcTileCatalog.entries.firstOrNull { it.id
     ?: tr("cc_layout_title", "控制中心磁贴布局自定义")
 
 @Composable
-internal fun ControlCenterTileLayoutPage(back: () -> Unit) = AppPage(
+internal fun ControlCenterTileLayoutPage(openLandscape: () -> Unit, back: () -> Unit) = AppPage(
     tr("cc_layout_title", "控制中心磁贴布局自定义"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI),
 ) { padding, scroll ->
     val context = LocalContext.current
     val service by HookApplication.service.collectAsState()
     val store = remember(context) { ControlCenterTileLayoutSettingsStore(context) }
+    val landscapeStore = remember(context) { ControlCenterTileLayoutLandscapeSettingsStore(context) }
     var settings by remember { mutableStateOf(store.settings) }
+    var landscapeSettings by remember { mutableStateOf(landscapeStore.settings) }
     val listState = rememberLazyListState()
     val local = remember(context) { context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE) }
     var available by remember { mutableStateOf(CcTileCatalog.available(local).map { it.id }) }
@@ -70,8 +72,13 @@ internal fun ControlCenterTileLayoutPage(back: () -> Unit) = AppPage(
     }
     DisposableEffect(local) {
         val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key == null || key == KEY_CONTROL_CENTER_5G_TILE_MODE || key == KEY_CONTROL_CENTER_GMS_TILE_ENABLED)
+            if (key == null || key == KEY_CONTROL_CENTER_5G_TILE_MODE || key == KEY_CONTROL_CENTER_GMS_TILE_ENABLED) {
                 available = CcTileCatalog.available(local).map { it.id }
+            }
+            if (key == null || key == KEY_CC_TILE_LAYOUT_LANDSCAPE_ADAPTIVE ||
+                key == KEY_CC_TILE_LAYOUT_LANDSCAPE || key == KEY_CC_TILE_LAYOUT_LANDSCAPE_SIZE_MEMORY) {
+                landscapeSettings = readCcTileLayoutLandscapeSettings(local)
+            }
         }
         local.registerOnSharedPreferenceChangeListener(listener)
         onDispose { local.unregisterOnSharedPreferenceChangeListener(listener) }
@@ -87,8 +94,12 @@ internal fun ControlCenterTileLayoutPage(back: () -> Unit) = AppPage(
         card = scheme.surfaceContainer.toArgb(),
     )
     LaunchedEffect(service) {
-        service?.let(store::syncRemote)
+        service?.let {
+            store.syncRemote(it)
+            landscapeStore.syncRemote(it)
+        }
         settings = store.settings
+        landscapeSettings = landscapeStore.settings
     }
     AppList(padding, scroll, 28, state = listState) {
         item {
@@ -110,6 +121,21 @@ internal fun ControlCenterTileLayoutPage(back: () -> Unit) = AppPage(
                         settings = settings.copy(smallTileAutoFill = it)
                         store.update(service, settings)
                     })
+                SwitchPreference(
+                    title = tr("cc_layout_landscape_adaptive", "自适应调整横屏布局"),
+                    checked = landscapeSettings.adaptive,
+                    enabled = settings.enabled,
+                    onCheckedChange = {
+                        landscapeSettings = landscapeSettings.copy(adaptive = it)
+                        landscapeStore.update(service, landscapeSettings)
+                    },
+                )
+                if (!landscapeSettings.adaptive) {
+                    ArrowPreference(
+                        title = tr("cc_layout_landscape_custom", "自定义横屏布局"),
+                        onClick = openLandscape,
+                    )
+                }
                 ArrowPreference(title = tr("cc_layout_reset", "还原初始布局"), onClick = { confirmReset = true })
             }
         }

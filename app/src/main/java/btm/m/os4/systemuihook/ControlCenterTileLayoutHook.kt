@@ -4,6 +4,7 @@ package btm.m.os4.systemuihook
 import android.content.Context
 import android.content.SharedPreferences
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Outline
 import android.graphics.Paint
@@ -13,10 +14,15 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
+import android.view.Gravity
+import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
-import android.view.Gravity
+import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.SeekBar
+import android.widget.TextView
 import io.github.libxposed.api.XposedInterface.ExceptionMode
 import io.github.libxposed.api.XposedModule
 import java.lang.ref.WeakReference
@@ -47,13 +53,45 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
     private val hiddenMediaChildren = WeakHashMap<View, MutableMap<String, Int>>()
     private val mediaLayoutSizes = WeakHashMap<View, Pair<Int, Int>>()
     private val mediaInstalled = Collections.newSetFromMap(WeakHashMap<Class<*>, Boolean>())
+    private val distributorInstalled = Collections.newSetFromMap(WeakHashMap<Class<*>, Boolean>())
     private val childLayouts = mutableSetOf<Method>()
     private val handler by lazy { Handler(Looper.getMainLooper()) }
     private var preferenceListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
     @Volatile private var settings = CcTileLayoutSettings()
+    @Volatile private var landscapeSettings = CcTileLayoutLandscapeSettings()
     private var selectionPreferences: SharedPreferences? = null
     private var selectedSpecs: Map<String, String> = emptyMap()
+    private var styleControllerRef: WeakReference<Any>? = null
     private val cardSelections = WeakHashMap<Any, List<String>>()
+
+    private fun isSupportedStyle(style: String?): Boolean = style == "VERTICAL" || style == "HORIZONTAL"
+
+    private fun isRightPanel(adapter: Any?): Boolean = (field(adapter, "isRightPanel") as? Boolean) != false
+
+    private fun adapterStyle(adapter: Any?): String? {
+        adapter ?: return null
+        val live = call(call(field(adapter, "mainPanelController"), "get"), "getStyle")?.toString()
+        return live ?: field(adapter, "style")?.toString()
+    }
+
+    private fun activeStyleForContext(context: Context?): String {
+        styleControllerRef?.get()?.let { sc ->
+            call(sc, "getStyle")?.toString()?.let { return it }
+        }
+        panels.keys.asSequence().mapNotNull(::adapterStyle).firstOrNull()?.let { return it }
+        if (context != null && context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+            val forceVertical = runCatching {
+                val cls = Class.forName("miui.systemui.util.CommonUtils", false, context.classLoader)
+                val inst = cls.getField("INSTANCE").get(null)
+                cls.getMethod("getForceVertical").invoke(inst) as? Boolean
+            }.getOrDefault(false)
+            if (forceVertical != true) return "HORIZONTAL"
+        }
+        return "VERTICAL"
+    }
+
+    private fun activeTiles(style: String?): List<CcTile> =
+        if (style == "HORIZONTAL") resolveCcLandscapeTiles(settings.tiles, landscapeSettings) else settings.tiles
 
     fun install(loader: ClassLoader, p: SharedPreferences) {
         if (!p.getBoolean(KEY_CC_TILE_LAYOUT_ENABLED, false)) return
@@ -74,8 +112,10 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
     private fun installAdapter(clazz: Class<*>, p: SharedPreferences) {
         if (!installed.add(clazz)) return
         settings = readCcTileLayoutSettings(p)
+        landscapeSettings = readCcTileLayoutLandscapeSettings(p)
         selectionPreferences = p
         installTileSelection(clazz.classLoader!!, p)
+        installDistributor(clazz.classLoader!!)
         installSmallTileTypes(clazz)
         // This runs on the main handler, outside the ClassLoader discovery stack.
         listOf(MEDIA_HOLDER, MEDIA_ANIMATOR).forEach { name ->
@@ -86,16 +126,20 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         if (preferenceListener == null) {
             preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
                 if (key == null || key in setOf(KEY_CC_TILE_LAYOUT, KEY_CC_TILE_LAYOUT_ENABLED, KEY_CC_MEDIA_SOURCE_ICON_HIDDEN,
-                        KEY_CC_SMALL_TILE_AUTO_FILL, KEY_CONTROL_CENTER_5G_TILE_MODE, KEY_CONTROL_CENTER_GMS_TILE_ENABLED)) {
+                        KEY_CC_SMALL_TILE_AUTO_FILL, KEY_CC_TILE_LAYOUT_LANDSCAPE_ADAPTIVE, KEY_CC_TILE_LAYOUT_LANDSCAPE,
+                        KEY_CONTROL_CENTER_5G_TILE_MODE, KEY_CONTROL_CENTER_GMS_TILE_ENABLED)) {
                     handler.post {
                         settings = readCcTileLayoutSettings(p)
+                        landscapeSettings = readCcTileLayoutLandscapeSettings(p)
                         if (!settings.enabled) adapted.entries.toList().filter { it.value.id == "media" }
                             .forEach { clearMedia(it.key) }
                         panels.entries.toList().forEach { (adapter, reference) ->
                             reference.get()?.let { rv ->
                                 refreshTileSelection(adapter)
                                 // Drop stale saved anchors after dimensions/order change; OEM lays out from top.
-                                if (key == null || key == KEY_CC_TILE_LAYOUT || key == KEY_CC_TILE_LAYOUT_ENABLED || key == KEY_CC_SMALL_TILE_AUTO_FILL) {
+                                if (key == null || key in setOf(KEY_CC_TILE_LAYOUT, KEY_CC_TILE_LAYOUT_ENABLED,
+                                        KEY_CC_SMALL_TILE_AUTO_FILL, KEY_CC_TILE_LAYOUT_LANDSCAPE_ADAPTIVE,
+                                        KEY_CC_TILE_LAYOUT_LANDSCAPE)) {
                                     call(adapter, "notifyDataSetChanged")
                                 }
                                 call(rv, "scrollToPosition", 0)
@@ -129,7 +173,7 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
             module.hook(m).setExceptionMode(ExceptionMode.PROTECTIVE).setId("cc-tiles:existing-panel").intercept { chain ->
                 val result = chain.proceed()
                 val adapter = chain.thisObject
-                if (adapter != null && panels[adapter]?.get() == null) {
+                if (adapter != null && isRightPanel(adapter) && panels[adapter]?.get() == null) {
                     (field(adapter,"recyclerView") as? ViewGroup)?.let { rv ->
                         registerPanel(adapter,rv)
                         rv.post { rv.requestLayout() }
@@ -140,7 +184,27 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         }
     }
 
+    private fun installDistributor(loader: ClassLoader) {
+        val distributorClass = runCatching { loader.loadClass(DISTRIBUTOR) }.getOrNull() ?: return
+        if (!distributorInstalled.add(distributorClass)) return
+        val distribute = distributorClass.declaredMethods.firstOrNull {
+            it.name == "distributePanels" && it.parameterCount == 1 && it.parameterTypes[0] == Boolean::class.javaPrimitiveType
+        } ?: return
+        module.hook(distribute).setExceptionMode(ExceptionMode.PROTECTIVE).setId("cc-tiles:distribute-panels").intercept { chain ->
+            val result = chain.proceed()
+            if (settings.enabled) {
+                // MainPanelStyleController.set_style and onConfigurationChanged call distributePanels
+                // immediately before handleNotifyChanged; sync orientation card specs right here.
+                field(chain.thisObject, "rightAdapter")?.let { rightAdapter ->
+                    refreshTileSelection(rightAdapter, fromDistribute = true)
+                }
+            }
+            result
+        }
+    }
+
     private fun registerPanel(adapter: Any, rv: ViewGroup) {
+        if (!isRightPanel(adapter)) return
         val manager = field(adapter,"layoutManager") ?: return
         managers[manager] = WeakReference(adapter)
         panels[adapter] = WeakReference(rv)
@@ -156,8 +220,9 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
             module.hook(m).setExceptionMode(ExceptionMode.PROTECTIVE).setId("cc-tiles:selected-specs").intercept { chain ->
                 val original = chain.proceed()
                 val context = call(chain.thisObject, "getContext") as? Context
-                if (!settings.enabled || context == null) original else {
-                    selectedSpecs = CcTileCatalog.specs(context, p, settings.tiles)
+                val style = activeStyleForContext(context)
+                if (!settings.enabled || context == null || !isSupportedStyle(style)) original else {
+                    selectedSpecs = CcTileCatalog.specs(context, p, activeTiles(style))
                     selectedSpecs.values.toList()
                 }
             }
@@ -168,24 +233,33 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
                     val original = chain.proceed()
                     val owner = chain.thisObject
                     val normal = call(call(field(owner, "mainPanelModeController"), "get"), "getMode")?.toString() == "NORMAL"
-                    val vertical = call(call(field(owner, "mainPanelStyleController"), "get"), "getStyle")?.toString() == "VERTICAL"
-                    if (settings.enabled && normal && vertical && settings.tiles.none { it.id == "media" }) emptyList<Any>() else original
+                    val styleController = call(field(owner, "mainPanelStyleController"), "get")?.also {
+                        styleControllerRef = WeakReference(it)
+                    }
+                    val style = call(styleController, "getStyle")?.toString()
+                    if (settings.enabled && normal && isSupportedStyle(style) && activeTiles(style).none { it.id == "media" }) emptyList<Any>() else original
                 }
             }
     }
 
-    private fun refreshTileSelection(adapter: Any) {
+    private fun refreshTileSelection(adapter: Any, fromDistribute: Boolean = false) {
         val p = selectionPreferences ?: return
-        val contents = field(adapter, "contentMap") as? Map<*, *> ?: return
-        val cards = contents.keys.firstOrNull { it?.javaClass?.simpleName == "QSCardsController" } ?: return
+        val contents = (field(adapter, "contentList") as? Iterable<*>)
+            ?: (field(adapter, "contentMap") as? Map<*, *>)?.keys
+            ?: return
+        val cards = contents.firstOrNull { it?.javaClass?.simpleName == "QSCardsController" } ?: return
+        call(field(cards, "mainPanelStyleController"), "get")?.let { styleControllerRef = WeakReference(it) }
         val qs = call(field(cards, "qsController"), "get") ?: return
         val context = call(qs, "getContext") as? Context ?: return
         runCatching {
-            selectedSpecs = CcTileCatalog.specs(context, p, settings.tiles)
-            val wanted = if (settings.enabled) selectedSpecs.values.toList()
+            val style = adapterStyle(adapter) ?: activeStyleForContext(context)
+            val active = settings.enabled && isSupportedStyle(style)
+            val tiles = activeTiles(style)
+            selectedSpecs = CcTileCatalog.specs(context, p, tiles)
+            val wanted = if (active) selectedSpecs.values.toList()
                 else (call(qs, "getCardStyleTileSpecs") as? List<*>)?.filterIsInstance<String>().orEmpty()
             // Include media membership: its native content output must also be redistributed.
-            val signature = wanted + if (settings.tiles.any { it.id == "media" } || !settings.enabled) listOf("@media") else emptyList()
+            val signature = wanted + if (!active || tiles.any { it.id == "media" }) listOf("@media") else emptyList()
             if (cardSelections[cards] == signature) return
             call(qs, "updateExcludeTileSpecs")
             // OEM clearCardTiles removes callbacks but does not release listening tokens.
@@ -196,7 +270,7 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
             }
             call(cards, "createCardTiles")
             call(call(field(cards, "qsListController"), "get"), "onTilesChanged")
-            call(cards, "distributeTiles")
+            if (!fromDistribute) call(cards, "distributeTiles")
             cardSelections[cards] = signature
         }.onFailure { HookModuleLogger.log(module, ModuleLog.WARN, "HyperChanger", "Could not refresh selected control center tiles", it) }
     }
@@ -220,8 +294,10 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
                 val original = chain.proceed()
                 val adapter = chain.thisObject
                 val manager = field(adapter, "layoutManager")
-                val id = if (adapter != null && manager != null) block(adapter, manager)?.ids?.get(chain.getArg(0) as Int) else null
-                val tile = settings.tiles.firstOrNull { it.id == id }
+                val position = chain.getArg(0) as Int
+                val plan = if (adapter != null && manager != null) block(adapter, manager) else null
+                val id = plan?.ids?.get(position)
+                val tile = plan?.tiles?.get(position)
                 if (id != null && id != "media" && tile != null && !tile.slider && tile.w == 1 && tile.h == 1) 8453 else original
             }
         }
@@ -239,8 +315,9 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
             val adapter = group?.let { call(it, "getAdapter") }
             if (adapter != null) {
                 return panels[adapter]?.get() === group &&
+                    isRightPanel(adapter) &&
                     field(adapter, "mode")?.toString() == "NORMAL" &&
-                    field(adapter, "style")?.toString() == "VERTICAL"
+                    isSupportedStyle(adapterStyle(adapter))
             }
             parent = parent.parent
         }
@@ -260,6 +337,7 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         val child = find(root, name) ?: return
         if (visible) {
             hiddenMediaChildren[root]?.remove(name)?.let { child.visibility = it }
+            if (name == "device_icon" && child.visibility == View.GONE) child.visibility = View.VISIBLE
         } else {
             hiddenMediaChildren.getOrPut(root) { mutableMapOf() }.putIfAbsent(name, child.visibility)
             // INVISIBLE still participates in OEM measurement and preserves expansion snapshots.
@@ -370,25 +448,41 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
                     val parent = expanded.parent as? View
                     if (parent != null) {
                         // Map the small row into the animated parent's current coordinate space.
-                        // Both endpoints show the same row, so it stays visible during the morph.
+                        // Re-measure & re-layout at the live width instead of non-uniform scaleX/Y
+                        // so the SeekBar thumb and time labels never stretch or squish horizontally.
                         val start = mapRect(root, RectF(progress.left.toFloat(), progress.top.toFloat(), progress.right.toFloat(), progress.bottom.toFloat()), parent)
                         if (start != null) {
                             val target = snapshotRect(end)
                             val rect = interpolate(start, target, fraction)
+                            val curW = rect.width().roundToInt().coerceAtLeast(1)
+                            val curH = rect.height().roundToInt().coerceAtLeast(1)
                             expanded.pivotX = 0f; expanded.pivotY = 0f
-                            expanded.scaleX = rect.width() / target.width().coerceAtLeast(1f)
-                            expanded.scaleY = rect.height() / target.height().coerceAtLeast(1f)
+                            expanded.scaleX = 1f
+                            expanded.scaleY = 1f
+                            expanded.measure(
+                                View.MeasureSpec.makeMeasureSpec(curW, View.MeasureSpec.EXACTLY),
+                                View.MeasureSpec.makeMeasureSpec(curH, View.MeasureSpec.EXACTLY),
+                            )
                             val x = rect.left.roundToInt(); val y = rect.top.roundToInt()
-                            expanded.layout(x, y, x + target.width().roundToInt(), y + target.height().roundToInt())
+                            expanded.layout(x, y, x + curW, y + curH)
                             expanded.alpha = 1f
-                            val state = if (mediaEmpty(root)) Triple(0f, 0L, 0L) else readMediaProgress(root)
+                            val empty = mediaEmpty(root)
+                            val state = if (empty) Triple(0f, 0L, 0L) else readMediaProgress(root)
                             state?.let {
-                                (find(expanded, "media_progress_bar") as? android.widget.SeekBar)?.let { bar ->
-                                    if (!bar.isPressed) bar.progress = (state.first * bar.max).roundToInt()
+                                (find(expanded, "media_progress_bar") as? SeekBar)?.let { bar ->
+                                    if (!bar.isPressed) {
+                                        val maxVal = bar.max.coerceAtLeast(1)
+                                        bar.progress = (state.first * maxVal).roundToInt()
+                                    }
                                 }
-                                (find(expanded, "media_elapsed_time") as? android.widget.TextView)?.text = formatTime(state.second)
-                                (find(expanded, "media_total_time") as? android.widget.TextView)?.text = formatTime(state.third)
+                                (find(expanded, "media_elapsed_time") as? TextView)?.let { tv ->
+                                    applyMediaTime(tv, state.second)
+                                }
+                                (find(expanded, "media_total_time") as? TextView)?.let { tv ->
+                                    applyMediaTime(tv, state.third)
+                                }
                             }
+                            progress.syncNow()
                         }
                     }
                 }
@@ -436,15 +530,27 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
 
     /** Reject any unfamiliar structure rather than moving lower tiles or mixed panel contents. */
     private fun block(adapter: Any, manager: Any): Block? {
-        if (!settings.enabled || field(adapter, "mode")?.toString() != "NORMAL" || field(adapter, "style")?.toString() != "VERTICAL") return null
+        if (!settings.enabled || !isRightPanel(adapter) || field(adapter, "mode")?.toString() != "NORMAL") return null
+        val style = adapterStyle(adapter)
+        if (!isSupportedStyle(style)) return null
         if ((call(manager, "getSpanCount") as? Int) != 4 || (call(manager, "getOrientation") as? Int) != 1) return null
         val content = field(adapter, "contentMap") as? Map<*, *> ?: return null
+        val activeLayout = activeTiles(style)
+        val specs = run {
+            val expectedIds = activeLayout.mapNotNull { if (it.slider || it.id == "media") null else it.id }
+            if (selectedSpecs.keys.containsAll(expectedIds)) selectedSpecs else {
+                val rv = panels[adapter]?.get()
+                val prefs = selectionPreferences
+                if (rv != null && prefs != null) CcTileCatalog.specs(rv.context, prefs, activeLayout).also { selectedSpecs = it }
+                else selectedSpecs
+            }
+        }
         var index = 0
         val all = mutableListOf<Triple<Int, String?, Any?>>()
         content.forEach { (owner, raw) ->
             (raw as? List<*>)?.forEach { item ->
                 val id = when (owner?.javaClass?.simpleName) {
-                    "QSCardsController" -> selectedSpecs.entries.firstOrNull { it.value == call(item, "getSpec") }?.key
+                    "QSCardsController" -> specs.entries.firstOrNull { it.value == call(item, "getSpec") }?.key
                     "MediaPlayerController" -> "media"
                     "BrightnessSliderController" -> "brightness"
                     "VolumeSliderController" -> "volume"
@@ -456,20 +562,22 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         val ids = linkedMapOf<Int, String>()
         all.forEach { (position, id, _) -> if (id != null) ids[position] = id }
         if (ids.values.toSet().size != ids.size || "brightness" !in ids.values || "volume" !in ids.values) return null
-        if (ids.values.any { id -> settings.tiles.none { it.id == id } }) return null
+        if (ids.values.any { id -> activeLayout.none { it.id == id } }) return null
         val start = ids.keys.min(); val end = ids.keys.max()
         if (end - start + 1 != ids.size) return null
         val tiles = linkedMapOf<Int, CcTile>()
-        ids.forEach { (position, id) -> tiles[position] = settings.tiles.first { it.id == id } }
-        val following = if (settings.smallTileAutoFill) all.filter { it.first > end }.map { (position, _, item) ->
+        ids.forEach { (position, id) -> tiles[position] = activeLayout.first { it.id == id } }
+        // In HORIZONTAL (landscape), QSListController lives in leftMainPanel rather than rightMainPanel.
+        val allowSmallFill = settings.smallTileAutoFill && style == "VERTICAL"
+        val following = if (allowSmallFill) all.filter { it.first > end }.map { (position, _, item) ->
             val span = ((call(item, "getSpanSize") as? Int) ?: 4).coerceIn(1, 4)
             CcFillRecord(position, span, item?.javaClass?.simpleName == "QSRecord" &&
                 (call(item, "getType") as? Int) == 8453 && span == 1)
         } else emptyList()
         val lookup = if (following.isNotEmpty()) call(manager, "getSpanSizeLookup") else null
         val nextSpanIndex = (call(lookup, "getSpanIndex", end + 1, 4) as? Int) ?: 0
-        val fill = planCcSmallTileFill(tiles, CcTileLayouts.rows(settings.tiles), following,
-            settings.smallTileAutoFill, nextSpanIndex)
+        val fill = planCcSmallTileFill(tiles, CcTileLayouts.rows(activeLayout), following,
+            allowSmallFill, nextSpanIndex)
         return Block(start, fill.tiles.keys.max(), ids, fill.tiles, fill.nativePositions, fill.rows)
     }
 
@@ -666,7 +774,7 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
                 val adapter = if (parent is ViewGroup) call(parent, "getAdapter") else null
                 if (root != null && settings.enabled) {
                     if (t != null && adapter != null && panels[adapter]?.get() === parent &&
-                        field(adapter, "mode")?.toString() == "NORMAL" && field(adapter, "style")?.toString() == "VERTICAL") {
+                        isRightPanel(adapter) && field(adapter, "mode")?.toString() == "NORMAL" && isSupportedStyle(adapterStyle(adapter))) {
                         if (t.id == "media") layoutMedia(root, t) else if (!t.slider) layoutCard(root, t)
                     }
                 }
@@ -683,18 +791,30 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         val label = find(root, "label_container") ?: return
         val icon = (0 until content.childCount).map(content::getChildAt).firstOrNull { it !== label } ?: return
         val d = root.resources.displayMetrics.density
-        val size = minOf((32 * d).roundToInt(), (root.width * .42f).roundToInt())
-        val inset = (12 * d).roundToInt()
         if (t.w == 1) {
+            val size = minOf((32 * d).roundToInt(), (root.width * .42f).roundToInt())
+            val inset = (12 * d).roundToInt()
             val labelHeight = minOf(label.measuredHeight.coerceAtLeast((24 * d).roundToInt()), root.height / 2)
             val y = ((root.height - size - labelHeight - 6 * d) / 2).roundToInt()
             box(icon, (root.width-size)/2, y, size, size)
             box(label, inset / 2, y + size + (6*d).roundToInt(), root.width-inset, labelHeight)
-        } else {
-            box(icon, inset, (root.height-size)/2, size, size)
-            val x = inset * 2 + size
-            box(label, x, (root.height-label.measuredHeight)/2, (root.width-x-inset).coerceAtLeast(1), label.measuredHeight)
+            return
         }
+        // Wide cards (2×1, 3×1, 4×1, 2×2, ...) are already laid out natively by QSCardItemView's
+        // horizontal scale_content LinearLayout with qs_tile_item_icon_size (68dp) and native
+        // icon/label margins. Only intervene if an unusually short row cannot fit the native icon.
+        val nativeIconSize = dimenPx(root.context, "qs_tile_item_icon_size", (68 * d).roundToInt())
+        if (root.height >= nativeIconSize && root.width >= nativeIconSize * 2) return
+        val iconSize = minOf(nativeIconSize, root.height, (root.width * .44f).roundToInt()).coerceAtLeast(1)
+        val iconStart = dimenPx(root.context, "qs_card_item_icon_margin_start", (-1 * d).roundToInt())
+        val labelStartGap = dimenPx(root.context, "qs_card_item_label_container_margin_start", (-11 * d).roundToInt())
+        val labelEnd = dimenPx(root.context, "qs_card_item_label_container_margin_end", (17 * d).roundToInt())
+        val rtl = root.layoutDirection == View.LAYOUT_DIRECTION_RTL
+        val iconX = if (rtl) root.width - iconStart - iconSize else iconStart
+        box(icon, iconX, (root.height - iconSize) / 2, iconSize, iconSize)
+        val labelW = (root.width - iconStart - iconSize - labelStartGap - labelEnd).coerceAtLeast(1)
+        val labelX = if (rtl) labelEnd else (iconStart + iconSize + labelStartGap).coerceAtLeast(0)
+        box(label, labelX, (root.height - label.measuredHeight) / 2, labelW, label.measuredHeight)
     }
 
     private fun layoutMedia(root: View, t: CcTile) {
@@ -744,8 +864,8 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         title?.let { box(it,textX,textY,(textW-textEnd).coerceAtLeast(1),lineH) }
         artist?.let { box(it,textX,textY+lineH,(textW-textEnd).coerceAtLeast(1),lineH) }
         empty?.let {
-            (it as? android.widget.TextView)?.gravity = Gravity.START or Gravity.CENTER_VERTICAL
-            box(it,textX,textY,textW,lineH*2)
+            (it as? TextView)?.gravity = Gravity.START or Gravity.TOP
+            box(it, textX, textY, (textW - textEnd).coerceAtLeast(1), lineH)
         }
         audio?.let {
             val h = minOf(((if (wide) 38 else 32)*d).roundToInt(),root.height/3).coerceAtLeast(1)
@@ -768,7 +888,7 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
             }
             box(progress, textX, root.height - inset - progressHeight(root),
                 (root.width - textX - inset).coerceAtLeast(1), progressHeight(root))
-            progress.invalidate()
+            progress.syncNow()
         } else mediaProgress.remove(root)?.get()?.let { (root as? ViewGroup)?.overlay?.remove(it) }
         syncEmptyMedia(root)
     }
@@ -848,64 +968,290 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
             else (contentW - if (!vertical && find(root, "device_icon")?.visibility == View.VISIBLE) dp(26) else 0).coerceAtLeast(1)
         find(root, "title")?.let { box(it, contentX, textY, textW, lineH) }
         find(root, "artist")?.let { box(it, contentX, textY + lineH, textW, lineH) }
-        find(root, "empty_state")?.let { box(it, contentX, textY, textW, lineH * 2) }
+        find(root, "empty_state")?.let {
+            (it as? TextView)?.gravity = Gravity.START or Gravity.TOP
+            box(it, contentX, textY, textW, lineH)
+        }
         if (showProgress && root is ViewGroup) {
             val progress = mediaProgress[root]?.get() ?: MediaProgressView(root.context, root).also {
                 mediaProgress[root] = WeakReference(it)
                 root.overlay.add(it)
             }
             box(progress, contentX, root.height - inset - progressH, contentW, progressH)
-            progress.invalidate()
+            progress.syncNow()
         } else mediaProgress.remove(root)?.get()?.let { (root as? ViewGroup)?.overlay?.remove(it) }
         syncEmptyMedia(root)
     }
 
     private fun syncEmptyMedia(root: View) {
         if (root !is ViewGroup) return
-        val empty = find(root, "empty_state") as? android.widget.TextView
+        val empty = find(root, "empty_state") as? TextView
         val cover = find(root, "cover") ?: return
         empty?.let {
-            it.gravity = Gravity.LEFT or Gravity.CENTER_VERTICAL
+            it.gravity = Gravity.START or Gravity.TOP
             it.textAlignment = View.TEXT_ALIGNMENT_VIEW_START
         }
         if (mediaEmpty(root)) {
-            val placeholder = mediaPlaceholders[root]?.get() ?: View(root.context).also {
-                it.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                it.isClickable = false
-                mediaPlaceholders[root] = WeakReference(it)
-                root.overlay.add(it)
+            val radius = coverRadius(mediaHolders[root]?.get(), cover) ?: (10f * root.resources.displayMetrics.density)
+            val placeholder = (mediaPlaceholders[root]?.get() as? ImageView) ?: ImageView(root.context).also { iv ->
+                iv.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                iv.isClickable = false
+                iv.scaleType = ImageView.ScaleType.CENTER_CROP
+                iv.clipToOutline = true
+                val drawableCtx = resolveMiPlayContext(root) ?: root.context
+                val defaultCoverId = drawableCtx.resources.getIdentifier(
+                    "miplay_cover_default",
+                    "drawable",
+                    "miui.systemui.plugin",
+                )
+                if (defaultCoverId != 0) {
+                    runCatching { iv.setImageDrawable(drawableCtx.getDrawable(defaultCoverId)) }
+                } else {
+                    iv.background = GradientDrawable().apply {
+                        shape = GradientDrawable.RECTANGLE
+                        setColor(0x73808080)
+                    }
+                }
+                mediaPlaceholders[root] = WeakReference(iv)
+                root.overlay.add(iv)
             }
-            val background = placeholder.background as? GradientDrawable ?: GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE; setColor(0x73808080)
-            }.also { placeholder.background = it }
-            background.cornerRadius = coverRadius(mediaHolders[root]?.get(), cover) ?: (10f * root.resources.displayMetrics.density)
+            placeholder.outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) {
+                    outline.setRoundRect(0, 0, view.width, view.height, radius)
+                }
+            }
+            placeholder.invalidateOutline()
             box(placeholder, cover.left, cover.top, cover.width, cover.height)
         } else mediaPlaceholders.remove(root)?.get()?.let { root.overlay.remove(it) }
     }
 
-    private fun progressHeight(root: View): Int = (30 * root.resources.displayMetrics.density).roundToInt()
+    private fun progressHeight(root: View): Int {
+        val existing = mediaProgress[root]?.get()
+        val measured = existing?.preferredHeightPx() ?: 0
+        if (measured > 0) return measured
+        val miPlayCtx = resolveMiPlayContext(root) ?: root.context
+        val d = miPlayCtx.resources.displayMetrics.density
+        val barH = dimenPx(miPlayCtx, "miplay_detail_header_media_progress_bar_top", (20 * d).roundToInt())
+        val gap = dimenPx(miPlayCtx, "miplay_detail_header_media_elapsed_time_margin_top", 0)
+        val textH = dimenPx(miPlayCtx, "miplay_detail_header_media_time_text_size", (10 * d).roundToInt())
+        return (barH + gap + (textH * 1.4f).roundToInt()).coerceAtLeast((30 * d).roundToInt())
+    }
 
-    private inner class MediaProgressView(context: Context, root: View) : View(context) {
+    private fun resolveMiPlayContext(root: View): Context? = runCatching {
+        val c = Class.forName("com.android.systemui.MiPlayController", false, root.javaClass.classLoader)
+        val inst = c.getField("INSTANCE").get(null)
+        c.getMethod("getContext").invoke(inst) as? Context
+    }.getOrNull()
+
+    private fun dimenPx(context: Context, name: String, fallback: Int): Int {
+        val id = context.resources.getIdentifier(name, "dimen", "miui.systemui.plugin")
+        return if (id != 0) runCatching { context.resources.getDimensionPixelSize(id) }.getOrDefault(fallback) else fallback
+    }
+
+    private fun applyMediaTime(tv: TextView, ms: Long) {
+        val applied = runCatching {
+            val m = generateSequence<Class<*>>(tv.javaClass) { it.superclass }
+                .flatMap { it.declaredMethods.asSequence() }
+                .firstOrNull { it.name == "setMediaTime" && it.parameterCount == 1 && it.parameterTypes[0] == Long::class.javaPrimitiveType }
+                ?: return@runCatching false
+            m.isAccessible = true
+            m.invoke(tv, ms)
+            true
+        }.getOrDefault(false)
+        if (!applied) tv.text = formatTime(ms)
+    }
+
+    /**
+     * Reuses the expanded panel's native container_progress (MiPlaySeekBar + MediaTimeTextView x2)
+     * inside the collapsed tile so expand/collapse progress transitions are visually 1:1 with zero
+     * horizontal compression or handoff snap. Falls back to canvas drawing if inflation fails.
+     */
+    private inner class MediaProgressView(context: Context, root: View) : FrameLayout(context) {
         private val mediaRoot = WeakReference(root)
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val density = resources.displayMetrics.density
         private var cachedState: Triple<Float, Long, Long>? = null
+        private var nativeContainer: View? = null
+        private var nativeSeekBar: SeekBar? = null
+        private var nativeElapsed: TextView? = null
+        private var nativeTotal: TextView? = null
+        private var seekBarFgActiveColor: Int = Color.WHITE
+        private var seekBarFgDisableColor: Int = Color.WHITE
+        private var cachedPreferredHeight = 0
+
         private val ticker = object : Runnable {
             override fun run() {
                 if (!isAttachedToWindow) return
-                if (mediaRoot.get()?.isShown == true) invalidate()
+                if (mediaRoot.get()?.isShown == true) syncNow()
                 postDelayed(this, 500L)
             }
         }
+
         init {
-            setWillNotDraw(false)
+            clipChildren = false
+            clipToPadding = false
             importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
             isClickable = false
+            isFocusable = false
+            inflateNativeProgress(root)
+            setWillNotDraw(nativeContainer != null)
         }
-        override fun onAttachedToWindow() { super.onAttachedToWindow(); removeCallbacks(ticker); post(ticker) }
-        override fun onDetachedFromWindow() { removeCallbacks(ticker); super.onDetachedFromWindow() }
+
+        private fun inflateNativeProgress(root: View) {
+            runCatching {
+                val miPlayCtx = resolveMiPlayContext(root) ?: root.context
+                val layoutId = miPlayCtx.resources.getIdentifier(
+                    "qs_control_detail_header_metainfo_layout",
+                    "layout",
+                    "miui.systemui.plugin",
+                )
+                if (layoutId == 0) return@runCatching
+                val inflated = LayoutInflater.from(miPlayCtx).inflate(layoutId, null, false)
+                val container = find(inflated, "container_progress") ?: return@runCatching
+                (container.parent as? ViewGroup)?.removeView(container)
+                container.alpha = 1f
+                container.scaleX = 1f
+                container.scaleY = 1f
+                container.visibility = View.VISIBLE
+                val bar = find(container, "media_progress_bar") as? SeekBar
+                val elapsed = find(container, "media_elapsed_time") as? TextView
+                val total = find(container, "media_total_time") as? TextView
+                bar?.let {
+                    it.isClickable = false
+                    it.isFocusable = false
+                    // Detaching from meta_data_info removes sibling @id/coverParent; anchor bar to container top.
+                    it.layoutParams?.let { lp ->
+                        runCatching { set(lp, "topToTop", 0) }
+                        runCatching { set(lp, "topToBottom", -1) }
+                        it.layoutParams = lp
+                    }
+                    if (it.max <= 0) it.max = 1000
+                }
+                addView(
+                    container,
+                    LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+                )
+                nativeContainer = container
+                nativeSeekBar = bar
+                nativeElapsed = elapsed
+                nativeTotal = total
+                seekBarFgActiveColor = colorRes(
+                    miPlayCtx,
+                    "miplay_media_progress_bar_foreground_primary_color",
+                    Color.WHITE,
+                )
+                seekBarFgDisableColor = colorRes(
+                    miPlayCtx,
+                    "miplay_media_progress_bar_foreground_primary_disable_color",
+                    seekBarFgActiveColor,
+                )
+                bar?.let { applyNativeSeekBarMaterial(it, miPlayCtx) }
+            }
+        }
+
+        private fun applyNativeSeekBarMaterial(bar: SeekBar, miPlayCtx: Context) {
+            runCatching {
+                val loader = bar.javaClass.classLoader ?: return@runCatching
+                val blurCompat = Class.forName("miui.systemui.util.MiBlurCompat", false, loader)
+                val opened = blurCompat
+                    .getMethod("getBackgroundMaterialOpenedInDefaultTheme", Context::class.java)
+                    .invoke(null, miPlayCtx) as? Boolean ?: false
+                if (opened) {
+                    blurCompat.getMethod("setMiViewBlurModeCompat", View::class.java, Int::class.javaPrimitiveType)
+                        .invoke(null, bar, 2)
+                    val tokenClass = Class.forName("miui.systemui.util.MiuiColorBlendToken", false, loader)
+                    val tokenInst = tokenClass.getField("INSTANCE").get(null)
+                    val colors = tokenClass.getMethod("getCC_DETAIL_PANEL_MORE_BUTTON_BLEND_COLORS").invoke(tokenInst)
+                    val setBlend = blurCompat.methods.firstOrNull {
+                        it.name == "setMiBackgroundBlendColors" && it.parameterCount == 2
+                    }
+                    if (setBlend != null && colors != null) {
+                        setBlend.invoke(null, bar, colors)
+                    }
+                }
+                val tokensKt = Class.forName("com.android.systemui.miplay.material.MiPlayMaterialTokensKt", false, loader)
+                val timelineToken = tokensKt.getMethod("getTimeLineSeekBarToken").invoke(null)
+                val materialExt = Class.forName("miui.systemui.ui.material.MaterialBackgroundExt", false, loader)
+                val setMaterial = materialExt.methods.firstOrNull {
+                    it.name == "setMaterialBackground" && it.parameterCount == 3
+                }
+                if (setMaterial != null && timelineToken != null) {
+                    setMaterial.invoke(null, bar, timelineToken, false)
+                }
+            }
+        }
+
+        private fun colorRes(context: Context, name: String, fallback: Int): Int {
+            val id = context.resources.getIdentifier(name, "color", "miui.systemui.plugin")
+            return if (id != 0) runCatching { context.getColor(id) }.getOrDefault(fallback) else fallback
+        }
+
+        private fun applySeekBarColors(bar: SeekBar, active: Boolean) {
+            val fg = if (active) seekBarFgActiveColor else Color.TRANSPARENT
+            val fgDisable = if (active) seekBarFgDisableColor else Color.TRANSPARENT
+            runCatching { call(bar, "setForegroundPrimaryColor", fg) }
+            runCatching { call(bar, "setForegroundPrimaryDisableColor", fgDisable) }
+        }
+
+        fun preferredHeightPx(): Int {
+            val container = nativeContainer ?: return 0
+            if (cachedPreferredHeight > 0) return cachedPreferredHeight
+            val w = (width.takeIf { it > 0 } ?: (180 * density).roundToInt())
+            container.measure(
+                MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED),
+            )
+            val measured = container.measuredHeight
+            if (measured > 0) cachedPreferredHeight = measured
+            return measured
+        }
+
+        fun syncNow() {
+            val root = mediaRoot.get() ?: return
+            if (!settings.enabled || !hasMediaProgress(root)) return
+            val empty = mediaEmpty(root)
+            if (empty) cachedState = null
+            else readMediaProgress(root)?.let { cachedState = it }
+            val state = cachedState ?: Triple(0f, 0L, 0L)
+            val bar = nativeSeekBar
+            if (bar != null) {
+                val hasDuration = !empty && state.third > 0L
+                if (bar.isEnabled != hasDuration) bar.isEnabled = hasDuration
+                applySeekBarColors(bar, hasDuration)
+                val maxVal = bar.max.coerceAtLeast(1)
+                val nextProgress = if (hasDuration) (state.first * maxVal).roundToInt().coerceIn(0, maxVal) else 0
+                if (bar.progress != nextProgress) bar.progress = nextProgress
+                nativeElapsed?.let { applyMediaTime(it, state.second) }
+                nativeTotal?.let { applyMediaTime(it, state.third) }
+                val container = nativeContainer
+                if (container != null && width > 0 && height > 0) {
+                    container.measure(
+                        MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+                        MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY),
+                    )
+                    container.layout(0, 0, width, height)
+                }
+                container?.invalidate()
+            } else {
+                invalidate()
+            }
+        }
+
+        override fun onAttachedToWindow() {
+            super.onAttachedToWindow()
+            removeCallbacks(ticker)
+            syncNow()
+            post(ticker)
+        }
+
+        override fun onDetachedFromWindow() {
+            removeCallbacks(ticker)
+            super.onDetachedFromWindow()
+        }
+
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
+            if (nativeContainer != null) return
             val root = mediaRoot.get() ?: return
             if (!settings.enabled || !hasMediaProgress(root)) return
             if (mediaEmpty(root)) cachedState = null
@@ -965,13 +1311,17 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         target ?: return null
         val m = generateSequence(target.javaClass) { it.superclass }.flatMap { it.declaredMethods.asSequence() }.firstOrNull { m ->
             m.name == name && m.parameterCount == args.size && m.parameterTypes.zip(args).all { (type,arg) ->
-                type.isInstance(arg) || (type == Int::class.javaPrimitiveType && arg is Int) || (type == Boolean::class.javaPrimitiveType && arg is Boolean)
+                type.isInstance(arg) ||
+                    (type == Int::class.javaPrimitiveType && arg is Int) ||
+                    (type == Long::class.javaPrimitiveType && arg is Long) ||
+                    (type == Boolean::class.javaPrimitiveType && arg is Boolean)
             }
         } ?: return null
         return m.apply { isAccessible = true }.invoke(target,*args)
     }
     companion object {
         private const val ADAPTER = "miui.systemui.controlcenter.panel.main.recyclerview.MainPanelAdapter"
+        private const val DISTRIBUTOR = "miui.systemui.controlcenter.panel.main.MainPanelContentDistributor"
         private const val QS_CARDS_CONTROLLER = "miui.systemui.controlcenter.panel.main.qs.QSCardsController"
         private const val MEDIA_HOLDER = "miui.systemui.controlcenter.panel.main.media.MediaPlayerController\$MediaPlayerViewHolder"
         private const val MEDIA_ANIMATOR = "miui.systemui.controlcenter.panel.secondary.media.MediaPanelAnimator"

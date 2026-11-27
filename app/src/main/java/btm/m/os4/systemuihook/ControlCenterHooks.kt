@@ -27,6 +27,13 @@ internal class ControlCenterHooks(
     private val controlCenterCarrierHook by lazy { ControlCenterCarrierHook(module) }
     private val controlCenterClockHook by lazy { ControlCenterClockHook(module) }
     private val controlCenterTileLayoutHook by lazy { ControlCenterTileLayoutHook(module) }
+    private val controlCenterFocusModeHook by lazy { ControlCenterFocusModeHook(module) }
+    private val controlCenterMediaBigCoverHook by lazy { ControlCenterMediaBigCoverHook(module) }
+    private val controlCenterMultiPageHook by lazy {
+        ControlCenterMultiPageHook(module) { content, container ->
+            controlCenterMediaBigCoverHook.bindExternalDetailContent(content, container)
+        }
+    }
 
     private var customTileHookInstalled = false
     private var customPluginTileHookInstalled = false
@@ -38,6 +45,9 @@ internal class ControlCenterHooks(
         controlCenterCarrierHook.install(classLoader, preferences)
         controlCenterClockHook.install(classLoader, preferences)
         controlCenterTileLayoutHook.install(classLoader, preferences)
+        controlCenterFocusModeHook.install(classLoader, preferences)
+        controlCenterMultiPageHook.install(classLoader, preferences)
+        controlCenterMediaBigCoverHook.install(classLoader, preferences)
     }
 
     fun onHeaderClassLoaded(loadedClass: Class<*>, preferences: SharedPreferences) {
@@ -46,6 +56,9 @@ internal class ControlCenterHooks(
         controlCenterCarrierHook.onClassLoaded(loadedClass, preferences)
         controlCenterClockHook.onClassLoaded(loadedClass, preferences)
         controlCenterTileLayoutHook.onClassLoaded(loadedClass, preferences)
+        controlCenterFocusModeHook.onClassLoaded(loadedClass, preferences)
+        controlCenterMultiPageHook.onClassLoaded(loadedClass, preferences)
+        controlCenterMediaBigCoverHook.onClassLoaded(loadedClass, preferences)
     }
 
     /** Clears the "force new control center" flag so the legacy shade comes back. */

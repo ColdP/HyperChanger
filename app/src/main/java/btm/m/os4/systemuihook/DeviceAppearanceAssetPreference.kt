@@ -182,7 +182,7 @@ private fun AppearanceAssetRow(mime: String, slot: String, title: String, update
 }
 
 @Composable
-private fun AssetPreview(bitmap: Bitmap?) {
+internal fun AssetPreview(bitmap: Bitmap?) {
     if (bitmap == null) Text(tr("未导入", "未导入"), style = MiuixTheme.textStyles.body2)
     else {
         val scale = minOf(180f / bitmap.width, 180f / bitmap.height)
@@ -190,7 +190,7 @@ private fun AssetPreview(bitmap: Bitmap?) {
     }
 }
 
-private fun previewBitmap(context: Context, uri: Uri): Bitmap? = runCatching {
+internal fun previewBitmap(context: Context, uri: Uri): Bitmap? = runCatching {
     val drawable = if (uri.scheme == "file") LogoDrawableLoader.loadFile(context, File(requireNotNull(uri.path)))
     else context.contentResolver.openInputStream(uri)?.use { LogoDrawableLoader.loadBytes(context, it.readBytes()) }
     drawable ?: return@runCatching null

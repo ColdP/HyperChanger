@@ -18,10 +18,16 @@ internal class LockscreenHooks(
     private val logTag: String,
 ) {
     private val shortcutGestures = LockscreenShortcutGestureHooks(module, logTag)
+    private val bottomGestureLine = LockscreenBottomGestureLineHook(module, logTag)
 
     fun installShortcutGestureHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
         if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
         shortcutGestures.install(classLoader, preferences)
+    }
+
+    fun installBottomGestureLineHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
+        if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return
+        bottomGestureLine.install(classLoader, preferences)
     }
 
     // Preserve the process-wide guard and its write point after both install attempts.
