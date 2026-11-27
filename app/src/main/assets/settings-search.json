@@ -7832,13 +7832,8 @@
       false
     ],
     [
-      "clearFrostTabMaterial",
-      "材质混色",
-      false
-    ],
-    [
-      "clearFrostTabStrokeShadow",
-      "描边与阴影",
+      "clearFrostTabFrost",
+      "磨砂参数调整",
       false
     ],
     [
@@ -7854,6 +7849,11 @@
     [
       "clearFrostReset",
       "恢复清透磨砂默认参数",
+      true
+    ],
+    [
+      "clearFrostCustomBlendEnabled",
+      "启用自定义混色",
       true
     ],
     [

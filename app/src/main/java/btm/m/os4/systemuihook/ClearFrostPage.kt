@@ -83,8 +83,54 @@ internal fun ClearFrostParametersPage(openPresets: () -> Unit, back: () -> Unit)
         value = store.settings
         changed()
     }
-    val lightStyleLabels = clearFrostLightMaterialStyles.map { tr(it.titleKey, it.defaultTitle) }
-    val darkStyleLabels = clearFrostDarkMaterialStyles.map { tr(it.titleKey, it.defaultTitle) }
+    var lastLightStyle by rememberSaveable {
+        mutableStateOf(
+            value.lightStyle.takeUnless { it == CLEAR_FROST_STYLE_CUSTOM } ?: CLEAR_FROST_DEFAULT_LIGHT_STYLE,
+        )
+    }
+    var lastDarkStyle by rememberSaveable {
+        mutableStateOf(
+            value.darkStyle.takeUnless { it == CLEAR_FROST_STYLE_CUSTOM } ?: CLEAR_FROST_DEFAULT_DARK_STYLE,
+        )
+    }
+    var lastNotifLightStyle by rememberSaveable {
+        mutableStateOf(
+            value.notificationLightStyle.takeUnless { it == CLEAR_FROST_STYLE_CUSTOM } ?: CLEAR_FROST_DEFAULT_LIGHT_STYLE,
+        )
+    }
+    var lastNotifDarkStyle by rememberSaveable {
+        mutableStateOf(
+            value.notificationDarkStyle.takeUnless { it == CLEAR_FROST_STYLE_CUSTOM } ?: CLEAR_FROST_DEFAULT_DARK_STYLE,
+        )
+    }
+    var lastCcLightStyle by rememberSaveable {
+        mutableStateOf(
+            value.controlCenterLightStyle.takeUnless { it == CLEAR_FROST_STYLE_CUSTOM } ?: CLEAR_FROST_DEFAULT_LIGHT_STYLE,
+        )
+    }
+    var lastCcDarkStyle by rememberSaveable {
+        mutableStateOf(
+            value.controlCenterDarkStyle.takeUnless { it == CLEAR_FROST_STYLE_CUSTOM } ?: CLEAR_FROST_DEFAULT_DARK_STYLE,
+        )
+    }
+    LaunchedEffect(value) {
+        if (value.lightStyle != CLEAR_FROST_STYLE_CUSTOM) lastLightStyle = value.lightStyle
+        if (value.darkStyle != CLEAR_FROST_STYLE_CUSTOM) lastDarkStyle = value.darkStyle
+        if (value.notificationLightStyle != CLEAR_FROST_STYLE_CUSTOM) lastNotifLightStyle = value.notificationLightStyle
+        if (value.notificationDarkStyle != CLEAR_FROST_STYLE_CUSTOM) lastNotifDarkStyle = value.notificationDarkStyle
+        if (value.controlCenterLightStyle != CLEAR_FROST_STYLE_CUSTOM) lastCcLightStyle = value.controlCenterLightStyle
+        if (value.controlCenterDarkStyle != CLEAR_FROST_STYLE_CUSTOM) lastCcDarkStyle = value.controlCenterDarkStyle
+    }
+    val customBlendEnabled = value.usesCustomLightStyle() || value.usesCustomDarkStyle()
+    val defaultTag = tr("clearFrostDefaultTag", "默认")
+    val lightStyleLabels = clearFrostSelectableLightStyles.map { style ->
+        val label = tr(style.titleKey, style.defaultTitle)
+        if (style.id == CLEAR_FROST_DEFAULT_LIGHT_STYLE) "$label ($defaultTag)" else label
+    }
+    val darkStyleLabels = clearFrostSelectableDarkStyles.map { style ->
+        val label = tr(style.titleKey, style.defaultTitle)
+        if (style.id == CLEAR_FROST_DEFAULT_DARK_STYLE) "$label ($defaultTag)" else label
+    }
     val ccThemeLabels = listOf(
         tr("clearFrostThemeSystem", "跟随系统"),
         tr("clearFrostThemeLight", "浅色模式"),
@@ -92,15 +138,22 @@ internal fun ClearFrostParametersPage(openPresets: () -> Unit, back: () -> Unit)
         tr("clearFrostThemeInverse", "反系统跟随"),
     )
     val strokePresetLabels = listOf(
-        tr("clearFrostStrokeSmall", "小尺寸"),
+        "${tr("clearFrostStrokeSmall", "小尺寸")} ($defaultTag)",
         tr("clearFrostStrokeMiddle", "中尺寸"),
         tr("clearFrostStrokeBig", "大尺寸"),
+        tr("clearFrostStrokeAngle45", "45° 斜射光源"),
+        tr("clearFrostStrokeWide", "宽光场"),
+        tr("clearFrostStrokeAngle45Wide", "45° 斜射 + 宽光场"),
         tr("clearFrostStrokeCustom", "自定义"),
     )
     fun lightIndex(id: String): Int =
-        clearFrostLightMaterialStyles.indexOfFirst { it.id == id }.coerceAtLeast(0)
+        clearFrostSelectableLightStyles.indexOfFirst { it.id == id }
+            .takeIf { it >= 0 }
+            ?: clearFrostSelectableLightStyles.indexOfFirst { it.id == CLEAR_FROST_DEFAULT_LIGHT_STYLE }.coerceAtLeast(0)
     fun darkIndex(id: String): Int =
-        clearFrostDarkMaterialStyles.indexOfFirst { it.id == id }.coerceAtLeast(0)
+        clearFrostSelectableDarkStyles.indexOfFirst { it.id == id }
+            .takeIf { it >= 0 }
+            ?: clearFrostSelectableDarkStyles.indexOfFirst { it.id == CLEAR_FROST_DEFAULT_DARK_STYLE }.coerceAtLeast(0)
 
     AppPage(
         tr("clearFrostTitle", "清透磨砂材质参数调整"),
@@ -109,8 +162,7 @@ internal fun ClearFrostParametersPage(openPresets: () -> Unit, back: () -> Unit)
         header = {
             SoftGlassHeaderTabs(
                 listOf(
-                    tr("clearFrostTabMaterial", "材质混色"),
-                    tr("clearFrostTabStrokeShadow", "描边与阴影"),
+                    tr("clearFrostTabFrost", "磨砂参数调整"),
                     tr("背景调整", "背景调整"),
                 ),
                 tab,
@@ -133,75 +185,113 @@ internal fun ClearFrostParametersPage(openPresets: () -> Unit, back: () -> Unit)
             }
             if (tab == 0) {
                 item {
-                    Group(tr("clearFrostMaterialGroup", "材质混色参数")) {
+                    Group(tr("clearFrostMaterialGroup", "材质混色")) {
                         Text(
-                            tr("clearFrostMaterialHint", "仅在系统使用清透磨砂材质时生效，不影响柔光玻璃模式。可选内置混色样式或自定义浅/深色混色层，保留控制中心已激活磁贴与图标的区分度。"),
+                            tr("clearFrostMaterialHint", "仅在系统使用清透磨砂材质时生效，不影响柔光玻璃。点击滑块数值可精确输入或恢复默认。"),
                             modifier = Modifier.padding(16.dp),
                             style = MiuixTheme.textStyles.body2,
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
+                        SwitchPreference(
+                            title = tr("clearFrostCustomBlendEnabled", "启用自定义混色"),
+                            summary = tr("clearFrostCustomBlendSummary", "关闭时直接选用系统材质预设，开启后可自由配置浅色与深色混色层。"),
+                            checked = customBlendEnabled,
+                            onCheckedChange = { useCustom ->
+                                if (useCustom) {
+                                    updateFrost {
+                                        it.copy(
+                                            lightStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                            darkStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                            notificationLightStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                            notificationDarkStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                            controlCenterLightStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                            controlCenterDarkStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                        )
+                                    }
+                                } else {
+                                    updateFrost {
+                                        it.copy(
+                                            lightStyle = lastLightStyle,
+                                            darkStyle = lastDarkStyle,
+                                            notificationLightStyle = lastNotifLightStyle,
+                                            notificationDarkStyle = lastNotifDarkStyle,
+                                            controlCenterLightStyle = lastCcLightStyle,
+                                            controlCenterDarkStyle = lastCcDarkStyle,
+                                        )
+                                    }
+                                }
+                            },
+                        )
+                        AnimatedVisibility(
+                            visible = !customBlendEnabled,
+                            enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                            exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                        ) {
+                            Column {
+                                if (!value.separateScopes) {
+                                    OverlayDropdownPreference(
+                                        title = tr("clearFrostLightStyle", "浅色模式材质"),
+                                        items = lightStyleLabels,
+                                        selectedIndex = lightIndex(value.lightStyle),
+                                        onSelectedIndexChange = { idx ->
+                                            updateFrost { it.copy(lightStyle = clearFrostSelectableLightStyles[idx].id) }
+                                        },
+                                    )
+                                    OverlayDropdownPreference(
+                                        title = tr("clearFrostDarkStyle", "深色模式材质"),
+                                        items = darkStyleLabels,
+                                        selectedIndex = darkIndex(value.darkStyle),
+                                        onSelectedIndexChange = { idx ->
+                                            updateFrost { it.copy(darkStyle = clearFrostSelectableDarkStyles[idx].id) }
+                                        },
+                                    )
+                                } else {
+                                    OverlayDropdownPreference(
+                                        title = tr("clearFrostNotifLightStyle", "通知中心浅色材质"),
+                                        items = lightStyleLabels,
+                                        selectedIndex = lightIndex(value.notificationLightStyle),
+                                        onSelectedIndexChange = { idx ->
+                                            updateFrost { it.copy(notificationLightStyle = clearFrostSelectableLightStyles[idx].id) }
+                                        },
+                                    )
+                                    OverlayDropdownPreference(
+                                        title = tr("clearFrostNotifDarkStyle", "通知中心深色材质"),
+                                        items = darkStyleLabels,
+                                        selectedIndex = darkIndex(value.notificationDarkStyle),
+                                        onSelectedIndexChange = { idx ->
+                                            updateFrost { it.copy(notificationDarkStyle = clearFrostSelectableDarkStyles[idx].id) }
+                                        },
+                                    )
+                                    OverlayDropdownPreference(
+                                        title = tr("clearFrostCcLightStyle", "控制中心浅色材质"),
+                                        items = lightStyleLabels,
+                                        selectedIndex = lightIndex(value.controlCenterLightStyle),
+                                        onSelectedIndexChange = { idx ->
+                                            updateFrost { it.copy(controlCenterLightStyle = clearFrostSelectableLightStyles[idx].id) }
+                                        },
+                                    )
+                                    OverlayDropdownPreference(
+                                        title = tr("clearFrostCcDarkStyle", "控制中心深色材质"),
+                                        items = darkStyleLabels,
+                                        selectedIndex = darkIndex(value.controlCenterDarkStyle),
+                                        onSelectedIndexChange = { idx ->
+                                            updateFrost { it.copy(controlCenterDarkStyle = clearFrostSelectableDarkStyles[idx].id) }
+                                        },
+                                    )
+                                }
+                                SwitchPreference(
+                                    title = tr("clearFrostSeparateScopes", "通知与控制中心分开设置"),
+                                    checked = value.separateScopes,
+                                    onCheckedChange = { separate -> updateFrost { it.copy(separateScopes = separate) } },
+                                )
+                            }
+                        }
                         OverlayDropdownPreference(
                             title = tr("clearFrostCcThemeMode", "控制中心明暗外观"),
                             items = ccThemeLabels,
                             selectedIndex = value.controlCenterThemeMode,
                             onSelectedIndexChange = { idx -> updateFrost { it.copy(controlCenterThemeMode = idx) } },
                         )
-                        SwitchPreference(
-                            title = tr("clearFrostSeparateScopes", "通知与控制中心分开设置"),
-                            checked = value.separateScopes,
-                            onCheckedChange = { separate -> updateFrost { it.copy(separateScopes = separate) } },
-                        )
-                        if (!value.separateScopes) {
-                            OverlayDropdownPreference(
-                                title = tr("clearFrostLightStyle", "浅色模式材质"),
-                                items = lightStyleLabels,
-                                selectedIndex = lightIndex(value.lightStyle),
-                                onSelectedIndexChange = { idx ->
-                                    updateFrost { it.copy(lightStyle = clearFrostLightMaterialStyles[idx].id) }
-                                },
-                            )
-                            OverlayDropdownPreference(
-                                title = tr("clearFrostDarkStyle", "深色模式材质"),
-                                items = darkStyleLabels,
-                                selectedIndex = darkIndex(value.darkStyle),
-                                onSelectedIndexChange = { idx ->
-                                    updateFrost { it.copy(darkStyle = clearFrostDarkMaterialStyles[idx].id) }
-                                },
-                            )
-                        } else {
-                            OverlayDropdownPreference(
-                                title = tr("clearFrostNotifLightStyle", "通知中心浅色材质"),
-                                items = lightStyleLabels,
-                                selectedIndex = lightIndex(value.notificationLightStyle),
-                                onSelectedIndexChange = { idx ->
-                                    updateFrost { it.copy(notificationLightStyle = clearFrostLightMaterialStyles[idx].id) }
-                                },
-                            )
-                            OverlayDropdownPreference(
-                                title = tr("clearFrostNotifDarkStyle", "通知中心深色材质"),
-                                items = darkStyleLabels,
-                                selectedIndex = darkIndex(value.notificationDarkStyle),
-                                onSelectedIndexChange = { idx ->
-                                    updateFrost { it.copy(notificationDarkStyle = clearFrostDarkMaterialStyles[idx].id) }
-                                },
-                            )
-                            OverlayDropdownPreference(
-                                title = tr("clearFrostCcLightStyle", "控制中心浅色材质"),
-                                items = lightStyleLabels,
-                                selectedIndex = lightIndex(value.controlCenterLightStyle),
-                                onSelectedIndexChange = { idx ->
-                                    updateFrost { it.copy(controlCenterLightStyle = clearFrostLightMaterialStyles[idx].id) }
-                                },
-                            )
-                            OverlayDropdownPreference(
-                                title = tr("clearFrostCcDarkStyle", "控制中心深色材质"),
-                                items = darkStyleLabels,
-                                selectedIndex = darkIndex(value.controlCenterDarkStyle),
-                                onSelectedIndexChange = { idx ->
-                                    updateFrost { it.copy(controlCenterDarkStyle = clearFrostDarkMaterialStyles[idx].id) }
-                                },
-                            )
-                        }
                         ParameterIntSlide(
                             title = tr("clearFrostElementOpacity", "元素混色不透明度"),
                             value = value.elementOpacity,
@@ -211,7 +301,7 @@ internal fun ClearFrostParametersPage(openPresets: () -> Unit, back: () -> Unit)
                         ) { n -> updateFrost { it.copy(elementOpacity = n) } }
                     }
                 }
-                if (value.usesCustomLightStyle()) {
+                if (customBlendEnabled) {
                     item {
                         Group(tr("clearFrostCustomLightGroup", "自定义浅色混色")) {
                             ClearFrostColorRow(
@@ -222,7 +312,16 @@ internal fun ClearFrostParametersPage(openPresets: () -> Unit, back: () -> Unit)
                                     title = tr("clearFrostCustomLight1", "浅色混色层 1"),
                                     color = value.customLightColor1,
                                     defaultColor = CLEAR_FROST_DEFAULT_LIGHT_COLOR_1,
-                                ) { c -> updateFrost { it.copy(customLightColor1 = c) } }
+                                ) { c ->
+                                    updateFrost {
+                                        it.copy(
+                                            lightStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                            notificationLightStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                            controlCenterLightStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                            customLightColor1 = c,
+                                        )
+                                    }
+                                }
                             }
                             ClearFrostColorRow(
                                 title = tr("clearFrostBlendLayer2", "混色层 2"),
@@ -232,7 +331,16 @@ internal fun ClearFrostParametersPage(openPresets: () -> Unit, back: () -> Unit)
                                     title = tr("clearFrostCustomLight2", "浅色混色层 2"),
                                     color = value.customLightColor2,
                                     defaultColor = CLEAR_FROST_DEFAULT_LIGHT_COLOR_2,
-                                ) { c -> updateFrost { it.copy(customLightColor2 = c) } }
+                                ) { c ->
+                                    updateFrost {
+                                        it.copy(
+                                            lightStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                            notificationLightStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                            controlCenterLightStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                            customLightColor2 = c,
+                                        )
+                                    }
+                                }
                             }
                             ClearFrostColorRow(
                                 title = tr("clearFrostBlendLayer3", "混色层 3"),
@@ -242,12 +350,19 @@ internal fun ClearFrostParametersPage(openPresets: () -> Unit, back: () -> Unit)
                                     title = tr("clearFrostCustomLight3", "浅色混色层 3"),
                                     color = value.customLightColor3,
                                     defaultColor = CLEAR_FROST_DEFAULT_LIGHT_COLOR_3,
-                                ) { c -> updateFrost { it.copy(customLightColor3 = c) } }
+                                ) { c ->
+                                    updateFrost {
+                                        it.copy(
+                                            lightStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                            notificationLightStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                            controlCenterLightStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                            customLightColor3 = c,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
-                }
-                if (value.usesCustomDarkStyle()) {
                     item {
                         Group(tr("clearFrostCustomDarkGroup", "自定义深色混色")) {
                             ClearFrostColorRow(
@@ -258,7 +373,16 @@ internal fun ClearFrostParametersPage(openPresets: () -> Unit, back: () -> Unit)
                                     title = tr("clearFrostCustomDark1", "深色混色层 1"),
                                     color = value.customDarkColor1,
                                     defaultColor = CLEAR_FROST_DEFAULT_DARK_COLOR_1,
-                                ) { c -> updateFrost { it.copy(customDarkColor1 = c) } }
+                                ) { c ->
+                                    updateFrost {
+                                        it.copy(
+                                            darkStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                            notificationDarkStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                            controlCenterDarkStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                            customDarkColor1 = c,
+                                        )
+                                    }
+                                }
                             }
                             ClearFrostColorRow(
                                 title = tr("clearFrostBlendLayer2", "混色层 2"),
@@ -268,7 +392,16 @@ internal fun ClearFrostParametersPage(openPresets: () -> Unit, back: () -> Unit)
                                     title = tr("clearFrostCustomDark2", "深色混色层 2"),
                                     color = value.customDarkColor2,
                                     defaultColor = CLEAR_FROST_DEFAULT_DARK_COLOR_2,
-                                ) { c -> updateFrost { it.copy(customDarkColor2 = c) } }
+                                ) { c ->
+                                    updateFrost {
+                                        it.copy(
+                                            darkStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                            notificationDarkStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                            controlCenterDarkStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                            customDarkColor2 = c,
+                                        )
+                                    }
+                                }
                             }
                             ClearFrostColorRow(
                                 title = tr("clearFrostBlendLayer3", "混色层 3"),
@@ -278,12 +411,20 @@ internal fun ClearFrostParametersPage(openPresets: () -> Unit, back: () -> Unit)
                                     title = tr("clearFrostCustomDark3", "深色混色层 3"),
                                     color = value.customDarkColor3,
                                     defaultColor = CLEAR_FROST_DEFAULT_DARK_COLOR_3,
-                                ) { c -> updateFrost { it.copy(customDarkColor3 = c) } }
+                                ) { c ->
+                                    updateFrost {
+                                        it.copy(
+                                            darkStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                            notificationDarkStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                            controlCenterDarkStyle = CLEAR_FROST_STYLE_CUSTOM,
+                                            customDarkColor3 = c,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
                 }
-            } else if (tab == 1) {
                 item {
                     Group(tr("clearFrostStrokeGroup", "高光描边")) {
                         SwitchPreference(
@@ -299,78 +440,84 @@ internal fun ClearFrostParametersPage(openPresets: () -> Unit, back: () -> Unit)
                         ) {
                             Column {
                                 OverlayDropdownPreference(
-                                    title = tr("clearFrostStrokePreset", "描边预设"),
+                                    title = tr("clearFrostStrokePreset", "描边样式"),
                                     items = strokePresetLabels,
                                     selectedIndex = clearFrostStrokePresets.indexOfFirst { it.first == value.strokePreset }.coerceAtLeast(0),
                                     onSelectedIndexChange = { idx ->
                                         updateFrost { it.copy(strokePreset = clearFrostStrokePresets[idx].first) }
                                     },
                                 )
-                                if (value.strokePreset == CLEAR_FROST_STROKE_CUSTOM) {
-                                    ParameterDpSlide(
-                                        title = tr("clearFrostStrokeWidth", "主描边宽度"),
-                                        value = value.strokeNormalWidth,
-                                        range = 0f..6f,
-                                        defaultValue = 2.6f,
-                                    ) { v -> updateFrost { it.copy(strokeNormalWidth = v) } }
-                                    ParameterDpSlide(
-                                        title = tr("clearFrostStrokeBloomWidth", "泛光描边宽度"),
-                                        value = value.strokeBloomWidth,
-                                        range = 0f..5f,
-                                        defaultValue = 0.8f,
-                                    ) { v -> updateFrost { it.copy(strokeBloomWidth = v) } }
-                                    ParameterIntSlide(
-                                        title = tr("clearFrostStrokeBloomAlpha", "泛光强度"),
-                                        value = value.strokeBloomAlpha,
-                                        range = 0..100,
-                                        suffix = "%",
-                                        defaultValue = 5,
-                                    ) { v -> updateFrost { it.copy(strokeBloomAlpha = v) } }
-                                    ParameterIntSlide(
-                                        title = tr("clearFrostStrokeBloomDegree", "泛光渐变角度"),
-                                        value = value.strokeBloomDegree,
-                                        range = 0..360,
-                                        suffix = "°",
-                                        defaultValue = 180,
-                                    ) { v -> updateFrost { it.copy(strokeBloomDegree = v) } }
-                                    ParameterIntSlide(
-                                        title = tr("clearFrostStrokeSource1Alpha", "主光源高光强度"),
-                                        value = value.strokeSource1Alpha,
-                                        range = 0..100,
-                                        suffix = "%",
-                                        defaultValue = 60,
-                                    ) { v -> updateFrost { it.copy(strokeSource1Alpha = v) } }
-                                    ParameterIntSlide(
-                                        title = tr("clearFrostStrokeSource2Alpha", "副光源高光强度"),
-                                        value = value.strokeSource2Alpha,
-                                        range = 0..100,
-                                        suffix = "%",
-                                        defaultValue = 35,
-                                    ) { v -> updateFrost { it.copy(strokeSource2Alpha = v) } }
-                                    SwitchPreference(
-                                        title = tr("clearFrostStrokeAdvancedLights", "高级光源方向调整"),
-                                        checked = showAdvancedStrokeLights,
-                                        onCheckedChange = { showAdvancedStrokeLights = it },
-                                    )
-                                    AnimatedVisibility(visible = showAdvancedStrokeLights) {
-                                        Column {
-                                            ParameterFloatSlide(tr("clearFrostLight1X", "主光源 X"), value.strokeSource1X, -1f..1f, 0.5f) { v ->
-                                                updateFrost { it.copy(strokeSource1X = v) }
-                                            }
-                                            ParameterFloatSlide(tr("clearFrostLight1Y", "主光源 Y"), value.strokeSource1Y, -1f..1f, 0.5f) { v ->
-                                                updateFrost { it.copy(strokeSource1Y = v) }
-                                            }
-                                            ParameterFloatSlide(tr("clearFrostLight1Z", "主光源 Z"), value.strokeSource1Z, -1f..1f, -0.5f) { v ->
-                                                updateFrost { it.copy(strokeSource1Z = v) }
-                                            }
-                                            ParameterFloatSlide(tr("clearFrostLight2X", "副光源 X"), value.strokeSource2X, -1f..1f, 0.5f) { v ->
-                                                updateFrost { it.copy(strokeSource2X = v) }
-                                            }
-                                            ParameterFloatSlide(tr("clearFrostLight2Y", "副光源 Y"), value.strokeSource2Y, -1f..1f, 0.95f) { v ->
-                                                updateFrost { it.copy(strokeSource2Y = v) }
-                                            }
-                                            ParameterFloatSlide(tr("clearFrostLight2Z", "副光源 Z"), value.strokeSource2Z, -1f..1f, -0.5f) { v ->
-                                                updateFrost { it.copy(strokeSource2Z = v) }
+                                AnimatedVisibility(
+                                    visible = value.strokePreset == CLEAR_FROST_STROKE_CUSTOM,
+                                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = .96f),
+                                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = .96f),
+                                ) {
+                                    Column {
+                                        ParameterDpSlide(
+                                            title = tr("clearFrostStrokeWidth", "主描边宽度"),
+                                            value = value.strokeNormalWidth,
+                                            range = 0f..6f,
+                                            defaultValue = 2.6f,
+                                        ) { v -> updateFrost { it.copy(strokeNormalWidth = v) } }
+                                        ParameterIntSlide(
+                                            title = tr("clearFrostStrokeSource1Alpha", "主光源高光强度"),
+                                            value = value.strokeSource1Alpha,
+                                            range = 0..100,
+                                            suffix = "%",
+                                            defaultValue = 60,
+                                        ) { v -> updateFrost { it.copy(strokeSource1Alpha = v) } }
+                                        ParameterIntSlide(
+                                            title = tr("clearFrostStrokeSource2Alpha", "副光源高光强度"),
+                                            value = value.strokeSource2Alpha,
+                                            range = 0..100,
+                                            suffix = "%",
+                                            defaultValue = 35,
+                                        ) { v -> updateFrost { it.copy(strokeSource2Alpha = v) } }
+                                        ParameterDpSlide(
+                                            title = tr("clearFrostStrokeBloomWidth", "泛光描边宽度"),
+                                            value = value.strokeBloomWidth,
+                                            range = 0f..5f,
+                                            defaultValue = 0.8f,
+                                        ) { v -> updateFrost { it.copy(strokeBloomWidth = v) } }
+                                        ParameterIntSlide(
+                                            title = tr("clearFrostStrokeBloomAlpha", "泛光强度"),
+                                            value = value.strokeBloomAlpha,
+                                            range = 0..100,
+                                            suffix = "%",
+                                            defaultValue = 5,
+                                        ) { v -> updateFrost { it.copy(strokeBloomAlpha = v) } }
+                                        ParameterIntSlide(
+                                            title = tr("clearFrostStrokeBloomDegree", "泛光渐变角度"),
+                                            value = value.strokeBloomDegree,
+                                            range = 0..360,
+                                            suffix = "°",
+                                            defaultValue = 180,
+                                        ) { v -> updateFrost { it.copy(strokeBloomDegree = v) } }
+                                        SwitchPreference(
+                                            title = tr("clearFrostStrokeAdvancedLights", "高级光源方向调整"),
+                                            checked = showAdvancedStrokeLights,
+                                            onCheckedChange = { showAdvancedStrokeLights = it },
+                                        )
+                                        AnimatedVisibility(visible = showAdvancedStrokeLights) {
+                                            Column {
+                                                ParameterFloatSlide(tr("clearFrostLight1X", "主光源 X"), value.strokeSource1X, -1f..1f, 0.5f) { v ->
+                                                    updateFrost { it.copy(strokeSource1X = v) }
+                                                }
+                                                ParameterFloatSlide(tr("clearFrostLight1Y", "主光源 Y"), value.strokeSource1Y, -1f..1f, 0.5f) { v ->
+                                                    updateFrost { it.copy(strokeSource1Y = v) }
+                                                }
+                                                ParameterFloatSlide(tr("clearFrostLight1Z", "主光源 Z"), value.strokeSource1Z, -1f..1f, -0.5f) { v ->
+                                                    updateFrost { it.copy(strokeSource1Z = v) }
+                                                }
+                                                ParameterFloatSlide(tr("clearFrostLight2X", "副光源 X"), value.strokeSource2X, -1f..1f, 0.5f) { v ->
+                                                    updateFrost { it.copy(strokeSource2X = v) }
+                                                }
+                                                ParameterFloatSlide(tr("clearFrostLight2Y", "副光源 Y"), value.strokeSource2Y, -1f..1f, 0.95f) { v ->
+                                                    updateFrost { it.copy(strokeSource2Y = v) }
+                                                }
+                                                ParameterFloatSlide(tr("clearFrostLight2Z", "副光源 Z"), value.strokeSource2Z, -1f..1f, -0.5f) { v ->
+                                                    updateFrost { it.copy(strokeSource2Z = v) }
+                                                }
                                             }
                                         }
                                     }

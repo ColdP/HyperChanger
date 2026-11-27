@@ -7,10 +7,15 @@ import kotlin.math.roundToInt
 
 internal const val CLEAR_FROST_STYLE_SYSTEM = "system"
 internal const val CLEAR_FROST_STYLE_CUSTOM = "custom"
+internal const val CLEAR_FROST_DEFAULT_LIGHT_STYLE = "Colored_Thick_Light"
+internal const val CLEAR_FROST_DEFAULT_DARK_STYLE = "Colored_Extra_Thin_Dark"
 
 internal const val CLEAR_FROST_STROKE_SMALL = "small"
 internal const val CLEAR_FROST_STROKE_MIDDLE = "middle"
 internal const val CLEAR_FROST_STROKE_BIG = "big"
+internal const val CLEAR_FROST_STROKE_ANGLE45 = "angle45"
+internal const val CLEAR_FROST_STROKE_WIDE = "wide"
+internal const val CLEAR_FROST_STROKE_ANGLE45_WIDE = "angle45_wide"
 internal const val CLEAR_FROST_STROKE_CUSTOM = "custom"
 
 internal const val CLEAR_FROST_CC_THEME_SYSTEM = 0
@@ -46,55 +51,61 @@ internal data class ClearFrostMaterialStyle(
 
 internal val clearFrostLightMaterialStyles: List<ClearFrostMaterialStyle> = listOf(
     ClearFrostMaterialStyle(CLEAR_FROST_STYLE_SYSTEM, "clearFrostStyleSystem", "跟随系统原值", intArrayOf(), intArrayOf()),
-    ClearFrostMaterialStyle("Colored_Extra_Thin_Light", "clearFrostColoredExtraThin", "彩色超薄", intArrayOf(-2140772762, 653390321, 449958353), intArrayOf(BLEND_OVERLAY, BLEND_COLOR_DODGE, BLEND_SRC_OVER)),
-    ClearFrostMaterialStyle("Colored_Thin_Light", "clearFrostColoredThin", "彩色薄", intArrayOf(-1719697537, -2130772226), intArrayOf(BLEND_OVERLAY, BLEND_SOFT_LIGHT)),
-    ClearFrostMaterialStyle("Colored_Regular_Light", "clearFrostColoredRegular", "彩色常规", intArrayOf(-2052675930, 486539263), intArrayOf(BLEND_OVERLAY, BLEND_PLUS_LIGHTER)),
-    ClearFrostMaterialStyle("Colored_Thick_Light", "clearFrostColoredThick", "彩色厚", intArrayOf(-428575628, -1722658222, 869388753), intArrayOf(BLEND_OVERLAY, BLEND_COLOR_DODGE, BLEND_SRC_OVER)),
-    ClearFrostMaterialStyle("Colored_Extra_Thick_Light", "clearFrostColoredExtraThick", "彩色超厚", intArrayOf(1301254031, 1807794368), intArrayOf(BLEND_PLUS_LIGHTER, BLEND_COLOR_DODGE)),
-    ClearFrostMaterialStyle("Pured_Extra_Thin_Light", "clearFrostPuredExtraThin", "纯色超薄", intArrayOf(-855638017, 1593835519, 620756991), intArrayOf(BLEND_COLOR_BURN, BLEND_PLUS_LIGHTER, BLEND_SRC_OVER)),
-    ClearFrostMaterialStyle("Pured_Thin_Light", "clearFrostPuredThin", "纯色薄", intArrayOf(812477805, 1593835519, 1728053247), intArrayOf(BLEND_PLUS_LIGHTER, BLEND_PLUS_LIGHTER, BLEND_SRC_OVER)),
-    ClearFrostMaterialStyle("Pured_Regular_Light", "clearFrostPuredRegular", "纯色常规", intArrayOf(872020473, -1275068417), intArrayOf(BLEND_OVERLAY, BLEND_HARD_LIGHT)),
-    ClearFrostMaterialStyle("Pured_Thick_Light", "clearFrostPuredThick", "纯色厚", intArrayOf(-1711276033, -1073741825), intArrayOf(BLEND_OVERLAY, BLEND_SRC_OVER)),
-    ClearFrostMaterialStyle("Pured_Extra_Thick_Light", "clearFrostPuredExtraThick", "纯色超厚", intArrayOf(1728053247, -1711933963), intArrayOf(BLEND_PLUS_LIGHTER, BLEND_SRC_OVER)),
-    ClearFrostMaterialStyle("Pured_Thin_Glass_Light", "clearFrostPuredThinGlass", "清透薄玻璃", intArrayOf(83886080, -1711276033, 1728053247), intArrayOf(BLEND_PLUS_DARKER, BLEND_SOFT_LIGHT, BLEND_HARD_LIGHT)),
-    ClearFrostMaterialStyle("Pured_Regular_Glass_Light", "clearFrostPuredRegularGlass", "清透常规玻璃", intArrayOf(83886080, -1711276033, -1711276033), intArrayOf(BLEND_PLUS_DARKER, BLEND_SOFT_LIGHT, BLEND_HARD_LIGHT)),
-    ClearFrostMaterialStyle("Pured_Thick_Glass_Light", "clearFrostPuredThickGlass", "清透厚玻璃", intArrayOf(637534208, -855638017, -855638017), intArrayOf(BLEND_PLUS_DARKER, BLEND_SOFT_LIGHT, BLEND_HARD_LIGHT)),
-    ClearFrostMaterialStyle("Overlay_Extra_Thin_Light", "clearFrostOverlayExtraThin", "叠加超薄", intArrayOf(261724569), intArrayOf(BLEND_LUMINOSITY)),
-    ClearFrostMaterialStyle("Overlay_Thin_Light", "clearFrostOverlayThin", "叠加薄", intArrayOf(1301714582, 442918502), intArrayOf(BLEND_LUMINOSITY, BLEND_PLUS_DARKER)),
-    ClearFrostMaterialStyle("Overlay_Regular_Light", "clearFrostOverlayRegular", "叠加常规", intArrayOf(1301714582, 0x1A000000), intArrayOf(BLEND_LUMINOSITY, BLEND_PLUS_DARKER)),
-    ClearFrostMaterialStyle("Overlay_Thick_Light", "clearFrostOverlayThick", "叠加厚", intArrayOf(-1474355425, -6645094), intArrayOf(BLEND_LUMINOSITY, BLEND_OVERLAY)),
-    ClearFrostMaterialStyle("Overlay_Extra_Thick_Light", "clearFrostOverlayExtraThick", "叠加超厚", intArrayOf(-866033311, 1291845632), intArrayOf(BLEND_LUMINOSITY, BLEND_COLOR_BURN)),
-    ClearFrostMaterialStyle("Info_Extra_Thin_Light", "clearFrostInfoExtraThin", "信息超薄", intArrayOf(1001501105), intArrayOf(BLEND_PLUS_DARKER)),
-    ClearFrostMaterialStyle("Info_Thin_Light", "clearFrostInfoThin", "信息薄", intArrayOf(-2137483112), intArrayOf(BLEND_PLUS_LIGHTER)),
-    ClearFrostMaterialStyle("Info_Regular_Light", "clearFrostInfoRegular", "信息常规", intArrayOf(-1281845096), intArrayOf(BLEND_PLUS_LIGHTER)),
-    ClearFrostMaterialStyle("Info_Thick_Light", "clearFrostInfoThick", "信息厚", intArrayOf(-6776680), intArrayOf(BLEND_PLUS_LIGHTER)),
-    ClearFrostMaterialStyle("Info_Colored_Regular", "clearFrostInfoColoredRegular", "信息彩色常规", intArrayOf(-6579301, 268435455), intArrayOf(BLEND_COLOR_DODGE, BLEND_PLUS_LIGHTER)),
+    ClearFrostMaterialStyle("Colored_Extra_Thin_Light", "clearFrostColoredExtraThin", "彩色 · 超轻", intArrayOf(-2140772762, 653390321, 449958353), intArrayOf(BLEND_OVERLAY, BLEND_COLOR_DODGE, BLEND_SRC_OVER)),
+    ClearFrostMaterialStyle("Colored_Thin_Light", "clearFrostColoredThin", "彩色 · 轻盈", intArrayOf(-1719697537, -2130772226), intArrayOf(BLEND_OVERLAY, BLEND_SOFT_LIGHT)),
+    ClearFrostMaterialStyle("Colored_Regular_Light", "clearFrostColoredRegular", "彩色 · 适中", intArrayOf(-2052675930, 486539263), intArrayOf(BLEND_OVERLAY, BLEND_PLUS_LIGHTER)),
+    ClearFrostMaterialStyle("Colored_Thick_Light", "clearFrostColoredThick", "彩色 · 厚实", intArrayOf(-428575628, -1722658222, 869388753), intArrayOf(BLEND_OVERLAY, BLEND_COLOR_DODGE, BLEND_SRC_OVER)),
+    ClearFrostMaterialStyle("Colored_Extra_Thick_Light", "clearFrostColoredExtraThick", "彩色 · 超厚", intArrayOf(1301254031, 1807794368), intArrayOf(BLEND_PLUS_LIGHTER, BLEND_COLOR_DODGE)),
+    ClearFrostMaterialStyle("Pured_Extra_Thin_Light", "clearFrostPuredExtraThin", "纯色 · 超轻", intArrayOf(-855638017, 1593835519, 620756991), intArrayOf(BLEND_COLOR_BURN, BLEND_PLUS_LIGHTER, BLEND_SRC_OVER)),
+    ClearFrostMaterialStyle("Pured_Thin_Light", "clearFrostPuredThin", "纯色 · 轻盈", intArrayOf(812477805, 1593835519, 1728053247), intArrayOf(BLEND_PLUS_LIGHTER, BLEND_PLUS_LIGHTER, BLEND_SRC_OVER)),
+    ClearFrostMaterialStyle("Pured_Regular_Light", "clearFrostPuredRegular", "纯色 · 适中", intArrayOf(872020473, -1275068417), intArrayOf(BLEND_OVERLAY, BLEND_HARD_LIGHT)),
+    ClearFrostMaterialStyle("Pured_Thick_Light", "clearFrostPuredThick", "纯色 · 厚实", intArrayOf(-1711276033, -1073741825), intArrayOf(BLEND_OVERLAY, BLEND_SRC_OVER)),
+    ClearFrostMaterialStyle("Pured_Extra_Thick_Light", "clearFrostPuredExtraThick", "纯色 · 超厚", intArrayOf(1728053247, -1711933963), intArrayOf(BLEND_PLUS_LIGHTER, BLEND_SRC_OVER)),
+    ClearFrostMaterialStyle("Pured_Thin_Glass_Light", "clearFrostPuredThinGlass", "清透玻璃 · 轻盈", intArrayOf(83886080, -1711276033, 1728053247), intArrayOf(BLEND_PLUS_DARKER, BLEND_SOFT_LIGHT, BLEND_HARD_LIGHT)),
+    ClearFrostMaterialStyle("Pured_Regular_Glass_Light", "clearFrostPuredRegularGlass", "清透玻璃 · 适中", intArrayOf(83886080, -1711276033, -1711276033), intArrayOf(BLEND_PLUS_DARKER, BLEND_SOFT_LIGHT, BLEND_HARD_LIGHT)),
+    ClearFrostMaterialStyle("Pured_Thick_Glass_Light", "clearFrostPuredThickGlass", "清透玻璃 · 厚实", intArrayOf(637534208, -855638017, -855638017), intArrayOf(BLEND_PLUS_DARKER, BLEND_SOFT_LIGHT, BLEND_HARD_LIGHT)),
+    ClearFrostMaterialStyle("Overlay_Extra_Thin_Light", "clearFrostOverlayExtraThin", "叠加 · 超轻", intArrayOf(261724569), intArrayOf(BLEND_LUMINOSITY)),
+    ClearFrostMaterialStyle("Overlay_Thin_Light", "clearFrostOverlayThin", "叠加 · 轻盈", intArrayOf(1301714582, 442918502), intArrayOf(BLEND_LUMINOSITY, BLEND_PLUS_DARKER)),
+    ClearFrostMaterialStyle("Overlay_Regular_Light", "clearFrostOverlayRegular", "叠加 · 适中", intArrayOf(1301714582, 0x1A000000), intArrayOf(BLEND_LUMINOSITY, BLEND_PLUS_DARKER)),
+    ClearFrostMaterialStyle("Overlay_Thick_Light", "clearFrostOverlayThick", "叠加 · 厚实", intArrayOf(-1474355425, -6645094), intArrayOf(BLEND_LUMINOSITY, BLEND_OVERLAY)),
+    ClearFrostMaterialStyle("Overlay_Extra_Thick_Light", "clearFrostOverlayExtraThick", "叠加 · 超厚", intArrayOf(-866033311, 1291845632), intArrayOf(BLEND_LUMINOSITY, BLEND_COLOR_BURN)),
+    ClearFrostMaterialStyle("Info_Extra_Thin_Light", "clearFrostInfoExtraThin", "信息 · 超轻", intArrayOf(1001501105), intArrayOf(BLEND_PLUS_DARKER)),
+    ClearFrostMaterialStyle("Info_Thin_Light", "clearFrostInfoThin", "信息 · 轻盈", intArrayOf(-2137483112), intArrayOf(BLEND_PLUS_LIGHTER)),
+    ClearFrostMaterialStyle("Info_Regular_Light", "clearFrostInfoRegular", "信息 · 适中", intArrayOf(-1281845096), intArrayOf(BLEND_PLUS_LIGHTER)),
+    ClearFrostMaterialStyle("Info_Thick_Light", "clearFrostInfoThick", "信息 · 厚实", intArrayOf(-6776680), intArrayOf(BLEND_PLUS_LIGHTER)),
+    ClearFrostMaterialStyle("Info_Colored_Regular", "clearFrostInfoColoredRegular", "信息 · 彩色适中", intArrayOf(-6579301, 268435455), intArrayOf(BLEND_COLOR_DODGE, BLEND_PLUS_LIGHTER)),
     ClearFrostMaterialStyle(CLEAR_FROST_STYLE_CUSTOM, "clearFrostStyleCustom", "自定义混色", intArrayOf(), intArrayOf()),
 )
 
 internal val clearFrostDarkMaterialStyles: List<ClearFrostMaterialStyle> = listOf(
     ClearFrostMaterialStyle(CLEAR_FROST_STYLE_SYSTEM, "clearFrostStyleSystem", "跟随系统原值", intArrayOf(), intArrayOf()),
-    ClearFrostMaterialStyle("Colored_Extra_Thin_Dark", "clearFrostColoredExtraThin", "彩色超薄", intArrayOf(-942879540, 777146962), intArrayOf(BLEND_COLOR_BURN, BLEND_SRC_OVER)),
-    ClearFrostMaterialStyle("Colored_Thin_Dark", "clearFrostColoredThin", "彩色薄", intArrayOf(442918502, 861427800), intArrayOf(BLEND_COLOR_BURN, BLEND_PLUS_DARKER)),
-    ClearFrostMaterialStyle("Colored_Regular_Dark", "clearFrostColoredRegular", "彩色常规", intArrayOf(1879048192, 335544320), intArrayOf(BLEND_OVERLAY, BLEND_SRC_OVER)),
-    ClearFrostMaterialStyle("Colored_Thick_Dark", "clearFrostColoredThick", "彩色厚", intArrayOf(1719105399, 863270004, 855638016), intArrayOf(BLEND_COLOR_BURN, BLEND_OVERLAY, BLEND_SRC_OVER)),
-    ClearFrostMaterialStyle("Colored_Extra_Thick_Dark", "clearFrostColoredExtraThick", "彩色超厚", intArrayOf(1718973813, 1640022208), intArrayOf(BLEND_PLUS_DARKER, BLEND_COLOR_BURN)),
-    ClearFrostMaterialStyle("Pured_Extra_Thin_Dark", "clearFrostPuredExtraThin", "纯色超薄", intArrayOf(-428838800, -871099372), intArrayOf(BLEND_OVERLAY, BLEND_SRC_OVER)),
-    ClearFrostMaterialStyle("Pured_Thin_Dark", "clearFrostPuredThin", "纯色薄", intArrayOf(-1803715203, 1711276032), intArrayOf(BLEND_PLUS_DARKER, BLEND_SRC_OVER)),
-    ClearFrostMaterialStyle("Pured_Regular_Dark", "clearFrostPuredRegular", "纯色常规", intArrayOf(1962934272, 1375731712), intArrayOf(BLEND_COLOR_BURN, BLEND_SRC_OVER)),
-    ClearFrostMaterialStyle("Pured_Thick_Dark", "clearFrostPuredThick", "纯色厚", intArrayOf(1291845632, -2146299374), intArrayOf(BLEND_COLOR_BURN, BLEND_SRC_OVER)),
-    ClearFrostMaterialStyle("Pured_Extra_Thick_Dark", "clearFrostPuredExtraThick", "纯色超厚", intArrayOf(-870770407, 1412510001), intArrayOf(BLEND_LUMINOSITY, BLEND_PLUS_LIGHTER)),
-    ClearFrostMaterialStyle("Pured_Thin_Glass_Dark", "clearFrostPuredThinGlass", "清透薄玻璃", intArrayOf(0x1A000000, 1716934230, -1723908289), intArrayOf(BLEND_PLUS_DARKER, BLEND_LUMINOSITY, BLEND_OVERLAY)),
-    ClearFrostMaterialStyle("Pured_Regular_Glass_Dark", "clearFrostPuredRegularGlass", "清透常规玻璃", intArrayOf(0x1A000000, -1720947604, -1727658490), intArrayOf(BLEND_PLUS_DARKER, BLEND_LUMINOSITY, BLEND_SOFT_LIGHT)),
-    ClearFrostMaterialStyle("Pured_Thick_Glass_Dark", "clearFrostPuredThickGlass", "清透厚玻璃", intArrayOf(0x1A000000, -1722329257, -1727658490), intArrayOf(BLEND_PLUS_DARKER, BLEND_LUMINOSITY, BLEND_SOFT_LIGHT)),
-    ClearFrostMaterialStyle("Overlay_Extra_Thin_Dark", "clearFrostOverlayExtraThin", "叠加超薄", intArrayOf(1965500199), intArrayOf(BLEND_LUMINOSITY)),
-    ClearFrostMaterialStyle("Overlay_Thick_Dark", "clearFrostOverlayThick", "叠加厚", intArrayOf(1723052979, -1637456282), intArrayOf(BLEND_LUMINOSITY, BLEND_PLUS_DARKER)),
-    ClearFrostMaterialStyle("Info_Extra_Thin_Dark", "clearFrostInfoExtraThin", "信息超薄", intArrayOf(1001501105), intArrayOf(BLEND_PLUS_LIGHTER)),
-    ClearFrostMaterialStyle("Info_Thin_Dark", "clearFrostInfoThin", "信息薄", intArrayOf(-2137483112), intArrayOf(BLEND_PLUS_DARKER)),
-    ClearFrostMaterialStyle("Info_Regular_Dark", "clearFrostInfoRegular", "信息常规", intArrayOf(-1281845096), intArrayOf(BLEND_PLUS_DARKER)),
-    ClearFrostMaterialStyle("Info_Thick_Dark", "clearFrostInfoThick", "信息厚", intArrayOf(-6776680), intArrayOf(BLEND_PLUS_DARKER)),
+    ClearFrostMaterialStyle("Colored_Extra_Thin_Dark", "clearFrostColoredExtraThin", "彩色 · 超轻", intArrayOf(-942879540, 777146962), intArrayOf(BLEND_COLOR_BURN, BLEND_SRC_OVER)),
+    ClearFrostMaterialStyle("Colored_Thin_Dark", "clearFrostColoredThin", "彩色 · 轻盈", intArrayOf(442918502, 861427800), intArrayOf(BLEND_COLOR_BURN, BLEND_PLUS_DARKER)),
+    ClearFrostMaterialStyle("Colored_Regular_Dark", "clearFrostColoredRegular", "彩色 · 适中", intArrayOf(1879048192, 335544320), intArrayOf(BLEND_OVERLAY, BLEND_SRC_OVER)),
+    ClearFrostMaterialStyle("Colored_Thick_Dark", "clearFrostColoredThick", "彩色 · 厚实", intArrayOf(1719105399, 863270004, 855638016), intArrayOf(BLEND_COLOR_BURN, BLEND_OVERLAY, BLEND_SRC_OVER)),
+    ClearFrostMaterialStyle("Colored_Extra_Thick_Dark", "clearFrostColoredExtraThick", "彩色 · 超厚", intArrayOf(1718973813, 1640022208), intArrayOf(BLEND_PLUS_DARKER, BLEND_COLOR_BURN)),
+    ClearFrostMaterialStyle("Pured_Extra_Thin_Dark", "clearFrostPuredExtraThin", "纯色 · 超轻", intArrayOf(-428838800, -871099372), intArrayOf(BLEND_OVERLAY, BLEND_SRC_OVER)),
+    ClearFrostMaterialStyle("Pured_Thin_Dark", "clearFrostPuredThin", "纯色 · 轻盈", intArrayOf(-1803715203, 1711276032), intArrayOf(BLEND_PLUS_DARKER, BLEND_SRC_OVER)),
+    ClearFrostMaterialStyle("Pured_Regular_Dark", "clearFrostPuredRegular", "纯色 · 适中", intArrayOf(1962934272, 1375731712), intArrayOf(BLEND_COLOR_BURN, BLEND_SRC_OVER)),
+    ClearFrostMaterialStyle("Pured_Thick_Dark", "clearFrostPuredThick", "纯色 · 厚实", intArrayOf(1291845632, -2146299374), intArrayOf(BLEND_COLOR_BURN, BLEND_SRC_OVER)),
+    ClearFrostMaterialStyle("Pured_Extra_Thick_Dark", "clearFrostPuredExtraThick", "纯色 · 超厚", intArrayOf(-870770407, 1412510001), intArrayOf(BLEND_LUMINOSITY, BLEND_PLUS_LIGHTER)),
+    ClearFrostMaterialStyle("Pured_Thin_Glass_Dark", "clearFrostPuredThinGlass", "清透玻璃 · 轻盈", intArrayOf(0x1A000000, 1716934230, -1723908289), intArrayOf(BLEND_PLUS_DARKER, BLEND_LUMINOSITY, BLEND_OVERLAY)),
+    ClearFrostMaterialStyle("Pured_Regular_Glass_Dark", "clearFrostPuredRegularGlass", "清透玻璃 · 适中", intArrayOf(0x1A000000, -1720947604, -1727658490), intArrayOf(BLEND_PLUS_DARKER, BLEND_LUMINOSITY, BLEND_SOFT_LIGHT)),
+    ClearFrostMaterialStyle("Pured_Thick_Glass_Dark", "clearFrostPuredThickGlass", "清透玻璃 · 厚实", intArrayOf(0x1A000000, -1722329257, -1727658490), intArrayOf(BLEND_PLUS_DARKER, BLEND_LUMINOSITY, BLEND_SOFT_LIGHT)),
+    ClearFrostMaterialStyle("Overlay_Extra_Thin_Dark", "clearFrostOverlayExtraThin", "叠加 · 超轻", intArrayOf(1965500199), intArrayOf(BLEND_LUMINOSITY)),
+    ClearFrostMaterialStyle("Overlay_Thick_Dark", "clearFrostOverlayThick", "叠加 · 厚实", intArrayOf(1723052979, -1637456282), intArrayOf(BLEND_LUMINOSITY, BLEND_PLUS_DARKER)),
+    ClearFrostMaterialStyle("Info_Extra_Thin_Dark", "clearFrostInfoExtraThin", "信息 · 超轻", intArrayOf(1001501105), intArrayOf(BLEND_PLUS_LIGHTER)),
+    ClearFrostMaterialStyle("Info_Thin_Dark", "clearFrostInfoThin", "信息 · 轻盈", intArrayOf(-2137483112), intArrayOf(BLEND_PLUS_DARKER)),
+    ClearFrostMaterialStyle("Info_Regular_Dark", "clearFrostInfoRegular", "信息 · 适中", intArrayOf(-1281845096), intArrayOf(BLEND_PLUS_DARKER)),
+    ClearFrostMaterialStyle("Info_Thick_Dark", "clearFrostInfoThick", "信息 · 厚实", intArrayOf(-6776680), intArrayOf(BLEND_PLUS_DARKER)),
     ClearFrostMaterialStyle(CLEAR_FROST_STYLE_CUSTOM, "clearFrostStyleCustom", "自定义混色", intArrayOf(), intArrayOf()),
 )
+
+internal val clearFrostSelectableLightStyles: List<ClearFrostMaterialStyle> =
+    clearFrostLightMaterialStyles.filterNot { it.id == CLEAR_FROST_STYLE_CUSTOM }
+
+internal val clearFrostSelectableDarkStyles: List<ClearFrostMaterialStyle> =
+    clearFrostDarkMaterialStyles.filterNot { it.id == CLEAR_FROST_STYLE_CUSTOM }
 
 private val clearFrostLightStyleMap = clearFrostLightMaterialStyles.associateBy { it.id }
 private val clearFrostDarkStyleMap = clearFrostDarkMaterialStyles.associateBy { it.id }
@@ -103,6 +114,9 @@ internal val clearFrostStrokePresets: List<Pair<String, String>> = listOf(
     CLEAR_FROST_STROKE_SMALL to "clearFrostStrokeSmall",
     CLEAR_FROST_STROKE_MIDDLE to "clearFrostStrokeMiddle",
     CLEAR_FROST_STROKE_BIG to "clearFrostStrokeBig",
+    CLEAR_FROST_STROKE_ANGLE45 to "clearFrostStrokeAngle45",
+    CLEAR_FROST_STROKE_WIDE to "clearFrostStrokeWide",
+    CLEAR_FROST_STROKE_ANGLE45_WIDE to "clearFrostStrokeAngle45Wide",
     CLEAR_FROST_STROKE_CUSTOM to "clearFrostStrokeCustom",
 )
 
@@ -286,9 +300,24 @@ internal fun buildClearFrostBloomStrokePx(
     density: Float,
 ): FloatArray {
     if (!settings.strokeEnabled) return CLEAR_FROST_EMPTY_STROKE
+    fun strokeVariant(diagonal45: Boolean, wideField: Boolean): FloatArray =
+        (if (isLight) STROKE_SMALL_LIGHT else STROKE_SMALL_DARK).copyOf().apply {
+            if (wideField) this[6] = 5.0f
+            if (diagonal45) {
+                this[7] = 0.0f
+                this[8] = 0.0f
+                this[9] = -0.5f
+                this[14] = 1.0f
+                this[15] = 1.0f
+                this[16] = -0.5f
+            }
+        }
     val dpParams = when (settings.strokePreset) {
         CLEAR_FROST_STROKE_MIDDLE -> (if (isLight) STROKE_MIDDLE_LIGHT else STROKE_MIDDLE_DARK).copyOf()
         CLEAR_FROST_STROKE_BIG -> (if (isLight) STROKE_BIG_LIGHT else STROKE_BIG_DARK).copyOf()
+        CLEAR_FROST_STROKE_ANGLE45 -> strokeVariant(diagonal45 = true, wideField = false)
+        CLEAR_FROST_STROKE_WIDE -> strokeVariant(diagonal45 = false, wideField = true)
+        CLEAR_FROST_STROKE_ANGLE45_WIDE -> strokeVariant(diagonal45 = true, wideField = true)
         CLEAR_FROST_STROKE_CUSTOM -> floatArrayOf(
             settings.strokeBloomWidth,
             settings.strokeBloomDegree.toFloat(),
