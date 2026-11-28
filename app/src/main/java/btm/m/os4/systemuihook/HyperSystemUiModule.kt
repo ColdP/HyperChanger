@@ -179,6 +179,7 @@ class HyperSystemUiModule : XposedModule() {
             module = this,
             readContext = ::readContext,
             applicationContext = { systemUiApplicationContext },
+            showGlobalActions = ::showCachedGlobalActions,
         )
     }
     private val notificationHooks by lazy {
@@ -1358,6 +1359,9 @@ class HyperSystemUiModule : XposedModule() {
                         installLockscreenClockHorizontalRectHook(param.defaultClassLoader, preferences, "systemui")
                         systemUiLockscreenClockHorizontalHookInstalled = true
                     }
+                    if (param.packageName == SYSTEM_UI) {
+                        lockscreenHooks.installClockCustomSystemUiHooks(param.defaultClassLoader, preferences)
+                    }
                     if (!lockscreenCarrierHideHookInstalled) {
                         lockscreenCarrierHideHookInstalled = installLockscreenCarrierHideHook(
                             param.defaultClassLoader,
@@ -1483,6 +1487,7 @@ class HyperSystemUiModule : XposedModule() {
                         aodLockscreenTemplateLimitHookInstalled = true
                     }
                     installAodEditorBackgroundHook(param.defaultClassLoader, preferences)
+                    lockscreenHooks.installClockCustomAodHooks(param.defaultClassLoader, preferences)
                 }
                 SUBSCREEN_CENTER -> {
                     othersHooks.installRearMiniPlayerSubScreenHooks(preferences)
@@ -1526,6 +1531,7 @@ class HyperSystemUiModule : XposedModule() {
                     }
                     installAodLockscreenTemplateLimitHook(param.defaultClassLoader, preferences)
                     installVideoWallpaperGlassSupportHook(param.defaultClassLoader, preferences)
+                    lockscreenHooks.installClockCustomThemeManagerHooks(param.defaultClassLoader, preferences)
                     if (preferences.getBoolean("unlock_xiaomi_18_rear_screen_ai", false) || preferences.getBoolean("remove_custom_rear_screen_restrictions", false)) {
                         othersHooks.installCustomRearScreenWidgetRegistration(param.defaultClassLoader)
                     }
@@ -4077,6 +4083,7 @@ class HyperSystemUiModule : XposedModule() {
     private var softGlassRuntime: SoftGlassRuntimeSettings? = null
     private var clearFrostHooks: ClearFrostHooks? = null
     private var iosNotificationClockGlassRuntime: btm.m.os4.systemuihook.newnotificationcenter.IosNotificationClockGlassRuntime? = null
+    private var classicCcShadeRuntime: ClassicControlCenterRuntimeSettings? = null
     private var volumeGlassRuntime: VolumePanelGlassRuntimeSettings? = null
     private var controlCenterRadiusRuntime: ControlCenterRadiusRuntimeSettings? = null
     private val volumeGlobalRecipes = WeakHashMap<View, SoftGlassRecipeCache>()
@@ -4090,6 +4097,7 @@ class HyperSystemUiModule : XposedModule() {
     private val softGlassBlendDispatching = ThreadLocal<Boolean>()
     private val volumeMaterialDispatching = ThreadLocal<Boolean>()
     private val standaloneSoftGlassSurfaces = Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap<View, Boolean>()))
+    private val classicCcShadeSurfaces = Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap<View, Boolean>()))
     private val softGlassRefresh = Runnable {
         val surfaces = synchronized(softGlassBaselines) {
             softGlassBaselines.map { (view, setters) -> view to setters.toMap() }
@@ -4113,10 +4121,12 @@ class HyperSystemUiModule : XposedModule() {
             softGlassRefreshing.remove()
             if (softGlassRuntime?.settings?.enabled != true) {
                 val retainClock = iosNotificationClockGlassRuntime?.settings?.enabled == true
-                if (retainClock) {
+                val retainClassicShade = classicCcShadeRuntime?.settings?.enabled == true
+                if (retainClock || retainClassicShade) {
                     synchronized(softGlassBaselines) {
                         val retired = softGlassBaselines.keys.filterNot {
-                            btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterPresentation.isHostedClockView(it)
+                            (retainClock && btm.m.os4.systemuihook.newnotificationcenter.IosNotificationCenterPresentation.isHostedClockView(it)) ||
+                                (retainClassicShade && isClassicCcShadeSurface(it))
                         }
                         retired.forEach { softGlassBaselines.remove(it); softGlassArrayPairs.remove(it); softGlassLegacyBlends.remove(it); volumeGlobalRecipes.remove(it) }
                     }
@@ -4149,12 +4159,73 @@ class HyperSystemUiModule : XposedModule() {
         else selected.glass.copy(enabled = true)
     }
 
+    private fun isClassicCcManagedSurface(view: View): Boolean =
+        view.getTag(CLASSIC_CC_MANAGED_SURFACE_TAG_KEY) == true
+
+    private fun isClassicCcShadeSurface(view: View): Boolean {
+        if (isClassicCcManagedSurface(view) ||
+            lockscreenBackdropContainers.contains(view) ||
+            isControlCenterTopButtonBackground(view) ||
+            expandedIslandMaterialApplying.get() == true ||
+            expandedIslandGlassSurfaces.contains(view) ||
+            isNotificationRowBackground(view) ||
+            isMediaNotificationView(view) ||
+            isVolumePanelSurface(view) ||
+            view.tag == SHORTCUT_GLASS_TAG ||
+            view.tag == LOCKSCREEN_CAPSULE_MATERIAL_TAG
+        ) return false
+        if (classicCcShadeSurfaces.contains(view)) return true
+        if (isShadeBackgroundView(view)) {
+            classicCcShadeSurfaces.add(view)
+            return true
+        }
+        val cls = view.javaClass.name
+        if (cls.contains("NotificationShadeWindowView") || cls.contains("NotificationPanelView")) {
+            classicCcShadeSurfaces.add(view)
+            return true
+        }
+        val stack = Thread.currentThread().stackTrace
+        for (frame in stack) {
+            val name = frame.className
+            if (name.contains("ShadeBlendBlurController", ignoreCase = true) ||
+                name.contains("ShadeWindowBlurController", ignoreCase = true) ||
+                name.contains("ShadeSolidBackgroundController", ignoreCase = true)
+            ) {
+                classicCcShadeSurfaces.add(view)
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun classicCcShadeOverride(view: View): ClassicControlCenterSettings? {
+        val s = classicCcShadeRuntime?.settings ?: return null
+        if (!s.enabled || !s.shadeBackgroundCustomEnabled) return null
+        val isClassic = runCatching {
+            android.provider.Settings.System.getInt(view.context.contentResolver, "use_control_panel", 1) == 0
+        }.getOrDefault(false)
+        if (!isClassic) return null
+        return if (isClassicCcShadeSurface(view)) s else null
+    }
+
+    private fun classicCcShadeGlassBlurFallback(view: View): Int? {
+        val s = classicCcShadeRuntime?.settings ?: return null
+        if (!s.enabled || s.shadeBackgroundCustomEnabled || s.useGlobalSoftGlass) return null
+        if (s.softGlass.refractionBlur == 100) return null
+        val isClassic = runCatching {
+            android.provider.Settings.System.getInt(view.context.contentResolver, "use_control_panel", 1) == 0
+        }.getOrDefault(false)
+        if (!isClassic) return null
+        return if (isClassicCcShadeSurface(view)) s.softGlass.refractionBlur else null
+    }
+
     // These module-owned layers already resolve and apply their complete recipe.
     // Exclude them from the global setter hooks even inside a vendor control-center call.
     private fun isControlCenterTopButtonBackground(view: View): Boolean =
         view.tag == "$CONTROL_CENTER_PLUS_TAG.background" || view.tag == "$CONTROL_CENTER_POWER_TAG.background"
 
     private fun isSoftGlassSurface(view: View): Boolean {
+        if (isClassicCcManagedSurface(view)) return false
         if (lockscreenBackdropContainers.contains(view)) return false
         if (isControlCenterTopButtonBackground(view) || expandedIslandMaterialApplying.get() == true || expandedIslandGlassSurfaces.contains(view)) return false
         if (view.tag == SHORTCUT_GLASS_TAG || view.tag == LOCKSCREEN_CAPSULE_MATERIAL_TAG) return false
@@ -4187,7 +4258,7 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun isSoftGlassPanelLayer(view: View): Boolean {
-        if (lockscreenBackdropContainers.contains(view) || isControlCenterTopButtonBackground(view) ||
+        if (isClassicCcManagedSurface(view) || lockscreenBackdropContainers.contains(view) || isControlCenterTopButtonBackground(view) ||
             expandedIslandMaterialApplying.get() == true || expandedIslandGlassSurfaces.contains(view) ||
             view.tag == SHORTCUT_GLASS_TAG || view.tag == LOCKSCREEN_CAPSULE_MATERIAL_TAG
         ) return false
@@ -4207,6 +4278,7 @@ class HyperSystemUiModule : XposedModule() {
     }
 
     private fun isSoftGlassBlendSurface(view: View): Boolean {
+        if (isClassicCcManagedSurface(view)) return false
         if (lockscreenBackdropContainers.contains(view)) return false
         if (isControlCenterTopButtonBackground(view) || expandedIslandMaterialApplying.get() == true || expandedIslandGlassSurfaces.contains(view)) return false
         if (view.tag == SHORTCUT_GLASS_TAG || view.tag == LOCKSCREEN_CAPSULE_MATERIAL_TAG) return false
@@ -4246,12 +4318,14 @@ class HyperSystemUiModule : XposedModule() {
             hookDeoptimized = ::hookDeoptimized,
             logTag = TAG,
             isExcludedSurface = { view ->
-                lockscreenBackdropContainers.contains(view) ||
+                isClassicCcManagedSurface(view) ||
+                    lockscreenBackdropContainers.contains(view) ||
                     isControlCenterTopButtonBackground(view) ||
                     expandedIslandMaterialApplying.get() == true ||
                     expandedIslandGlassSurfaces.contains(view) ||
                     view.tag == SHORTCUT_GLASS_TAG ||
-                    view.tag == LOCKSCREEN_CAPSULE_MATERIAL_TAG
+                    view.tag == LOCKSCREEN_CAPSULE_MATERIAL_TAG ||
+                    classicCcShadeOverride(view) != null
             },
             isShadeBackgroundView = ::isShadeBackgroundView,
             isNotificationRowBackground = ::isNotificationRowBackground,
@@ -4259,6 +4333,10 @@ class HyperSystemUiModule : XposedModule() {
             isVolumePanelSurface = ::isVolumePanelSurface,
         ).also { it.install(preferences, classLoader) }
         iosNotificationClockGlassRuntime = btm.m.os4.systemuihook.newnotificationcenter.IosNotificationClockGlassRuntime(preferences) {
+            softGlassRefreshHandler.removeCallbacks(softGlassRefresh)
+            softGlassRefreshHandler.postDelayed(softGlassRefresh, 16L)
+        }
+        classicCcShadeRuntime = ClassicControlCenterRuntimeSettings(preferences) {
             softGlassRefreshHandler.removeCallbacks(softGlassRefresh)
             softGlassRefreshHandler.postDelayed(softGlassRefresh, 16L)
         }
@@ -4308,6 +4386,7 @@ class HyperSystemUiModule : XposedModule() {
                         return@intercept result
                     }
                     val normal = if (original.size >= 42 && original.any { it != 0f } &&
+                        currentSystemNotificationMaterialType(classLoader) == "GLASS" &&
                         shouldUseNormalNotificationMaterial(view, preferences)) normalNotificationGlassParams(view) else null
                     if (settings?.enabled != true || !isSoftGlassSurface(view)) {
                         updateStandaloneSoftGlass(view, false)
@@ -4352,7 +4431,28 @@ class HyperSystemUiModule : XposedModule() {
                             softGlassBlur(chain.getArg(1) as Int, clockSettings.refractionBlur),
                         ))
                     }
-                    if (!settings.enabled || !isSoftGlassSurface(view)) return@intercept chain.proceed()
+                    val classicShade = classicCcShadeOverride(view)
+                    if (classicShade != null) {
+                        rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0), chain.getArg(1)))
+                        return@intercept chain.proceedWith(view, arrayOf(
+                            softGlassBlur(chain.getArg(0) as Int, classicShade.shadeGlassBlur),
+                            softGlassBlur(chain.getArg(1) as Int, classicShade.shadeGlassBlur),
+                        ))
+                    }
+                    if (isClassicCcShadeSurface(view)) {
+                        rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0), chain.getArg(1)))
+                    }
+                    if (!settings.enabled) {
+                        val classicRefraction = classicCcShadeGlassBlurFallback(view)
+                        if (classicRefraction != null) {
+                            return@intercept chain.proceedWith(view, arrayOf(
+                                softGlassBlur(chain.getArg(0) as Int, classicRefraction),
+                                softGlassBlur(chain.getArg(1) as Int, classicRefraction),
+                            ))
+                        }
+                        return@intercept chain.proceed()
+                    }
+                    if (!isSoftGlassSurface(view)) return@intercept chain.proceed()
                     rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0), chain.getArg(1)))
                     // GlassToken.blurRadius is separate from the ordinary background blur.
                     // Keep both native samples and their animation-zero values independent.
@@ -4371,6 +4471,14 @@ class HyperSystemUiModule : XposedModule() {
                     if (clockSettings != null) {
                         rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0)))
                         return@intercept chain.proceedWith(view, arrayOf(softGlassBlur(chain.getArg(0) as Int, clockSettings.backgroundBlur)))
+                    }
+                    val classicShade = classicCcShadeOverride(view)
+                    if (classicShade != null) {
+                        rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0)))
+                        return@intercept chain.proceedWith(view, arrayOf(softGlassBlur(chain.getArg(0) as Int, classicShade.shadeBackgroundBlur)))
+                    }
+                    if (isClassicCcShadeSurface(view)) {
+                        rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0)))
                     }
                     clearFrostHooks?.handleBackgroundBlurRadius(view, method, chain.getArg(0) as Int) { args ->
                         chain.proceedWith(view, args)
@@ -4392,6 +4500,14 @@ class HyperSystemUiModule : XposedModule() {
                     if (clockSettings != null) {
                         rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0)))
                         return@intercept chain.proceedWith(view, arrayOf(softGlassScale(chain.getArg(0) as Float, clockSettings.backgroundScale)))
+                    }
+                    val classicShade = classicCcShadeOverride(view)
+                    if (classicShade != null) {
+                        rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0)))
+                        return@intercept chain.proceedWith(view, arrayOf(softGlassScale(chain.getArg(0) as Float, classicShade.shadeBackgroundScale)))
+                    }
+                    if (isClassicCcShadeSurface(view)) {
+                        rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0)))
                     }
                     clearFrostHooks?.handleBackgroundBlurScaleRatio(view, method, chain.getArg(0) as Float) { args ->
                         chain.proceedWith(view, args)
@@ -4420,6 +4536,21 @@ class HyperSystemUiModule : XposedModule() {
                         } finally {
                             softGlassBlendDispatching.remove()
                         }
+                    }
+                    val classicShade = classicCcShadeOverride(view)
+                    if (classicShade != null) {
+                        val copy = ArrayList(original.filterIsInstance<Point>().map { Point(it.x, it.y) })
+                        rememberSoftGlassBaseline(view, method, arrayOf(copy))
+                        softGlassBlendDispatching.set(true)
+                        try {
+                            return@intercept chain.proceedWith(view, arrayOf(softGlassBlendPoints(copy, classicShade.shadeBackgroundOpacity)))
+                        } finally {
+                            softGlassBlendDispatching.remove()
+                        }
+                    }
+                    if (isClassicCcShadeSurface(view)) {
+                        val copy = ArrayList(original.filterIsInstance<Point>().map { Point(it.x, it.y) })
+                        rememberSoftGlassBaseline(view, method, arrayOf(copy))
                     }
                     clearFrostHooks?.handleBackgroundBlendColors(view, method, original) { args ->
                         chain.proceedWith(view, args)
@@ -4470,6 +4601,23 @@ class HyperSystemUiModule : XposedModule() {
                         softGlassBlendDispatching.remove()
                     }
                 }
+                val classicShade = classicCcShadeOverride(view)
+                if (classicShade != null) {
+                    if (softGlassRefreshing.get() != true) synchronized(softGlassBaselines) {
+                        softGlassLegacyBlends.getOrPut(view) { arrayListOf() }.add(Point(chain.getArg(0) as Int, chain.getArg(1) as Int))
+                    }
+                    softGlassBlendDispatching.set(true)
+                    return@intercept try {
+                        chain.proceedWith(view, arrayOf(softGlassColorAlpha(chain.getArg(0) as Int, classicShade.shadeBackgroundOpacity), chain.getArg(1)))
+                    } finally {
+                        softGlassBlendDispatching.remove()
+                    }
+                }
+                if (isClassicCcShadeSurface(view) && softGlassRefreshing.get() != true) {
+                    synchronized(softGlassBaselines) {
+                        softGlassLegacyBlends.getOrPut(view) { arrayListOf() }.add(Point(chain.getArg(0) as Int, chain.getArg(1) as Int))
+                    }
+                }
                 if (clearFrostHooks?.isActive(view) == true) return@intercept chain.proceed()
                 if (!settings.enabled || !isSoftGlassBlendSurface(view)) return@intercept chain.proceed()
                 if (softGlassRefreshing.get() != true) synchronized(softGlassBaselines) {
@@ -4491,6 +4639,21 @@ class HyperSystemUiModule : XposedModule() {
                     val settings = softGlassRuntime?.settings ?: return@intercept chain.proceed()
                     if (isVolumePanelSurface(view)) return@intercept chain.proceed()
                     val originalSelf = chain.getArg(1) as? ArrayList<*>
+                    val classicShade = classicCcShadeOverride(view)
+                    if (classicShade != null && originalSelf != null) {
+                        val copy = ArrayList(originalSelf.filterIsInstance<Point>().map { Point(it.x, it.y) })
+                        rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0), copy))
+                        softGlassBlendDispatching.set(true)
+                        return@intercept try {
+                            chain.proceedWith(view, arrayOf(softGlassBlur(chain.getArg(0) as Int, classicShade.shadeBackgroundBlur), softGlassBlendPoints(copy, classicShade.shadeBackgroundOpacity)))
+                        } finally {
+                            softGlassBlendDispatching.remove()
+                        }
+                    }
+                    if (originalSelf != null && isClassicCcShadeSurface(view)) {
+                        val copy = ArrayList(originalSelf.filterIsInstance<Point>().map { Point(it.x, it.y) })
+                        rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0), copy))
+                    }
                     if (originalSelf != null) {
                         clearFrostHooks?.handleSelfBlur(view, method, chain.getArg(0) as Int, originalSelf) { args ->
                             chain.proceedWith(view, args)
@@ -4514,6 +4677,16 @@ class HyperSystemUiModule : XposedModule() {
                 .intercept { chain ->
                     val view = chain.thisObject as? View ?: return@intercept chain.proceed()
                     val settings = softGlassRuntime?.settings ?: return@intercept chain.proceed()
+                    val classicShade = classicCcShadeOverride(view)
+                    if (classicShade != null &&
+                        (softGlassRefreshing.get() == true || stackContainsAny("ShadeWindowBlurController", "ShadeSolidBackgroundController"))
+                    ) {
+                        rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0)))
+                        return@intercept chain.proceedWith(view, arrayOf(softGlassColorAlpha(chain.getArg(0) as Int, classicShade.shadeBackgroundOpacity)))
+                    }
+                    if (stackContainsAny("ShadeWindowBlurController", "ShadeSolidBackgroundController") && isClassicCcShadeSurface(view)) {
+                        rememberSoftGlassBaseline(view, method, arrayOf(chain.getArg(0)))
+                    }
                     clearFrostHooks?.handleBackgroundColor(view, method, chain.getArg(0) as Int) { args ->
                         chain.proceedWith(view, args)
                     }?.takeIf { it.first }?.let { return@intercept it.second }
@@ -4766,7 +4939,7 @@ class HyperSystemUiModule : XposedModule() {
                     val clock = chain.thisObject as? View ?: return@intercept chain.proceed()
                     val sourceRect = chain.getArg(0) as? Rect ?: return@intercept chain.proceed()
                     val rect = Rect(sourceRect)
-                    val offset = if (preferences.getBoolean(KEY_LOCKSCREEN_CLOCK_HORIZONTAL_MOVE, false) &&
+                    val offset = if (readLockscreenClockHorizontalEnabled(clock.context, preferences) &&
                         !notificationField.getBoolean(clock)
                     ) {
                         clockHorizontalLiveOffsets[clock]
@@ -4791,7 +4964,7 @@ class HyperSystemUiModule : XposedModule() {
                         rect.offset(shift, 0)
                         clockHorizontalRectOffsets[clock] = Rect(rect) to shift
                     }
-                    chain.proceed()
+                    chain.proceed(arrayOf(rect))
                 }
             btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed lockscreen clock horizontal rect hook for $scope")
         }.onFailure { error ->
@@ -4875,7 +5048,7 @@ class HyperSystemUiModule : XposedModule() {
                     .intercept { chain ->
                         val result = chain.proceed()
                         val view = chain.thisObject as? View
-                        if (view != null && preferences.getBoolean(KEY_LOCKSCREEN_CLOCK_HORIZONTAL_MOVE, false)) {
+                        if (view != null && readLockscreenClockHorizontalEnabled(view.context, preferences)) {
                             clockHorizontalEditorShifts.remove(view)
                             clockHorizontalEditorClockShifts.remove(view)
                             applyEditorClockHorizontalOffset(
@@ -4895,7 +5068,7 @@ class HyperSystemUiModule : XposedModule() {
                         .intercept { chain ->
                             val result = chain.proceed()
                             val view = chain.thisObject as? View
-                            if (view != null && preferences.getBoolean(KEY_LOCKSCREEN_CLOCK_HORIZONTAL_MOVE, false)) {
+                            if (view != null && readLockscreenClockHorizontalEnabled(view.context, preferences)) {
                                 clockHorizontalEditorShifts.remove(view)
                                 applyEditorClockHorizontalOffset(
                                     view,
@@ -4911,7 +5084,7 @@ class HyperSystemUiModule : XposedModule() {
                 .intercept { chain ->
                     val result = chain.proceed()
                     val view = chain.thisObject as? View
-                    if (view != null && preferences.getBoolean(KEY_LOCKSCREEN_CLOCK_HORIZONTAL_MOVE, false)) {
+                    if (view != null && readLockscreenClockHorizontalEnabled(view.context, preferences)) {
                         applyEditorClockHorizontalOffset(view, readLockscreenClockHorizontalOffset(view.context))
                     }
                     result
@@ -4922,13 +5095,35 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
+    private fun isTouchInsideClockMoveArea(editor: View, event: MotionEvent): Boolean {
+        val rawX = event.rawX
+        val rawY = event.rawY
+        val timeFrame = runCatching { findField(editor.javaClass, "mTimeAreaFrame")?.get(editor) as? View }.getOrNull()
+            ?: return false
+        if (timeFrame.visibility != View.VISIBLE) return false
+        val rect = Rect()
+        if (!timeFrame.getGlobalVisibleRect(rect)) return false
+        if (!rect.contains(rawX.roundToInt(), rawY.roundToInt())) return false
+        // Exclude bottom-right corner resize handle so resizing never triggers horizontal clock drag.
+        val corner = runCatching { findField(editor.javaClass, "cornerHandleView")?.get(editor) as? View }.getOrNull()
+        if (corner != null && corner.visibility == View.VISIBLE) {
+            val handleRect = Rect()
+            if (corner.getGlobalVisibleRect(handleRect)) {
+                val pad = (20f * editor.resources.displayMetrics.density).roundToInt()
+                handleRect.inset(-pad, -pad)
+                if (handleRect.contains(rawX.roundToInt(), rawY.roundToInt())) return false
+            }
+        }
+        return true
+    }
+
     private fun handleLockscreenClockHorizontalTouch(
         editor: View,
         event: MotionEvent,
         preferences: SharedPreferences,
         eventX: Float? = null,
     ) {
-        if (!preferences.getBoolean(KEY_LOCKSCREEN_CLOCK_HORIZONTAL_MOVE, false) ||
+        if (!readLockscreenClockHorizontalEnabled(editor.context, preferences) ||
             event.pointerCount != 1
         ) {
             if (event.actionMasked == MotionEvent.ACTION_CANCEL ||
@@ -4942,10 +5137,14 @@ class HyperSystemUiModule : XposedModule() {
         val x = eventX?.takeIf { it.isFinite() } ?: event.x
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                clockHorizontalDrags[editor] = ClockHorizontalDrag(
-                    x,
-                    readLockscreenClockHorizontalOffset(editor.context),
-                )
+                if (isTouchInsideClockMoveArea(editor, event)) {
+                    clockHorizontalDrags[editor] = ClockHorizontalDrag(
+                        x,
+                        readLockscreenClockHorizontalOffset(editor.context),
+                    )
+                } else {
+                    clockHorizontalDrags.remove(editor)
+                }
             }
             MotionEvent.ACTION_MOVE,
             MotionEvent.ACTION_UP,
@@ -4972,7 +5171,10 @@ class HyperSystemUiModule : XposedModule() {
                     clockHorizontalDrags.remove(editor)
                 }
             }
-            MotionEvent.ACTION_CANCEL -> clockHorizontalDrags.remove(editor)
+            MotionEvent.ACTION_CANCEL -> {
+                clearEditorClockHorizontalPreview(editor)
+                clockHorizontalDrags.remove(editor)
+            }
         }
     }
 
@@ -4990,6 +5192,7 @@ class HyperSystemUiModule : XposedModule() {
         val base = clockHorizontalEditorClockShifts[editor] ?: 0
         forEachEditorClock(editor) { clock ->
             clock.translationX = (base + delta).toFloat()
+            clock.invalidate()
         }
     }
 
@@ -5603,6 +5806,26 @@ class HyperSystemUiModule : XposedModule() {
         btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Installed focus notification normal-material enforcement ($effectHookCount effects)")
     }
 
+    private fun currentSystemNotificationMaterialType(classLoader: ClassLoader): String? = runCatching {
+        val compat = Class.forName(SYSTEMUI_MI_BLUR_COMPAT_CLASS, false, classLoader)
+        val field = compat.getDeclaredField("materialStyle").apply { isAccessible = true }
+        (field.get(null) as? Enum<*>)?.name ?: field.get(null)?.toString()
+    }.getOrNull()
+
+    private fun clearNotificationGlassIfNeeded(view: View?, classLoader: ClassLoader) {
+        if (view == null) return
+        runCatching {
+            val glassCompat = Class.forName(MI_GLASS_COMPAT_CLASS, false, classLoader)
+            glassCompat.getMethod("setMiGlassCompat", View::class.java, FloatArray::class.java)
+                .invoke(null, view, FloatArray(42))
+            glassCompat.getMethod("setMiViewMaterialTypeCompat", Int::class.javaPrimitiveType, View::class.java)
+                .invoke(null, 0, view)
+        }.onFailure {
+            runCatching { View::class.java.getMethod("setMiGlass", FloatArray::class.java).invoke(view, FloatArray(42)) }
+            runCatching { View::class.java.getMethod("setMiViewMaterialType", Int::class.javaPrimitiveType).invoke(view, 0) }
+        }
+    }
+
     private fun applyNormalMediaNotificationEffect(
         header: View,
         context: Context,
@@ -5612,7 +5835,20 @@ class HyperSystemUiModule : XposedModule() {
         if (mediaMaterialApplying.get() == true) return
         mediaMaterialApplying.set(true)
         runCatching {
-            val effectClass = classLoader.loadClass(MEDIA_NOTIFICATION_GLASS_EFFECT_CLASS)
+            val materialType = currentSystemNotificationMaterialType(classLoader)
+            val targetClassName = when (materialType) {
+                "BLUR" -> MEDIA_NOTIFICATION_BLUR_EFFECT_CLASS
+                "NONE" -> MEDIA_NOTIFICATION_NORMAL_EFFECT_CLASS
+                else -> MEDIA_NOTIFICATION_GLASS_EFFECT_CLASS
+            }
+            if (materialType != "GLASS") {
+                val holder = header.javaClass.methods.firstOrNull {
+                    it.name == "getMediaViewHolder" && it.parameterCount == 0
+                }?.invoke(header)
+                val mediaBg = holder?.let { readInstanceField(it, "mediaBg") as? View }
+                clearNotificationGlassIfNeeded(mediaBg, classLoader)
+            }
+            val effectClass = classLoader.loadClass(targetClassName)
             val instance = effectClass.fields.firstOrNull { it.name == "INSTANCE" }?.get(null)
                 ?: effectClass.declaredFields.firstOrNull { it.name == "INSTANCE" }
                     ?.apply { isAccessible = true }
@@ -5622,12 +5858,12 @@ class HyperSystemUiModule : XposedModule() {
                 it.name == "apply" && it.parameterCount == 2
             } ?: return@runCatching
             apply.invoke(instance, header, context)
-            val hit = "$source:${header.javaClass.name}"
+            val hit = "$source:$materialType:${header.javaClass.name}"
             if (focusMaterialEnforcementHits.add("media:$hit")) {
-                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Re-applied normal media notification glass ($source)")
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Re-applied normal media notification material ($materialType, $source)")
             }
         }.onFailure { error ->
-            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not re-apply normal media notification glass", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not re-apply normal media notification material", error)
         }.also {
             mediaMaterialApplying.remove()
         }
@@ -5639,8 +5875,25 @@ class HyperSystemUiModule : XposedModule() {
         classLoader: ClassLoader,
         source: String,
     ) {
+        if (focusMaterialApplying.get() == true) return
+        focusMaterialApplying.set(true)
         runCatching {
-            val effectClass = classLoader.loadClass(NOTIFICATION_ROW_GLASS_EFFECT_CLASS)
+            val materialType = currentSystemNotificationMaterialType(classLoader)
+            val targetClassName = when (materialType) {
+                "BLUR" -> NOTIFICATION_ROW_BLUR_EFFECT_CLASS
+                "NONE" -> NOTIFICATION_ROW_NORMAL_EFFECT_CLASS
+                else -> NOTIFICATION_ROW_GLASS_EFFECT_CLASS
+            }
+            if (materialType != "GLASS") {
+                val injector = row.javaClass.methods.firstOrNull {
+                    it.name == "getInjector" && it.parameterCount == 0
+                }?.invoke(row)
+                val bgNormal = injector?.javaClass?.methods?.firstOrNull {
+                    it.name == "getBackgroundNormal" && it.parameterCount == 0
+                }?.invoke(injector) as? View
+                clearNotificationGlassIfNeeded(bgNormal, classLoader)
+            }
+            val effectClass = classLoader.loadClass(targetClassName)
             val instance = effectClass.fields.firstOrNull { it.name == "INSTANCE" }?.get(null)
                 ?: effectClass.declaredFields.firstOrNull { it.name == "INSTANCE" }
                     ?.apply { isAccessible = true }
@@ -5650,12 +5903,14 @@ class HyperSystemUiModule : XposedModule() {
                 it.name == "apply" && it.parameterCount == 2
             } ?: return@runCatching
             apply.invoke(instance, row, context)
-            val hit = "$source:${row.javaClass.name}"
+            val hit = "$source:$materialType:${row.javaClass.name}"
             if (focusMaterialEnforcementHits.add(hit)) {
-                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Re-applied normal notification glass after focus effect ($source)")
+                btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.INFO, TAG, "Re-applied normal notification material after focus effect ($materialType, $source)")
             }
         }.onFailure { error ->
-            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not re-apply normal notification glass after focus effect", error)
+            btm.m.os4.systemuihook.HookModuleLogger.log(this, Log.WARN, TAG, "Could not re-apply normal notification material after focus effect", error)
+        }.also {
+            focusMaterialApplying.remove()
         }
     }
 
@@ -5704,6 +5959,7 @@ class HyperSystemUiModule : XposedModule() {
                             val view = chain.thisObject as? View
                             val unify = preferences.getBoolean(KEY_UNIFY_NOTIFICATION_MATERIAL, false)
                             val isFocus = unify && view != null &&
+                                currentSystemNotificationMaterialType(classLoader) != "NONE" &&
                                 isNotificationRowBackground(view) &&
                                 notificationTypeFor(view) == NotificationMaterialType.FOCUS
                             if (!isFocus) {
@@ -12165,10 +12421,20 @@ class HyperSystemUiModule : XposedModule() {
             "miui.systemui.controlcenter.panel.main.header.MainPanelHeaderController"
         private const val NOTIFICATION_BACKGROUND_VIEW_CLASS =
             "com.android.systemui.statusbar.notification.row.NotificationBackgroundView"
+        private const val SYSTEMUI_MI_BLUR_COMPAT_CLASS =
+            "com.miui.systemui.util.MiBlurCompat"
         private const val NOTIFICATION_ROW_GLASS_EFFECT_CLASS =
             "com.android.systemui.statusbar.notification.style.vieweffect.NotificationRowGlassEffect"
+        private const val NOTIFICATION_ROW_BLUR_EFFECT_CLASS =
+            "com.android.systemui.statusbar.notification.style.vieweffect.NotificationRowBlurEffect"
+        private const val NOTIFICATION_ROW_NORMAL_EFFECT_CLASS =
+            "com.android.systemui.statusbar.notification.style.vieweffect.NotificationRowNormalEffect"
         private const val MEDIA_NOTIFICATION_GLASS_EFFECT_CLASS =
             "com.android.systemui.statusbar.notification.style.vieweffect.MediaViewGlassEffect"
+        private const val MEDIA_NOTIFICATION_BLUR_EFFECT_CLASS =
+            "com.android.systemui.statusbar.notification.style.vieweffect.MediaViewBlurEffect"
+        private const val MEDIA_NOTIFICATION_NORMAL_EFFECT_CLASS =
+            "com.android.systemui.statusbar.notification.style.vieweffect.MediaViewNormalEffect"
         private val FOCUS_NOTIFICATION_EFFECT_CLASSES = listOf(
             "com.android.systemui.statusbar.notification.style.vieweffect.FocusNotificationNormalEffect",
             "com.android.systemui.statusbar.notification.style.vieweffect.FocusNotificationNormalCustomBgEffect",
@@ -12598,6 +12864,7 @@ class HyperSystemUiModule : XposedModule() {
         )
         private val fodEnrollmentFlowOverrides = WeakHashMap<Any, Any>()
         private val mediaMaterialApplying = ThreadLocal<Boolean>()
+        private val focusMaterialApplying = ThreadLocal<Boolean>()
         private val normalNotificationGlassParamsCache =
             WeakHashMap<Resources, MutableMap<String, FloatArray>>()
         private val controlCenterMaterialHits = Collections.synchronizedSet(mutableSetOf<String>())

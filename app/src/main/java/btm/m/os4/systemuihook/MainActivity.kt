@@ -330,10 +330,10 @@ private enum class PageId {
     CLEAR_FROST_PRESETS,
     CAMERA_WATERMARKS,
     CAMERA_SHUTTER_SOUNDS,
-    IOS_NOTIFICATION_CLOCK_GLASS, CONTROL_CENTER_TOP_BUTTONS, CONTROL_CENTER_TILE_LAYOUT, CONTROL_CENTER_TILE_LAYOUT_LANDSCAPE, CONTROL_CENTER_MULTI_PAGE, CONTROL_CENTER_FOCUS_MODE, CONTROL_CENTER_FOCUS_MODE_EDITOR,
+    IOS_NOTIFICATION_CLOCK_GLASS, CONTROL_CENTER_TOP_BUTTONS, CONTROL_CENTER_TILE_LAYOUT, CONTROL_CENTER_TILE_LAYOUT_LANDSCAPE, CONTROL_CENTER_MULTI_PAGE, CONTROL_CENTER_FOCUS_MODE, CONTROL_CENTER_FOCUS_MODE_EDITOR, CLASSIC_CONTROL_CENTER, CLASSIC_CONTROL_CENTER_PRESETS,
     GESTURE_HANDLE_STYLE, DESKTOP, DESKTOP_MATERIAL,
     ISLAND, ISLAND_COLLAPSED, ISLAND_EXPANDED, ISLAND_EXPANDED_BACKGROUND, IOS_NOTIFICATION_CENTER, IOS_NOTIFICATION_HEADER_SETTINGS, UNLOCK_ISLAND, NOTIFICATION_RESTRICTIONS, NOTIFICATION_MEDIA_CARD, STATUS, STATUS_ADJUSTMENT, STATUS_SIGNAL_CUSTOMIZATION, STATUS_SIGNAL_TUNING, CONTROL, LOCK, LOCKSCREEN_MUSIC, LOCKSCREEN_CAPSULE, LOCKSCREEN_SHORTCUT_BACKGROUND, LIFT_TO_WAKE_SCHEDULE, LOCKSCREEN_WIDGET_EDITOR, LOCKSCREEN_WIDGET_BACKGROUND, LYRIC_LIBRARY, RASTER_WALLPAPER, SUPER_XIAOAI, CAMERA, CAMERA_PALETTE, SYSTEM_UPDATE, SYSTEM_SETTINGS, SYSTEM_FRAMEWORK, DEVICE_PROFILE,
-    DEVICE_PROFILE_PRESETS, DEVICE_PROFILE_CLOUD_PRESETS, CUSTOM_DEPTH_WALLPAPER,
+    DEVICE_PROFILE_PRESETS, DEVICE_PROFILE_CLOUD_PRESETS, CUSTOM_DEPTH_WALLPAPER, LOCKSCREEN_CLOCK_FONT_LIBRARY,
     SETTINGS_FLOATING_SEARCH_PARAMETERS, SETTINGS_APPEARANCE_HOME, SETTINGS_APPEARANCE_DEVICE, SETTINGS_ENTRY_LABELS, SETTINGS_ENTRY_ICONS, SETTINGS_ENTRY_APPEARANCE, THEME_AND_COLOR, TUTORIAL_DEVICE_CARD, ABOUT, LICENSE, LANGUAGE, DONATE, OPEN, CONTRIBUTORS,
     LEGAL_DISCLAIMER, LEGAL_PRIVACY, LEGAL_USER_AGREEMENT,
     SOFTWARE_UPDATE, UPDATE_LOG, REAR_SCREEN, REAR_SCREEN_SHELL, REAR_CUSTOM_CENTER, REAR_MUSIC_APPS, REAR_SWIPE_APP, REAR_MINI_PLAYER, OTHER, SIDEBAR, SIDEBAR_GLASS, PERSONAL_ASSISTANT, ASSISTANT_WIDGET_GLASS, WIDGETS, CONTACTS_DIALER, CONTACTS_DIALER_BACKGROUND, PORTAL, PORTAL_MATERIAL, APP_NAVIGATION, RESTART_SCOPES, DISCLAIMER, SIMULATE_MEDIA_NOTIFICATION, SIMULATE_ISLAND, MODULE_PRESET_IMPORT_PREVIEW,
@@ -397,7 +397,9 @@ private fun categoryIconResource(page: PageId?): Int? = when (page) {
     PageId.CONTROL_CENTER_TILE_LAYOUT_LANDSCAPE,
     PageId.CONTROL_CENTER_MULTI_PAGE,
     PageId.CONTROL_CENTER_FOCUS_MODE,
-    PageId.CONTROL_CENTER_FOCUS_MODE_EDITOR -> R.drawable.hc_home_statusbar
+    PageId.CONTROL_CENTER_FOCUS_MODE_EDITOR,
+    PageId.CLASSIC_CONTROL_CENTER,
+    PageId.CLASSIC_CONTROL_CENTER_PRESETS -> R.drawable.hc_home_statusbar
     PageId.LOCK,
     PageId.LOCKSCREEN_MUSIC,
     PageId.LOCKSCREEN_CAPSULE,
@@ -407,7 +409,8 @@ private fun categoryIconResource(page: PageId?): Int? = when (page) {
     PageId.LOCKSCREEN_WIDGET_BACKGROUND,
     PageId.LYRIC_LIBRARY,
     PageId.RASTER_WALLPAPER,
-    PageId.CUSTOM_DEPTH_WALLPAPER -> R.drawable.hc_home_lockscreen
+    PageId.CUSTOM_DEPTH_WALLPAPER,
+    PageId.LOCKSCREEN_CLOCK_FONT_LIBRARY -> R.drawable.hc_home_lockscreen
     PageId.SYSTEM_FRAMEWORK -> R.drawable.hc_home_framework
     PageId.SUPER_XIAOAI -> R.drawable.hc_home_xiaoai
     PageId.CAMERA,
@@ -733,10 +736,13 @@ private fun categoryDeepSearchItems(): List<CategorySearchItem> {
         entry("状态栏信号自定义", "状态栏信号自定义", PageId.STATUS_SIGNAL_CUSTOMIZATION, ui),
         entry("控制中心顶部按钮", "控制中心顶部按钮", PageId.CONTROL_CENTER_TOP_BUTTONS, ui),
         entry("cc_layout_title", "控制中心磁贴布局自定义", PageId.CONTROL_CENTER_TILE_LAYOUT, ui),
+        entry("classic_cc_title", "经典控制中心优化", PageId.CLASSIC_CONTROL_CENTER, ui),
+        entry("classic_cc_presets", "经典控制中心预设", PageId.CLASSIC_CONTROL_CENTER_PRESETS, ui),
         entry("音乐锁屏", "音乐锁屏", PageId.LOCKSCREEN_MUSIC, ui),
         entry("锁屏快捷功能背景", "锁屏快捷功能背景", PageId.LOCKSCREEN_SHORTCUT_BACKGROUND, ui, ScopeApplication.AOD),
         entry("定时抬起亮屏", "定时抬起亮屏", PageId.LIFT_TO_WAKE_SCHEDULE, ui),
         entry("自定义景深壁纸", "自定义景深壁纸", PageId.CUSTOM_DEPTH_WALLPAPER, ui, ScopeApplication.AOD),
+        entry("lockscreen_clock_font_library", "时钟字体库", PageId.LOCKSCREEN_CLOCK_FONT_LIBRARY, ui, ScopeApplication.AOD),
         entry("我的设备与全部参数", "我的设备与全部参数", PageId.DEVICE_PROFILE, settings),
         entry("settingsEntryLabels", "自定义系统设置入口文案", PageId.SETTINGS_ENTRY_LABELS, settings),
         entry("settingsEntryIcons", "自定义系统设置入口图标", PageId.SETTINGS_ENTRY_ICONS, settings),
@@ -826,6 +832,8 @@ private fun categorySearchKeywords(page: PageId?): String = when (page) {
     } else ""
     PageId.CONTROL_CENTER_FOCUS_MODE,
     PageId.CONTROL_CENTER_FOCUS_MODE_EDITOR -> "控制中心 专注模式 勿扰 睡眠 驾驶 工作 图标 文本 control center focus mode dnd sleep driving work"
+    PageId.CLASSIC_CONTROL_CENTER,
+    PageId.CLASSIC_CONTROL_CENTER_PRESETS -> "经典控制中心 旧版控制中心 快捷设置 磁贴 模糊 柔光玻璃 清透磨砂 预设 亮度条 音量条 自动亮度 顶栏 classic control center presets qs tiles blur glass frost brightness volume"
     PageId.LOCK -> "锁屏 时钟 壁纸 小组件 keyguard lockscreen clock wallpaper widgets"
     PageId.LOCKSCREEN_MUSIC -> "锁屏 音乐 专辑 封面 歌词 lockscreen music album cover lyrics"
     PageId.LOCKSCREEN_CAPSULE -> "锁屏 胶囊 通知 媒体 lockscreen capsule notification media"
@@ -834,6 +842,7 @@ private fun categorySearchKeywords(page: PageId?): String = when (page) {
     PageId.UNLOCK_ISLAND -> "解锁岛 指纹 人脸 动画 unlock island fingerprint face animation"
     PageId.LIFT_TO_WAKE_SCHEDULE -> "抬起亮屏 时间段 定时 raise lift wake schedule"
     PageId.CUSTOM_DEPTH_WALLPAPER -> "锁屏 景深 壁纸 depth wallpaper lockscreen"
+    PageId.LOCKSCREEN_CLOCK_FONT_LIBRARY -> "锁屏 时钟 字体 字体库 导入 避让 三星 lockscreen clock font library custom import avoidance"
     PageId.RASTER_WALLPAPER -> "光栅 壁纸 倾斜 raster wallpaper tilt"
     PageId.SYSTEM_FRAMEWORK -> "系统框架 小窗 音量 截图 system framework floating window volume screenshot"
     PageId.SYSTEM_SETTINGS -> "系统设置 我的设备 外观 settings device appearance"
@@ -1388,6 +1397,7 @@ private fun Root(
                 ControlCenterTileLayoutLandscapeSettingsStore(context).syncRemote(it)
                 ControlCenterMultiPageSettingsStore(context).syncRemote(it)
                 ControlCenterMediaBigCoverSettingsStore(context).syncRemote(it)
+                ClassicControlCenterSettingsStore(context).syncRemote(it)
                 ControlCenterFocusModeSettingsStore(context).syncRemote(it)
                 IosNotificationBottomOffsetSettingsStore(context).syncRemote(it)
                 IosNotificationExpansionSettingsStore(context).syncRemote(it)
@@ -1400,6 +1410,7 @@ private fun Root(
                 DynamicIslandAppearanceSettingsStore(context).syncRemote(it)
                 LockscreenFaceUnlockSettingsStore(context).syncRemote(it)
                 LockscreenBottomSettingsStore(context).syncRemote(it)
+                LockscreenClockCustomSettingsStore(context).syncRemote(it)
                 musicStore.syncRemote(it)
                 HomeGlassSettingsStore(context).syncRemote(it)
                 dockStore.syncRemote(it)
@@ -6346,6 +6357,8 @@ private fun Detail(
             modeId = pendingFocusModeEditId,
             back = back,
         )
+        PageId.CLASSIC_CONTROL_CENTER -> ClassicControlCenterPage({ openPage(PageId.CLASSIC_CONTROL_CENTER_PRESETS) }, back)
+        PageId.CLASSIC_CONTROL_CENTER_PRESETS -> ClassicControlCenterPresetsPage(back)
         PageId.STATUS -> Status(settings, update, openPage, back)
         PageId.STATUS_ADJUSTMENT -> StatusAdjustment(settings, update, back)
         PageId.STATUS_SIGNAL_CUSTOMIZATION -> StatusSignalCustomization(settings, update, openPage, back)
@@ -6354,6 +6367,7 @@ private fun Detail(
         PageId.CONTROL -> Control(back)
         PageId.LOCK -> Lock(settings, lockscreenCapsuleSettings, update, openPage, back)
         PageId.CUSTOM_DEPTH_WALLPAPER -> CustomDepthWallpaperPage(back)
+        PageId.LOCKSCREEN_CLOCK_FONT_LIBRARY -> LockscreenClockFontLibraryPage(back)
         PageId.LOCKSCREEN_MUSIC -> MusicLockscreenPage(settings, update, openPage, back)
         PageId.LOCKSCREEN_CAPSULE -> LockscreenCapsule(lockscreenCapsuleSettings, updateLockscreenCapsule, back)
         PageId.LOCKSCREEN_SHORTCUT_BACKGROUND -> LockscreenShortcutBackgroundPage(back)
@@ -9859,6 +9873,10 @@ private fun Status(
         item {
             Group(tr("\u63a7\u5236\u4e2d\u5fc3", "\u63a7\u5236\u4e2d\u5fc3")) {
                 SharedViewArrowPreference(
+                    title = tr("classic_cc_title", "经典控制中心优化"),
+                    onClick = { open(PageId.CLASSIC_CONTROL_CENTER) },
+                )
+                SharedViewArrowPreference(
                     title = tr("cc_layout_title", "控制中心磁贴布局自定义"),
                     onClick = { open(PageId.CONTROL_CENTER_TILE_LAYOUT) },
                 )
@@ -10833,6 +10851,18 @@ private fun Lock(
     var lockscreenBottomSettings by remember {
         mutableStateOf(lockscreenBottomStore.settings)
     }
+    val clockCustomStore = remember(context) {
+        LockscreenClockCustomSettingsStore(context)
+    }
+    val clockFontLibrary = remember(context) {
+        LockscreenClockFontLibrary(context)
+    }
+    var clockCustomSettings by remember {
+        mutableStateOf(clockCustomStore.settings)
+    }
+    var clockFontCount by remember {
+        mutableIntStateOf(clockFontLibrary.list().size)
+    }
     val updateLockscreenBottom: ((LockscreenBottomSettings) -> LockscreenBottomSettings) -> Unit = { transform ->
         lockscreenBottomStore.update(clockHorizontalService, transform)
         lockscreenBottomSettings = lockscreenBottomStore.settings
@@ -10845,6 +10875,9 @@ private fun Lock(
             lockscreenNotificationOffsetSettings = lockscreenNotificationOffsetStore.settings
             lockscreenBottomStore.syncRemote(it)
             lockscreenBottomSettings = lockscreenBottomStore.settings
+            clockCustomStore.syncRemote(it)
+            clockCustomSettings = clockCustomStore.settings
+            clockFontCount = clockFontLibrary.list().size
         }
     }
 
@@ -10969,6 +11002,26 @@ private fun Lock(
         }
         item {
             Group(tr("\u65f6\u949f\u4e0e\u72b6\u6001\u680f", "\u65f6\u949f\u4e0e\u72b6\u6001\u680f")) {
+                SharedViewArrowPreference(
+                    title = tr("lockscreen_clock_font_library", "时钟字体库"),
+                    summary = if (clockFontCount > 0) {
+                        tr("lockscreen_clock_font_count", "已导入 %d 个字体").format(clockFontCount)
+                    } else {
+                        tr("未导入", "未导入")
+                    },
+                    onClick = { open(PageId.LOCKSCREEN_CLOCK_FONT_LIBRARY) },
+                )
+                SwitchPreference(
+                    title = tr("lockscreen_clock_avoidance", "时钟避让"),
+                    summary = tr("lockscreen_clock_avoidance_summary", "使锁屏大时钟数字贴合壁纸主体轮廓自适应拉伸，开启时自动处理景深冲突；也可在锁屏时钟编辑的字体页直接开关"),
+                    checked = clockCustomSettings.avoidanceEnabled,
+                    onCheckedChange = { value ->
+                        clockCustomStore.update(clockHorizontalService) {
+                            it.copy(avoidanceEnabled = value)
+                        }
+                        clockCustomSettings = clockCustomStore.settings
+                    },
+                )
                 SwitchPreference(
                     title = tr("去除时钟的水平位置移动限制", "去除时钟的水平位置移动限制"),
                     checked = clockHorizontalEnabled,
@@ -16097,7 +16150,7 @@ internal fun OverlayDropdownPreference(
 }
 
 @Composable
-private fun GlassActionButton(
+internal fun GlassActionButton(
     enabled: Boolean = true,
     onClick: () -> Unit,
     size: Dp = 46.dp,

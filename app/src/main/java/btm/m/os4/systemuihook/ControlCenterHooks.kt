@@ -22,6 +22,7 @@ internal class ControlCenterHooks(
     private val module: HyperSystemUiModule,
     private val readContext: (Any) -> Context?,
     private val applicationContext: () -> Context?,
+    private val showGlobalActions: () -> Unit = {},
 ) {
     private val controlCenterHeaderHeightHook by lazy { ControlCenterHeaderHeightHook(module) }
     private val controlCenterCarrierHook by lazy { ControlCenterCarrierHook(module) }
@@ -34,6 +35,7 @@ internal class ControlCenterHooks(
             controlCenterMediaBigCoverHook.bindExternalDetailContent(content, container)
         }
     }
+    private val classicControlCenterHook by lazy { ClassicControlCenterHook(module, showGlobalActions) }
 
     private var customTileHookInstalled = false
     private var customPluginTileHookInstalled = false
@@ -48,6 +50,7 @@ internal class ControlCenterHooks(
         controlCenterFocusModeHook.install(classLoader, preferences)
         controlCenterMultiPageHook.install(classLoader, preferences)
         controlCenterMediaBigCoverHook.install(classLoader, preferences)
+        classicControlCenterHook.install(classLoader, preferences)
     }
 
     fun onHeaderClassLoaded(loadedClass: Class<*>, preferences: SharedPreferences) {
@@ -59,12 +62,14 @@ internal class ControlCenterHooks(
         controlCenterFocusModeHook.onClassLoaded(loadedClass, preferences)
         controlCenterMultiPageHook.onClassLoaded(loadedClass, preferences)
         controlCenterMediaBigCoverHook.onClassLoaded(loadedClass, preferences)
+        classicControlCenterHook.onClassLoaded(loadedClass, preferences)
     }
 
     /** Clears the "force new control center" flag so the legacy shade comes back. */
     fun installOldControlCenterHook(loader: ClassLoader, prefs: SharedPreferences) {
         if (!ModuleSafetyRuntime.allows(SafetySection.CONTROL_CENTER)) return
-        if (!readSettingsAppScopePreferences(prefs).oldControlCenter) return
+        val classicUnlock = readClassicControlCenterSettings(prefs).let { it.enabled && it.unlockClassicInSystemUi }
+        if (!readSettingsAppScopePreferences(prefs).oldControlCenter && !classicUnlock) return
         listOf(
             "com.miui.systemui.controlcenter.data.repository.ControlCenterSettingsRepositoryImpl" to "forceUseControlCenter",
             "com.android.systemui.controlcenter.policy.ControlCenterControllerImpl" to "forceUseControlCenterPanel",

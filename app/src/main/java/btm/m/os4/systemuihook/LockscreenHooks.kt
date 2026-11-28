@@ -19,6 +19,19 @@ internal class LockscreenHooks(
 ) {
     private val shortcutGestures = LockscreenShortcutGestureHooks(module, logTag)
     private val bottomGestureLine = LockscreenBottomGestureLineHook(module, logTag)
+    private val clockCustom = LockscreenClockCustomHooks(module, logTag)
+
+    fun installClockCustomSystemUiHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
+        clockCustom.installSystemUi(classLoader, preferences)
+    }
+
+    fun installClockCustomAodHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
+        clockCustom.installAod(classLoader, preferences)
+    }
+
+    fun installClockCustomThemeManagerHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
+        clockCustom.installThemeManager(classLoader, preferences)
+    }
 
     fun installShortcutGestureHooks(classLoader: ClassLoader, preferences: SharedPreferences) {
         if (!ModuleSafetyRuntime.allows(SafetySection.LOCKSCREEN)) return

@@ -128,6 +128,8 @@ object ModulePresetCodec {
                 completeSettingsFloatingSearchPreset(values)
                 completeSettingsLayoutPreset(values)
                 completeClearFrostPreset(values)
+                completeClassicControlCenterPreset(values)
+                completeLockscreenClockCustomPreset(values)
             }
             if (groupName == SETTINGS_APPEARANCE_PREFERENCES) {
                 val legacy = values.optJSONObject("color_mode_assets_enabled")?.optBoolean("value", false) ?: false
@@ -237,6 +239,8 @@ object ModulePresetCodec {
                 completeSettingsFloatingSearchPreset(values)
                 completeSettingsLayoutPreset(values)
                 completeClearFrostPreset(values)
+                completeClassicControlCenterPreset(values)
+                completeLockscreenClockCustomPreset(values)
             }
             if (groupName == SETTINGS_APPEARANCE_PREFERENCES) {
                 val legacy = values.optJSONObject("color_mode_assets_enabled")?.optBoolean("value", false) ?: false
@@ -289,7 +293,7 @@ object ModulePresetCodec {
                 }
             }
         }
-        service?.let { CameraWatermarkRemote.publish(context, it); CameraShutterRemote.publish(context, it) }
+        service?.let { CameraWatermarkRemote.publish(context, it); CameraShutterRemote.publish(context, it); LockscreenClockFontRemote.publish(context, it) }
     }
 
     fun reset(context: Context, service: XposedService?) {
@@ -298,7 +302,7 @@ object ModulePresetCodec {
             service?.getRemotePreferences(group)?.edit()?.clear()?.apply()
         }
         resourceRoots(context).forEach { it.deleteRecursively() }
-        service?.let { CameraWatermarkRemote.publish(context, it); CameraShutterRemote.publish(context, it) }
+        service?.let { CameraWatermarkRemote.publish(context, it); CameraShutterRemote.publish(context, it); LockscreenClockFontRemote.publish(context, it) }
     }
 
     fun import(
@@ -353,6 +357,8 @@ object ModulePresetCodec {
                 completeSettingsFloatingSearchPreset(values)
                 completeSettingsLayoutPreset(values)
                 completeClearFrostPreset(values)
+                completeClassicControlCenterPreset(values)
+                completeLockscreenClockCustomPreset(values)
             }
             if (groupName == SETTINGS_APPEARANCE_PREFERENCES) {
                 val legacy = values.optJSONObject("color_mode_assets_enabled")?.optBoolean("value", false) ?: false
@@ -447,6 +453,7 @@ object ModulePresetCodec {
             File(root, ASSISTANT_BACKGROUND_DIRECTORY),
             File(root, CAMERA_WATERMARK_DIRECTORY),
             File(root, CAMERA_SHUTTER_DIRECTORY),
+            File(root, LOCKSCREEN_CLOCK_FONT_DIRECTORY),
         )
         return candidates.flatMap { file ->
             if (!file.exists()) emptyList() else if (file.isDirectory) {
@@ -501,5 +508,6 @@ object ModulePresetCodec {
         File(context.filesDir, ASSISTANT_BACKGROUND_DIRECTORY),
         File(context.filesDir, CAMERA_WATERMARK_DIRECTORY),
         File(context.filesDir, CAMERA_SHUTTER_DIRECTORY),
+        File(context.filesDir, LOCKSCREEN_CLOCK_FONT_DIRECTORY),
     )
 }
