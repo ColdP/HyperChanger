@@ -13,12 +13,16 @@ import android.graphics.Outline
 import android.graphics.PorterDuff
 import android.graphics.Paint
 import android.graphics.RectF
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
+import android.media.AudioManager
 import android.net.Uri
 import android.graphics.Rect
 import android.graphics.drawable.Drawable
 import android.os.BatteryManager
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
@@ -56,6 +60,7 @@ private const val WIDGET_HEIGHT_DP = 64f
 private const val WIDGET_PRESENTATION_POSITION_DURATION_MS = 360L
 private const val WIDGET_COMBINATION_TWO_HEIGHT_DP = 64f
 private const val WIDGET_VERTICAL_OFFSET_DP = 80f
+private const val WIDGET_CLOCK_BOTTOM_GAP_DP = 14f
 private const val WIDGET_TEXT_SIZE_SP = 15.3f
 private const val WIDGET_COMBINATION_METRIC_TEXT_SIZE_SP = 12.24f
 private const val WIDGET_ROW_HEIGHT_DP = 20
@@ -72,7 +77,58 @@ private const val MOBILE_ICON_WIDTH_DP = 19
 private const val MOBILE_ICON_HEIGHT_DP = 21
 private const val WIDGET_DARK_FOREGROUND = 0xFF1A1A1A.toInt()
 private const val STEPS_GOAL = 10000
+private const val STAND_GOAL = 12
 private const val SYSTEM_NEXT_ALARM_FORMATTED = "next_alarm_formatted"
+private const val WALLPAPER_COLOR_CACHE_TTL_MS = 15_000L
+
+private object WallpaperForegroundColorCache {
+    private var cachedWallpaperId = Int.MIN_VALUE
+    private var cachedColor = Color.WHITE
+    private var cachedTimestampMs = 0L
+
+    @Synchronized
+    fun resolve(context: Context): Int = runCatching {
+        val wallpaperManager = WallpaperManager.getInstance(context)
+        val wallpaperId = runCatching {
+            wallpaperManager.getWallpaperId(WallpaperManager.FLAG_LOCK)
+        }.getOrDefault(-1)
+        val now = SystemClock.elapsedRealtime()
+        if (wallpaperId > 0 && wallpaperId == cachedWallpaperId) {
+            return@runCatching cachedColor
+        }
+        if (wallpaperId <= 0 && cachedTimestampMs > 0L && now - cachedTimestampMs < WALLPAPER_COLOR_CACHE_TTL_MS) {
+            return@runCatching cachedColor
+        }
+        val computed = sample(wallpaperManager)
+        cachedWallpaperId = wallpaperId
+        cachedColor = computed
+        cachedTimestampMs = now
+        computed
+    }.getOrDefault(Color.WHITE)
+
+    private fun sample(wallpaperManager: WallpaperManager): Int {
+        val drawable = runCatching {
+            wallpaperManager.getDrawable(WallpaperManager.FLAG_LOCK)
+        }.getOrNull() ?: wallpaperManager.drawable
+            ?: return Color.WHITE
+        val sample = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888)
+        val pixelCount = sample.width * sample.height
+        Canvas(sample).apply {
+            drawable.setBounds(0, 0, width, height)
+            drawable.draw(this)
+        }
+        var totalLuminance = 0.0
+        for (y in 0 until sample.height) {
+            for (x in 0 until sample.width) {
+                val color = sample.getPixel(x, y)
+                totalLuminance +=
+                    0.2126 * Color.red(color) + 0.7152 * Color.green(color) + 0.0722 * Color.blue(color)
+            }
+        }
+        sample.recycle()
+        return if (totalLuminance / pixelCount >= 142.0) WIDGET_DARK_FOREGROUND else Color.WHITE
+    }
+}
 
 /**
  * The editor and full-screen charging animation reuse the keyguard window. Track their explicit
@@ -139,33 +195,8 @@ internal object LockscreenWidgetSceneState {
     }
 }
 
-private fun wallpaperForegroundColor(context: Context): Int = runCatching {
-    val wallpaperManager = WallpaperManager.getInstance(context)
-    val drawable = runCatching {
-        wallpaperManager.getDrawable(WallpaperManager.FLAG_LOCK)
-    }.getOrNull() ?: wallpaperManager.drawable
-        ?: throw IllegalStateException("No wallpaper drawable available")
-    val sample = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888)
-    val pixelCount = sample.width * sample.height
-    Canvas(sample).apply {
-        drawable.setBounds(0, 0, width, height)
-        drawable.draw(this)
-    }
-    var totalLuminance = 0.0
-    for (y in 0 until sample.height) {
-        for (x in 0 until sample.width) {
-            val color = sample.getPixel(x, y)
-            totalLuminance +=
-                0.2126 * Color.red(color) + 0.7152 * Color.green(color) + 0.0722 * Color.blue(color)
-        }
-    }
-    sample.recycle()
-    if (totalLuminance / pixelCount >= 142.0) {
-        WIDGET_DARK_FOREGROUND
-    } else {
-        Color.WHITE
-    }
-}.getOrDefault(Color.WHITE)
+private fun wallpaperForegroundColor(context: Context): Int =
+    WallpaperForegroundColorCache.resolve(context)
 
 /**
  * The widget is created inside com.android.systemui, so its Context cannot resolve the
@@ -231,12 +262,15 @@ private data class LockscreenWidgetData(
     val city: String,
     val highLow: String,
     val battery: Int,
+    val batteryCharging: Boolean,
+    val batteryTempTenthsC: Int?,
     val deviceName: String,
     val weatherIcon: Drawable?,
     val sunrise: Int,
     val sunriseTomorrow: Int,
     val sunset: Int,
     val steps: Int?,
+    val stepsTarget: Int,
     val humidity: String,
     val aqi: String,
     val feelsLike: String,
@@ -244,8 +278,22 @@ private data class LockscreenWidgetData(
     val wind: String,
     val windIcon: Drawable?,
     val standCount: Int?,
+    val standTarget: Int,
     val nextAlarm: String?,
     val nextSchedule: ScheduleEntry?,
+    val uvIndex: Int?,
+    val rainProbability: Int?,
+    val pressureHpa: Int?,
+    val bluetoothBattery: BluetoothBatterySnapshot,
+    val worldClock: WorldClockSnapshot,
+    val calendarWeekday: String,
+    val calendarDay: String,
+    val countdown: CountdownSnapshot,
+    val memoTitle: String,
+    val memoContent: String,
+    val sleepMinutes: Int?,
+    val soundMode: Int,
+    val flashlightOn: Boolean,
 )
 
 private data class ScheduleEntry(
@@ -268,6 +316,9 @@ private data class SystemWeatherSnapshot(
     val feelsLikeIcon: Drawable?,
     val wind: String,
     val windIcon: Drawable?,
+    val uvIndex: Int?,
+    val rainProbability: Int?,
+    val pressureHpa: Int?,
 )
 
 /** A time-layer root and its vendor container that exposes visual clock bounds. */
@@ -302,11 +353,13 @@ private class StepsProgressView(context: Context) : View(context) {
     private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val bounds = RectF()
     private var steps = 0
+    private var goal = STEPS_GOAL
     private var foregroundColor = Color.WHITE
     private var icon: Drawable? = null
 
-    fun bind(value: Int?, color: Int, drawable: Drawable?) {
+    fun bind(value: Int?, color: Int, drawable: Drawable?, target: Int = STEPS_GOAL) {
         steps = value?.coerceAtLeast(0) ?: 0
+        goal = target.takeIf { it > 0 } ?: STEPS_GOAL
         foregroundColor = color
         icon = drawable?.mutate()
         invalidate()
@@ -322,7 +375,7 @@ private class StepsProgressView(context: Context) : View(context) {
         ringPaint.color = Color.argb(72, Color.red(foregroundColor), Color.green(foregroundColor), Color.blue(foregroundColor))
         canvas.drawArc(bounds, -50f, 280f, false, ringPaint)
         ringPaint.color = foregroundColor
-        val progress = (steps.toFloat() / STEPS_GOAL).coerceIn(0f, 1f)
+        val progress = (steps.toFloat() / goal).coerceIn(0f, 1f)
         canvas.drawArc(bounds, -50f, 280f * progress, false, ringPaint)
         icon?.let { drawable ->
             val iconSize = (width.coerceAtMost(height) * .36f).roundToInt()
@@ -337,11 +390,13 @@ private class StepsProgressView(context: Context) : View(context) {
     private fun dp(value: Float): Float = value * resources.displayMetrics.density
 }
 
-/** A lightweight native view for the five independently selectable lock-screen widgets. */
+/** A lightweight native view for all selectable lock-screen widgets (legacy + iOS/OneUI extended). */
 private class LockscreenWidgetView(
     context: Context,
-    private val itemMask: Int,
-    private val itemOrder: List<Int>,
+    private val widgetIds: List<String>,
+    private val interactiveEnabled: Boolean,
+    private val onSoundModeClick: () -> Unit,
+    private val onFlashlightClick: () -> Unit,
     private val applyBatteryTrackMaterial: (View) -> Unit,
     private val applyShortcutSurfaceMaterial: (View) -> Unit,
     private val foregroundColorProvider: () -> Int,
@@ -350,6 +405,7 @@ private class LockscreenWidgetView(
     private val signatureScale: Int,
     private val signatureBackground: Boolean,
 ) : FrameLayout(context) {
+    private val widgetIdSet: Set<String> = widgetIds.toSet()
     private val weatherIcon = ImageView(context)
     private val temperature = TextView(context)
     private val condition = TextView(context)
@@ -392,6 +448,42 @@ private class LockscreenWidgetView(
     private val scheduleTitle = TextView(context)
     private val scheduleTime = TextView(context)
     private val signatureImage = ImageView(context)
+    // Extended iOS / OneUI widgets
+    private val uvGauge = CircularGaugeRingView(context)
+    private val rainIcon = ImageView(context)
+    private val rainValue = TextView(context)
+    private val pressureGauge = CircularGaugeRingView(context)
+    private val batteryRingGauge = CircularGaugeRingView(context)
+    private val batteryTempIcon = ImageView(context)
+    private val batteryTempValue = TextView(context)
+    private val btIcon = ImageView(context)
+    private val btPercent = TextView(context)
+    private val btDeviceName = TextView(context)
+    private val btTrack = ImageView(context)
+    private val btFill = View(context)
+    private var btBatteryBar: FrameLayout? = null
+    private var btBatteryValue = 0
+    private val worldClockLabel = TextView(context)
+    private val worldClockTime = TextView(context)
+    private val worldClockOffset = TextView(context)
+    private val calendarWeekday = TextView(context)
+    private val calendarDay = TextView(context)
+    private val countdownIcon = ImageView(context)
+    private val countdownTitle = TextView(context)
+    private val countdownDays = TextView(context)
+    private val countdownDate = TextView(context)
+    private val memoIcon = ImageView(context)
+    private val memoTitle = TextView(context)
+    private val memoContent = TextView(context)
+    private val sleepIcon = ImageView(context)
+    private val sleepValue = TextView(context)
+    private val activityRings = ActivityRingsView(context)
+    private val activityStepsLine = TextView(context)
+    private val activityStandLine = TextView(context)
+    private val soundModeIcon = ImageView(context)
+    private val soundModeLabel = TextView(context)
+    private val flashlightIcon = ImageView(context)
+    private val flashlightLabel = TextView(context)
     private val shortcutSurfaceLayers = ArrayList<ImageView>(5)
     private lateinit var batteryBar: FrameLayout
     private var batteryValue = 0
@@ -408,31 +500,33 @@ private class LockscreenWidgetView(
         }
     }
 
+    private fun hasWidget(id: String): Boolean = id in widgetIdSet
+
     private val usesDetailedLayout: Boolean
-        get() = itemMask == LOCKSCREEN_WIDGET_DEFAULT_ITEMS && itemOrder == listOf(
-            LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER,
-            LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY,
+        get() = widgetIds == listOf(
+            LockscreenWidgetIds.DETAIL_WEATHER,
+            LockscreenWidgetIds.DETAIL_BATTERY,
         )
 
-    private val detailedWeatherFlag: Int
-        get() = if (itemMask and LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER_BACKGROUND != 0) {
-            LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER_BACKGROUND
-        } else {
-            LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER
+    private val detailedWeatherId: String?
+        get() = when {
+            hasWidget(LockscreenWidgetIds.DETAIL_WEATHER_BG) -> LockscreenWidgetIds.DETAIL_WEATHER_BG
+            hasWidget(LockscreenWidgetIds.DETAIL_WEATHER) -> LockscreenWidgetIds.DETAIL_WEATHER
+            else -> null
         }
 
-    private val detailedBatteryFlag: Int
-        get() = if (itemMask and LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY_BACKGROUND != 0) {
-            LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY_BACKGROUND
-        } else {
-            LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY
+    private val detailedBatteryId: String?
+        get() = when {
+            hasWidget(LockscreenWidgetIds.DETAIL_BATTERY_BG) -> LockscreenWidgetIds.DETAIL_BATTERY_BG
+            hasWidget(LockscreenWidgetIds.DETAIL_BATTERY) -> LockscreenWidgetIds.DETAIL_BATTERY
+            else -> null
         }
 
     private val hasDetailedWeather: Boolean
-        get() = itemMask and detailedWeatherFlag != 0
+        get() = detailedWeatherId != null
 
     private val hasDetailedBattery: Boolean
-        get() = itemMask and detailedBatteryFlag != 0
+        get() = detailedBatteryId != null
 
     private fun buildCombinationOne(context: Context) {
         setPadding(dp(16), 0, dp(16), 0)
@@ -519,17 +613,8 @@ private class LockscreenWidgetView(
 
         // The editor limits compositions to two long cards, one long card plus two circles,
         // or four circles. Keep that same geometry in SystemUI.
-        val selectedCount = Integer.bitCount(itemMask)
-        val longCount = listOf(
-            LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER,
-            LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY,
-            LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER_BACKGROUND,
-            LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY_BACKGROUND,
-            LOCKSCREEN_WIDGET_ITEM_COMPACT_WEATHER,
-            LOCKSCREEN_WIDGET_ITEM_SIGNATURE,
-            LOCKSCREEN_WIDGET_ITEM_STEPS_WIDE,
-            LOCKSCREEN_WIDGET_ITEM_SCHEDULE,
-        ).count { itemMask and it != 0 }
+        val selectedCount = widgetIds.size
+        val longCount = widgetIds.count(LockscreenWidgetIds::isWide)
         val surfaceHeight = if (selectedCount >= 4 && longCount == 0) 56 else 64
         val metricWidth = surfaceHeight
         val hasDetailedPair = selectedCount == 2 &&
@@ -546,10 +631,9 @@ private class LockscreenWidgetView(
                 if (row.childCount > 0) leftMargin = dp(surfaceGap)
             })
         }
-        val surfaces = LinkedHashMap<Int, Pair<FrameLayout, Int>>()
-        if (hasDetailedWeather) {
-            val hasBackground =
-                detailedWeatherFlag == LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER_BACKGROUND
+        val surfaces = LinkedHashMap<String, Pair<FrameLayout, Int>>()
+        detailedWeatherId?.let { weatherId ->
+            val hasBackground = weatherId == LockscreenWidgetIds.DETAIL_WEATHER_BG
             val contentInset = if (hasBackground) dp(12) else 0
             val weatherSurface = if (hasBackground) {
                 createSurface(widthDp = detailedWidth, heightDp = surfaceHeight, circular = false)
@@ -590,11 +674,10 @@ private class LockscreenWidgetView(
                 rightMargin = contentInset
             })
             weatherSurface.addView(weatherContent, LayoutParams(-1, -1))
-            surfaces[detailedWeatherFlag] = weatherSurface to detailedWidth
+            surfaces[weatherId] = weatherSurface to detailedWidth
         }
-        if (hasDetailedBattery) {
-            val hasBackground =
-                detailedBatteryFlag == LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY_BACKGROUND
+        detailedBatteryId?.let { batteryId ->
+            val hasBackground = batteryId == LockscreenWidgetIds.DETAIL_BATTERY_BG
             val contentInset = if (hasBackground) dp(12) else 0
             val batterySurface = if (hasBackground) {
                 createSurface(widthDp = detailedWidth, heightDp = surfaceHeight, circular = false)
@@ -640,9 +723,9 @@ private class LockscreenWidgetView(
                 rightMargin = contentInset
             })
             batterySurface.addView(batteryContent, LayoutParams(-1, -1))
-            surfaces[detailedBatteryFlag] = batterySurface to detailedWidth
+            surfaces[batteryId] = batterySurface to detailedWidth
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_COMPACT_WEATHER != 0) {
+        if (hasWidget(LockscreenWidgetIds.COMPACT_WEATHER)) {
             val weatherSurface = createSurface(widthDp = compactWeatherWidth, heightDp = surfaceHeight, circular = false)
             val weatherContent = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -661,9 +744,9 @@ private class LockscreenWidgetView(
             weatherText.addView(combinationCondition, LinearLayout.LayoutParams(-1, dp(19)))
             weatherContent.addView(weatherText, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(7) })
             weatherSurface.addView(weatherContent, LayoutParams(-1, -1))
-            surfaces[LOCKSCREEN_WIDGET_ITEM_COMPACT_WEATHER] = weatherSurface to compactWeatherWidth
+            surfaces[LockscreenWidgetIds.COMPACT_WEATHER] = weatherSurface to compactWeatherWidth
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_SIGNATURE != 0) {
+        if (hasWidget(LockscreenWidgetIds.SIGNATURE)) {
             val signatureSurface = if (signatureBackground) {
                 createSurface(widthDp = compactWeatherWidth, heightDp = surfaceHeight, circular = false)
             } else {
@@ -681,9 +764,9 @@ private class LockscreenWidgetView(
             signatureImage.scaleX = scale
             signatureImage.scaleY = scale
             signatureSurface.addView(signatureImage, LayoutParams(-1, -1))
-            surfaces[LOCKSCREEN_WIDGET_ITEM_SIGNATURE] = signatureSurface to compactWeatherWidth
+            surfaces[LockscreenWidgetIds.SIGNATURE] = signatureSurface to compactWeatherWidth
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_STEPS_WIDE != 0) {
+        if (hasWidget(LockscreenWidgetIds.STEPS_WIDE)) {
             val stepsSurface = createSurface(widthDp = compactWeatherWidth, heightDp = surfaceHeight, circular = false)
             val content = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -695,7 +778,7 @@ private class LockscreenWidgetView(
                 gravity = Gravity.CENTER_VERTICAL
             }
             style(stepsWideTitle, 12f)
-            stepsWideTitle.text = "今日步数"
+            stepsWideTitle.text = widgetLocalized("今日步数", "Steps", "歩数")
             stepsWideTitle.alpha = .78f
             labels.addView(stepsWideTitle, LinearLayout.LayoutParams(-1, dp(18)))
             val valueRow = LinearLayout(context).apply { gravity = Gravity.BOTTOM }
@@ -703,16 +786,16 @@ private class LockscreenWidgetView(
             stepsWideValue.setTypeface(stepsWideValue.typeface, android.graphics.Typeface.BOLD)
             valueRow.addView(stepsWideValue, LinearLayout.LayoutParams(-2, dp(29)))
             style(stepsWideUnit, 8.8f)
-            stepsWideUnit.text = "步"
+            stepsWideUnit.text = widgetLocalized("步", "", "歩")
             stepsWideUnit.setTypeface(stepsWideUnit.typeface, android.graphics.Typeface.BOLD)
             valueRow.addView(stepsWideUnit, LinearLayout.LayoutParams(-2, dp(22)).apply { leftMargin = dp(2) })
             labels.addView(valueRow, LinearLayout.LayoutParams(-1, dp(30)))
             content.addView(labels, LinearLayout.LayoutParams(0, -1, 1f))
             content.addView(stepsWideProgress, LinearLayout.LayoutParams(dp(58), dp(58)))
             stepsSurface.addView(content, LayoutParams(-1, -1))
-            surfaces[LOCKSCREEN_WIDGET_ITEM_STEPS_WIDE] = stepsSurface to compactWeatherWidth
+            surfaces[LockscreenWidgetIds.STEPS_WIDE] = stepsSurface to compactWeatherWidth
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_SCHEDULE != 0) {
+        if (hasWidget(LockscreenWidgetIds.SCHEDULE)) {
             val scheduleSurface = createSurface(widthDp = compactWeatherWidth, heightDp = surfaceHeight, circular = false)
             val content = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
@@ -729,9 +812,122 @@ private class LockscreenWidgetView(
             scheduleTime.ellipsize = android.text.TextUtils.TruncateAt.END
             content.addView(scheduleTime, LinearLayout.LayoutParams(-1, dp(24)))
             scheduleSurface.addView(content, LayoutParams(-1, -1))
-            surfaces[LOCKSCREEN_WIDGET_ITEM_SCHEDULE] = scheduleSurface to compactWeatherWidth
+            surfaces[LockscreenWidgetIds.SCHEDULE] = scheduleSurface to compactWeatherWidth
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_SUN != 0) {
+        if (hasWidget(LockscreenWidgetIds.BLUETOOTH_BATTERY)) {
+            val btSurface = createSurface(widthDp = compactWeatherWidth, heightDp = surfaceHeight, circular = false)
+            val content = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(14), dp(8), dp(14), dp(8))
+            }
+            val top = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            btIcon.setImageDrawable(loadModuleDrawable(context, "ic_widget_bluetooth"))
+            btIcon.scaleType = ImageView.ScaleType.CENTER_INSIDE
+            top.addView(btIcon, LinearLayout.LayoutParams(dp(16), dp(16)))
+            style(btPercent, 13.5f)
+            top.addView(btPercent, LinearLayout.LayoutParams(-2, dp(18)).apply { leftMargin = dp(5) })
+            content.addView(top, LinearLayout.LayoutParams(-1, dp(18)))
+            style(btDeviceName, 11.2f)
+            btDeviceName.alpha = .82f
+            btDeviceName.ellipsize = android.text.TextUtils.TruncateAt.END
+            content.addView(btDeviceName, LinearLayout.LayoutParams(-1, dp(16)).apply { topMargin = dp(2) })
+            val bar = FrameLayout(context)
+            btBatteryBar = bar
+            btTrack.background = rounded(Color.argb(76, 255, 255, 255), dp(6).toFloat())
+            btFill.background = rounded(Color.WHITE, dp(6).toFloat())
+            bar.addView(btTrack, FrameLayout.LayoutParams(-1, dp(6)))
+            bar.addView(btFill, FrameLayout.LayoutParams(0, dp(6)))
+            content.addView(bar, LinearLayout.LayoutParams(-1, dp(6)).apply { topMargin = dp(5) })
+            btSurface.addView(content, LayoutParams(-1, -1))
+            surfaces[LockscreenWidgetIds.BLUETOOTH_BATTERY] = btSurface to compactWeatherWidth
+        }
+        if (hasWidget(LockscreenWidgetIds.COUNTDOWN)) {
+            val cdSurface = createSurface(widthDp = compactWeatherWidth, heightDp = surfaceHeight, circular = false)
+            val content = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(13), 0, dp(12), 0)
+            }
+            countdownIcon.setImageDrawable(loadModuleDrawable(context, "ic_widget_countdown"))
+            countdownIcon.scaleType = ImageView.ScaleType.CENTER_INSIDE
+            content.addView(countdownIcon, LinearLayout.LayoutParams(dp(22), dp(22)))
+            val texts = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val headerRow = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            style(countdownTitle, 11.2f)
+            countdownTitle.alpha = .78f
+            countdownTitle.ellipsize = android.text.TextUtils.TruncateAt.END
+            headerRow.addView(countdownTitle, LinearLayout.LayoutParams(0, dp(17), 1f))
+            style(countdownDate, 10f)
+            countdownDate.alpha = .68f
+            headerRow.addView(countdownDate, LinearLayout.LayoutParams(-2, dp(15)).apply { leftMargin = dp(4) })
+            texts.addView(headerRow, LinearLayout.LayoutParams(-1, dp(17)))
+            style(countdownDays, 15f)
+            countdownDays.ellipsize = android.text.TextUtils.TruncateAt.END
+            texts.addView(countdownDays, LinearLayout.LayoutParams(-1, dp(23)).apply { topMargin = dp(2) })
+            content.addView(texts, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(8) })
+            cdSurface.addView(content, LayoutParams(-1, -1))
+            surfaces[LockscreenWidgetIds.COUNTDOWN] = cdSurface to compactWeatherWidth
+        }
+        if (hasWidget(LockscreenWidgetIds.CUSTOM_MEMO)) {
+            val memoSurface = createSurface(widthDp = compactWeatherWidth, heightDp = surfaceHeight, circular = false)
+            val content = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(13), 0, dp(12), 0)
+            }
+            memoIcon.setImageDrawable(loadModuleDrawable(context, "ic_widget_memo"))
+            memoIcon.scaleType = ImageView.ScaleType.CENTER_INSIDE
+            content.addView(memoIcon, LinearLayout.LayoutParams(dp(20), dp(20)))
+            val texts = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            style(memoTitle, 11.2f)
+            memoTitle.alpha = .76f
+            memoTitle.ellipsize = android.text.TextUtils.TruncateAt.END
+            texts.addView(memoTitle, LinearLayout.LayoutParams(-1, dp(17)))
+            style(memoContent, 13.5f)
+            memoContent.maxLines = 1
+            memoContent.ellipsize = android.text.TextUtils.TruncateAt.END
+            texts.addView(memoContent, LinearLayout.LayoutParams(-1, dp(22)).apply { topMargin = dp(2) })
+            content.addView(texts, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(8) })
+            memoSurface.addView(content, LayoutParams(-1, -1))
+            surfaces[LockscreenWidgetIds.CUSTOM_MEMO] = memoSurface to compactWeatherWidth
+        }
+        if (hasWidget(LockscreenWidgetIds.ACTIVITY_RINGS)) {
+            val actSurface = createSurface(widthDp = compactWeatherWidth, heightDp = surfaceHeight, circular = false)
+            val content = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), 0, dp(10), 0)
+            }
+            content.addView(activityRings, LinearLayout.LayoutParams(dp(44), dp(44)))
+            val texts = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            style(activityStepsLine, 13.6f)
+            activityStepsLine.ellipsize = android.text.TextUtils.TruncateAt.END
+            texts.addView(activityStepsLine, LinearLayout.LayoutParams(-1, dp(20)))
+            style(activityStandLine, 11.4f)
+            activityStandLine.alpha = .82f
+            activityStandLine.ellipsize = android.text.TextUtils.TruncateAt.END
+            texts.addView(activityStandLine, LinearLayout.LayoutParams(-1, dp(18)).apply { topMargin = dp(2) })
+            content.addView(texts, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(8) })
+            actSurface.addView(content, LayoutParams(-1, -1))
+            surfaces[LockscreenWidgetIds.ACTIVITY_RINGS] = actSurface to compactWeatherWidth
+        }
+        if (hasWidget(LockscreenWidgetIds.SUN)) {
             val sunSurface = createSurface(widthDp = metricWidth, heightDp = surfaceHeight, circular = true)
             val sunContent = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
@@ -743,9 +939,9 @@ private class LockscreenWidgetView(
             sunTime.gravity = Gravity.CENTER
             sunContent.addView(sunTime, LinearLayout.LayoutParams(-1, dp(22)).apply { topMargin = dp(1) })
             sunSurface.addView(sunContent, LayoutParams(-1, -1))
-            surfaces[LOCKSCREEN_WIDGET_ITEM_SUN] = sunSurface to metricWidth
+            surfaces[LockscreenWidgetIds.SUN] = sunSurface to metricWidth
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_STEPS != 0) {
+        if (hasWidget(LockscreenWidgetIds.STEPS)) {
             val stepsSurface = createSurface(widthDp = metricWidth, heightDp = surfaceHeight, circular = true)
             val stepsContent = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
@@ -757,16 +953,17 @@ private class LockscreenWidgetView(
             stepCount.gravity = Gravity.CENTER
             stepsContent.addView(stepCount, LinearLayout.LayoutParams(-1, dp(22)).apply { topMargin = dp(1) })
             stepsSurface.addView(stepsContent, LayoutParams(-1, -1))
-            surfaces[LOCKSCREEN_WIDGET_ITEM_STEPS] = stepsSurface to metricWidth
+            surfaces[LockscreenWidgetIds.STEPS] = stepsSurface to metricWidth
         }
         fun addMetricSurface(
-            flag: Int,
+            id: String,
             icon: View,
             value: TextView,
             iconWidth: Int = 28,
             iconHeight: Int = 28,
             valueSize: Float = WIDGET_COMBINATION_METRIC_TEXT_SIZE_SP,
             valueHeight: Int = 22,
+            onClick: (() -> Unit)? = null,
         ) {
             val surface = createSurface(widthDp = metricWidth, heightDp = surfaceHeight, circular = true)
             val content = LinearLayout(context).apply {
@@ -786,55 +983,56 @@ private class LockscreenWidgetView(
                 alarmValueDefaultTopMarginPx = valueLayoutParams.topMargin
                 alarmValueDefaultHeightPx = valueLayoutParams.height
             }
+            if (onClick != null && interactiveEnabled) {
+                surface.isClickable = true
+                surface.isFocusable = false
+                surface.setOnClickListener { onClick() }
+            }
             surface.addView(content, LayoutParams(-1, -1))
-            surfaces[flag] = surface to metricWidth
+            surfaces[id] = surface to metricWidth
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_HUMIDITY != 0) {
+        if (hasWidget(LockscreenWidgetIds.HUMIDITY)) {
             style(humidityLabel, 10f)
-            humidityLabel.text = "湿度"
+            humidityLabel.text = widgetLocalized("湿度", "HUM", "湿度")
             humidityLabel.gravity = Gravity.CENTER
-            addMetricSurface(LOCKSCREEN_WIDGET_ITEM_HUMIDITY, humidityLabel, humidityValue, 32, 25)
+            addMetricSurface(LockscreenWidgetIds.HUMIDITY, humidityLabel, humidityValue, 32, 25)
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_AQI != 0) {
+        if (hasWidget(LockscreenWidgetIds.AQI)) {
             style(aqiLabel, 10f)
             aqiLabel.text = "AQI"
             aqiLabel.gravity = Gravity.CENTER
-            addMetricSurface(LOCKSCREEN_WIDGET_ITEM_AQI, aqiLabel, aqiValue, 32, 25)
+            addMetricSurface(LockscreenWidgetIds.AQI, aqiLabel, aqiValue, 32, 25)
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_FEELS_LIKE != 0) {
+        if (hasWidget(LockscreenWidgetIds.FEELS_LIKE)) {
             style(feelsLikeLabel, 10f)
-            feelsLikeLabel.text = "体感"
+            feelsLikeLabel.text = widgetLocalized("体感", "FEELS", "体感")
             feelsLikeLabel.gravity = Gravity.CENTER
-            addMetricSurface(LOCKSCREEN_WIDGET_ITEM_FEELS_LIKE, feelsLikeLabel, feelsLikeValue, 32, 25)
+            addMetricSurface(LockscreenWidgetIds.FEELS_LIKE, feelsLikeLabel, feelsLikeValue, 32, 25)
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_WIND != 0) {
+        if (hasWidget(LockscreenWidgetIds.WIND)) {
             addMetricSurface(
-                LOCKSCREEN_WIDGET_ITEM_WIND,
+                LockscreenWidgetIds.WIND,
                 windIcon,
                 windValue,
                 valueSize = 10f,
             )
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_STAND != 0) {
+        if (hasWidget(LockscreenWidgetIds.STAND)) {
             style(standLabel, 10f)
-            standLabel.text = "站立"
+            standLabel.text = widgetLocalized("站立", "STAND", "スタンド")
             standLabel.gravity = Gravity.CENTER
-            addMetricSurface(LOCKSCREEN_WIDGET_ITEM_STAND, standLabel, standCount, 32, 25)
+            addMetricSurface(LockscreenWidgetIds.STAND, standLabel, standCount, 32, 25)
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_ALARM != 0) {
+        if (hasWidget(LockscreenWidgetIds.ALARM)) {
             alarmIcon.setImageDrawable(
                 loadModuleDrawable(context, "ic_widget_alarm")
                     ?: loadSystemDrawable(context, "ic_alarm"),
             )
-            // Reserve a second line for values with a non-weekday date prefix. Four-circle
-            // layouts are only 56dp high, so use a smaller icon there to keep two lines inside.
             val alarmIconHeight = if (surfaceHeight >= 64) 30 else 25
-            // Keep the single-line slot identical to the other metric widgets. The taller slot
-            // is applied only when the bound alarm text actually contains a date line.
             val alarmValueHeight = 22
             alarmValueMultilineHeightPx = dp(if (surfaceHeight >= 64) 32 else 30)
             addMetricSurface(
-                LOCKSCREEN_WIDGET_ITEM_ALARM,
+                LockscreenWidgetIds.ALARM,
                 alarmIcon,
                 alarmTime,
                 30,
@@ -842,16 +1040,125 @@ private class LockscreenWidgetView(
                 11f,
                 alarmValueHeight,
             )
-            // style() sets the single-line defaults for other metric values; override them
-            // after the shared builder so a date prefix can occupy its own line.
             alarmTime.maxLines = 2
             alarmTime.ellipsize = android.text.TextUtils.TruncateAt.END
             alarmTime.setLineSpacing(0f, .9f)
         }
-        itemOrder.forEach { flag ->
-            surfaces.remove(flag)?.let { (surface, width) -> addSurface(surface, width) }
+        if (hasWidget(LockscreenWidgetIds.UV_INDEX)) {
+            val uvSurface = createSurface(widthDp = metricWidth, heightDp = surfaceHeight, circular = true)
+            uvSurface.addView(uvGauge, LayoutParams(-1, -1))
+            surfaces[LockscreenWidgetIds.UV_INDEX] = uvSurface to metricWidth
         }
-        // Keep the view resilient to a future preference migration with an incomplete order.
+        if (hasWidget(LockscreenWidgetIds.RAIN_PROB)) {
+            rainIcon.setImageDrawable(loadModuleDrawable(context, "ic_widget_rain"))
+            addMetricSurface(
+                LockscreenWidgetIds.RAIN_PROB,
+                rainIcon,
+                rainValue,
+                iconWidth = 22,
+                iconHeight = 22,
+                valueSize = 11.8f,
+                valueHeight = 20,
+            )
+        }
+        if (hasWidget(LockscreenWidgetIds.PRESSURE)) {
+            val pressureSurface = createSurface(widthDp = metricWidth, heightDp = surfaceHeight, circular = true)
+            pressureSurface.addView(pressureGauge, LayoutParams(-1, -1))
+            surfaces[LockscreenWidgetIds.PRESSURE] = pressureSurface to metricWidth
+        }
+        if (hasWidget(LockscreenWidgetIds.BATTERY_RING)) {
+            val ringSurface = createSurface(widthDp = metricWidth, heightDp = surfaceHeight, circular = true)
+            ringSurface.addView(batteryRingGauge, LayoutParams(-1, -1))
+            surfaces[LockscreenWidgetIds.BATTERY_RING] = ringSurface to metricWidth
+        }
+        if (hasWidget(LockscreenWidgetIds.BATTERY_TEMP)) {
+            batteryTempIcon.setImageDrawable(loadModuleDrawable(context, "ic_widget_thermometer"))
+            addMetricSurface(
+                LockscreenWidgetIds.BATTERY_TEMP,
+                batteryTempIcon,
+                batteryTempValue,
+                iconWidth = 22,
+                iconHeight = 22,
+                valueSize = 11.4f,
+                valueHeight = 20,
+            )
+        }
+        if (hasWidget(LockscreenWidgetIds.WORLD_CLOCK)) {
+            val wcSurface = createSurface(widthDp = metricWidth, heightDp = surfaceHeight, circular = true)
+            val content = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+            }
+            style(worldClockLabel, if (surfaceHeight >= 64) 9.8f else 9f)
+            worldClockLabel.alpha = .78f
+            worldClockLabel.gravity = Gravity.CENTER
+            content.addView(worldClockLabel, LinearLayout.LayoutParams(-1, dp(14)))
+            style(worldClockTime, if (surfaceHeight >= 64) 13.8f else 12.2f)
+            worldClockTime.gravity = Gravity.CENTER
+            content.addView(worldClockTime, LinearLayout.LayoutParams(-1, dp(19)))
+            style(worldClockOffset, 8.8f)
+            worldClockOffset.alpha = .72f
+            worldClockOffset.gravity = Gravity.CENTER
+            content.addView(worldClockOffset, LinearLayout.LayoutParams(-1, dp(13)))
+            wcSurface.addView(content, LayoutParams(-1, -1))
+            surfaces[LockscreenWidgetIds.WORLD_CLOCK] = wcSurface to metricWidth
+        }
+        if (hasWidget(LockscreenWidgetIds.CALENDAR_DATE)) {
+            val calSurface = createSurface(widthDp = metricWidth, heightDp = surfaceHeight, circular = true)
+            val content = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+            }
+            style(calendarWeekday, if (surfaceHeight >= 64) 10.5f else 9.5f)
+            calendarWeekday.alpha = .82f
+            calendarWeekday.gravity = Gravity.CENTER
+            content.addView(calendarWeekday, LinearLayout.LayoutParams(-1, dp(15)))
+            style(calendarDay, if (surfaceHeight >= 64) 21.5f else 18.5f)
+            calendarDay.gravity = Gravity.CENTER
+            content.addView(calendarDay, LinearLayout.LayoutParams(-1, dp(26)))
+            calSurface.addView(content, LayoutParams(-1, -1))
+            surfaces[LockscreenWidgetIds.CALENDAR_DATE] = calSurface to metricWidth
+        }
+        if (hasWidget(LockscreenWidgetIds.SLEEP)) {
+            sleepIcon.setImageDrawable(loadModuleDrawable(context, "ic_widget_sleep"))
+            addMetricSurface(
+                LockscreenWidgetIds.SLEEP,
+                sleepIcon,
+                sleepValue,
+                iconWidth = 22,
+                iconHeight = 22,
+                valueSize = 10.8f,
+                valueHeight = 20,
+            )
+        }
+        if (hasWidget(LockscreenWidgetIds.SOUND_MODE)) {
+            addMetricSurface(
+                LockscreenWidgetIds.SOUND_MODE,
+                soundModeIcon,
+                soundModeLabel,
+                iconWidth = 22,
+                iconHeight = 22,
+                valueSize = 10.4f,
+                valueHeight = 19,
+                onClick = onSoundModeClick,
+            )
+        }
+        if (hasWidget(LockscreenWidgetIds.FLASHLIGHT)) {
+            flashlightIcon.setImageDrawable(loadModuleDrawable(context, "ic_widget_flashlight"))
+            addMetricSurface(
+                LockscreenWidgetIds.FLASHLIGHT,
+                flashlightIcon,
+                flashlightLabel,
+                iconWidth = 22,
+                iconHeight = 22,
+                valueSize = 10.4f,
+                valueHeight = 19,
+                onClick = onFlashlightClick,
+            )
+        }
+        widgetIds.forEach { id ->
+            surfaces.remove(id)?.let { (surface, width) -> addSurface(surface, width) }
+        }
         surfaces.values.forEach { (surface, width) -> addSurface(surface, width) }
     }
 
@@ -909,7 +1216,7 @@ private class LockscreenWidgetView(
         combinationCondition.text = listOf(data.temperature, data.condition)
             .filter { it.isNotBlank() }
             .joinToString(" ")
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_COMPACT_WEATHER != 0) {
+        if (hasWidget(LockscreenWidgetIds.COMPACT_WEATHER)) {
             combinationWeatherIcon.setImageDrawable(data.weatherIcon)
         }
         if (hasDetailedWeather) {
@@ -934,61 +1241,184 @@ private class LockscreenWidgetView(
             now >= data.sunset && data.sunriseTomorrow in 1 until 24 * 60 -> data.sunriseTomorrow
             else -> data.sunrise
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_SUN != 0) {
+        if (hasWidget(LockscreenWidgetIds.SUN)) {
             sunIcon.setImageDrawable(
                 loadModuleDrawable(context, if (showSunset) "ic_widget_sunset" else "ic_widget_sunrise")
                     ?: loadSystemDrawable(context, if (showSunset) "weather_icon_sun_down" else "weather_icon_sun_up"),
             )
             sunTime.text = formatMinute(targetMinute)
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_STEPS != 0) {
-            stepIcon.setImageDrawable(loadSystemDrawable(context, "health_icon_step_count_25"))
+        if (hasWidget(LockscreenWidgetIds.STEPS)) {
+            stepIcon.setImageDrawable(
+                loadSystemDrawable(context, "health_icon_step_count_25")
+                    ?: loadModuleDrawable(context, "ic_widget_steps"),
+            )
             stepCount.text = data.steps?.takeIf { it >= 0 }?.toString() ?: "--"
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_STEPS_WIDE != 0) {
+        if (hasWidget(LockscreenWidgetIds.STEPS_WIDE)) {
             stepsWideValue.text = data.steps?.takeIf { it >= 0 }?.toString() ?: "--"
-            stepsWideProgress.bind(data.steps, color, loadSystemDrawable(context, "health_icon_step_count_25"))
+            stepsWideProgress.bind(
+                data.steps,
+                color,
+                loadSystemDrawable(context, "health_icon_step_count_25")
+                    ?: loadModuleDrawable(context, "ic_widget_steps"),
+                data.stepsTarget,
+            )
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_HUMIDITY != 0) {
+        if (hasWidget(LockscreenWidgetIds.HUMIDITY)) {
             humidityValue.text = data.humidity
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_AQI != 0) {
+        if (hasWidget(LockscreenWidgetIds.AQI)) {
             aqiValue.text = data.aqi
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_FEELS_LIKE != 0) {
+        if (hasWidget(LockscreenWidgetIds.FEELS_LIKE)) {
             feelsLikeValue.text = data.feelsLike
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_WIND != 0) {
+        if (hasWidget(LockscreenWidgetIds.WIND)) {
             windIcon.setImageDrawable(data.windIcon)
             windValue.text = data.wind
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_STAND != 0) {
+        if (hasWidget(LockscreenWidgetIds.STAND)) {
             standCount.text = data.standCount?.takeIf { it >= 0 }?.toString() ?: "--"
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_ALARM != 0) {
+        if (hasWidget(LockscreenWidgetIds.ALARM)) {
             alarmTime.text = formatAlarmText(data.nextAlarm ?: "--:--")
             updateAlarmTextSpacing()
         }
-        if (itemMask and LOCKSCREEN_WIDGET_ITEM_SCHEDULE != 0) {
-            scheduleTitle.text = data.nextSchedule?.title ?: "无日程"
+        if (hasWidget(LockscreenWidgetIds.SCHEDULE)) {
+            scheduleTitle.text = data.nextSchedule?.title ?: widgetLocalized("无日程", "No events", "予定なし")
             scheduleTime.text = data.nextSchedule?.timeLabel ?: ""
+        }
+        // Bind extended iOS / OneUI widgets
+        if (hasWidget(LockscreenWidgetIds.UV_INDEX)) {
+            val uv = data.uvIndex
+            val progress = if (uv != null) (uv.coerceIn(0, 11) / 11f) else 0f
+            uvGauge.bindGauge(
+                progress = progress,
+                valueText = uv?.toString() ?: "--",
+                bottomLabel = "UV",
+                color = color,
+            )
+        }
+        if (hasWidget(LockscreenWidgetIds.RAIN_PROB)) {
+            rainValue.text = data.rainProbability?.let { "$it%" } ?: "--%"
+        }
+        if (hasWidget(LockscreenWidgetIds.PRESSURE)) {
+            val hpa = data.pressureHpa
+            val progress = if (hpa != null) ((hpa - 970f) / 80f).coerceIn(0f, 1f) else 0f
+            pressureGauge.bindGauge(
+                progress = progress,
+                valueText = hpa?.toString() ?: "--",
+                bottomLabel = "hPa",
+                color = color,
+            )
+        }
+        if (hasWidget(LockscreenWidgetIds.BATTERY_RING)) {
+            val icon = if (data.batteryCharging) {
+                loadModuleDrawable(context, "ic_widget_battery_bolt")
+            } else {
+                loadMobile3Icon(context)
+            }
+            batteryRingGauge.bindGauge(
+                progress = data.battery.coerceIn(0, 100) / 100f,
+                valueText = "${data.battery}%",
+                bottomLabel = null,
+                color = color,
+                iconDrawable = icon,
+                fullCircle = true,
+            )
+        }
+        if (hasWidget(LockscreenWidgetIds.BATTERY_TEMP)) {
+            batteryTempValue.text = formatBatteryTempText(data.batteryTempTenthsC)
+        }
+        if (hasWidget(LockscreenWidgetIds.BLUETOOTH_BATTERY)) {
+            val bt = data.bluetoothBattery
+            if (bt.connected) {
+                btPercent.text = bt.batteryPercent?.let { "$it%" }
+                    ?: widgetLocalized("已连接", "Linked", "接続済")
+                btDeviceName.text = bt.deviceName
+                btBatteryValue = bt.batteryPercent?.coerceIn(0, 100) ?: 100
+            } else {
+                btPercent.text = "--"
+                btDeviceName.text = widgetLocalized("未连接蓝牙", "No Bluetooth", "未接続")
+                btBatteryValue = 0
+            }
+            btFill.background = rounded(color, dp(6).toFloat())
+            updateBluetoothBatteryFill()
+        }
+        if (hasWidget(LockscreenWidgetIds.WORLD_CLOCK)) {
+            worldClockLabel.text = data.worldClock.label
+            worldClockTime.text = data.worldClock.timeText
+            worldClockOffset.text = data.worldClock.offsetLabel
+        }
+        if (hasWidget(LockscreenWidgetIds.CALENDAR_DATE)) {
+            calendarWeekday.text = data.calendarWeekday
+            calendarDay.text = data.calendarDay
+        }
+        if (hasWidget(LockscreenWidgetIds.COUNTDOWN)) {
+            countdownTitle.text = data.countdown.title
+            countdownDays.text = data.countdown.daysLabel
+            countdownDate.text = data.countdown.dateLabel
+        }
+        if (hasWidget(LockscreenWidgetIds.CUSTOM_MEMO)) {
+            val hasTitle = data.memoTitle.isNotBlank()
+            memoTitle.visibility = if (hasTitle) View.VISIBLE else View.GONE
+            memoTitle.text = data.memoTitle
+            memoContent.maxLines = if (hasTitle) 1 else 2
+            memoContent.text = data.memoContent.ifBlank {
+                widgetLocalized("保持热爱，奔赴山海", "Stay curious", "毎日を大切に")
+            }
+        }
+        if (hasWidget(LockscreenWidgetIds.SLEEP)) {
+            sleepValue.text = formatSleepDuration(data.sleepMinutes)
+        }
+        if (hasWidget(LockscreenWidgetIds.ACTIVITY_RINGS)) {
+            val stepsVal = data.steps?.takeIf { it >= 0 }
+            val standVal = data.standCount?.takeIf { it >= 0 }
+            val stepsProg = if (stepsVal != null && data.stepsTarget > 0) stepsVal.toFloat() / data.stepsTarget else 0f
+            val standProg = if (standVal != null && data.standTarget > 0) standVal.toFloat() / data.standTarget else 0f
+            activityRings.bind(stepsProg, standProg, color)
+            activityStepsLine.text = if (stepsVal != null) {
+                widgetLocalized("$stepsVal 步", "$stepsVal steps", "$stepsVal 歩")
+            } else {
+                widgetLocalized("-- 步", "-- steps", "-- 歩")
+            }
+            activityStandLine.text = if (standVal != null) {
+                widgetLocalized("站立 $standVal/${data.standTarget}", "Stand $standVal/${data.standTarget}", "スタンド $standVal/${data.standTarget}")
+            } else {
+                widgetLocalized("站立 --/${data.standTarget}", "Stand --/${data.standTarget}", "スタンド --/${data.standTarget}")
+            }
+        }
+        if (hasWidget(LockscreenWidgetIds.SOUND_MODE)) {
+            soundModeIcon.setImageDrawable(loadModuleDrawable(context, soundModeDrawableName(data.soundMode)))
+            soundModeLabel.text = soundModeLabel(data.soundMode)
+        }
+        if (hasWidget(LockscreenWidgetIds.FLASHLIGHT)) {
+            flashlightLabel.text = if (data.flashlightOn) {
+                widgetLocalized("已开启", "ON", "オン")
+            } else {
+                widgetLocalized("手电筒", "Torch", "ライト")
+            }
+            flashlightIcon.alpha = if (data.flashlightOn) 1f else 0.78f
         }
         listOf(
             temperature, condition, city, highLow, batteryPercent, deviceName,
             combinationCity, combinationCondition, sunTime, stepCount, humidityLabel, humidityValue,
             aqiLabel, aqiValue, feelsLikeLabel, feelsLikeValue, windValue, standLabel, standCount,
             stepsWideTitle, stepsWideValue, stepsWideUnit, alarmTime, scheduleTitle, scheduleTime,
+            rainValue, batteryTempValue, btPercent, btDeviceName,
+            worldClockLabel, worldClockTime, worldClockOffset,
+            calendarWeekday, calendarDay, countdownTitle, countdownDays, countdownDate,
+            memoTitle, memoContent, sleepValue, activityStepsLine, activityStandLine,
+            soundModeLabel, flashlightLabel,
         ).forEach { it.setTextColor(color) }
         listOf(
             weatherIcon, combinationWeatherIcon, sunIcon, stepIcon, batteryIcon, windIcon, alarmIcon,
+            rainIcon, batteryTempIcon, btIcon, countdownIcon, memoIcon, sleepIcon,
+            soundModeIcon, flashlightIcon,
         ).forEach {
             it.imageTintList = ColorStateList.valueOf(color)
         }
-        stepsWideProgress.bind(
-            data.steps,
-            color,
-            loadSystemDrawable(context, "health_icon_step_count_25"),
-        )
         batteryFill.background = rounded(color, dp(9).toFloat())
         applySurfaceMaterialsAfterLayout()
     }
@@ -1007,6 +1437,7 @@ private class LockscreenWidgetView(
         if (!usesDetailedLayout) {
             applySurfaceMaterialsAfterLayout()
             if (::batteryBar.isInitialized) updateBatteryFill()
+            updateBluetoothBatteryFill()
         } else {
             applyTrackMaterialAfterLayout()
             updateBatteryFill()
@@ -1038,6 +1469,19 @@ private class LockscreenWidgetView(
             width = fillWidth.coerceAtLeast(if (batteryValue > 0) dp(5) else 0)
         }
         batteryFill.requestLayout()
+    }
+
+    private fun updateBluetoothBatteryFill() {
+        val bar = btBatteryBar ?: return
+        if (bar.width <= 0) {
+            bar.post { updateBluetoothBatteryFill() }
+            return
+        }
+        val fillWidth = (bar.width * btBatteryValue / 100f).roundToInt()
+        btFill.layoutParams = (btFill.layoutParams as FrameLayout.LayoutParams).apply {
+            width = fillWidth.coerceAtLeast(if (btBatteryValue > 0) dp(4) else 0)
+        }
+        btFill.requestLayout()
     }
 
     private fun style(view: TextView, size: Float) {
@@ -1110,8 +1554,15 @@ internal class LockscreenWidgetController(
     private val context = host.context
     private val handler = Handler(Looper.getMainLooper())
     private var view: LockscreenWidgetView? = null
-    private var displayedItemMask = -1
-    private var displayedItemOrder: List<Int> = emptyList()
+    private var displayedWidgetIds: List<String> = emptyList()
+    private var displayedInteractiveEnabled = true
+    private var currentVerticalOffsetDp = 0
+    private var currentScaleFactor = 1f
+    private var currentFollowClockBottom = false
+    private var lastKnownClockBottomInHost = Float.NaN
+    private var torchOn = false
+    private var torchCameraId: String? = null
+    private var torchCallback: CameraManager.TorchCallback? = null
     private var displayedSignatureType = -1
     private var displayedSignatureVersion = Long.MIN_VALUE
     private var displayedSignatureColor = 0
@@ -1136,7 +1587,7 @@ internal class LockscreenWidgetController(
     private var lastLockscreenVisible: Boolean? = null
     private var notificationStack: WeakReference<View>? = null
     private val preferenceListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == KEY_LOCKSCREEN_WIDGET_ENABLED || key == KEY_LOCKSCREEN_WIDGET_HIDE_ON_AOD) {
+        if (key == null || key.startsWith("lockscreen_widget_")) {
             host.post(::refresh)
         }
     }
@@ -1191,6 +1642,7 @@ internal class LockscreenWidgetController(
     }
 
     fun destroy() {
+        unregisterTorchCallback()
         LockscreenWidgetSceneState.unregister(this)
         LockscreenMediaPresentationBridge.unregister(this)
         runCatching { preferences.unregisterOnSharedPreferenceChangeListener(preferenceListener) }
@@ -1205,14 +1657,78 @@ internal class LockscreenWidgetController(
         presentationPositionAnimating = false
         positionAnimationTargetX = Float.NaN
         positionAnimationTargetY = Float.NaN
+        lastKnownClockBottomInHost = Float.NaN
         view = null
-        displayedItemMask = -1
-        displayedItemOrder = emptyList()
+        displayedWidgetIds = emptyList()
+        displayedInteractiveEnabled = true
         displayedSignatureType = -1
         displayedSignatureVersion = Long.MIN_VALUE
         displayedSignatureColor = 0
         displayedSignatureScale = -1
         displayedSignatureBackground = true
+    }
+
+    private fun updateTorchCallbackRegistration(needed: Boolean) {
+        if (!needed) {
+            unregisterTorchCallback()
+            return
+        }
+        if (torchCallback != null) return
+        runCatching {
+            val cameraManager = context.getSystemService(CameraManager::class.java) ?: return@runCatching
+            val cameraId = cameraManager.cameraIdList.firstOrNull { id ->
+                val chars = cameraManager.getCameraCharacteristics(id)
+                chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true &&
+                    chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
+            } ?: cameraManager.cameraIdList.firstOrNull { id ->
+                cameraManager.getCameraCharacteristics(id).get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+            } ?: return@runCatching
+            torchCameraId = cameraId
+            val cb = object : CameraManager.TorchCallback() {
+                override fun onTorchModeChanged(camId: String, enabled: Boolean) {
+                    if (camId == torchCameraId && torchOn != enabled) {
+                        torchOn = enabled
+                        host.post(::refresh)
+                    }
+                }
+            }
+            cameraManager.registerTorchCallback(cb, handler)
+            torchCallback = cb
+        }
+    }
+
+    private fun unregisterTorchCallback() {
+        val cb = torchCallback ?: return
+        torchCallback = null
+        runCatching {
+            context.getSystemService(CameraManager::class.java)?.unregisterTorchCallback(cb)
+        }
+    }
+
+    private fun toggleFlashlight() {
+        runCatching {
+            val cameraManager = context.getSystemService(CameraManager::class.java) ?: return@runCatching
+            val id = torchCameraId ?: cameraManager.cameraIdList.firstOrNull { camId ->
+                cameraManager.getCameraCharacteristics(camId).get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+            }?.also { torchCameraId = it } ?: return@runCatching
+            val next = !torchOn
+            cameraManager.setTorchMode(id, next)
+            torchOn = next
+            host.post(::refresh)
+        }
+    }
+
+    private fun cycleSoundMode() {
+        runCatching {
+            val audio = context.getSystemService(AudioManager::class.java) ?: return@runCatching
+            val next = when (audio.ringerMode) {
+                AudioManager.RINGER_MODE_NORMAL -> AudioManager.RINGER_MODE_VIBRATE
+                AudioManager.RINGER_MODE_VIBRATE -> AudioManager.RINGER_MODE_SILENT
+                else -> AudioManager.RINGER_MODE_NORMAL
+            }
+            audio.ringerMode = next
+            host.post(::refresh)
+        }
     }
 
     internal fun onSceneVisibilityChanged() {
@@ -1248,9 +1764,16 @@ internal class LockscreenWidgetController(
     }
 
     private fun refresh() {
-        val rawItemMask = preferences.readLockscreenWidgetItems()
-        val requestedItemOrder = preferences.readLockscreenWidgetOrder(rawItemMask)
-        val requestedItemMask = requestedItemOrder.fold(0) { mask, flag -> mask or flag }
+        val extSettings = readLockscreenWidgetExtendedSettings(preferences)
+        val requestedWidgetIds = readEffectiveLockscreenWidgetIds(preferences)
+        val requestedInteractive = extSettings.interactiveEnabled
+        currentVerticalOffsetDp = extSettings.verticalOffsetDp
+        currentScaleFactor = extSettings.scalePercent / 100f
+        if (currentFollowClockBottom != extSettings.followClockBottom) {
+            currentFollowClockBottom = extSettings.followClockBottom
+            lastKnownClockBottomInHost = Float.NaN
+            if (currentFollowClockBottom) restoreClockPosition()
+        }
         val requestedSignatureType = preferences.getInt(
             KEY_LOCKSCREEN_WIDGET_SIGNATURE_TYPE,
             LOCKSCREEN_WIDGET_SIGNATURE_NONE,
@@ -1260,8 +1783,8 @@ internal class LockscreenWidgetController(
         val requestedSignatureScale = preferences.getInt(KEY_LOCKSCREEN_WIDGET_SIGNATURE_SCALE, 100).coerceIn(25, 200)
         val requestedSignatureBackground = preferences.getBoolean(KEY_LOCKSCREEN_WIDGET_SIGNATURE_BACKGROUND, true)
         if (view != null && (
-                displayedItemMask != requestedItemMask ||
-                    displayedItemOrder != requestedItemOrder ||
+                displayedWidgetIds != requestedWidgetIds ||
+                    displayedInteractiveEnabled != requestedInteractive ||
                     displayedSignatureType != requestedSignatureType ||
                     displayedSignatureVersion != requestedSignatureVersion ||
                     displayedSignatureColor != requestedSignatureColor ||
@@ -1273,13 +1796,14 @@ internal class LockscreenWidgetController(
             view?.animate()?.cancel()
             view?.let { old -> runCatching { (old.parent as? ViewGroup)?.removeView(old) } }
             view = null
-            displayedItemMask = -1
-            displayedItemOrder = emptyList()
+            displayedWidgetIds = emptyList()
         }
         val widget = view ?: LockscreenWidgetView(
             context = context,
-            itemMask = requestedItemMask,
-            itemOrder = requestedItemOrder,
+            widgetIds = requestedWidgetIds,
+            interactiveEnabled = requestedInteractive,
+            onSoundModeClick = ::cycleSoundMode,
+            onFlashlightClick = ::toggleFlashlight,
             applyBatteryTrackMaterial = applyBatteryTrackMaterial,
             applyShortcutSurfaceMaterial = applyShortcutSurfaceMaterial,
             foregroundColorProvider = ::resolveForegroundColor,
@@ -1289,8 +1813,8 @@ internal class LockscreenWidgetController(
             signatureBackground = requestedSignatureBackground,
         ).also {
             view = it
-            displayedItemMask = requestedItemMask
-            displayedItemOrder = requestedItemOrder
+            displayedWidgetIds = requestedWidgetIds
+            displayedInteractiveEnabled = requestedInteractive
             displayedSignatureType = requestedSignatureType
             displayedSignatureVersion = requestedSignatureVersion
             displayedSignatureColor = requestedSignatureColor
@@ -1298,6 +1822,7 @@ internal class LockscreenWidgetController(
             displayedSignatureBackground = requestedSignatureBackground
             host.addView(it, ViewGroup.LayoutParams(dp(WIDGET_WIDTH_DP), dp(WIDGET_HEIGHT_DP)))
         }
+        updateTorchCallbackRegistration(LockscreenWidgetIds.FLASHLIGHT in displayedWidgetIds)
         // Recover if a vendor layout rebuild detached the widget from its stable root.
         if (widget.parent !== host) {
             (widget.parent as? ViewGroup)?.removeView(widget)
@@ -1321,7 +1846,7 @@ internal class LockscreenWidgetController(
             return
         }
         showWidget(widget)
-        widget.bind(readData())
+        widget.bind(readData(extSettings))
         schedulePosition()
     }
 
@@ -1340,14 +1865,15 @@ internal class LockscreenWidgetController(
         val wasTargetVisible = targetVisible
         targetVisible = true
         hideAnimationRunning = false
+        val targetScale = currentScaleFactor
         if (widget.visibility != View.VISIBLE) {
             widget.animate().cancel()
             widget.visibility = View.VISIBLE
             widget.alpha = 0f
-            widget.scaleX = 0.92f
-            widget.scaleY = 0.92f
+            widget.scaleX = 0.92f * targetScale
+            widget.scaleY = 0.92f * targetScale
             appearanceAnimating = true
-            widget.animate().alpha(1f).scaleX(1f).scaleY(1f)
+            widget.animate().alpha(1f).scaleX(targetScale).scaleY(targetScale)
                 .setDuration(260L)
                 .setInterpolator(android.view.animation.DecelerateInterpolator())
                 .setListener(object : AnimatorListenerAdapter() {
@@ -1360,7 +1886,7 @@ internal class LockscreenWidgetController(
             // from the current visual state instead of leaving the widget faded.
             widget.animate().cancel()
             appearanceAnimating = true
-            widget.animate().alpha(1f).scaleX(1f).scaleY(1f)
+            widget.animate().alpha(1f).scaleX(targetScale).scaleY(targetScale)
                 .setDuration(220L)
                 .setInterpolator(android.view.animation.DecelerateInterpolator())
                 .setListener(object : AnimatorListenerAdapter() {
@@ -1378,12 +1904,13 @@ internal class LockscreenWidgetController(
 
     private fun hideWidget(widget: LockscreenWidgetView, immediately: Boolean = false) {
         targetVisible = false
+        val targetScale = currentScaleFactor
         if (immediately) {
             widget.animate().cancel()
             widget.visibility = View.GONE
             widget.alpha = 1f
-            widget.scaleX = 1f
-            widget.scaleY = 1f
+            widget.scaleX = targetScale
+            widget.scaleY = targetScale
             appearanceAnimating = false
             hideAnimationRunning = false
             restoreClockPosition()
@@ -1400,7 +1927,7 @@ internal class LockscreenWidgetController(
         widget.animate().cancel()
         appearanceAnimating = true
         hideAnimationRunning = true
-        widget.animate().alpha(0f).scaleX(0.92f).scaleY(0.92f)
+        widget.animate().alpha(0f).scaleX(0.92f * targetScale).scaleY(0.92f * targetScale)
             .setDuration(220L)
             .setInterpolator(android.view.animation.DecelerateInterpolator())
             .setListener(object : AnimatorListenerAdapter() {
@@ -1427,10 +1954,27 @@ internal class LockscreenWidgetController(
         followerPosted = false
     }
 
-    private fun readData(): LockscreenWidgetData {
-        val root = host.rootView
-        val systemWeather = readSystemWeather()
-        val weatherRoot = findViewByIdName(root, setOf("weather_smartspace_view", "weather_smartspace_view_large"))
+    private fun readData(extSettings: LockscreenWidgetExtendedSettings): LockscreenWidgetData {
+        val active = displayedWidgetIds.toSet()
+        val needsWeather = active.any {
+            it == LockscreenWidgetIds.DETAIL_WEATHER ||
+                it == LockscreenWidgetIds.DETAIL_WEATHER_BG ||
+                it == LockscreenWidgetIds.COMPACT_WEATHER ||
+                it == LockscreenWidgetIds.SUN ||
+                it == LockscreenWidgetIds.HUMIDITY ||
+                it == LockscreenWidgetIds.AQI ||
+                it == LockscreenWidgetIds.FEELS_LIKE ||
+                it == LockscreenWidgetIds.WIND ||
+                it == LockscreenWidgetIds.UV_INDEX ||
+                it == LockscreenWidgetIds.RAIN_PROB ||
+                it == LockscreenWidgetIds.PRESSURE
+        }
+        val systemWeather = if (needsWeather) readSystemWeather() else null
+        val weatherRoot = if (needsWeather && systemWeather == null) {
+            findViewByIdName(host.rootView, setOf("weather_smartspace_view", "weather_smartspace_view_large"))
+        } else {
+            null
+        }
         val texts = ArrayList<String>()
         weatherRoot?.let { collectTexts(it, texts) }
         val joined = texts.joinToString(" ")
@@ -1438,47 +1982,111 @@ internal class LockscreenWidgetController(
             if (it.endsWith("°")) it else "$it°"
         } ?: "--°"
         val fallbackCondition = texts.firstOrNull { it.matches(Regex(".*[\\p{IsHan}].*")) && it.length <= 8 }
-            ?.replace(Regex("[0-9°+\\- ]"), "")?.takeIf { it.isNotBlank() } ?: "晴"
+            ?.replace(Regex("[0-9°+\\- ]"), "")?.takeIf { it.isNotBlank() }
+            ?: widgetLocalized("晴", "Clear", "晴れ")
         val fallbackCity = texts.firstOrNull { it.length in 2..8 && it.matches(Regex(".*[\\p{IsHan}].*")) && it != fallbackCondition }
-            ?: "天气"
+            ?: widgetLocalized("天气", "Weather", "天気")
         val high = Regex("(?i)(?:H|最高)\\s*[:：]?\\s*([+-]?\\d{1,3})").find(joined)?.groupValues?.getOrNull(1)
         val low = Regex("(?i)(?:L|最低)\\s*[:：]?\\s*([+-]?\\d{1,3})").find(joined)?.groupValues?.getOrNull(1)
         val fallbackHighLow = if (high != null || low != null) "H: ${high ?: "--"}°  L: ${low ?: "--"}°" else "H: --°  L: --°"
-        val batteryManager = context.getSystemService(BatteryManager::class.java)
-        val battery = batteryManager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-            ?.takeIf { it in 0..100 } ?: 0
+
+        val needsBattery = active.any {
+            it == LockscreenWidgetIds.DETAIL_BATTERY ||
+                it == LockscreenWidgetIds.DETAIL_BATTERY_BG ||
+                it == LockscreenWidgetIds.BATTERY_RING ||
+                it == LockscreenWidgetIds.BATTERY_TEMP
+        }
+        val batterySnapshot = if (needsBattery) {
+            readBatteryStatusSnapshot(context)
+        } else {
+            BatteryStatusSnapshot(0, false, null)
+        }
         val deviceName = preferences.getString(KEY_LOCKSCREEN_WIDGET_DEVICE_NAME, "")
             .orEmpty().trim().ifBlank { readRoProductMarketName() }
-        val icon = systemWeather?.icon ?: findWeatherIcon(weatherRoot)
-            ?: context.resources.getIdentifier("weather_icon_0", "drawable", context.packageName)
-                .takeIf { it != 0 }?.let { context.getDrawable(it) }
+        val icon = if (needsWeather) {
+            systemWeather?.icon ?: findWeatherIcon(weatherRoot)
+                ?: context.resources.getIdentifier("weather_icon_0", "drawable", context.packageName)
+                    .takeIf { it != 0 }?.let { context.getDrawable(it) }
+        } else {
+            null
+        }
+        val needsSteps = LockscreenWidgetIds.STEPS in active ||
+            LockscreenWidgetIds.STEPS_WIDE in active ||
+            LockscreenWidgetIds.ACTIVITY_RINGS in active
+        val stepsPair = if (needsSteps) readSystemStepsWithTarget() else null
+        val needsStand = LockscreenWidgetIds.STAND in active ||
+            LockscreenWidgetIds.ACTIVITY_RINGS in active
+        val standPair = if (needsStand) readSystemStandWithTarget() else null
+        val sleepMinutes = if (LockscreenWidgetIds.SLEEP in active) readSystemSleepMinutes() else null
+        val bluetoothBattery = if (LockscreenWidgetIds.BLUETOOTH_BATTERY in active) {
+            readBluetoothBatterySnapshot(context)
+        } else {
+            BluetoothBatterySnapshot(false, "", null)
+        }
+        val worldClock = if (LockscreenWidgetIds.WORLD_CLOCK in active) {
+            buildWorldClockSnapshot(extSettings.worldClockZoneId, extSettings.worldClockLabel)
+        } else {
+            WorldClockSnapshot("", "", "")
+        }
+        val nowCal = Calendar.getInstance()
+        val calendarWeekday = if (LockscreenWidgetIds.CALENDAR_DATE in active) {
+            SimpleDateFormat("EEE", Locale.getDefault()).format(nowCal.time).uppercase(Locale.getDefault())
+        } else {
+            ""
+        }
+        val calendarDay = if (LockscreenWidgetIds.CALENDAR_DATE in active) {
+            nowCal.get(Calendar.DAY_OF_MONTH).toString()
+        } else {
+            ""
+        }
+        val countdown = if (LockscreenWidgetIds.COUNTDOWN in active) {
+            buildCountdownSnapshot(extSettings.countdownTitle, extSettings.countdownDate)
+        } else {
+            CountdownSnapshot("", "", "")
+        }
+        val soundMode = if (LockscreenWidgetIds.SOUND_MODE in active) {
+            readSoundMode(context)
+        } else {
+            AudioManager.RINGER_MODE_NORMAL
+        }
         return LockscreenWidgetData(
-            systemWeather?.temperature ?: fallbackTemperature,
-            systemWeather?.condition ?: fallbackCondition,
-            systemWeather?.city ?: fallbackCity,
-            systemWeather?.highLow ?: fallbackHighLow,
-            battery,
-            deviceName,
-            icon,
-            systemWeather?.sunrise ?: 0,
-            systemWeather?.sunriseTomorrow ?: 0,
-            systemWeather?.sunset ?: 0,
-            // Both step layouts use the same HealthBean value. The wide layout has its own
-            // flag, so include it here or it would always render the no-data placeholder.
-            if (displayedItemMask and (LOCKSCREEN_WIDGET_ITEM_STEPS or LOCKSCREEN_WIDGET_ITEM_STEPS_WIDE) != 0) {
-                readSystemSteps()
-            } else {
-                null
-            },
-            systemWeather?.humidity ?: "--",
-            systemWeather?.aqi ?: "--",
-            systemWeather?.feelsLike ?: "--°",
-            systemWeather?.feelsLikeIcon,
-            systemWeather?.wind ?: "--",
-            systemWeather?.windIcon,
-            if (displayedItemMask and LOCKSCREEN_WIDGET_ITEM_STAND != 0) readSystemStandCount() else null,
-            if (displayedItemMask and LOCKSCREEN_WIDGET_ITEM_ALARM != 0) readNextAlarm() else null,
-            if (displayedItemMask and LOCKSCREEN_WIDGET_ITEM_SCHEDULE != 0) readNextSchedule() else null,
+            temperature = systemWeather?.temperature ?: fallbackTemperature,
+            condition = systemWeather?.condition ?: fallbackCondition,
+            city = systemWeather?.city ?: fallbackCity,
+            highLow = systemWeather?.highLow ?: fallbackHighLow,
+            battery = batterySnapshot.level,
+            batteryCharging = batterySnapshot.charging,
+            batteryTempTenthsC = batterySnapshot.temperatureTenthsC,
+            deviceName = deviceName,
+            weatherIcon = icon,
+            sunrise = systemWeather?.sunrise ?: 0,
+            sunriseTomorrow = systemWeather?.sunriseTomorrow ?: 0,
+            sunset = systemWeather?.sunset ?: 0,
+            steps = stepsPair?.first,
+            stepsTarget = stepsPair?.second?.takeIf { it > 0 } ?: STEPS_GOAL,
+            humidity = systemWeather?.humidity ?: "--",
+            aqi = systemWeather?.aqi ?: "--",
+            feelsLike = systemWeather?.feelsLike ?: "--°",
+            feelsLikeIcon = systemWeather?.feelsLikeIcon,
+            wind = systemWeather?.wind ?: "--",
+            windIcon = systemWeather?.windIcon,
+            standCount = standPair?.first,
+            standTarget = standPair?.second?.takeIf { it > 0 } ?: STAND_GOAL,
+            nextAlarm = if (LockscreenWidgetIds.ALARM in active) readNextAlarm() else null,
+            nextSchedule = if (LockscreenWidgetIds.SCHEDULE in active) readNextSchedule() else null,
+            uvIndex = systemWeather?.uvIndex,
+            rainProbability = systemWeather?.rainProbability,
+            pressureHpa = systemWeather?.pressureHpa,
+            bluetoothBattery = bluetoothBattery,
+            worldClock = worldClock,
+            calendarWeekday = calendarWeekday,
+            calendarDay = calendarDay,
+            countdown = countdown,
+            memoTitle = extSettings.memoTitle,
+            memoContent = extSettings.memoContent,
+            sleepMinutes = sleepMinutes,
+            soundMode = soundMode,
+            flashlightOn = torchOn,
         )
     }
 
@@ -1499,10 +2107,12 @@ internal class LockscreenWidgetController(
         context.contentResolver.query(uri, projection, null, null, null)
             ?.use { cursor ->
                 if (!cursor.moveToFirst()) return@runCatching null
-                val title = cursor.getString(0).orEmpty().trim().ifBlank { "日程" }
+                val title = cursor.getString(0).orEmpty().trim()
+                    .ifBlank { widgetLocalized("日程", "Event", "予定") }
                 val begin = cursor.getLong(1)
                 val allDay = cursor.getInt(2) != 0
-                val format = SimpleDateFormat(if (allDay) "MM/dd 全天" else "MM/dd HH:mm", Locale.getDefault())
+                val allDayPattern = widgetLocalized("MM/dd 全天", "MM/dd All day", "MM/dd 終日")
+                val format = SimpleDateFormat(if (allDay) allDayPattern else "MM/dd HH:mm", Locale.getDefault())
                 ScheduleEntry(title, format.format(java.util.Date(begin)))
             }
     }.getOrNull()
@@ -1520,8 +2130,10 @@ internal class LockscreenWidgetController(
         }.getOrNull()
         val valid = call("getTemperatureValid") as? Boolean ?: true
         val temperature = if (valid) "${(call("getTemperature") as? Number)?.toInt() ?: 0}°" else "--°"
-        val condition = (call("getDescription") as? String).orEmpty().ifBlank { "晴" }
-        val city = (call("getCityName") as? String).orEmpty().ifBlank { "天气" }
+        val condition = (call("getDescription") as? String).orEmpty()
+            .ifBlank { widgetLocalized("晴", "Clear", "晴れ") }
+        val city = (call("getCityName") as? String).orEmpty()
+            .ifBlank { widgetLocalized("天气", "Weather", "天気") }
         val high = (call("getHighestTemperature") as? Number)?.toInt()
         val low = (call("getLowestTemperature") as? Number)?.toInt()
         val highLow = "H: ${high ?: "--"}°  L: ${low ?: "--"}°"
@@ -1558,13 +2170,24 @@ internal class LockscreenWidgetController(
             .orEmpty()
         val windStrength = (call("getWindStrength") as? String).orEmpty()
         val wind = if (windDirection.isNotBlank() && windStrength.isNotBlank()) {
-            "$windDirection ${windStrength}级"
+            val unit = widgetLocalized("级", " Lv", "級")
+            "$windDirection $windStrength$unit"
         } else {
             "--"
         }
+        val uvIndex = (call("getUVILevel") as? String)?.trim()?.toIntOrNull()?.takeIf { it >= 0 }
+        val rawRain = (call("getRainProbability") as? String)?.trim().orEmpty()
+        val rainProbability = if (rawRain.isNotEmpty() && rawRain != "--") {
+            rawRain.removeSuffix("%").trim().toIntOrNull()?.takeIf { it in 0..100 }
+                ?: (call("getRainProbabilityInt") as? Number)?.toInt()?.takeIf { it in 0..100 }
+        } else {
+            null
+        }
+        val pressureHpa = (call("getPressure") as? Number)?.toInt()?.takeIf { it in 800..1150 }
         SystemWeatherSnapshot(
             temperature, condition, city, highLow, icon, sunrise, sunriseTomorrow, sunset,
             humidity, aqi, feelsLike, feelsLikeIcon, wind, windIcon,
+            uvIndex, rainProbability, pressureHpa,
         )
     }.getOrNull()
 
@@ -1573,16 +2196,25 @@ internal class LockscreenWidgetController(
      * same API keeps the widget on the ROM's permission path and avoids declaring a provider
      * dependency in the module app. Every reflection failure is a no-data state, never a crash.
      */
-    private fun readSystemSteps(): Int? = runCatching {
-        readSystemHealthCount(500, "getStepCountNow")
+    private fun readSystemStepsWithTarget(): Pair<Int, Int>? = runCatching {
+        readSystemHealthPair(500, "getStepCountNow", "getStepCountTarget", STEPS_GOAL)
     }.getOrNull()
 
     /** Health type 504 is the SystemUI path for the standing-count widget. */
-    private fun readSystemStandCount(): Int? = runCatching {
-        readSystemHealthCount(504, "getStandCountNow")
+    private fun readSystemStandWithTarget(): Pair<Int, Int>? = runCatching {
+        readSystemHealthPair(504, "getStandCountNow", "getStandCountTarget", STAND_GOAL)
     }.getOrNull()
 
-    private fun readSystemHealthCount(type: Int, resultGetter: String): Int? {
+    /** Health type 506 is the SystemUI path for sleep report duration in minutes. */
+    private fun readSystemSleepMinutes(): Int? = runCatching {
+        val bean = invokeSystemHealthBean(506) ?: return@runCatching null
+        val minutes = bean.javaClass.methods.firstOrNull { method ->
+            method.name == "getSleepDurationMinute" && method.parameterCount == 0
+        }?.invoke(bean) as? Number ?: return@runCatching null
+        minutes.toInt().takeIf { it > 0 }
+    }.getOrNull()
+
+    private fun invokeSystemHealthBean(type: Int): Any? {
         val dataUtils = Class.forName(CLOCK_DATA_UTILS_CLASS, false, classLoader)
         val healthBean = Class.forName("com.miui.clock.module.HealthBean", false, classLoader)
         val getter = dataUtils.methods.firstOrNull { method ->
@@ -1591,11 +2223,24 @@ internal class LockscreenWidgetController(
                 method.parameterTypes[1] == Int::class.javaPrimitiveType &&
                 method.parameterTypes[2].isAssignableFrom(healthBean)
         } ?: return null
-        val bean = getter.invoke(null, WeakReference(context), type, null) ?: return null
-        val steps = bean.javaClass.methods.firstOrNull { method ->
-            method.name == resultGetter && method.parameterCount == 0
+        return getter.invoke(null, WeakReference(context), type, null)
+    }
+
+    private fun readSystemHealthPair(
+        type: Int,
+        nowGetter: String,
+        targetGetter: String,
+        defaultTarget: Int,
+    ): Pair<Int, Int>? {
+        val bean = invokeSystemHealthBean(type) ?: return null
+        val now = bean.javaClass.methods.firstOrNull { method ->
+            method.name == nowGetter && method.parameterCount == 0
         }?.invoke(bean) as? Number ?: return null
-        return steps.toInt().takeIf { it >= 0 }
+        val nowInt = now.toInt().takeIf { it >= 0 } ?: return null
+        val target = (bean.javaClass.methods.firstOrNull { method ->
+            method.name == targetGetter && method.parameterCount == 0
+        }?.invoke(bean) as? Number)?.toInt()?.takeIf { it > 0 } ?: defaultTarget
+        return nowInt to target
     }
 
     private fun isLockscreenVisible(): Boolean = runCatching {
@@ -1695,15 +2340,34 @@ internal class LockscreenWidgetController(
         }
         if (widget.width <= 0 || widget.height <= 0) return
         val targetX = centerX - widget.width / 2f - widget.left
-        val normalTargetY = centerY - widget.height / 2f - dp(WIDGET_VERTICAL_OFFSET_DP) - widget.top
-        val notificationTargetY = if (preferences.getBoolean(KEY_LOCKSCREEN_WIDGET_NOTIFICATION_AVOID, true)) {
-            firstVisibleNotificationTop()?.let { notificationTop ->
-                notificationTop - dp(NOTIFICATION_SAFE_GAP_DP) - widget.height - widget.top
+        val sunkenTargetY = centerY - widget.height / 2f - dp(WIDGET_VERTICAL_OFFSET_DP) +
+            dp(currentVerticalOffsetDp.toFloat()) - widget.top
+        val targetY = if (currentFollowClockBottom) {
+            val clockBottomInHost = resolveClockBottomInHost(hostLocation[1])
+            if (clockBottomInHost != null) {
+                lastKnownClockBottomInHost = clockBottomInHost
+            }
+            val effectiveClockBottom = clockBottomInHost
+                ?: lastKnownClockBottomInHost.takeUnless(Float::isNaN)
+            if (effectiveClockBottom != null) {
+                val desiredY = effectiveClockBottom + dp(WIDGET_CLOCK_BOTTOM_GAP_DP) +
+                    dp(currentVerticalOffsetDp.toFloat()) - widget.top
+                val minY = dp(8f) - widget.top.toFloat()
+                val maxY = (centerY - widget.height / 2f - dp(16f) - widget.top).coerceAtLeast(minY)
+                desiredY.coerceIn(minY, maxY)
+            } else {
+                sunkenTargetY
             }
         } else {
-            null
+            val notificationTargetY = if (preferences.getBoolean(KEY_LOCKSCREEN_WIDGET_NOTIFICATION_AVOID, true)) {
+                firstVisibleNotificationTop()?.let { notificationTop ->
+                    notificationTop - dp(NOTIFICATION_SAFE_GAP_DP) - widget.height - widget.top
+                }
+            } else {
+                null
+            }
+            notificationTargetY?.let { minOf(sunkenTargetY, it) } ?: sunkenTargetY
         }
-        val targetY = notificationTargetY?.let { minOf(normalTargetY, it) } ?: normalTargetY
         if (presentationPositionAnimating) {
             val targetChanged = positionAnimationTargetX.isNaN() ||
                 kotlin.math.abs(positionAnimationTargetX - targetX) > 1f ||
@@ -1726,6 +2390,22 @@ internal class LockscreenWidgetController(
         if (!appearanceAnimating) syncShortcutAppearance(widget)
     }
 
+    private fun resolveClockBottomInHost(hostTopOnScreen: Int): Float? {
+        val targets = findLockscreenClockTargets(host.rootView)
+            .filter { target ->
+                target.clock.isAttachedToWindow && isVisibleForNotificationAvoidance(target.clock)
+            }
+        val maxScreenBottom = targets.mapNotNull { target ->
+            target.clockBottomOnScreen() ?: target.timeContent
+                ?.takeIf { it.isAttachedToWindow && it.height > 0 }
+                ?.let { time ->
+                    val loc = IntArray(2).also(time::getLocationOnScreen)
+                    loc[1] + time.height * kotlin.math.abs(time.scaleY)
+                }
+        }.maxOrNull() ?: return null
+        return maxScreenBottom - hostTopOnScreen.toFloat()
+    }
+
     /**
      * MIUI's depth clock may split the visible hour and minute into a primary clock and a
      * foreground-clock copy. Keep every active time layer clear of the widget, while preserving
@@ -1738,6 +2418,7 @@ internal class LockscreenWidgetController(
         // geometry every frame, and mapping that live geometry avoids fighting or stepping over
         // its own lockscreen/AOD interpolation.
         restoreClockPosition()
+        if (currentFollowClockBottom) return
         val targets = findLockscreenClockTargets(host.rootView)
             .filter { target ->
                 target.clock.isAttachedToWindow && isVisibleForNotificationAvoidance(target.clock)
@@ -1948,8 +2629,8 @@ internal class LockscreenWidgetController(
         val clock = findClockView(host.rootView)
         val animatedViews = listOfNotNull(leftShortcut, rightShortcut, clock)
         val alpha = animatedViews.minOf { it.alpha }.coerceIn(0f, 1f)
-        val scaleX = animatedViews.minOf { it.scaleX }.coerceIn(0.75f, 1.2f)
-        val scaleY = animatedViews.minOf { it.scaleY }.coerceIn(0.75f, 1.2f)
+        val scaleX = animatedViews.minOf { it.scaleX }.coerceIn(0.75f, 1.2f) * currentScaleFactor
+        val scaleY = animatedViews.minOf { it.scaleY }.coerceIn(0.75f, 1.2f) * currentScaleFactor
         widget.alpha = alpha
         widget.scaleX = scaleX
         widget.scaleY = scaleY

@@ -32,6 +32,7 @@ internal fun restartRecommendationSnapshot(group: String, preferences: SharedPre
     readControlCenterMediaBigCoverSettings(p)
     readControlCenterFocusModeSettings(p)
     readLockscreenBottomSettings(p)
+    readLockscreenWidgetExtendedSettings(p)
     readControlCenterTopButtonsPlacement(p)
     readControlCenterTopButtonsGeometry(p)
     ContactsDialerSettings.read(p)

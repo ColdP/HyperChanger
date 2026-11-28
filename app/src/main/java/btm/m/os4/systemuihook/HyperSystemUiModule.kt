@@ -11970,6 +11970,11 @@ class HyperSystemUiModule : XposedModule() {
         }
     }
 
+    private fun isConnectivityCardView(view: View): Boolean {
+        val state = readField(view, "state") ?: return false
+        return readField(state, "spec") == CC_CONNECTIVITY_TILE_SPEC
+    }
+
     private fun hookUnifiedRadiusSetter(targetClass: Class<*>, methodName: String, category: Int, preferences: SharedPreferences) {
         runCatching {
             val method = if (methodName.startsWith("get")) targetClass.getMethod(methodName)
@@ -11981,6 +11986,7 @@ class HyperSystemUiModule : XposedModule() {
                     if (controlRadiusDispatch.get() == category) return@intercept chain.proceed()
                     val settings = controlRadiusSettings(preferences)
                     val view = controlRadiusView(target) ?: return@intercept chain.proceed()
+                    if (category == 0 && isConnectivityCardView(view)) return@intercept chain.proceed()
                     val density = view.resources.displayMetrics.density
                     if (method.parameterCount == 0) {
                         // VolumePanelController's setter is empty; its getter supplies transition geometry.
@@ -12040,7 +12046,7 @@ class HyperSystemUiModule : XposedModule() {
                 .setId("material-style:${method.parameterCount}").intercept { chain ->
                     val result = chain.proceed()
                     val view = chain.getArg(0) as? View ?: return@intercept result
-                    if (view.javaClass.name == TOP_BUTTONS_CLASS) {
+                    if (view.javaClass.name == TOP_BUTTONS_CLASS && !isConnectivityCardView(view)) {
                         val settings = controlRadiusSettings(preferences)
                         val input = readField(view, "_cornerRadius") as? Float
                         if (input != null) {

@@ -43,8 +43,10 @@ internal fun ControlCenterTileLayoutPage(openLandscape: () -> Unit, back: () -> 
     val service by HookApplication.service.collectAsState()
     val store = remember(context) { ControlCenterTileLayoutSettingsStore(context) }
     val landscapeStore = remember(context) { ControlCenterTileLayoutLandscapeSettingsStore(context) }
+    val connectivityStore = remember(context) { ControlCenterConnectivityWidgetSettingsStore(context) }
     var settings by remember { mutableStateOf(store.settings) }
     var landscapeSettings by remember { mutableStateOf(landscapeStore.settings) }
+    var connectivitySettings by remember { mutableStateOf(connectivityStore.settings) }
     val listState = rememberLazyListState()
     val local = remember(context) { context.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE) }
     var available by remember { mutableStateOf(CcTileCatalog.available(local).map { it.id }) }
@@ -97,9 +99,11 @@ internal fun ControlCenterTileLayoutPage(openLandscape: () -> Unit, back: () -> 
         service?.let {
             store.syncRemote(it)
             landscapeStore.syncRemote(it)
+            connectivityStore.syncRemote(it)
         }
         settings = store.settings
         landscapeSettings = landscapeStore.settings
+        connectivitySettings = connectivityStore.settings
     }
     AppList(padding, scroll, 28, state = listState) {
         item {
@@ -121,6 +125,17 @@ internal fun ControlCenterTileLayoutPage(openLandscape: () -> Unit, back: () -> 
                         settings = settings.copy(smallTileAutoFill = it)
                         store.update(service, settings)
                     })
+                ParameterIntSlide(
+                    title = tr("cc_connectivity_tile_corner_radius", "快捷连接磁贴圆角"),
+                    value = connectivitySettings.tileCornerRadiusOffsetDp,
+                    range = CC_CONNECTIVITY_CORNER_RADIUS_MIN..CC_CONNECTIVITY_CORNER_RADIUS_MAX,
+                    suffix = " dp",
+                    defaultValue = CC_CONNECTIVITY_CORNER_RADIUS_DEFAULT,
+                    enabled = settings.enabled,
+                ) { value ->
+                    connectivityStore.update(service) { it.copy(tileCornerRadiusOffsetDp = value) }
+                    connectivitySettings = connectivityStore.settings
+                }
                 SwitchPreference(
                     title = tr("cc_layout_landscape_adaptive", "自适应调整横屏布局"),
                     checked = landscapeSettings.adaptive,
@@ -368,7 +383,11 @@ internal class CcLayoutEditorView(context: Context) : View(context) {
     private fun drawAvailable(c: Canvas, id: String, r: RectF) {
         val palette = colors ?: return
         round(c, r, radius(r), if (active?.id == id && dragging) palette.activeTile else palette.tile)
-        icon(c, id, r.centerX() - 16f * density, r.centerY() - 16f * density, 32f * density)
+        if (id == "connectivity") {
+            drawConnectivityPreview(c, r, compact = true)
+        } else {
+            icon(c, id, r.centerX() - 16f * density, r.centerY() - 16f * density, 32f * density)
+        }
         paint.style = Paint.Style.FILL; paint.color = palette.foreground
         paint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
         paint.textSize = 11f * density; paint.textAlign = Paint.Align.CENTER
@@ -389,6 +408,8 @@ internal class CcLayoutEditorView(context: Context) : View(context) {
         val u = density * scale
         if (t.slider) {
             icon(c, t.id, r.centerX() - 16 * u, r.bottom - 48 * u, 32 * u)
+        } else if (t.connectivity) {
+            drawConnectivityPreview(c, r, compact = false)
         } else if (t.id == "media") {
             val gray = palette.media
             fun block(x: Float, y: Float, w: Float, h: Float, rad: Float) = round(c, RectF(x, y, x + maxOf(0f, w), y + h), rad, gray)
@@ -459,7 +480,7 @@ internal class CcLayoutEditorView(context: Context) : View(context) {
                     if (vertical) y + iconSize + 17 * u else r.centerY() - (paint.ascent() + paint.descent()) / 2, paint)
             }
         }
-        if (!t.slider) {
+        if (!t.slider && !t.connectivity) {
             paint.color = palette.handle; paint.style = Paint.Style.STROKE; paint.strokeWidth = 4.8f * u
             paint.strokeCap = Paint.Cap.ROUND; paint.strokeJoin = Paint.Join.ROUND
             val right = r.right - 11 * u; val bottom = r.bottom - 11 * u
@@ -498,6 +519,48 @@ internal class CcLayoutEditorView(context: Context) : View(context) {
         drawable.setBounds(0, 0, s.roundToInt(), s.roundToInt())
         drawable.draw(c)
         c.restore()
+    }
+    private fun drawConnectivityPreview(c: Canvas, r: RectF, compact: Boolean) {
+        val side = minOf(r.width(), r.height())
+        if (side <= 2f) return
+        val inset = side * (if (compact) 0.14f else 0.105f)
+        val gap = side * (if (compact) 0.08f else 0.075f)
+        val quad = (side - 2f * inset - gap) / 2f
+        if (quad <= 1f) return
+        val startX = r.centerX() - side / 2f + inset
+        val startY = r.centerY() - side / 2f + inset
+        val blue = 0xFF0D84FF.toInt()
+        val green = 0xFF30D158.toInt()
+        val muted = ((colors?.foreground ?: Color.WHITE) and 0x00FFFFFF) or 0x2B000000
+
+        fun circleIcon(cx: Float, cy: Float, diameter: Float, bg: Int, iconId: String?, iconTint: Int) {
+            paint.style = Paint.Style.FILL
+            paint.color = bg
+            c.drawCircle(cx, cy, diameter / 2f, paint)
+            val d = iconId?.let { icons[it] } ?: return
+            val isz = (diameter * 0.54f).roundToInt().coerceAtLeast(1)
+            c.save()
+            c.translate(cx - isz / 2f, cy - isz / 2f)
+            d.mutate().setTint(iconTint)
+            d.setBounds(0, 0, isz, isz)
+            d.draw(c)
+            c.restore()
+        }
+
+        // Top-Left: Airplane, Top-Right: Xiaomi Share, Bottom-Left: WLAN
+        circleIcon(startX + quad / 2f, startY + quad / 2f, quad, muted, "airplane", colors?.foreground ?: Color.WHITE)
+        circleIcon(startX + quad + gap + quad / 2f, startY + quad / 2f, quad, blue, "misharetile", Color.WHITE)
+        circleIcon(startX + quad / 2f, startY + quad + gap + quad / 2f, quad, blue, "wlan", Color.WHITE)
+
+        // Bottom-Right 2×2 mini cluster: Cellular, Bluetooth, Hotspot, NFC
+        val miniGap = quad * 0.12f
+        val miniD = (quad - miniGap) / 2f
+        val mX = startX + quad + gap
+        val mY = startY + quad + gap
+        circleIcon(mX + miniD / 2f, mY + miniD / 2f, miniD, green, if (compact) null else "data", Color.WHITE)
+        circleIcon(mX + miniD + miniGap + miniD / 2f, mY + miniD / 2f, miniD, blue, if (compact) null else "bt", Color.WHITE)
+        circleIcon(mX + miniD / 2f, mY + miniD + miniGap + miniD / 2f, miniD, muted, if (compact) null else "hotspot", colors?.foreground ?: Color.WHITE)
+        circleIcon(mX + miniD + miniGap + miniD / 2f, mY + miniD + miniGap + miniD / 2f, miniD, muted, if (compact) null else "nfc", colors?.foreground ?: Color.WHITE)
     }
     private fun animateTo(next: List<CcTile>) {
         if (next == tiles && animator?.isRunning == true &&
@@ -570,7 +633,7 @@ internal class CcLayoutEditorView(context: Context) : View(context) {
                     val r = lowerRect(it); r.bottom += labelHeight; r.contains(e.x, e.y)
                 } else null
                 val hit = upper ?: lower?.let { id ->
-                    val size = sizes[id] ?: (if(id == "media") 2 to 2 else 1 to 1)
+                    val size = sizes[id] ?: (if (id == "media" || id == "connectivity") 2 to 2 else 1 to 1)
                     CcTile(id, 0, 0, size.first, size.second)
                 } ?: return false
                 animator?.end(); rects.clear()
@@ -579,7 +642,7 @@ internal class CcLayoutEditorView(context: Context) : View(context) {
                 shapeAnimator?.cancel(); compactness = if (sourceLower) 1f else 0f
                 origin = if (sourceLower) lowerRect(hit.id) else rect(hit)
                 pointer = e.getPointerId(0); startX = e.x; startY = e.y; rawPointerY = e.rawY; dx = 0f; dy = 0f
-                resizing = !sourceLower && !hit.slider && e.x >= origin.right - 32 * density && e.y >= origin.bottom - 32 * density
+                resizing = !sourceLower && !hit.slider && !hit.connectivity && e.x >= origin.right - 32 * density && e.y >= origin.bottom - 32 * density
                 if (resizing) parent?.requestDisallowInterceptTouchEvent(true) else uiHandler.postDelayed(longPress, 220)
                 invalidate(); return true
             }

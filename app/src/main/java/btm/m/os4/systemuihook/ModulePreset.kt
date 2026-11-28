@@ -97,6 +97,7 @@ object ModulePresetCodec {
                 completeStatusBarSecondsPreset(values)
                 completeCcTileLayoutPreset(values)
                 completeCcTileLayoutLandscapePreset(values)
+                completeControlCenterConnectivityWidgetPreset(values)
                 completeControlCenterMultiPagePreset(values)
                 completeControlCenterMediaBigCoverPreset(values)
                 completeControlCenterFocusModePreset(values)
@@ -130,6 +131,7 @@ object ModulePresetCodec {
                 completeClearFrostPreset(values)
                 completeClassicControlCenterPreset(values)
                 completeLockscreenClockCustomPreset(values)
+                completeLockscreenWidgetExtendedPreset(values)
             }
             if (groupName == SETTINGS_APPEARANCE_PREFERENCES) {
                 val legacy = values.optJSONObject("color_mode_assets_enabled")?.optBoolean("value", false) ?: false
@@ -208,6 +210,7 @@ object ModulePresetCodec {
                 completeStatusBarSecondsPreset(values)
                 completeCcTileLayoutPreset(values)
                 completeCcTileLayoutLandscapePreset(values)
+                completeControlCenterConnectivityWidgetPreset(values)
                 completeControlCenterMultiPagePreset(values)
                 completeControlCenterMediaBigCoverPreset(values)
                 completeControlCenterFocusModePreset(values)
@@ -241,6 +244,7 @@ object ModulePresetCodec {
                 completeClearFrostPreset(values)
                 completeClassicControlCenterPreset(values)
                 completeLockscreenClockCustomPreset(values)
+                completeLockscreenWidgetExtendedPreset(values)
             }
             if (groupName == SETTINGS_APPEARANCE_PREFERENCES) {
                 val legacy = values.optJSONObject("color_mode_assets_enabled")?.optBoolean("value", false) ?: false
@@ -326,6 +330,7 @@ object ModulePresetCodec {
                 completeStatusBarSecondsPreset(values)
                 completeCcTileLayoutPreset(values)
                 completeCcTileLayoutLandscapePreset(values)
+                completeControlCenterConnectivityWidgetPreset(values)
                 completeControlCenterMultiPagePreset(values)
                 completeControlCenterMediaBigCoverPreset(values)
                 completeControlCenterFocusModePreset(values)
@@ -359,6 +364,7 @@ object ModulePresetCodec {
                 completeClearFrostPreset(values)
                 completeClassicControlCenterPreset(values)
                 completeLockscreenClockCustomPreset(values)
+                completeLockscreenWidgetExtendedPreset(values)
             }
             if (groupName == SETTINGS_APPEARANCE_PREFERENCES) {
                 val legacy = values.optJSONObject("color_mode_assets_enabled")?.optBoolean("value", false) ?: false

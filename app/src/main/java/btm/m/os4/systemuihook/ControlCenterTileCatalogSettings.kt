@@ -15,6 +15,7 @@ internal const val KEY_CC_TILE_SIZE_MEMORY = "control_center_tile_size_memory_v1
 internal object CcTileSizeMemory {
     fun valid(sizes: Map<String, Pair<Int, Int>>) = sizes.all { (id, size) ->
         id in CcTileCatalog.ids && id != "brightness" && id != "volume" &&
+            (id != "connectivity" || (size.first == 2 && size.second == 2)) &&
             size.first in 1..4 && size.second in 1..if (id == "media") 3 else 2
     }
     fun read(p: SharedPreferences): Map<String, Pair<Int, Int>> = runCatching {
@@ -42,6 +43,7 @@ internal object CcTileCatalog {
     val entries = listOf(
         CcCatalogTile("wlan", "WLAN", "wifi"),
         CcCatalogTile("data", "移动数据", "cell"),
+        CcCatalogTile("connectivity", "快捷连接", "custom_connectivity"),
         CcCatalogTile("media", "媒体播放", null),
         CcCatalogTile("brightness", "亮度", null),
         CcCatalogTile("volume", "音量", null),

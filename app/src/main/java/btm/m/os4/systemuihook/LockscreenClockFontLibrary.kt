@@ -79,7 +79,14 @@ internal data class FontVariableAxesInfo(
     val hasWeightAxis: Boolean,
     val hasWidthAxis: Boolean,
     val hasHeightAxis: Boolean,
+    val weightMin: Float = 100f,
+    val weightDefault: Float = 400f,
+    val weightMax: Float = 900f,
+    val widthMin: Float = 75f,
+    val widthDefault: Float = 100f,
+    val widthMax: Float = 125f,
     val heightMin: Float = 10f,
+    val heightDefault: Float = 28f,
     val heightMax: Float = 100f,
 )
 
@@ -156,7 +163,14 @@ internal object ClockFontParser {
         var hasWght = false
         var hasWdth = false
         var hasHght = false
+        var wghtMin = 100f
+        var wghtDef = 400f
+        var wghtMax = 900f
+        var wdthMin = 75f
+        var wdthDef = 100f
+        var wdthMax = 125f
         var hghtMin = 10f
+        var hghtDef = 28f
         var hghtMax = 100f
         if (axisCount > 0 && axisSize >= 20) {
             for (i in 0 until axisCount) {
@@ -164,14 +178,30 @@ internal object ClockFontParser {
                 if (pos + 20 > bytes.size) break
                 val axisTag = buf.getInt(pos)
                 val minVal = buf.getInt(pos + 4) / 65536f
+                val defVal = buf.getInt(pos + 8) / 65536f
                 val maxVal = buf.getInt(pos + 12) / 65536f
                 when (axisTag) {
-                    0x77676874 -> hasWght = true // 'wght'
-                    0x77647468 -> hasWdth = true // 'wdth'
-                    0x48474854 -> {              // 'HGHT'
+                    0x77676874 -> { // 'wght'
+                        hasWght = true
+                        if (maxVal > minVal) {
+                            wghtMin = minVal
+                            wghtDef = defVal.coerceIn(minVal, maxVal)
+                            wghtMax = maxVal
+                        }
+                    }
+                    0x77647468 -> { // 'wdth'
+                        hasWdth = true
+                        if (maxVal > minVal) {
+                            wdthMin = minVal
+                            wdthDef = defVal.coerceIn(minVal, maxVal)
+                            wdthMax = maxVal
+                        }
+                    }
+                    0x48474854 -> { // 'HGHT'
                         hasHght = true
                         if (maxVal > minVal) {
                             hghtMin = minVal
+                            hghtDef = defVal.coerceIn(minVal, maxVal)
                             hghtMax = maxVal
                         }
                     }
@@ -184,7 +214,14 @@ internal object ClockFontParser {
             hasWeightAxis = hasWght,
             hasWidthAxis = hasWdth,
             hasHeightAxis = hasHght,
+            weightMin = wghtMin,
+            weightDefault = wghtDef,
+            weightMax = wghtMax,
+            widthMin = wdthMin,
+            widthDefault = wdthDef,
+            widthMax = wdthMax,
             heightMin = hghtMin,
+            heightDefault = hghtDef,
             heightMax = hghtMax,
         )
     }
@@ -195,7 +232,9 @@ internal object ClockFontParser {
             val font = Font.Builder(file).build()
             val family = runCatching { FontFamily.Builder(font).buildVariableFamily() }.getOrNull()
                 ?: FontFamily.Builder(font).build()
-            Typeface.CustomFallbackBuilder(family).build()
+            Typeface.CustomFallbackBuilder(family)
+                .setSystemFallback("sans-serif")
+                .build()
         }.getOrNull()
         if (variable != null) return variable
         return runCatching { Typeface.Builder(file).build() }.getOrNull()
@@ -206,7 +245,9 @@ internal object ClockFontParser {
             val font = Font.Builder(pfd).build()
             val family = runCatching { FontFamily.Builder(font).buildVariableFamily() }.getOrNull()
                 ?: FontFamily.Builder(font).build()
-            Typeface.CustomFallbackBuilder(family).build()
+            Typeface.CustomFallbackBuilder(family)
+                .setSystemFallback("sans-serif")
+                .build()
         }.getOrNull()
         if (variable != null) return variable
         return runCatching { Typeface.Builder(pfd.fileDescriptor).build() }.getOrNull()

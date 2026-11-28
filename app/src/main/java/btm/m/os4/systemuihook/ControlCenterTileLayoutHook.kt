@@ -37,7 +37,10 @@ import kotlin.math.roundToInt
  * All RecyclerView objects belong to the plugin loader; only Android View crosses loaders.
  * Uses native card factories/owners; no replacement views or secondary router hooks.
  */
-internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
+internal class ControlCenterTileLayoutHook(
+    private val module: XposedModule,
+    private val onConnectivityCardReady: (ViewGroup, Any?) -> Unit = { _, _ -> },
+) {
     private val scheduled = Collections.newSetFromMap(WeakHashMap<Class<*>, Boolean>())
     private val installed = Collections.newSetFromMap(WeakHashMap<Class<*>, Boolean>())
     private val managerInstalled = Collections.newSetFromMap(WeakHashMap<Class<*>, Boolean>())
@@ -62,6 +65,7 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
     private var selectionPreferences: SharedPreferences? = null
     private var selectedSpecs: Map<String, String> = emptyMap()
     private var styleControllerRef: WeakReference<Any>? = null
+    private var qsControllerRef: WeakReference<Any>? = null
     private val cardSelections = WeakHashMap<Any, List<String>>()
 
     private fun isSupportedStyle(style: String?): Boolean = style == "VERTICAL" || style == "HORIZONTAL"
@@ -219,12 +223,32 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         controller.getDeclaredMethod("getCardStyleTileSpecs").let { m ->
             module.hook(m).setExceptionMode(ExceptionMode.PROTECTIVE).setId("cc-tiles:selected-specs").intercept { chain ->
                 val original = chain.proceed()
+                chain.thisObject?.let { qsControllerRef = WeakReference(it) }
                 val context = call(chain.thisObject, "getContext") as? Context
                 val style = activeStyleForContext(context)
                 if (!settings.enabled || context == null || !isSupportedStyle(style)) original else {
                     selectedSpecs = CcTileCatalog.specs(context, p, activeTiles(style))
                     selectedSpecs.values.toList()
                 }
+            }
+        }
+        runCatching { controller.getDeclaredMethod("getCreateStartExcludeTileSpecs") }.getOrNull()?.let { m ->
+            module.hook(m).setExceptionMode(ExceptionMode.PROTECTIVE).setId("cc-tiles:exclude-stock-cards").intercept { chain ->
+                val original = chain.proceed()
+                chain.thisObject?.let { qsControllerRef = WeakReference(it) }
+                val context = call(chain.thisObject, "getContext") as? Context
+                val style = activeStyleForContext(context)
+                if (settings.enabled && isSupportedStyle(style) && original is MutableList<*>) {
+                    @Suppress("UNCHECKED_CAST")
+                    val list = original as MutableList<String>
+                    // Keep stock upper card specs ("wifi", "cell") excluded from the lower small-tile
+                    // grid when moved out of the upper layout (e.g. replaced by the 2x2 Connectivity
+                    // widget), and ensure the custom connectivity spec never leaks into small tiles.
+                    if ("wifi" !in list) list.add("wifi")
+                    if ("cell" !in list) list.add("cell")
+                    if (CC_CONNECTIVITY_TILE_SPEC !in list) list.add(CC_CONNECTIVITY_TILE_SPEC)
+                }
+                original
             }
         }
         loader.loadClass("miui.systemui.controlcenter.panel.main.media.MediaPlayerController")
@@ -250,6 +274,7 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
         val cards = contents.firstOrNull { it?.javaClass?.simpleName == "QSCardsController" } ?: return
         call(field(cards, "mainPanelStyleController"), "get")?.let { styleControllerRef = WeakReference(it) }
         val qs = call(field(cards, "qsController"), "get") ?: return
+        qsControllerRef = WeakReference(qs)
         val context = call(qs, "getContext") as? Context ?: return
         runCatching {
             val style = adapterStyle(adapter) ?: activeStyleForContext(context)
@@ -756,6 +781,9 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
 
     private fun prepareChild(view: View, tile: CcTile, width: Int, height: Int) {
         adapted[view] = tile
+        if (tile.connectivity && view is ViewGroup) {
+            onConnectivityCardReady(view, qsControllerRef?.get())
+        }
         if (tile.id == "media") (view.parent as? ViewGroup)?.let { parent ->
             call(parent, "getChildViewHolder", view)?.let { mediaHolders[view] = WeakReference(it) }
         }
@@ -785,8 +813,9 @@ internal class ControlCenterTileLayoutHook(private val module: XposedModule) {
 
     /** Keep the OEM children/listeners; resize their actual boxes instead of scaling touch targets. */
     private fun layoutCard(root: View, t: CcTile) {
-        // Native 1×1 tiles own their icon frame, text mode, background and touch geometry.
-        if (find(root, "icon_frame") != null) return
+        // Native 1×1 tiles own their icon frame, text mode, background and touch geometry;
+        // the 2×2 Connectivity widget owns its own 2×2 interactive layout.
+        if (t.connectivity || find(root, "icon_frame") != null) return
         val content = find(root, "scale_content") as? ViewGroup ?: return
         val label = find(root, "label_container") ?: return
         val icon = (0 until content.childCount).map(content::getChildAt).firstOrNull { it !== label } ?: return

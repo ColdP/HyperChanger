@@ -27,7 +27,12 @@ internal class ControlCenterHooks(
     private val controlCenterHeaderHeightHook by lazy { ControlCenterHeaderHeightHook(module) }
     private val controlCenterCarrierHook by lazy { ControlCenterCarrierHook(module) }
     private val controlCenterClockHook by lazy { ControlCenterClockHook(module) }
-    private val controlCenterTileLayoutHook by lazy { ControlCenterTileLayoutHook(module) }
+    private val controlCenterConnectivityWidgetHook by lazy { ControlCenterConnectivityWidgetHook(module) }
+    private val controlCenterTileLayoutHook by lazy {
+        ControlCenterTileLayoutHook(module) { card, qsController ->
+            controlCenterConnectivityWidgetHook.bindConnectivityCard(card, qsController)
+        }
+    }
     private val controlCenterFocusModeHook by lazy { ControlCenterFocusModeHook(module) }
     private val controlCenterMediaBigCoverHook by lazy { ControlCenterMediaBigCoverHook(module) }
     private val controlCenterMultiPageHook by lazy {
@@ -48,6 +53,7 @@ internal class ControlCenterHooks(
         controlCenterClockHook.install(classLoader, preferences)
         controlCenterTileLayoutHook.install(classLoader, preferences)
         controlCenterFocusModeHook.install(classLoader, preferences)
+        controlCenterConnectivityWidgetHook.install(classLoader, preferences)
         controlCenterMultiPageHook.install(classLoader, preferences)
         controlCenterMediaBigCoverHook.install(classLoader, preferences)
         classicControlCenterHook.install(classLoader, preferences)
@@ -60,6 +66,7 @@ internal class ControlCenterHooks(
         controlCenterClockHook.onClassLoaded(loadedClass, preferences)
         controlCenterTileLayoutHook.onClassLoaded(loadedClass, preferences)
         controlCenterFocusModeHook.onClassLoaded(loadedClass, preferences)
+        controlCenterConnectivityWidgetHook.onClassLoaded(loadedClass, preferences)
         controlCenterMultiPageHook.onClassLoaded(loadedClass, preferences)
         controlCenterMediaBigCoverHook.onClassLoaded(loadedClass, preferences)
         classicControlCenterHook.onClassLoaded(loadedClass, preferences)
@@ -126,7 +133,10 @@ internal class ControlCenterHooks(
             ?: return
         module.hook(create).setExceptionMode(ExceptionMode.PROTECTIVE).setId("hyperchanger:custom-tiles").intercept { chain ->
             val spec = chain.getArg(0) as? String
-            if (spec == "custom_5G" || (spec == "custom_GMS" && prefs.getBoolean(KEY_CONTROL_CENTER_GMS_TILE_ENABLED, false))) {
+            if (spec == "custom_5G" ||
+                (spec == "custom_GMS" && prefs.getBoolean(KEY_CONTROL_CENTER_GMS_TILE_ENABLED, false)) ||
+                spec == CC_CONNECTIVITY_TILE_SPEC
+            ) {
                 injectPluginTile(chain.thisObject, loader, prefs, spec)
             }
             chain.proceed()
@@ -167,6 +177,7 @@ internal class ControlCenterHooks(
                 val hostLoader = host.javaClass.classLoader ?: loader
                 if (prefs.getInt(KEY_CONTROL_CENTER_5G_TILE_MODE, 0) != 0 && !map.containsKey("custom_5G")) map["custom_5G"] = proxyTile(host, hostLoader, prefs, "custom_5G")
                 if (prefs.getBoolean(KEY_CONTROL_CENTER_GMS_TILE_ENABLED, false) && !map.containsKey("custom_GMS")) map["custom_GMS"] = proxyTile(host, hostLoader, prefs, "custom_GMS")
+                if (!map.containsKey(CC_CONNECTIVITY_TILE_SPEC)) map[CC_CONNECTIVITY_TILE_SPEC] = proxyTile(host, hostLoader, prefs, CC_CONNECTIVITY_TILE_SPEC)
                 map
             }
             customPluginTileHookInstalled = true
@@ -183,6 +194,15 @@ internal class ControlCenterHooks(
         val map = invokeNoArgResult(pluginField.get(interactor), "getAllPluginTiles") as? MutableMap<Any?, Any?> ?: return@runCatching
         if (spec == "custom_5G" && !map.containsKey(spec)) map.values.firstOrNull()?.let { map[spec] = proxyTile(it, it.javaClass.classLoader ?: loader, prefs, spec) }
         if (spec == "custom_GMS" && !map.containsKey(spec)) map.values.firstOrNull()?.let { map[spec] = proxyTile(it, it.javaClass.classLoader ?: loader, prefs, spec) }
+        if (spec == CC_CONNECTIVITY_TILE_SPEC && !map.containsKey(spec)) map.values.firstOrNull()?.let { map[spec] = proxyTile(it, it.javaClass.classLoader ?: loader, prefs, spec) }
+    }
+
+    private fun isConnectivityWidgetConfigured(prefs: SharedPreferences): Boolean {
+        val portrait = readCcTileLayoutSettings(prefs)
+        if (!portrait.enabled) return false
+        if (portrait.tiles.any { it.connectivity }) return true
+        val landscape = readCcTileLayoutLandscapeSettings(prefs)
+        return !landscape.adaptive && landscape.tiles.any { it.connectivity }
     }
 
     private fun proxyTile(host: Any, loader: ClassLoader, prefs: SharedPreferences, spec: String): Any {
@@ -191,11 +211,22 @@ internal class ControlCenterHooks(
         val state = invokeNoArgResult(host, "getState")?.javaClass?.getDeclaredConstructor()?.apply { isAccessible = true }?.newInstance() ?: error("tile state unavailable")
         val callbacks = mutableListOf<Any>()
         fun refresh() {
+            val connectivity = spec == CC_CONNECTIVITY_TILE_SPEC
             val gms = spec == "custom_GMS"
-            val enabled = if (gms) isGmsEnabled(context) else isUserFiveGEnabled(context)
+            val enabled = when {
+                connectivity -> false
+                gms -> isGmsEnabled(context)
+                else -> isUserFiveGEnabled(context)
+            }
+            val label = when {
+                connectivity -> "快捷连接"
+                gms -> "Google 服务"
+                else -> "5G"
+            }
+            runCatching { state.javaClass.getField("spec").set(state, spec) }
             state.javaClass.getField("state").setInt(state, if (enabled) 2 else 1)
-            state.javaClass.getField("label").set(state, if (gms) "Google 服务" else "5G")
-            state.javaClass.getField("contentDescription").set(state, if (gms) "Google 服务" else "5G")
+            state.javaClass.getField("label").set(state, label)
+            state.javaClass.getField("contentDescription").set(state, label)
             // DrawableIcon moved from quicksettings to controlcenter.qs in 18.3.x.
             // Resolve both names because the plugin and SystemUI can use different
             // class loaders during a SystemUI/plugin upgrade.
@@ -206,14 +237,22 @@ internal class ControlCenterHooks(
                 runCatching { host.javaClass.classLoader.loadClass(name) }.getOrNull()
                     ?: runCatching { loader.loadClass(name) }.getOrNull()
             }.firstOrNull() ?: error("DrawableIcon unavailable")
-            val drawable = if (gms) loadTileDrawable(context, R.drawable.ic_control_center_google) else loadTileDrawable(context, when (prefs.getInt(KEY_CONTROL_CENTER_5G_TILE_MODE, 1)) { 2 -> R.drawable.ic_control_center_5g_semibold; 3 -> R.drawable.ic_control_center_5g_black; 4 -> R.drawable.ic_control_center_5g_signal; else -> R.drawable.ic_control_center_5g_regular })
+            val drawable = when {
+                connectivity -> loadTileDrawable(context, R.drawable.hc_cc_preview_wlan)
+                gms -> loadTileDrawable(context, R.drawable.ic_control_center_google)
+                else -> loadTileDrawable(context, when (prefs.getInt(KEY_CONTROL_CENTER_5G_TILE_MODE, 1)) { 2 -> R.drawable.ic_control_center_5g_semibold; 3 -> R.drawable.ic_control_center_5g_black; 4 -> R.drawable.ic_control_center_5g_signal; else -> R.drawable.ic_control_center_5g_regular })
+            }
             state.javaClass.getField("icon").set(state, iconClass.getConstructor(Drawable::class.java).newInstance(drawable))
             callbacks.toList().forEach { cb -> runCatching { cb.javaClass.methods.firstOrNull { it.name == "onStateChanged" && it.parameterCount == 1 }?.invoke(cb, state) } }
         }
         refresh()
         return Proxy.newProxyInstance(iface.classLoader, arrayOf(iface)) { proxy, method, args -> when (method.name) {
             "getTileSpec" -> spec
-            "isAvailable" -> if (spec == "custom_GMS") hasGms(context) else prefs.getInt(KEY_CONTROL_CENTER_5G_TILE_MODE, 0) != 0
+            "isAvailable" -> when (spec) {
+                CC_CONNECTIVITY_TILE_SPEC -> isConnectivityWidgetConfigured(prefs)
+                "custom_GMS" -> hasGms(context)
+                else -> prefs.getInt(KEY_CONTROL_CENTER_5G_TILE_MODE, 0) != 0
+            }
             "getState" -> state
             // PluginTile calls this on every update and expects a fresh State.
             "newTileState" -> state.javaClass.getDeclaredConstructor().apply { isAccessible = true }.newInstance()
@@ -224,8 +263,18 @@ internal class ControlCenterHooks(
             "composeChangeAnnouncement" -> spec
             // This value is unboxed by PluginTile; returning null here crashes SystemUI.
             "getMetricsCategory" -> 0
-            "handleClick" -> { if (spec == "custom_GMS") toggleGms(context) else setUserFiveGEnabled(context, !isUserFiveGEnabled(context)); refresh(); null }
-            "getLongClickIntent" -> if (spec == "custom_GMS") Intent().setClassName("com.miui.securitycenter", "com.miui.googlebase.ui.GmsCoreSettings") else Intent().setClassName("com.android.phone", "com.android.phone.settings.MiuiFiveGNetworkSetting")
+            "handleClick" -> {
+                if (spec != CC_CONNECTIVITY_TILE_SPEC) {
+                    if (spec == "custom_GMS") toggleGms(context) else setUserFiveGEnabled(context, !isUserFiveGEnabled(context))
+                    refresh()
+                }
+                null
+            }
+            "getLongClickIntent" -> when (spec) {
+                CC_CONNECTIVITY_TILE_SPEC -> null
+                "custom_GMS" -> Intent().setClassName("com.miui.securitycenter", "com.miui.googlebase.ui.GmsCoreSettings")
+                else -> Intent().setClassName("com.android.phone", "com.android.phone.settings.MiuiFiveGNetworkSetting")
+            }
             "hashCode" -> System.identityHashCode(proxy); "equals" -> proxy === args?.firstOrNull(); "toString" -> "HyperChanger-$spec"; else -> null
         } }
     }

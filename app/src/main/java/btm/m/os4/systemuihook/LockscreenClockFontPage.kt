@@ -498,8 +498,10 @@ private fun ClockFontLibraryCard(
                     fontFamily = typeface?.let(::FontFamily) ?: FontFamily.Default,
                     fontSize = 52.sp,
                     lineHeight = 58.sp,
+                    style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "lnum"),
                     color = MiuixTheme.colorScheme.onSurface,
                     maxLines = 1,
+                    softWrap = false,
                 )
             }
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -567,16 +569,20 @@ private fun ClockFontDialogPreviewBox(
                 fontFamily = family,
                 fontSize = 56.sp,
                 lineHeight = 62.sp,
+                style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "lnum"),
                 color = MiuixTheme.colorScheme.onSurface,
                 maxLines = 1,
+                softWrap = false,
             )
             if (showDigitsRow) {
                 Text(
                     text = "0123456789:",
                     fontFamily = family,
                     fontSize = 18.sp,
+                    style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "lnum"),
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     maxLines = 1,
+                    softWrap = false,
                 )
             }
         }

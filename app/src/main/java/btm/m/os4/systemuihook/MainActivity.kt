@@ -1411,6 +1411,7 @@ private fun Root(
                 LockscreenFaceUnlockSettingsStore(context).syncRemote(it)
                 LockscreenBottomSettingsStore(context).syncRemote(it)
                 LockscreenClockCustomSettingsStore(context).syncRemote(it)
+                LockscreenWidgetExtendedSettingsStore(context).syncRemote(it)
                 musicStore.syncRemote(it)
                 HomeGlassSettingsStore(context).syncRemote(it)
                 dockStore.syncRemote(it)
@@ -10863,6 +10864,16 @@ private fun Lock(
     var clockFontCount by remember {
         mutableIntStateOf(clockFontLibrary.list().size)
     }
+    val lockscreenWidgetExtStore = remember(context) {
+        LockscreenWidgetExtendedSettingsStore(context)
+    }
+    var lockscreenWidgetExtSettings by remember {
+        mutableStateOf(lockscreenWidgetExtStore.settings)
+    }
+    val updateLockscreenWidgetExt: ((LockscreenWidgetExtendedSettings) -> LockscreenWidgetExtendedSettings) -> Unit = { transform ->
+        lockscreenWidgetExtStore.update(clockHorizontalService, transform)
+        lockscreenWidgetExtSettings = lockscreenWidgetExtStore.settings
+    }
     val updateLockscreenBottom: ((LockscreenBottomSettings) -> LockscreenBottomSettings) -> Unit = { transform ->
         lockscreenBottomStore.update(clockHorizontalService, transform)
         lockscreenBottomSettings = lockscreenBottomStore.settings
@@ -10878,6 +10889,8 @@ private fun Lock(
             clockCustomStore.syncRemote(it)
             clockCustomSettings = clockCustomStore.settings
             clockFontCount = clockFontLibrary.list().size
+            lockscreenWidgetExtStore.syncRemote(it)
+            lockscreenWidgetExtSettings = lockscreenWidgetExtStore.settings
         }
     }
 
@@ -11174,7 +11187,11 @@ OverlayDropdownPreference(
                     Column {
                         SharedViewArrowPreference(
                             title = tr("锁屏小组件", "锁屏小组件"),
-                            summary = lockscreenWidgetItemsSummary(s.lockscreenWidgetItems),
+                            summary = lockscreenWidgetEffectiveSummary(
+                                s.lockscreenWidgetItems,
+                                s.lockscreenWidgetOrder,
+                                lockscreenWidgetExtSettings,
+                            ),
                             onClick = { open(PageId.LOCKSCREEN_WIDGET_EDITOR) },
                         )
                         SharedViewArrowPreference(
@@ -11204,11 +11221,45 @@ OverlayDropdownPreference(
                             },
                         )
                         SwitchPreference(
+                            title = tr("lockscreenWidgetFollowClockBottom", "跟随时钟底部"),
+                            summary = tr("lockscreenWidgetFollowClockBottomSummary", "开启后像 OneUI 一样紧贴锁屏时间底部显示，关闭则默认下沉至锁屏底部"),
+                            checked = lockscreenWidgetExtSettings.followClockBottom,
+                            onCheckedChange = { value ->
+                                updateLockscreenWidgetExt { it.copy(followClockBottom = value) }
+                            },
+                        )
+                        SwitchPreference(
                             title = tr("\u907f\u8ba9\u9501\u5c4f\u901a\u77e5", "\u907f\u8ba9\u9501\u5c4f\u901a\u77e5"),
                             summary = tr("\u6709\u901a\u77e5\u65f6\u79fb\u52a8\u5230\u901a\u77e5\u9876\u90e8\uff0c\u5e76\u4fdd\u7559\u5b89\u5168\u95f4\u8ddd", "\u6709\u901a\u77e5\u65f6\u79fb\u52a8\u5230\u901a\u77e5\u9876\u90e8\uff0c\u5e76\u4fdd\u7559\u5b89\u5168\u95f4\u8ddd"),
                             checked = s.lockscreenWidgetNotificationAvoid,
                             onCheckedChange = { value ->
                                 update { it.copy(lockscreenWidgetNotificationAvoid = value) }
+                            },
+                        )
+                        ParameterIntSlide(
+                            title = tr("lockscreenWidgetVerticalOffset", "小组件垂直位置偏移"),
+                            value = lockscreenWidgetExtSettings.verticalOffsetDp,
+                            range = LOCKSCREEN_WIDGET_VERTICAL_OFFSET_MIN..LOCKSCREEN_WIDGET_VERTICAL_OFFSET_MAX,
+                            suffix = " dp",
+                            defaultValue = 0,
+                        ) { value ->
+                            updateLockscreenWidgetExt { it.copy(verticalOffsetDp = value) }
+                        }
+                        ParameterIntSlide(
+                            title = tr("lockscreenWidgetScale", "小组件整体缩放"),
+                            value = lockscreenWidgetExtSettings.scalePercent,
+                            range = LOCKSCREEN_WIDGET_SCALE_MIN..LOCKSCREEN_WIDGET_SCALE_MAX,
+                            suffix = "%",
+                            defaultValue = 100,
+                        ) { value ->
+                            updateLockscreenWidgetExt { it.copy(scalePercent = value) }
+                        }
+                        SwitchPreference(
+                            title = tr("lockscreenWidgetInteractive", "允许锁屏点击交互"),
+                            summary = tr("lockscreenWidgetInteractiveSummary", "支持在锁屏直接点击声音模式、手电筒等快捷小组件切换状态"),
+                            checked = lockscreenWidgetExtSettings.interactiveEnabled,
+                            onCheckedChange = { value ->
+                                updateLockscreenWidgetExt { it.copy(interactiveEnabled = value) }
                             },
                         )
                     }
@@ -12385,41 +12436,67 @@ private fun LockscreenWidgetDeviceNameDialog(
 }
 
 private data class LockscreenWidgetEditorItem(
+    val id: String,
     val flag: Int,
     val title: String,
     val kind: LockscreenWidgetEditorKind,
     val wide: Boolean = false,
     val surface: Boolean = true,
+    val category: LockscreenWidgetCategory = lockscreenWidgetCategoryOf(id),
 )
 
 private enum class LockscreenWidgetEditorKind {
     DETAIL_WEATHER, DETAIL_BATTERY, COMPACT_WEATHER, SUN, STEPS, STEPS_WIDE, SIGNATURE,
     SCHEDULE, HUMIDITY, AQI, FEELS_LIKE, WIND, STAND, ALARM,
+    UV_INDEX, RAIN_PROB, PRESSURE, BATTERY_RING, BATTERY_TEMP, BLUETOOTH_BATTERY,
+    WORLD_CLOCK, CALENDAR_DATE, COUNTDOWN, CUSTOM_MEMO, SLEEP, ACTIVITY_RINGS,
+    SOUND_MODE, FLASHLIGHT,
 }
 
 private fun lockscreenWidgetEditorItems() = listOf(
-    LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER, tr("详细天气", "详细天气"), LockscreenWidgetEditorKind.DETAIL_WEATHER, wide = true, surface = false),
-    LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY, tr("详细电量", "详细电量"), LockscreenWidgetEditorKind.DETAIL_BATTERY, wide = true, surface = false),
-    LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER_BACKGROUND, tr("详细天气（有背景）", "详细天气（有背景）"), LockscreenWidgetEditorKind.DETAIL_WEATHER, wide = true),
-    LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY_BACKGROUND, tr("详细电量（有背景）", "详细电量（有背景）"), LockscreenWidgetEditorKind.DETAIL_BATTERY, wide = true),
-    LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_COMPACT_WEATHER, tr("简约天气", "简约天气"), LockscreenWidgetEditorKind.COMPACT_WEATHER, wide = true),
-    LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_SUN, tr("日出日落", "日出日落"), LockscreenWidgetEditorKind.SUN),
-    LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_STEPS, tr("步数", "步数"), LockscreenWidgetEditorKind.STEPS),
-    LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_STEPS_WIDE, tr("步数", "步数"), LockscreenWidgetEditorKind.STEPS_WIDE, wide = true),
-    LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_SIGNATURE, tr("签名", "签名"), LockscreenWidgetEditorKind.SIGNATURE, wide = true),
-    LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_SCHEDULE, tr("日程", "日程"), LockscreenWidgetEditorKind.SCHEDULE, wide = true),
-    LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_HUMIDITY, tr("湿度", "湿度"), LockscreenWidgetEditorKind.HUMIDITY),
-    LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_AQI, "AQI", LockscreenWidgetEditorKind.AQI),
-    LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_FEELS_LIKE, tr("体感温度", "体感温度"), LockscreenWidgetEditorKind.FEELS_LIKE),
-    LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_WIND, tr("风", "风"), LockscreenWidgetEditorKind.WIND),
-    LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_STAND, tr("站立", "站立"), LockscreenWidgetEditorKind.STAND),
-    LockscreenWidgetEditorItem(LOCKSCREEN_WIDGET_ITEM_ALARM, tr("闹钟", "闹钟"), LockscreenWidgetEditorKind.ALARM),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.DETAIL_WEATHER, LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER, tr("详细天气", "详细天气"), LockscreenWidgetEditorKind.DETAIL_WEATHER, wide = true, surface = false),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.DETAIL_BATTERY, LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY, tr("详细电量", "详细电量"), LockscreenWidgetEditorKind.DETAIL_BATTERY, wide = true, surface = false),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.DETAIL_WEATHER_BG, LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER_BACKGROUND, tr("详细天气（有背景）", "详细天气（有背景）"), LockscreenWidgetEditorKind.DETAIL_WEATHER, wide = true),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.DETAIL_BATTERY_BG, LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY_BACKGROUND, tr("详细电量（有背景）", "详细电量（有背景）"), LockscreenWidgetEditorKind.DETAIL_BATTERY, wide = true),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.COMPACT_WEATHER, LOCKSCREEN_WIDGET_ITEM_COMPACT_WEATHER, tr("简约天气", "简约天气"), LockscreenWidgetEditorKind.COMPACT_WEATHER, wide = true),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.UV_INDEX, 0, tr("lockscreenWidgetUvIndex", "紫外线"), LockscreenWidgetEditorKind.UV_INDEX),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.RAIN_PROB, 0, tr("lockscreenWidgetRainProb", "降水概率"), LockscreenWidgetEditorKind.RAIN_PROB),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.PRESSURE, 0, tr("lockscreenWidgetPressure", "气压"), LockscreenWidgetEditorKind.PRESSURE),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.SUN, LOCKSCREEN_WIDGET_ITEM_SUN, tr("日出日落", "日出日落"), LockscreenWidgetEditorKind.SUN),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.HUMIDITY, LOCKSCREEN_WIDGET_ITEM_HUMIDITY, tr("湿度", "湿度"), LockscreenWidgetEditorKind.HUMIDITY),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.AQI, LOCKSCREEN_WIDGET_ITEM_AQI, "AQI", LockscreenWidgetEditorKind.AQI),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.FEELS_LIKE, LOCKSCREEN_WIDGET_ITEM_FEELS_LIKE, tr("体感温度", "体感温度"), LockscreenWidgetEditorKind.FEELS_LIKE),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.WIND, LOCKSCREEN_WIDGET_ITEM_WIND, tr("风", "风"), LockscreenWidgetEditorKind.WIND),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.BATTERY_RING, 0, tr("lockscreenWidgetBatteryRing", "电量环"), LockscreenWidgetEditorKind.BATTERY_RING),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.BATTERY_TEMP, 0, tr("lockscreenWidgetBatteryTemp", "电池温度"), LockscreenWidgetEditorKind.BATTERY_TEMP),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.BLUETOOTH_BATTERY, 0, tr("lockscreenWidgetBluetoothBattery", "蓝牙电量"), LockscreenWidgetEditorKind.BLUETOOTH_BATTERY, wide = true),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.WORLD_CLOCK, 0, tr("lockscreenWidgetWorldClock", "世界时钟"), LockscreenWidgetEditorKind.WORLD_CLOCK),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.CALENDAR_DATE, 0, tr("lockscreenWidgetCalendarDate", "日历日期"), LockscreenWidgetEditorKind.CALENDAR_DATE),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.ALARM, LOCKSCREEN_WIDGET_ITEM_ALARM, tr("闹钟", "闹钟"), LockscreenWidgetEditorKind.ALARM),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.SCHEDULE, LOCKSCREEN_WIDGET_ITEM_SCHEDULE, tr("日程", "日程"), LockscreenWidgetEditorKind.SCHEDULE, wide = true),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.COUNTDOWN, 0, tr("lockscreenWidgetCountdown", "倒数日"), LockscreenWidgetEditorKind.COUNTDOWN, wide = true),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.STEPS, LOCKSCREEN_WIDGET_ITEM_STEPS, tr("步数", "步数"), LockscreenWidgetEditorKind.STEPS),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.STEPS_WIDE, LOCKSCREEN_WIDGET_ITEM_STEPS_WIDE, tr("lockscreenWidgetStepsWide", "步数卡片"), LockscreenWidgetEditorKind.STEPS_WIDE, wide = true),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.STAND, LOCKSCREEN_WIDGET_ITEM_STAND, tr("站立", "站立"), LockscreenWidgetEditorKind.STAND),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.SLEEP, 0, tr("lockscreenWidgetSleep", "睡眠时长"), LockscreenWidgetEditorKind.SLEEP),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.ACTIVITY_RINGS, 0, tr("lockscreenWidgetActivityRings", "运动三环"), LockscreenWidgetEditorKind.ACTIVITY_RINGS, wide = true),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.CUSTOM_MEMO, 0, tr("lockscreenWidgetCustomMemo", "便签寄语"), LockscreenWidgetEditorKind.CUSTOM_MEMO, wide = true),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.SIGNATURE, LOCKSCREEN_WIDGET_ITEM_SIGNATURE, tr("签名", "签名"), LockscreenWidgetEditorKind.SIGNATURE, wide = true),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.SOUND_MODE, 0, tr("lockscreenWidgetSoundMode", "声音模式"), LockscreenWidgetEditorKind.SOUND_MODE),
+    LockscreenWidgetEditorItem(LockscreenWidgetIds.FLASHLIGHT, 0, tr("lockscreenWidgetFlashlight", "手电筒"), LockscreenWidgetEditorKind.FLASHLIGHT),
 )
 
-private fun lockscreenWidgetItemsSummary(mask: Int): String = lockscreenWidgetEditorItems()
-    .filter { mask and it.flag != 0 }
-    .joinToString("、") { it.title }
-    .ifBlank { tr("天气、电量", "天气、电量") }
+private fun lockscreenWidgetEffectiveSummary(
+    legacyMask: Int,
+    legacyOrder: String,
+    ext: LockscreenWidgetExtendedSettings,
+): String {
+    val byId = lockscreenWidgetEditorItems().associateBy(LockscreenWidgetEditorItem::id)
+    val selected = ext.resolveSelectedIds(legacyMask, legacyOrder)
+    return selected.mapNotNull { byId[it]?.title }
+        .joinToString("、")
+        .ifBlank { tr("天气、电量", "天气、电量") }
+}
 
 private fun lockscreenWidgetBackgroundModeLabel(mode: Int): String = when (mode) {
     LOCKSCREEN_WIDGET_BACKGROUND_PURE -> tr("纯色", "纯色")
@@ -12428,30 +12505,19 @@ private fun lockscreenWidgetBackgroundModeLabel(mode: Int): String = when (mode)
     else -> tr("跟随快捷按钮背景", "跟随快捷按钮背景")
 }
 
-private fun lockscreenWidgetItemsInOrder(mask: Int, order: String): List<LockscreenWidgetEditorItem> {
-    val editorItems = lockscreenWidgetEditorItems()
-    val byFlag = editorItems.associateBy(LockscreenWidgetEditorItem::flag)
-    val orderedFlags = order.split(',').mapNotNull(String::toIntOrNull)
-        .filter { it in byFlag && mask and it != 0 }.distinct()
-    return (orderedFlags + editorItems.map(LockscreenWidgetEditorItem::flag)
-        .filter { mask and it != 0 && it !in orderedFlags })
-        .mapNotNull(byFlag::get)
+private fun lockscreenWidgetItemsInOrder(
+    legacyMask: Int,
+    legacyOrder: String,
+    ext: LockscreenWidgetExtendedSettings,
+): List<LockscreenWidgetEditorItem> {
+    val byId = lockscreenWidgetEditorItems().associateBy(LockscreenWidgetEditorItem::id)
+    return ext.resolveSelectedIds(legacyMask, legacyOrder).mapNotNull(byId::get)
 }
 
 private fun lockscreenWidgetCanAdd(
     current: List<LockscreenWidgetEditorItem>,
     candidate: LockscreenWidgetEditorItem,
-): Boolean {
-    val next = current + candidate
-    val longCount = next.count(LockscreenWidgetEditorItem::wide)
-    val circleCount = next.size - longCount
-    return when (longCount) {
-        0 -> circleCount <= 4
-        1 -> circleCount <= 2
-        2 -> circleCount == 0
-        else -> false
-    }
-}
+): Boolean = canAddLockscreenWidgetId(current.map(LockscreenWidgetEditorItem::id), candidate.id)
 
 private fun lockscreenEditorBackgroundFile(context: Context): File =
     File(context.filesDir, "lockscreen_editor_background.bin")
@@ -12717,6 +12783,20 @@ private fun LockscreenWidgetEditor(
     back: () -> Unit,
 ) = AppPage(tr("锁屏小组件", "锁屏小组件"), back, restartScopes = setOf(ScopeApplication.SYSTEM_UI, ScopeApplication.AOD)) { padding, scroll ->
     val context = LocalContext.current
+    val service by HookApplication.service.collectAsStateWithLifecycle()
+    val extStore = remember(context) { LockscreenWidgetExtendedSettingsStore(context) }
+    var extSettings by remember { mutableStateOf(extStore.settings) }
+    var selectedCategory by remember { mutableStateOf(LockscreenWidgetCategory.ALL) }
+    LaunchedEffect(service) {
+        service?.let {
+            extStore.syncRemote(it)
+            extSettings = extStore.settings
+        }
+    }
+    fun updateExt(transform: (LockscreenWidgetExtendedSettings) -> LockscreenWidgetExtendedSettings) {
+        extStore.update(service, transform)
+        extSettings = extStore.settings
+    }
     var showSignatureColorPicker by remember { mutableStateOf(false) }
     val requestCalendarPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -12737,9 +12817,12 @@ private fun LockscreenWidgetEditor(
             ) == PackageManager.PERMISSION_GRANTED
         if (!granted) requestCalendarPermission.launch(Manifest.permission.READ_CALENDAR)
     }
-    val selectedItems = remember(settings.lockscreenWidgetItems, settings.lockscreenWidgetOrder) {
-        lockscreenWidgetItemsInOrder(settings.lockscreenWidgetItems, settings.lockscreenWidgetOrder)
+    val allItems = lockscreenWidgetEditorItems()
+    val selectedItems = remember(settings.lockscreenWidgetItems, settings.lockscreenWidgetOrder, extSettings) {
+        lockscreenWidgetItemsInOrder(settings.lockscreenWidgetItems, settings.lockscreenWidgetOrder, extSettings)
     }
+    val selectedIds = remember(selectedItems) { selectedItems.map(LockscreenWidgetEditorItem::id) }
+    val usedSlots = remember(selectedIds) { selectedIds.sumOf(LockscreenWidgetIds::slotCost) }
     val customPreview by produceState<Bitmap?>(
         initialValue = null,
         key1 = settings.lockscreenWidgetPreviewVersion,
@@ -12797,61 +12880,62 @@ private fun LockscreenWidgetEditor(
             Toast.makeText(context, tr("仅支持可用的 PNG、SVG 或 Android Vector XML", "仅支持可用的 PNG、SVG 或 Android Vector XML"), Toast.LENGTH_SHORT).show()
         }
     }
+    fun commitSelection(nextIds: List<String>) {
+        val normalized = normalizeLockscreenWidgetSelection(nextIds)
+        if (normalized.isEmpty()) return
+        updateExt {
+            it.copy(
+                extActive = true,
+                selectedIdsRaw = normalized.joinToString(","),
+            )
+        }
+        val legacyFlags = normalized.mapNotNull(LockscreenWidgetIds.ID_TO_LEGACY_FLAG::get)
+        val legacyMask = legacyFlags.fold(0) { acc, f -> acc or f }
+        if (legacyMask != 0) {
+            update {
+                it.copy(
+                    lockscreenWidgetItems = legacyMask,
+                    lockscreenWidgetOrder = legacyFlags.joinToString(","),
+                )
+            }
+        }
+    }
     fun setItem(item: LockscreenWidgetEditorItem, enabled: Boolean) {
-        val current = settings.lockscreenWidgetItems and LOCKSCREEN_WIDGET_ALL_ITEMS
-        val counterpart = when (item.flag) {
-            LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER -> LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER_BACKGROUND
-            LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER_BACKGROUND -> LOCKSCREEN_WIDGET_ITEM_DETAIL_WEATHER
-            LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY -> LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY_BACKGROUND
-            LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY_BACKGROUND -> LOCKSCREEN_WIDGET_ITEM_DETAIL_BATTERY
-            else -> null
-        }
+        val counterpart = LockscreenWidgetIds.counterpartOf(item.id)
         val currentWithoutCounterpart = if (enabled && counterpart != null) {
-            current and counterpart.inv()
+            selectedIds.filter { it != counterpart }
         } else {
-            current
+            selectedIds
         }
-        val next = if (enabled) {
-            currentWithoutCounterpart or item.flag
-        } else {
-            currentWithoutCounterpart and item.flag.inv()
-        }
-        val layoutWithoutCounterpart = selectedItems.filter { it.flag != counterpart }
-        if (enabled && !lockscreenWidgetCanAdd(layoutWithoutCounterpart, item)) {
+        if (enabled && !canAddLockscreenWidgetId(currentWithoutCounterpart, item.id)) {
             Toast.makeText(context, tr("当前布局已达到组件上限", "当前布局已达到组件上限"), Toast.LENGTH_SHORT).show()
             return
         }
-        if (enabled && item.flag == LOCKSCREEN_WIDGET_ITEM_SCHEDULE) {
+        if (enabled && item.id == LockscreenWidgetIds.SCHEDULE) {
             requestCalendarPermissionIfNeeded()
         }
-        if (next != 0) update {
-            val order = lockscreenWidgetItemsInOrder(it.lockscreenWidgetItems, it.lockscreenWidgetOrder)
-                .map(LockscreenWidgetEditorItem::flag)
-                .let { existing ->
-                    if (enabled) {
-                        existing.map { flag -> if (flag == counterpart) item.flag else flag }
-                            .let { replaced ->
-                                if (item.flag in replaced) replaced else replaced + item.flag
-                            }
-                            .distinct()
-                    } else {
-                        existing.filter { flag -> flag != item.flag }
-                    }
-                }
-            it.copy(lockscreenWidgetItems = next, lockscreenWidgetOrder = order.joinToString(","))
+        val nextIds = if (enabled) {
+            if (counterpart != null && counterpart in selectedIds) {
+                selectedIds.map { if (it == counterpart) item.id else it }.distinct()
+            } else {
+                (currentWithoutCounterpart + item.id).distinct()
+            }
+        } else {
+            selectedIds.filter { it != item.id }
         }
+        if (nextIds.isNotEmpty()) commitSelection(nextIds)
     }
     fun moveItem(item: LockscreenWidgetEditorItem, steps: Int) {
         if (steps == 0) return
-        val from = selectedItems.indexOf(item)
+        val from = selectedIds.indexOf(item.id)
         if (from < 0) return
-        val to = (from + steps).coerceIn(0, selectedItems.lastIndex)
+        val to = (from + steps).coerceIn(0, selectedIds.lastIndex)
         if (to == from) return
-        val reordered = selectedItems.toMutableList().apply {
+        val reordered = selectedIds.toMutableList().apply {
             removeAt(from)
-            add(to, item)
+            add(to, item.id)
         }
-        update { it.copy(lockscreenWidgetOrder = reordered.joinToString(",") { entry -> entry.flag.toString() }) }
+        commitSelection(reordered)
     }
     AppList(padding, scroll, 28) {
         item {
@@ -12889,18 +12973,39 @@ private fun LockscreenWidgetEditor(
                 // The selected strip is clipped by the preview card, so a drag cannot draw
                 // outside the preview area. The editor limit guarantees it remains one row.
                 Box(Modifier.matchParentSize().clip(RoundedCornerShape(22.5.dp))) {
+                    if (extSettings.followClockBottom) {
+                        Column(
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = 24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text(
+                                text = "09:41",
+                                color = ComposeColor.White.copy(alpha = 0.94f),
+                                fontSize = 52.sp,
+                                fontWeight = FontWeight.Bold,
+                                lineHeight = 56.sp,
+                            )
+                        }
+                    }
                     Row(
                         modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(horizontal = 18.dp, vertical = 24.dp),
+                            .align(if (extSettings.followClockBottom) Alignment.TopCenter else Alignment.BottomCenter)
+                            .padding(
+                                top = if (extSettings.followClockBottom) 94.dp else 0.dp,
+                                bottom = if (extSettings.followClockBottom) 0.dp else 24.dp,
+                                start = 14.dp,
+                                end = 14.dp,
+                            ),
                         horizontalArrangement = Arrangement.spacedBy(if (selectedItems.size >= 4) 8.dp else 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        (selectedItems + lockscreenWidgetEditorItems().filter { item -> item !in selectedItems })
+                        (selectedItems + allItems.filter { item -> item.id !in selectedIds })
                             .forEach { item ->
-                                key(item.flag) {
+                                key(item.id) {
                                     AnimatedVisibility(
-                                        visible = item in selectedItems,
+                                        visible = item.id in selectedIds,
                                         enter = slideInVertically(tween(240)) { it } + fadeIn(tween(180)),
                                         exit = slideOutVertically(tween(200)) { it } + fadeOut(tween(150)),
                                     ) {
@@ -12916,6 +13021,7 @@ private fun LockscreenWidgetEditor(
                                             signatureColor = settings.lockscreenWidgetSignatureColor,
                                             signatureScale = settings.lockscreenWidgetSignatureScale,
                                             signatureBackground = settings.lockscreenWidgetSignatureBackground,
+                                            extSettings = extSettings,
                                         )
                                     }
                                 }
@@ -12925,44 +13031,82 @@ private fun LockscreenWidgetEditor(
             }
         }
         item {
+            LockscreenWidgetSlotAndPresetCard(
+                usedSlots = usedSlots,
+                selectedIds = selectedIds,
+                onApplyPreset = { presetIds ->
+                    if (LockscreenWidgetIds.SCHEDULE in presetIds) {
+                        requestCalendarPermissionIfNeeded()
+                    }
+                    commitSelection(presetIds)
+                },
+            )
+        }
+        item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 cornerRadius = 22.5.dp,
-                insideMargin = PaddingValues(horizontal = 18.dp, vertical = 20.dp),
+                insideMargin = PaddingValues(horizontal = 18.dp, vertical = 18.dp),
             ) {
-                Box(Modifier.fillMaxWidth()) {
-                    Box(
-                        Modifier
-                            .matchParentSize()
-                            // CardDefaults uses surfaceContainer; record the same default color.
-                            .background(MiuixTheme.colorScheme.surfaceContainer)
-                            .layerBackdrop(libraryBackdrop),
+                Column(Modifier.fillMaxWidth()) {
+                    LockscreenWidgetCategoryBar(
+                        selectedCategory = selectedCategory,
+                        onSelect = { selectedCategory = it },
                     )
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                    ) {
-                        lockscreenWidgetEditorItems().forEach { item ->
-                            key(item.flag) {
-                                AnimatedVisibility(
-                                    visible = settings.lockscreenWidgetItems and item.flag == 0,
-                                    enter = slideInVertically(tween(240)) { -it } + fadeIn(tween(180)),
-                                    exit = slideOutVertically(tween(200)) { it } + fadeOut(tween(150)),
-                                ) {
-                                    LockscreenWidgetPreviewTile(
-                                        item = item,
-                                        removable = false,
-                                        onAdd = { setItem(item, true) },
-                                        backdrop = libraryBackdrop,
-                                        glassTint = MiuixTheme.colorScheme.onSurface.let { foreground ->
-                                            if (foreground.luminance() < .5f) ComposeColor(0xFF4E545D) else MiuixTheme.colorScheme.surface
-                                        }.copy(alpha = .46f),
-                                        contentColor = MiuixTheme.colorScheme.onSurface,
-                                        signatureType = settings.lockscreenWidgetSignatureType,
-                                        signatureColor = settings.lockscreenWidgetSignatureColor,
-                                        signatureScale = settings.lockscreenWidgetSignatureScale,
-                                        signatureBackground = settings.lockscreenWidgetSignatureBackground,
-                                    )
+                    Box(Modifier.fillMaxWidth()) {
+                        Box(
+                            Modifier
+                                .matchParentSize()
+                                // CardDefaults uses surfaceContainer; record the same default color.
+                                .background(MiuixTheme.colorScheme.surfaceContainer)
+                                .layerBackdrop(libraryBackdrop),
+                        )
+                        val filteredItems = if (selectedCategory == LockscreenWidgetCategory.ALL) {
+                            allItems
+                        } else {
+                            allItems.filter { it.category == selectedCategory }
+                        }
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                        ) {
+                            filteredItems.forEach { item ->
+                                key(item.id) {
+                                    AnimatedVisibility(
+                                        visible = item.id !in selectedIds,
+                                        enter = slideInVertically(tween(240)) { -it } + fadeIn(tween(180)),
+                                        exit = slideOutVertically(tween(200)) { it } + fadeOut(tween(150)),
+                                    ) {
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.spacedBy(5.dp),
+                                        ) {
+                                            LockscreenWidgetPreviewTile(
+                                                item = item,
+                                                removable = false,
+                                                onAdd = { setItem(item, true) },
+                                                backdrop = libraryBackdrop,
+                                                glassTint = MiuixTheme.colorScheme.onSurface.let { foreground ->
+                                                    if (foreground.luminance() < .5f) ComposeColor(0xFF4E545D) else MiuixTheme.colorScheme.surface
+                                                }.copy(alpha = .46f),
+                                                contentColor = MiuixTheme.colorScheme.onSurface,
+                                                signatureType = settings.lockscreenWidgetSignatureType,
+                                                signatureColor = settings.lockscreenWidgetSignatureColor,
+                                                signatureScale = settings.lockscreenWidgetSignatureScale,
+                                                signatureBackground = settings.lockscreenWidgetSignatureBackground,
+                                                extSettings = extSettings,
+                                            )
+                                            Text(
+                                                text = item.title,
+                                                style = MiuixTheme.textStyles.footnote1,
+                                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.widthIn(max = if (item.wide) 142.dp else 68.dp),
+                                                textAlign = TextAlign.Center,
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -12970,7 +13114,19 @@ private fun LockscreenWidgetEditor(
                 }
             }
         }
-        if (settings.lockscreenWidgetItems and LOCKSCREEN_WIDGET_ITEM_SIGNATURE != 0) {
+        if (LockscreenWidgetIds.WORLD_CLOCK in selectedIds ||
+            LockscreenWidgetIds.COUNTDOWN in selectedIds ||
+            LockscreenWidgetIds.CUSTOM_MEMO in selectedIds
+        ) {
+            item {
+                LockscreenWidgetExtendedConfigCards(
+                    selectedIds = selectedIds,
+                    extSettings = extSettings,
+                    onUpdate = ::updateExt,
+                )
+            }
+        }
+        if (LockscreenWidgetIds.SIGNATURE in selectedIds) {
             item {
                 Group(tr("签名组件", "签名组件")) {
                     val signatureType = settings.lockscreenWidgetSignatureType
@@ -13055,8 +13211,9 @@ private fun LockscreenWidgetPreviewTile(
     signatureColor: Int = 0xFFFFFFFF.toInt(),
     signatureScale: Int = 100,
     signatureBackground: Boolean = true,
+    extSettings: LockscreenWidgetExtendedSettings = LockscreenWidgetExtendedSettings(),
 ) {
-    var dragOffset by remember(item.flag) { mutableFloatStateOf(0f) }
+    var dragOffset by remember(item.id) { mutableFloatStateOf(0f) }
     val animationScope = rememberCoroutineScope()
     val dragFeedback = remember(animationScope) {
         DampedDragAnimation(
@@ -13081,19 +13238,16 @@ private fun LockscreenWidgetPreviewTile(
             )
         }
     }
+    val circleSize = if (compact) 56.dp else 64.dp
     val width = when {
         item.kind == LockscreenWidgetEditorKind.DETAIL_WEATHER ||
             item.kind == LockscreenWidgetEditorKind.DETAIL_BATTERY -> if (removable) 151.dp else 142.dp
-        item.kind == LockscreenWidgetEditorKind.COMPACT_WEATHER ||
-            item.kind == LockscreenWidgetEditorKind.SIGNATURE ||
-            item.kind == LockscreenWidgetEditorKind.SCHEDULE -> 142.dp
-        item.kind == LockscreenWidgetEditorKind.STEPS_WIDE -> 142.dp
-        item.wide -> 136.dp
-        else -> 64.dp
+        item.wide -> 142.dp
+        else -> circleSize
     }
     val height = when {
         item.wide -> 64.dp
-        else -> 64.dp
+        else -> circleSize
     }
     val shape = when {
         !item.wide -> CircleShape
@@ -13106,7 +13260,7 @@ private fun LockscreenWidgetPreviewTile(
     val interactionModifier = if (onMove == null) {
         Modifier.clickable { onAdd?.invoke() }
     } else {
-        Modifier.pointerInput(item.flag) {
+        Modifier.pointerInput(item.id) {
             detectDragGestures(
                 onDragStart = { dragOffset = 0f },
                 onDrag = { change, amount ->
@@ -13179,6 +13333,7 @@ private fun LockscreenWidgetPreviewTile(
                 signatureColor = signatureColor,
                 signatureScale = signatureScale,
                 contentColor = contentColor,
+                extSettings = extSettings,
             )
         }
         if (removable) {
@@ -13279,6 +13434,7 @@ private fun LockscreenWidgetPreviewContent(
     signatureColor: Int = 0xFFFFFFFF.toInt(),
     signatureScale: Int = 100,
     contentColor: ComposeColor = ComposeColor.White,
+    extSettings: LockscreenWidgetExtendedSettings = LockscreenWidgetExtendedSettings(),
 ) {
     val textColor = contentColor
     when (item.kind) {
@@ -13320,7 +13476,7 @@ private fun LockscreenWidgetPreviewContent(
             Text("06:30", color = textColor, style = MiuixTheme.textStyles.body2, fontWeight = FontWeight.Bold)
         }
         LockscreenWidgetEditorKind.STEPS -> Column(modifier, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            Text("\u25CE", color = textColor, style = MiuixTheme.textStyles.title2, fontWeight = FontWeight.Bold)
+            Image(painterResource(R.drawable.ic_widget_steps), null, Modifier.size(22.dp), colorFilter = ColorFilter.tint(textColor))
             Text("6240", color = textColor, style = MiuixTheme.textStyles.body2, fontWeight = FontWeight.Bold)
         }
         LockscreenWidgetEditorKind.STEPS_WIDE -> StepsWideWidgetPreview(modifier, textColor)
@@ -13347,6 +13503,12 @@ private fun LockscreenWidgetPreviewContent(
             scale = signatureScale,
             modifier = modifier,
             fallbackColor = textColor,
+        )
+        else -> LockscreenWidgetExtendedPreview(
+            id = item.id,
+            extSettings = extSettings,
+            modifier = modifier,
+            textColor = textColor,
         )
     }
 }

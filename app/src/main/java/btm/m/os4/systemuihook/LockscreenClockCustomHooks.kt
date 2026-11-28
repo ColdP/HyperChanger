@@ -103,6 +103,9 @@ internal class LockscreenClockCustomHooks(
     private val editorFontMap = Collections.synchronizedMap(WeakHashMap<Any, List<RemoteClockFontEntry>>())
     private val editorBaseCountMap = Collections.synchronizedMap(WeakHashMap<Any, Int>())
     private val adapterToEditorMap = Collections.synchronizedMap(WeakHashMap<Any, Any>())
+    @Volatile private var paintVariationOverrideMethodResolved = false
+    @Volatile private var paintVariationOverrideMethod: Method? = null
+    private val reenteringCustomRectLayout = ThreadLocal<Boolean>()
 
     // --- Public entry points ---
 
@@ -200,7 +203,9 @@ internal class LockscreenClockCustomHooks(
     }
 
     /**
-     * Resolves custom fonts ONLY when fontStyle >= 10000 so built-in OEM fonts (21..26) stay untouched.
+     * Resolves custom fonts ONLY when fontStyle >= 10000 so built-in OEM fonts (21..26) stay untouched,
+     * and applies ink-bounds-based layout for third-party fonts that do not follow HyperOS's bespoke
+     * 3-axis (wght / wdth 10..100 / HGHT 10..100) font_set.xml specification.
      */
     private fun installFontResolutionHooks(
         classLoader: ClassLoader,
@@ -220,13 +225,20 @@ internal class LockscreenClockCustomHooks(
                         .setExceptionMode(ExceptionMode.PROTECTIVE)
                         .setId("lockscreen-clock-font-update-type:$scope")
                         .intercept { chain ->
+                            val base = chain.thisObject
                             val styleId = chain.getArg(0) as? Int ?: return@intercept chain.proceed()
                             if (styleId < LOCKSCREEN_CLOCK_FONT_STYLE_ID_BASE) {
-                                return@intercept chain.proceed()
+                                val wasCustom = readAllInOneCurrentFontStyle(base) >= LOCKSCREEN_CLOCK_FONT_STYLE_ID_BASE
+                                val result = chain.proceed()
+                                if (wasCustom) {
+                                    restoreBuiltInAllInOneAfterCustomFont(base)
+                                }
+                                return@intercept result
                             }
-                            val custom = resolveCustomFontByStyleId(styleId, preferences)?.first
+                            val custom = resolveCustomFontByStyleId(styleId, preferences)
                                 ?: return@intercept chain.proceed()
-                            applyTypefaceToAllInOneBase(chain.thisObject, custom, styleId)
+                            applyTypefaceToAllInOneBase(base, custom.first, custom.second, styleId)
+                            relayoutAllInOneForCustomFontIfReady(base, custom.first, custom.second, styleId)
                             null
                         }
                 }
@@ -242,13 +254,51 @@ internal class LockscreenClockCustomHooks(
                         .intercept { chain ->
                             val result = chain.proceed()
                             val base = chain.thisObject
-                            val info = runCatching {
-                                findField(base.javaClass, "mClockStyleInfo")?.get(base)
-                            }.getOrNull() ?: return@intercept result
-                            val styleId = readIntFieldOrGetter(info, "fontStyle", "getFontStyle")
+                            val styleId = readAllInOneInfoFontStyle(base)
                             if (styleId >= LOCKSCREEN_CLOCK_FONT_STYLE_ID_BASE) {
-                                resolveCustomFontByStyleId(styleId, preferences)?.first?.let { custom ->
-                                    applyTypefaceToAllInOneBase(base, custom, styleId)
+                                resolveCustomFontByStyleId(styleId, preferences)?.let { custom ->
+                                    applyTypefaceToAllInOneBase(base, custom.first, custom.second, styleId)
+                                    relayoutAllInOneForCustomFontIfReady(base, custom.first, custom.second, styleId)
+                                }
+                            }
+                            result
+                        }
+                }
+
+            // 3. SystemUI & AOD AllInOneBase.setClockViewRect(Rect) — adapt non-HyperOS custom fonts cleanly
+            allInOneClass.declaredMethods
+                .firstOrNull { it.name == "setClockViewRect" && it.parameterCount == 1 && it.parameterTypes[0] == Rect::class.java }
+                ?.apply { isAccessible = true }
+                ?.let { method ->
+                    module.hookDeoptimized(method)
+                        .setExceptionMode(ExceptionMode.PROTECTIVE)
+                        .setId("lockscreen-clock-font-rect-layout:$scope")
+                        .intercept { chain ->
+                            val result = chain.proceed()
+                            if (reenteringCustomRectLayout.get() == true) {
+                                return@intercept result
+                            }
+                            val base = chain.thisObject
+                            val styleId = readAllInOneInfoFontStyle(base).takeIf { it >= LOCKSCREEN_CLOCK_FONT_STYLE_ID_BASE }
+                                ?: readAllInOneCurrentFontStyle(base)
+                            if (styleId >= LOCKSCREEN_CLOCK_FONT_STYLE_ID_BASE) {
+                                val custom = resolveCustomFontByStyleId(styleId, preferences)
+                                if (custom != null) {
+                                    applyTypefaceToAllInOneBase(base, custom.first, custom.second, styleId)
+                                    if (!isHyperOsStandardClockFont(custom.second)) {
+                                        val rect = (runCatching {
+                                            findField(base.javaClass, "mClockViewRect")?.get(base) as? Rect
+                                        }.getOrNull() ?: chain.getArg(0) as? Rect)
+                                        if (rect != null && rect.width() > 0 && rect.height() > 0) {
+                                            layoutNonHyperCustomFontInAllInOne(
+                                                base = base,
+                                                rect = rect,
+                                                typeface = custom.first,
+                                                axes = custom.second,
+                                                styleId = styleId,
+                                            )
+                                        }
+                                    }
                                 }
                             }
                             result
@@ -258,7 +308,7 @@ internal class LockscreenClockCustomHooks(
             HookModuleLogger.log(module, Log.DEBUG, logTag, "AllInOneBase custom font hooks skipped ($scope)", err)
         }
 
-        // 3. Classic / ClassicPlus / ClassicMax font loaders (only when style >= 10000)
+        // 4. Classic / ClassicPlus / ClassicMax font loaders (only when style >= 10000)
         runCatching {
             val classicUtils = classLoader.loadClass("com.miui.clock.utils.ClassicClockTimeUtils")
             classicUtils.declaredMethods
@@ -289,7 +339,36 @@ internal class LockscreenClockCustomHooks(
         }
     }
 
-    private fun applyTypefaceToAllInOneBase(base: Any, typeface: Typeface, styleId: Int) {
+    private fun isHyperOsStandardClockFont(axes: FontVariableAxesInfo?): Boolean {
+        if (axes == null || !axes.hasHeightAxis || !axes.hasWidthAxis) return false
+        return axes.widthMin <= 20f && axes.widthMax >= 90f &&
+            axes.heightMin <= 20f && axes.heightMax >= 90f
+    }
+
+    private fun readAllInOneInfoFontStyle(base: Any): Int {
+        val info = runCatching { findField(base.javaClass, "mClockStyleInfo")?.get(base) }.getOrNull() ?: return 0
+        return readIntFieldOrGetter(info, "fontStyle", "getFontStyle")
+    }
+
+    private fun readAllInOneCurrentFontStyle(base: Any): Int {
+        val hourView = runCatching { findField(base.javaClass, "mHourView")?.get(base) as? View }.getOrNull() ?: return 0
+        return runCatching { findField(hourView.javaClass, "mFontStyle")?.getInt(hourView) ?: 0 }.getOrDefault(0)
+    }
+
+    private fun applyTypefaceToAllInOneBase(
+        base: Any,
+        typeface: Typeface,
+        axes: FontVariableAxesInfo?,
+        styleId: Int,
+    ) {
+        val isDoubleRow = runCatching {
+            findField(base.javaClass, "mDoubleRow")?.getBoolean(base) ?: false
+        }.getOrDefault(false)
+        val featureSettings = if (isHyperOsStandardClockFont(axes)) {
+            if (isDoubleRow) "tnum" else null
+        } else {
+            if (isDoubleRow) "lnum, tnum" else "lnum"
+        }
         listOf("mHourView", "mMinuteView", "mColonView").forEach { fieldName ->
             val tv = runCatching { findField(base.javaClass, fieldName)?.get(base) as? View }.getOrNull() ?: return@forEach
             runCatching {
@@ -298,12 +377,385 @@ internal class LockscreenClockCustomHooks(
             runCatching {
                 tv.javaClass.getMethod("setFontStyle", Int::class.javaPrimitiveType).invoke(tv, styleId)
             }
+            runCatching {
+                val paint = findField(tv.javaClass, "textPaint")?.get(tv) as? Paint
+                if (paint != null) {
+                    paint.fontFeatureSettings = featureSettings
+                    if (!isHyperOsStandardClockFont(axes)) {
+                        val w = findField(tv.javaClass, "weight")?.getFloat(tv) ?: (axes?.weightDefault ?: 400f)
+                        val wd = axes?.widthDefault ?: 100f
+                        val h = axes?.heightDefault ?: 28f
+                        applyCustomFontVariation(paint, axes, w, wd, h)
+                    }
+                }
+            }
             tv.invalidate()
         }
         runCatching {
             val measurePaint = findField(base.javaClass, "mTextMeasurePaint")?.get(base) as? Paint
-            measurePaint?.typeface = typeface
+            if (measurePaint != null) {
+                measurePaint.typeface = typeface
+                measurePaint.fontFeatureSettings = featureSettings
+            }
         }
+    }
+
+    private fun relayoutAllInOneForCustomFontIfReady(
+        base: Any,
+        typeface: Typeface,
+        axes: FontVariableAxesInfo?,
+        styleId: Int,
+    ) {
+        val rect = runCatching {
+            findField(base.javaClass, "mClockViewRect")?.get(base) as? Rect
+        }.getOrNull() ?: return
+        if (rect.width() <= 0 || rect.height() <= 0) return
+        if (!isHyperOsStandardClockFont(axes)) {
+            layoutNonHyperCustomFontInAllInOne(base, Rect(rect), typeface, axes, styleId)
+        } else {
+            runCatching {
+                reenteringCustomRectLayout.set(true)
+                try {
+                    base.javaClass.getMethod("setClockViewRect", Rect::class.java).invoke(base, Rect(rect))
+                } finally {
+                    reenteringCustomRectLayout.set(false)
+                }
+            }
+        }
+    }
+
+    private fun restoreBuiltInAllInOneAfterCustomFont(base: Any) {
+        val isDoubleRow = runCatching {
+            findField(base.javaClass, "mDoubleRow")?.getBoolean(base) ?: false
+        }.getOrDefault(false)
+        listOf("mHourView", "mMinuteView", "mColonView").forEach { fieldName ->
+            val tv = runCatching { findField(base.javaClass, fieldName)?.get(base) as? View }.getOrNull() ?: return@forEach
+            runCatching {
+                val paint = findField(tv.javaClass, "textPaint")?.get(tv) as? Paint
+                if (paint != null) {
+                    paint.fontFeatureSettings = if (isDoubleRow) "tnum" else null
+                    applyVariationStringToPaint(paint, null)
+                }
+            }
+        }
+        val rect = runCatching {
+            findField(base.javaClass, "mClockViewRect")?.get(base) as? Rect
+        }.getOrNull() ?: return
+        if (rect.width() <= 0 || rect.height() <= 0) return
+        runCatching {
+            reenteringCustomRectLayout.set(true)
+            try {
+                base.javaClass.getMethod("setClockViewRect", Rect::class.java).invoke(base, Rect(rect))
+            } finally {
+                reenteringCustomRectLayout.set(false)
+            }
+        }
+    }
+
+    /**
+     * Ink-bounds-based layout solver for custom fonts that do not follow HyperOS's 3-axis font_set.xml
+     * specification. Eliminates tiny glyphs, horizontal clipping, crushed 'wdth', and fontMetrics.top
+     * vertical drift in both single-row and double-row layouts across AOD Editor and SystemUI.
+     */
+    private fun layoutNonHyperCustomFontInAllInOne(
+        base: Any,
+        rect: Rect,
+        typeface: Typeface,
+        axes: FontVariableAxesInfo?,
+        styleId: Int,
+    ) {
+        runCatching {
+            val rectW = rect.width().toFloat()
+            val rectH = rect.height().toFloat()
+            if (rectW <= 4f || rectH <= 4f) return
+
+            val hourView = findField(base.javaClass, "mHourView")?.get(base) as? View
+            val minuteView = findField(base.javaClass, "mMinuteView")?.get(base) as? View
+            val colonView = findField(base.javaClass, "mColonView")?.get(base) as? View
+            val density = (base as? View)?.resources?.displayMetrics?.density
+                ?: hourView?.resources?.displayMetrics?.density
+                ?: 3f
+
+            val isDoubleRow = findField(base.javaClass, "mDoubleRow")?.getBoolean(base) ?: false
+            val is24Hour = findField(base.javaClass, "m24HourFormat")?.getBoolean(base) ?: true
+            val colonShow = findField(base.javaClass, "mColonShow")?.getBoolean(base) ?: true
+            val inNotif = findField(base.javaClass, "mInNotificationState")?.getBoolean(base) ?: false
+            val rawWeight = findField(base.javaClass, "mAllInOneWeight")?.getFloat(base) ?: -1f
+            val showColon = !isDoubleRow && (!is24Hour || colonShow)
+
+            val hourText = hourView?.let { findField(it.javaClass, "mText")?.get(it) as? String }
+                ?.takeIf { it.isNotEmpty() } ?: "12"
+            val rawMinText = minuteView?.let { findField(it.javaClass, "mText")?.get(it) as? String }
+                ?.takeIf { it.isNotEmpty() } ?: "00"
+            val minuteDigits = rawMinText.removePrefix(":").ifEmpty { "00" }
+            val fullText = if (showColon) "$hourText:$minuteDigits" else "$hourText$minuteDigits"
+
+            val effectiveWeight = when {
+                axes?.hasWeightAxis == true && rawWeight > 0f -> {
+                    val w = if (inNotif) rawWeight * 0.85f else rawWeight
+                    w.coerceIn(axes.weightMin, axes.weightMax)
+                }
+                axes?.hasWeightAxis == true -> axes.weightDefault.coerceIn(axes.weightMin, axes.weightMax)
+                rawWeight > 0f -> rawWeight
+                else -> 400f
+            }
+
+            val featureSettings = if (isDoubleRow) "lnum, tnum" else "lnum"
+            val measurePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+                this.typeface = typeface
+                this.fontFeatureSettings = featureSettings
+            }
+
+            val chosenHeight = axes?.heightDefault ?: 28f
+            var chosenWidth = axes?.widthDefault ?: 100f
+            val probeSize = 200f
+            val probePath = Path()
+            val probeBounds = RectF()
+
+            // For standard variable fonts with a 'wdth' axis, adapt width smoothly to the box aspect ratio
+            if (axes?.hasWidthAxis == true && axes.widthMax > axes.widthMin + 1f) {
+                measurePaint.textSize = probeSize
+                applyCustomFontVariation(measurePaint, axes, effectiveWeight, axes.widthDefault, chosenHeight)
+                val probeStr = if (isDoubleRow) "00" else if (showColon) "00:00" else "0000"
+                measurePaint.getTextPath(probeStr, 0, probeStr.length, 0f, 0f, probePath)
+                probePath.computeBounds(probeBounds, true)
+                if (!probeBounds.isEmpty && probeBounds.width() > 1f && probeBounds.height() > 1f) {
+                    val glyphAspect = probeBounds.width() / probeBounds.height()
+                    val targetAspect = if (isDoubleRow) {
+                        (rectW * 0.90f) / (rectH * 0.45f)
+                    } else {
+                        (rectW * 0.94f) / (rectH * 0.90f)
+                    }
+                    val factor = (targetAspect / glyphAspect).coerceIn(0.55f, 1.45f)
+                    chosenWidth = (axes.widthDefault * factor).coerceIn(axes.widthMin, axes.widthMax)
+                }
+            }
+
+            applyCustomFontVariation(measurePaint, axes, effectiveWeight, chosenWidth, chosenHeight)
+
+            if (!isDoubleRow) {
+                measurePaint.textSize = probeSize
+                val refStr = if (showColon) "00:00" else "0000"
+                val fullProbeBounds = measureTextInkBounds(measurePaint, fullText)
+                val refProbeBounds = measureTextInkBounds(measurePaint, refStr)
+                val fitW = max(fullProbeBounds.width(), refProbeBounds.width() * 0.92f).coerceAtLeast(1f)
+                val fitH = max(fullProbeBounds.height(), refProbeBounds.height()).coerceAtLeast(1f)
+                val availW = rectW * 0.95f
+                val availH = rectH * 0.94f
+                var textSizePx = min(probeSize * (availW / fitW), probeSize * (availH / fitH))
+                    .coerceIn(16f, 2000f)
+
+                measurePaint.textSize = textSizePx
+                var actualInk = measureTextInkBounds(measurePaint, fullText)
+                if (actualInk.width() > rectW * 0.97f && actualInk.width() > 1f) {
+                    textSizePx = (textSizePx * (rectW * 0.96f / actualInk.width())).coerceAtLeast(16f)
+                    measurePaint.textSize = textSizePx
+                    actualInk = measureTextInkBounds(measurePaint, fullText)
+                }
+                val zeroInk = measureTextInkBounds(measurePaint, "0")
+                val refTop = if (!zeroInk.isEmpty) min(actualInk.top, zeroInk.top) else actualInk.top
+                val refBottom = if (!zeroInk.isEmpty) max(actualInk.bottom, zeroInk.bottom) else actualInk.bottom
+                val refH = (refBottom - refTop).coerceAtLeast(actualInk.height().coerceAtLeast(1f))
+
+                val charWidths = FloatArray(fullText.length)
+                measurePaint.getTextWidths(fullText, charWidths)
+                var hourAdv = 0f
+                for (i in 0 until min(hourText.length, charWidths.size)) hourAdv += charWidths[i]
+                val colonAdv = if (showColon && hourText.length < charWidths.size) charWidths[hourText.length] else 0f
+                var minuteAdv = 0f
+                val minStart = hourText.length + if (showColon) 1 else 0
+                for (i in minStart until charWidths.size) minuteAdv += charWidths[i]
+
+                val drawX = rect.left + (rectW - actualInk.width()) * 0.5f - actualInk.left
+                val extraH = (rectH - refH).coerceAtLeast(0f)
+                val topOffset = min(extraH * 0.44f, max(extraH * 0.14f, 28f * density))
+                val drawY = rect.top + topOffset - refTop
+
+                if (hourView != null && hourView.visibility != View.GONE) {
+                    updateTimeViewCustomMetrics(
+                        tv = hourView,
+                        typeface = typeface,
+                        styleId = styleId,
+                        featureSettings = featureSettings,
+                        axes = axes,
+                        weight = effectiveWeight,
+                        width = chosenWidth,
+                        height = chosenHeight,
+                        textSizePx = textSizePx,
+                        advanceWidth = hourAdv,
+                        colonAdvanceWidth = null,
+                        drawX = drawX,
+                        drawY = drawY,
+                    )
+                }
+                if (minuteView != null && minuteView.visibility != View.GONE) {
+                    updateTimeViewCustomMetrics(
+                        tv = minuteView,
+                        typeface = typeface,
+                        styleId = styleId,
+                        featureSettings = featureSettings,
+                        axes = axes,
+                        weight = effectiveWeight,
+                        width = chosenWidth,
+                        height = chosenHeight,
+                        textSizePx = textSizePx,
+                        advanceWidth = if (showColon) colonAdv + minuteAdv else minuteAdv,
+                        colonAdvanceWidth = if (showColon) colonAdv else 0f,
+                        drawX = drawX + hourAdv,
+                        drawY = drawY,
+                    )
+                }
+                if (colonView != null) {
+                    updateTimeViewCustomMetrics(
+                        tv = colonView,
+                        typeface = typeface,
+                        styleId = styleId,
+                        featureSettings = featureSettings,
+                        axes = axes,
+                        weight = effectiveWeight,
+                        width = chosenWidth,
+                        height = chosenHeight,
+                        textSizePx = textSizePx,
+                        advanceWidth = colonAdv,
+                        colonAdvanceWidth = null,
+                        drawX = drawX + hourAdv,
+                        drawY = drawY,
+                    )
+                }
+            } else {
+                // Double-row layout: fit hour and minute cleanly with identical optical size and harmonious row gap
+                measurePaint.textSize = probeSize
+                val hourProbe = measureTextInkBounds(measurePaint, hourText)
+                val minProbe = measureTextInkBounds(measurePaint, minuteDigits)
+                val refProbe = measureTextInkBounds(measurePaint, "00")
+                val fitW = max(max(hourProbe.width(), minProbe.width()), refProbe.width() * 0.92f).coerceAtLeast(1f)
+                val fitH = max(max(hourProbe.height(), minProbe.height()), refProbe.height()).coerceAtLeast(1f)
+                val availW = rectW * 0.90f
+                val maxRowH = rectH * 0.465f
+                var textSizePx = min(probeSize * (availW / fitW), probeSize * (maxRowH / fitH))
+                    .coerceIn(16f, 2000f)
+
+                measurePaint.textSize = textSizePx
+                var hourInk = measureTextInkBounds(measurePaint, hourText)
+                var minInk = measureTextInkBounds(measurePaint, minuteDigits)
+                val maxInkW = max(hourInk.width(), minInk.width())
+                if (maxInkW > rectW * 0.94f && maxInkW > 1f) {
+                    textSizePx = (textSizePx * (rectW * 0.92f / maxInkW)).coerceAtLeast(16f)
+                    measurePaint.textSize = textSizePx
+                    hourInk = measureTextInkBounds(measurePaint, hourText)
+                    minInk = measureTextInkBounds(measurePaint, minuteDigits)
+                }
+
+                val hourAdv = measurePaint.measureText(hourText)
+                val minAdv = measurePaint.measureText(minuteDigits)
+                val rowH = max(hourInk.height(), minInk.height()).coerceAtLeast(1f)
+                val gap = min(rectH * 0.06f, rowH * 0.16f).coerceAtLeast(4f * density)
+                val totalH = hourInk.height() + gap + minInk.height()
+                val extraH = (rectH - totalH).coerceAtLeast(0f)
+                val blockTop = rect.top + min(extraH * 0.45f, max(extraH * 0.15f, 24f * density))
+
+                val hourX = rect.left + (rectW - hourInk.width()) * 0.5f - hourInk.left
+                val hourY = blockTop - hourInk.top
+                val minX = rect.left + (rectW - minInk.width()) * 0.5f - minInk.left
+                val minY = blockTop + hourInk.height() + gap - minInk.top
+
+                if (hourView != null && hourView.visibility != View.GONE) {
+                    updateTimeViewCustomMetrics(
+                        tv = hourView,
+                        typeface = typeface,
+                        styleId = styleId,
+                        featureSettings = featureSettings,
+                        axes = axes,
+                        weight = effectiveWeight,
+                        width = chosenWidth,
+                        height = chosenHeight,
+                        textSizePx = textSizePx,
+                        advanceWidth = hourAdv,
+                        colonAdvanceWidth = null,
+                        drawX = hourX,
+                        drawY = hourY,
+                    )
+                }
+                if (minuteView != null && minuteView.visibility != View.GONE) {
+                    updateTimeViewCustomMetrics(
+                        tv = minuteView,
+                        typeface = typeface,
+                        styleId = styleId,
+                        featureSettings = featureSettings,
+                        axes = axes,
+                        weight = effectiveWeight,
+                        width = chosenWidth,
+                        height = chosenHeight,
+                        textSizePx = textSizePx,
+                        advanceWidth = minAdv,
+                        colonAdvanceWidth = 0f,
+                        drawX = minX,
+                        drawY = minY,
+                    )
+                }
+            }
+        }.onFailure { err ->
+            HookModuleLogger.log(module, Log.DEBUG, logTag, "Custom font layout fallback", err)
+        }
+    }
+
+    private fun measureTextInkBounds(paint: Paint, text: String): RectF {
+        val path = Path()
+        val bounds = RectF()
+        if (text.isNotEmpty()) {
+            paint.getTextPath(text, 0, text.length, 0f, 0f, path)
+            path.computeBounds(bounds, true)
+        }
+        return bounds
+    }
+
+    private fun updateTimeViewCustomMetrics(
+        tv: View,
+        typeface: Typeface,
+        styleId: Int,
+        featureSettings: String?,
+        axes: FontVariableAxesInfo?,
+        weight: Float,
+        width: Float,
+        height: Float,
+        textSizePx: Float,
+        advanceWidth: Float,
+        colonAdvanceWidth: Float?,
+        drawX: Float,
+        drawY: Float,
+    ) {
+        val cls = tv.javaClass
+        runCatching { cls.getMethod("setTypeface", Typeface::class.java).invoke(tv, typeface) }
+        runCatching { cls.getMethod("setFontStyle", Int::class.javaPrimitiveType).invoke(tv, styleId) }
+        runCatching {
+            val paint = findField(cls, "textPaint")?.get(tv) as? Paint
+            if (paint != null) {
+                paint.fontFeatureSettings = featureSettings
+                applyCustomFontVariation(paint, axes, weight, width, height)
+            }
+        }
+        runCatching {
+            cls.getMethod(
+                "setClockParamsInternal",
+                Float::class.javaPrimitiveType,
+                Float::class.javaPrimitiveType,
+                Float::class.javaPrimitiveType,
+            ).invoke(tv, weight, width, height)
+        }
+        runCatching {
+            cls.getMethod("setSizeInternal", Float::class.javaPrimitiveType).invoke(tv, textSizePx)
+        }
+        runCatching {
+            cls.getMethod("setAdvanceWidth", Float::class.javaPrimitiveType).invoke(tv, advanceWidth)
+        }
+        if (colonAdvanceWidth != null) {
+            runCatching {
+                cls.getMethod("setColonAdvanceWidth", Float::class.javaPrimitiveType).invoke(tv, colonAdvanceWidth)
+            }
+        }
+        runCatching { findField(cls, "mDrawTextX")?.setFloat(tv, drawX) }
+        runCatching { findField(cls, "mDrawTextY")?.setFloat(tv, drawY) }
+        tv.invalidate()
     }
 
     // =========================================================================
@@ -575,21 +1027,35 @@ internal class LockscreenClockCustomHooks(
         val fgColor = if (isDark) Color.WHITE else Color.rgb(28, 28, 30)
         val subColor = if (isDark) Color.argb(175, 255, 255, 255) else Color.argb(150, 28, 28, 30)
 
-        // Draw "12" sample in upper/middle area using actual custom Typeface
+        // Draw "12" sample in upper/middle area optically centered by actual Path ink bounds
         val samplePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = fgColor
-            textAlign = Paint.Align.CENTER
-            textSize = 76f
+            textSize = 84f
+            fontFeatureSettings = "lnum"
             if (typeface != null) this.typeface = typeface
         }
-        val bounds = Rect()
-        samplePaint.getTextBounds("12", 0, 2, bounds)
-        if (bounds.width() > size * 0.82f) {
-            samplePaint.textSize *= (size * 0.82f / bounds.width().coerceAtLeast(1))
-            samplePaint.getTextBounds("12", 0, 2, bounds)
+        val samplePath = Path()
+        val sampleBounds = RectF()
+        samplePaint.getTextPath("12", 0, 2, 0f, 0f, samplePath)
+        samplePath.computeBounds(sampleBounds, true)
+        if (!sampleBounds.isEmpty && sampleBounds.width() > 1f && sampleBounds.height() > 1f) {
+            val maxW = size * 0.78f
+            val maxH = size * 0.50f
+            val scale = min(maxW / sampleBounds.width(), maxH / sampleBounds.height()).coerceAtMost(1.35f)
+            samplePaint.textSize *= scale
+            samplePath.reset()
+            samplePaint.getTextPath("12", 0, 2, 0f, 0f, samplePath)
+            samplePath.computeBounds(sampleBounds, true)
+            val dx = size * 0.5f - sampleBounds.centerX()
+            val dy = size * 0.41f - sampleBounds.centerY()
+            val saveCount = canvas.save()
+            canvas.translate(dx, dy)
+            canvas.drawPath(samplePath, samplePaint)
+            canvas.restoreToCount(saveCount)
+        } else {
+            samplePaint.textAlign = Paint.Align.CENTER
+            canvas.drawText("12", size * 0.5f, size * 0.52f, samplePaint)
         }
-        val sampleY = size * 0.44f - bounds.exactCenterY()
-        canvas.drawText("12", size * 0.5f, sampleY, samplePaint)
 
         // Draw compact font name below sample so multiple imported fonts are instantly distinguishable
         val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -752,45 +1218,61 @@ internal class LockscreenClockCustomHooks(
                         paint.typeface = customFont.first
                     }
 
-                    if (!readLockscreenClockAvoidanceEnabled(view.context, preferences)) {
-                        return@intercept chain.proceed()
-                    }
-                    if (!isEligibleForAvoidance(view, isEditor)) {
-                        return@intercept chain.proceed()
-                    }
-                    val contour = if (isEditor) {
-                        resolveEditorContour(view)
-                    } else {
-                        resolveSystemUiContour(view.context)
-                    } ?: return@intercept chain.proceed()
+                    val avoidEnabled = readLockscreenClockAvoidanceEnabled(view.context, preferences)
+                    val contour = if (avoidEnabled && isEligibleForAvoidance(view, isEditor)) {
+                        if (isEditor) resolveEditorContour(view) else resolveSystemUiContour(view.context)
+                    } else null
 
-                    if (!contour.hasValidSubject) {
-                        return@intercept chain.proceed()
+                    if (contour != null && contour.hasValidSubject) {
+                        val handled = runCatching {
+                            drawContourAvoidedTimeView(
+                                view = view,
+                                timeViewClass = timeViewClass,
+                                canvas = canvas,
+                                contour = contour,
+                                customFontAxes = customFont?.second,
+                                isCustomFont = customFont != null,
+                                applyVariationMethod = applyVariationMethod,
+                                paintFirstInVariation = paintFirstInVariation,
+                                simplifyPathMethod = simplifyPathMethod,
+                                paintFirstInSimplify = paintFirstInSimplify,
+                                setGlassEffectMethod = setGlassEffectMethod,
+                                glassEffectField = glassEffectField,
+                                glassClipField = glassClipField,
+                                setMiGlassClipMethod = setMiGlassClipMethod,
+                                setMiGlassMethod = setMiGlassMethod,
+                            )
+                        }.onFailure { err ->
+                            HookModuleLogger.log(module, Log.DEBUG, logTag, "Clock avoidance draw fallback ($scope)", err)
+                        }.getOrDefault(false)
+                        if (handled) return@intercept null
                     }
 
-                    val handled = runCatching {
-                        drawContourAvoidedTimeView(
-                            view = view,
-                            timeViewClass = timeViewClass,
-                            canvas = canvas,
-                            contour = contour,
-                            customFontAxes = customFont?.second,
-                            isCustomFont = customFont != null,
-                            applyVariationMethod = applyVariationMethod,
-                            paintFirstInVariation = paintFirstInVariation,
-                            simplifyPathMethod = simplifyPathMethod,
-                            paintFirstInSimplify = paintFirstInSimplify,
-                            setGlassEffectMethod = setGlassEffectMethod,
-                            glassEffectField = glassEffectField,
-                            glassClipField = glassClipField,
-                            setMiGlassClipMethod = setMiGlassClipMethod,
-                            setMiGlassMethod = setMiGlassMethod,
-                        )
-                    }.onFailure { err ->
-                        HookModuleLogger.log(module, Log.DEBUG, logTag, "Clock avoidance draw fallback ($scope)", err)
-                    }.getOrDefault(false)
+                    // For custom fonts, bypass OEM TimeView.onDraw even when avoidance is off/inactive so
+                    // HyperOS's hardcoded ('wdth' 10, 'HGHT' 50) doesn't crush third-party fonts, colons
+                    // align optically, and Liquid Glass simplifies overlapping third-party bezier paths.
+                    if (customFont != null) {
+                        val handledCustom = runCatching {
+                            drawCustomFontNormalTimeView(
+                                view = view,
+                                timeViewClass = timeViewClass,
+                                canvas = canvas,
+                                customFontAxes = customFont.second,
+                                simplifyPathMethod = simplifyPathMethod,
+                                paintFirstInSimplify = paintFirstInSimplify,
+                                setGlassEffectMethod = setGlassEffectMethod,
+                                glassEffectField = glassEffectField,
+                                glassClipField = glassClipField,
+                                setMiGlassClipMethod = setMiGlassClipMethod,
+                                setMiGlassMethod = setMiGlassMethod,
+                            )
+                        }.onFailure { err ->
+                            HookModuleLogger.log(module, Log.DEBUG, logTag, "Custom font draw fallback ($scope)", err)
+                        }.getOrDefault(false)
+                        if (handledCustom) return@intercept null
+                    }
 
-                    if (handled) null else chain.proceed()
+                    chain.proceed()
                 }
         }.onFailure { err ->
             HookModuleLogger.log(module, Log.WARN, logTag, "Could not install TimeView avoidance hook", err)
@@ -823,6 +1305,191 @@ internal class LockscreenClockCustomHooks(
                 }.getOrDefault(false) == true
                 if (isAod) return false
             }
+        }
+        return true
+    }
+
+    /**
+     * Clean renderer for custom fonts (styleId >= 10000) when Clock Avoidance is off or inactive:
+     * - Applies ONLY declared variable font axes clamped to real fvar ranges (never HyperOS's wdth=10 / HGHT=50).
+     * - Strips HyperOS's ss01 feature and opts into lining figures (lnum) on non-HyperOS fonts.
+     * - Optically centers the colon ':' vertically against digit ink height for non-HyperOS fonts.
+     * - Always runs MiuiBlurUtils.simplifyPath when Liquid Glass (MiGlass) is active so third-party
+     *   overlapping glyph contours never produce glass holes/artifacts.
+     */
+    private fun drawCustomFontNormalTimeView(
+        view: View,
+        timeViewClass: Class<*>,
+        canvas: Canvas,
+        customFontAxes: FontVariableAxesInfo?,
+        simplifyPathMethod: Method?,
+        paintFirstInSimplify: Boolean,
+        setGlassEffectMethod: Method?,
+        glassEffectField: Field?,
+        glassClipField: Field?,
+        setMiGlassClipMethod: Method?,
+        setMiGlassMethod: Method?,
+    ): Boolean {
+        val text = findField(timeViewClass, "mText")?.get(view) as? String ?: return false
+        if (text.isEmpty()) return false
+        val paint = findField(timeViewClass, "textPaint")?.get(view) as? Paint ?: return false
+        val textPath = findField(timeViewClass, "mTextPath")?.get(view) as? Path ?: return false
+        val colonPath = findField(timeViewClass, "mColonPath")?.get(view) as? Path ?: return false
+        val minuteOnlyPath = findField(timeViewClass, "mMinuteOnlyPath")?.get(view) as? Path ?: return false
+        val textBounds = findField(timeViewClass, "mTextBounds")?.get(view) as? RectF ?: return false
+
+        val weight = findField(timeViewClass, "weight")?.getFloat(view) ?: (customFontAxes?.weightDefault ?: 400f)
+        val width = findField(timeViewClass, "width")?.getFloat(view) ?: (customFontAxes?.widthDefault ?: 100f)
+        val height = findField(timeViewClass, "height")?.getFloat(view) ?: (customFontAxes?.heightDefault ?: 28f)
+        val textSizePx = findField(timeViewClass, "textSizePx")?.getFloat(view) ?: 0f
+        if (textSizePx <= 1f) return false
+
+        val drawTextX = findField(timeViewClass, "mDrawTextX")?.getFloat(view) ?: 0f
+        val drawTextY = findField(timeViewClass, "mDrawTextY")?.getFloat(view) ?: 0f
+        val fontAlpha = findField(timeViewClass, "fontAlpha")?.getFloat(view) ?: 1f
+        val colonAlpha = findField(timeViewClass, "mColonAlpha")?.getFloat(view) ?: 1f
+        val colonSplitIndex = findField(timeViewClass, "mColonSplitIndex")?.getInt(view) ?: 0
+        val colonAdvanceWidth = findField(timeViewClass, "mColonAdvanceWidth")?.getFloat(view) ?: 0f
+        val isGlass = findField(timeViewClass, "isMiGlassEffectEnable")?.getBoolean(view) ?: false
+        val glassData = findField(timeViewClass, "glassData")?.get(view) as? FloatArray
+
+        val isHyperStandard = isHyperOsStandardClockFont(customFontAxes)
+        if (!isHyperStandard) {
+            val currentFeat = paint.fontFeatureSettings
+            if (currentFeat == null || currentFeat.contains("ss01")) {
+                paint.fontFeatureSettings = if (currentFeat?.contains("tnum") == true) "lnum, tnum" else "lnum"
+            }
+        }
+
+        applyCustomFontVariation(paint, customFontAxes, weight, width, height)
+        applyPaintGlassEffect(paint, isGlass, setGlassEffectMethod, glassEffectField)
+        paint.textSize = textSizePx
+
+        val splitActive = colonSplitIndex > 0 && colonAlpha < 1f
+        val colonPos = text.indexOf(':')
+        val shouldOpticalCenterColon = !isHyperStandard && colonPos >= 0
+
+        if (shouldOpticalCenterColon) {
+            val zeroBounds = measureTextInkBounds(paint, "0")
+            val digitCenterY = if (!zeroBounds.isEmpty) zeroBounds.centerY() else 0f
+            val digitH = zeroBounds.height().coerceAtLeast(1f)
+
+            val singleColonPath = Path()
+            paint.getTextPath(":", 0, 1, 0f, 0f, singleColonPath)
+            val colonInk = RectF()
+            singleColonPath.computeBounds(colonInk, true)
+            var colonDy = if (!zeroBounds.isEmpty && !colonInk.isEmpty) {
+                digitCenterY - colonInk.centerY()
+            } else 0f
+            if (abs(colonDy) <= digitH * 0.03f) {
+                colonDy = 0f
+            } else {
+                colonDy = colonDy.coerceIn(-digitH * 0.35f, digitH * 0.35f)
+            }
+
+            if (text == ":") {
+                textPath.reset()
+                textPath.addPath(singleColonPath)
+                if (colonDy != 0f) textPath.offset(0f, colonDy)
+            } else if (colonPos == 0) {
+                val advColon = if (colonAdvanceWidth > 0f) colonAdvanceWidth else paint.measureText(":")
+                colonPath.reset()
+                colonPath.addPath(singleColonPath)
+                if (colonDy != 0f) colonPath.offset(0f, colonDy)
+
+                minuteOnlyPath.reset()
+                if (text.length > 1) {
+                    paint.getTextPath(text, 1, text.length, 0f, 0f, minuteOnlyPath)
+                }
+
+                textPath.reset()
+                textPath.addPath(colonPath)
+                if (text.length > 1) {
+                    val shiftedMin = Path(minuteOnlyPath)
+                    shiftedMin.offset(advColon, 0f)
+                    textPath.addPath(shiftedMin)
+                }
+            } else {
+                val beforeW = paint.measureText(text, 0, colonPos)
+                val colonW = paint.measureText(text, colonPos, colonPos + 1)
+                textPath.reset()
+                val tmp = Path()
+                paint.getTextPath(text, 0, colonPos, 0f, 0f, tmp)
+                textPath.addPath(tmp)
+                singleColonPath.offset(beforeW, colonDy)
+                textPath.addPath(singleColonPath)
+                if (colonPos + 1 < text.length) {
+                    tmp.reset()
+                    paint.getTextPath(text, colonPos + 1, text.length, beforeW + colonW, 0f, tmp)
+                    textPath.addPath(tmp)
+                }
+                if (splitActive) {
+                    colonPath.reset()
+                    paint.getTextPath(text, 0, colonSplitIndex, 0f, 0f, colonPath)
+                    minuteOnlyPath.reset()
+                    paint.getTextPath(text, colonSplitIndex, text.length, 0f, 0f, minuteOnlyPath)
+                }
+            }
+        } else {
+            textPath.reset()
+            paint.getTextPath(text, 0, text.length, 0f, 0f, textPath)
+            if (splitActive) {
+                colonPath.reset()
+                paint.getTextPath(text, 0, colonSplitIndex, 0f, 0f, colonPath)
+                minuteOnlyPath.reset()
+                paint.getTextPath(text, colonSplitIndex, text.length, 0f, 0f, minuteOnlyPath)
+            }
+        }
+
+        if (isGlass && simplifyPathMethod != null) {
+            invokeSimplifyPath(simplifyPathMethod, paintFirstInSimplify, paint, textPath)
+            if (splitActive) {
+                invokeSimplifyPath(simplifyPathMethod, paintFirstInSimplify, paint, colonPath)
+                invokeSimplifyPath(simplifyPathMethod, paintFirstInSimplify, paint, minuteOnlyPath)
+            }
+        }
+
+        textPath.computeBounds(textBounds, true)
+        findField(timeViewClass, "textTop")?.setInt(view, (textBounds.top + drawTextY).toInt())
+
+        if (isGlass && glassData != null) {
+            val clipRect = RectF(textBounds)
+            clipRect.offset(drawTextX, drawTextY)
+            invokeGlassClip(
+                view = view,
+                left = clipRect.left - 50f,
+                top = clipRect.top - 50f,
+                right = clipRect.right + 50f,
+                bottom = clipRect.bottom + 50f,
+                glassClipField = glassClipField,
+                setMiGlassClipMethod = setMiGlassClipMethod,
+            )
+            runCatching { setMiGlassMethod?.invoke(null, view, glassData) }
+        }
+
+        if (glassData != null && glassData.size > 20) {
+            paint.strokeWidth = glassData[19]
+            paint.strokeMiter = glassData[20]
+        }
+
+        val saveCount = canvas.save()
+        try {
+            if (!splitActive) {
+                paint.alpha = (fontAlpha * 255f).roundToInt().coerceIn(0, 255)
+                canvas.translate(drawTextX, drawTextY)
+                canvas.drawPath(textPath, paint)
+            } else {
+                canvas.translate(drawTextX, drawTextY)
+                if (colonAlpha > 0f) {
+                    paint.alpha = (fontAlpha * colonAlpha * 255f).roundToInt().coerceIn(0, 255)
+                    canvas.drawPath(colonPath, paint)
+                }
+                paint.alpha = (fontAlpha * 255f).roundToInt().coerceIn(0, 255)
+                canvas.translate(colonAdvanceWidth, 0f)
+                canvas.drawPath(minuteOnlyPath, paint)
+            }
+        } finally {
+            canvas.restoreToCount(saveCount)
         }
         return true
     }
@@ -891,7 +1558,15 @@ internal class LockscreenClockCustomHooks(
         val supportsHghtAxis = !isCustomFont || (customFontAxes?.hasHeightAxis == true)
         val hghtMin = if (isCustomFont && customFontAxes != null) customFontAxes.heightMin else 10f
 
-        if (supportsHghtAxis || customFontAxes?.hasWeightAxis == true) {
+        if (isCustomFont) {
+            if (!isHyperOsStandardClockFont(customFontAxes)) {
+                val currentFeat = paint.fontFeatureSettings
+                if (currentFeat == null || currentFeat.contains("ss01")) {
+                    paint.fontFeatureSettings = if (currentFeat?.contains("tnum") == true) "lnum, tnum" else "lnum"
+                }
+            }
+            applyCustomFontVariation(paint, customFontAxes, weight, width, baseHght)
+        } else {
             invokeApplyFontVariation(applyVariationMethod, paintFirstInVariation, paint, weight, width, baseHght)
         }
 
@@ -909,12 +1584,20 @@ internal class LockscreenClockCustomHooks(
 
         // Measure minimum natural height achievable at hghtMin for calibrated interpolation
         val minAxisHeight = if (supportsHghtAxis && baseHght > hghtMin + 0.5f) {
-            invokeApplyFontVariation(applyVariationMethod, paintFirstInVariation, paint, weight, width, hghtMin)
+            if (isCustomFont) {
+                applyCustomFontVariation(paint, customFontAxes, weight, width, hghtMin)
+            } else {
+                invokeApplyFontVariation(applyVariationMethod, paintFirstInVariation, paint, weight, width, hghtMin)
+            }
             refPath.reset()
             paint.getTextPath("0", 0, 1, 0f, 0f, refPath)
             refPath.computeBounds(refBounds, true)
             val h = refBounds.height().coerceAtLeast(16f)
-            invokeApplyFontVariation(applyVariationMethod, paintFirstInVariation, paint, weight, width, baseHght)
+            if (isCustomFont) {
+                applyCustomFontVariation(paint, customFontAxes, weight, width, baseHght)
+            } else {
+                invokeApplyFontVariation(applyVariationMethod, paintFirstInVariation, paint, weight, width, baseHght)
+            }
             h
         } else {
             baseDigitHeight
@@ -1014,7 +1697,11 @@ internal class LockscreenClockCustomHooks(
                 val spanH = (baseDigitHeight - minAxisHeight).coerceAtLeast(1f)
                 val t = ((targetH - minAxisHeight) / spanH).coerceIn(0f, 1f)
                 var chosenHght = hghtMin + t * (baseHght - hghtMin)
-                invokeApplyFontVariation(applyVariationMethod, paintFirstInVariation, paint, weight, width, chosenHght)
+                if (isCustomFont) {
+                    applyCustomFontVariation(paint, customFontAxes, weight, width, chosenHght)
+                } else {
+                    invokeApplyFontVariation(applyVariationMethod, paintFirstInVariation, paint, weight, width, chosenHght)
+                }
                 paint.getTextPath(text, idx, idx + 1, 0f, 0f, charPath)
                 charPath.computeBounds(charBounds, true)
 
@@ -1026,7 +1713,11 @@ internal class LockscreenClockCustomHooks(
                     val refined = (chosenHght * errRatio).coerceIn(hghtMin, baseHght)
                     if (abs(refined - chosenHght) > 0.3f) {
                         chosenHght = refined
-                        invokeApplyFontVariation(applyVariationMethod, paintFirstInVariation, paint, weight, width, chosenHght)
+                        if (isCustomFont) {
+                            applyCustomFontVariation(paint, customFontAxes, weight, width, chosenHght)
+                        } else {
+                            invokeApplyFontVariation(applyVariationMethod, paintFirstInVariation, paint, weight, width, chosenHght)
+                        }
                         charPath.reset()
                         paint.getTextPath(text, idx, idx + 1, 0f, 0f, charPath)
                         charPath.computeBounds(charBounds, true)
@@ -1061,7 +1752,7 @@ internal class LockscreenClockCustomHooks(
                         else if (ratio > 1.03f) ratio.coerceIn(1f, 1.06f)
                         else 1f
                     } else {
-                        ratio.coerceIn(0.62f, 1f)
+                        ratio.coerceIn(0.68f, 1f)
                     }
                     transformMatrix.reset()
                     if (abs(scaleY - 1f) > 0.01f) {
@@ -1090,10 +1781,14 @@ internal class LockscreenClockCustomHooks(
         }
 
         if (supportsHghtAxis) {
-            invokeApplyFontVariation(applyVariationMethod, paintFirstInVariation, paint, weight, width, baseHght)
+            if (isCustomFont) {
+                applyCustomFontVariation(paint, customFontAxes, weight, width, baseHght)
+            } else {
+                invokeApplyFontVariation(applyVariationMethod, paintFirstInVariation, paint, weight, width, baseHght)
+            }
         }
 
-        val needSimplify = isGlass && (fontStyle == 23 || fontStyle == 24 || fontStyle == 25)
+        val needSimplify = isGlass && (isCustomFont || fontStyle == 23 || fontStyle == 24 || fontStyle == 25)
         if (needSimplify && simplifyPathMethod != null) {
             invokeSimplifyPath(simplifyPathMethod, paintFirstInSimplify, paint, textPath)
             if (splitActive) {
@@ -1948,6 +2643,58 @@ internal class LockscreenClockCustomHooks(
     // =========================================================================
     // Reflection & Drawing Helpers
     // =========================================================================
+
+    private fun resolvePaintVariationOverrideMethod(paint: Paint): Method? {
+        if (paintVariationOverrideMethodResolved) return paintVariationOverrideMethod
+        val resolved = runCatching {
+            paint.javaClass.declaredMethods.firstOrNull {
+                (it.name == "setFontVariationOverride" || it.name == "setCustomVariationOverride") &&
+                    it.parameterCount == 1 &&
+                    it.parameterTypes[0] == String::class.java
+            }?.apply { isAccessible = true }
+        }.getOrNull()
+        paintVariationOverrideMethod = resolved
+        paintVariationOverrideMethodResolved = true
+        return resolved
+    }
+
+    private fun applyVariationStringToPaint(paint: Paint, variation: String?) {
+        val overrideMethod = resolvePaintVariationOverrideMethod(paint)
+        if (overrideMethod != null) {
+            runCatching { overrideMethod.invoke(paint, variation) }.onFailure {
+                if (variation == null) runCatching { overrideMethod.invoke(paint, "") }
+            }
+        }
+        runCatching { paint.fontVariationSettings = variation }
+    }
+
+    private fun applyCustomFontVariation(
+        paint: Paint,
+        axes: FontVariableAxesInfo?,
+        weight: Float,
+        width: Float,
+        height: Float,
+    ) {
+        if (axes == null || !axes.isVariable) {
+            applyVariationStringToPaint(paint, null)
+            return
+        }
+        val parts = ArrayList<String>(3)
+        if (axes.hasWeightAxis) {
+            val clamped = weight.coerceIn(axes.weightMin, axes.weightMax)
+            parts.add(String.format(Locale.US, "'wght' %.2f", clamped))
+        }
+        if (axes.hasWidthAxis) {
+            val clamped = width.coerceIn(axes.widthMin, axes.widthMax)
+            parts.add(String.format(Locale.US, "'wdth' %.2f", clamped))
+        }
+        if (axes.hasHeightAxis) {
+            val clamped = height.coerceIn(axes.heightMin, axes.heightMax)
+            parts.add(String.format(Locale.US, "'HGHT' %.2f", clamped))
+        }
+        val setting = if (parts.isEmpty()) null else parts.joinToString(", ")
+        applyVariationStringToPaint(paint, setting)
+    }
 
     private fun invokeApplyFontVariation(
         method: Method?,

@@ -14,6 +14,7 @@ internal const val KEY_CC_SMALL_TILE_AUTO_FILL = "control_center_small_tile_auto
 
 internal data class CcTile(val id: String, val col: Int, val row: Int, val w: Int, val h: Int) {
     val slider get() = id == "brightness" || id == "volume"
+    val connectivity get() = id == "connectivity"
 }
 
 /** Shared, deterministic grid model used by both the offline editor and plugin layout. */
@@ -29,7 +30,8 @@ internal object CcTileLayouts {
         tiles.any { it.id == "brightness" } && tiles.any { it.id == "volume" } && tiles.all { t ->
             t.id in CcTileCatalog.ids &&
             t.w in 1..4 && t.h in 1..(if (t.id == "media") 3 else 2) &&
-                (!t.slider || (t.w == 1 && t.h == 2)) && t.col >= 0 && t.col + t.w <= 4 &&
+                (!t.slider || (t.w == 1 && t.h == 2)) &&
+                (!t.connectivity || (t.w == 2 && t.h == 2)) && t.col >= 0 && t.col + t.w <= 4 &&
                 t.row in 0..127 && tiles.none { it.id != t.id && overlaps(t, it) }
         }
 
@@ -50,8 +52,16 @@ internal object CcTileLayouts {
     /** Pin the active item, retain unaffected items, prefer swapping into its old slot, then compact. */
     fun solve(base: List<CcTile>, id: String, col: Int, row: Int, w: Int, h: Int): List<CcTile> {
         val old = base.first { it.id == id }
-        val width = if (old.slider) 1 else w.coerceIn(1, 4)
-        val height = if (old.slider) 2 else h.coerceIn(1, if (id == "media") 3 else 2)
+        val width = when {
+            old.slider -> 1
+            old.connectivity -> 2
+            else -> w.coerceIn(1, 4)
+        }
+        val height = when {
+            old.slider -> 2
+            old.connectivity -> 2
+            else -> h.coerceIn(1, if (id == "media") 3 else 2)
+        }
         val active = old.copy(col = col.coerceIn(0, 4 - width), row = row.coerceIn(0, 124), w = width, h = height)
         val placed = mutableListOf(active)
         fun fits(t: CcTile) = t.row >= 0 && t.row <= 127 && placed.none { overlaps(t, it) }
